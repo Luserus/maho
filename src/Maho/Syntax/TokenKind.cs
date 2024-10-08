@@ -1,0 +1,46 @@
+namespace Maho.Syntax
+{
+    /// <summary> Token kind of a Token which represents what kind of Token it is and how statemachine handles it. </summary>
+    public enum TokenKind
+    {
+        NullToken,
+        Whitespace,
+        Tabspace,
+        Newline,
+        Identifier,
+        Integer,
+        Decimal,
+        String,
+        ExclamationMark,
+        DoubleQuote,
+        Octothorpe,
+        Percentage,
+        Ampersand,
+        SingleQuote,
+        LeftParenthesis,
+        RightParenthesis,
+        Asterisk,
+        Plus,
+        Comma,
+        Minus,
+        Dot,
+        ForwardSlash,
+        Colon,
+        Semicolon,
+        LeftAngleBracket,
+        Equals,
+        RightAngleBracket,
+        QuestionMark,
+        At,
+        LeftSquareBracket,
+        BackwardSlash,
+        RightSqureBracket,
+        Caret,
+        Underscore,
+        Backtick,
+        LeftCurlyBrace,
+        RightCurlyBrace,
+        Tilde,
+        BadToken
+    }
+}
