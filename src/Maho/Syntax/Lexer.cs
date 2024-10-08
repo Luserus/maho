@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 
 namespace Maho.Syntax
@@ -6,20 +5,14 @@ namespace Maho.Syntax
     /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
     /// <param name="program"> The program string to lex. </param>
     /// <param name="tabwidth"> The tab width used by the Lexer to increment column number. By default, it is assumed to be 4. </param>
-    internal sealed class Lexer(string program, int tabwidth = 4)
+    internal sealed class Lexer(string program)
     {
-        /// <value> The program string. </value>
+        /// <summary> The program string. </summary>
         /// <remarks> This field is readonly. </remarks>
         public string Program { get; } = program;
-        /// <value> The tab width used by the Lexer to increment column number. By default, it is assumed to be 4. </value>
-        /// <remarks> This field is readonly. </remarks>
-        public int Tabwidth { get; } = tabwidth;
-        /// <value> Tokens lexed by the Lexer in the form of an Immutable array. </value>
-        /// <remarks> This field is readonly. </remarks>
-        public ImmutableArray<Token> Tokens { get => [.. tokens]; }
-
         /// <summary> Tokens lexed by the Lexer. </summary>
-        private readonly List<Token> tokens = [];
+        public List<Token> Tokens { get; } = [];
+
         /// <summary> Current index of char being read in the program string. </summary>
         private int current = 0;
         /// <summary> Current Line number in the program. </summary>
@@ -30,11 +23,12 @@ namespace Maho.Syntax
         /// <summary> Lexes the program string into individual tokens. </summary>
         public void Lex()
         {
-            char ch = Program[current];
             Token token = new();
 
-            while (ch != '\0')
+            while (current < Program.Length)
             {
+                char ch = Program[current];
+
                 if (ch == ' ') // If ch is whitespace.
                 {
                     EndToken(ref token);
@@ -48,7 +42,7 @@ namespace Maho.Syntax
                     EndToken(ref token);
                     token.Data.Append(ch);
                     token.Kind = TokenKind.Tabspace;
-                    Consume(columnIncr: Tabwidth);
+                    Consume();
                     EndToken(ref token);
                 }
                 else if (ch == '\n' || ch == '\r') // If ch is newline or carriage return.
@@ -64,13 +58,105 @@ namespace Maho.Syntax
                 else if (char.IsLetter(ch)) // If ch is any unicode character.
                 {
                     token.Data.Append(ch);
+                    Consume();
 
                     if (token.Kind is TokenKind.NullToken)
                         token.Kind = TokenKind.Identifier;
+                }
+                else if (char.IsAsciiDigit(ch)) // If ch is any ASCII Digit [0 - 9].
+                {
+                    token.Data.Append(ch);
+                    Consume();
 
+                    if (token.Kind is TokenKind.NullToken)
+                        token.Kind = TokenKind.Integer;
+                }
+                else if (IsOperator(ch) is (true, var kind)) // If ch is any operator symbol.
+                {
+                    if (token.Kind is TokenKind.String)
+                    {
+                        token.Data.Append(ch);
+                        Consume();
+                    }
+                    else if (kind is TokenKind.Dot)
+                    {
+                        if (token.Kind is TokenKind.Integer && char.IsAsciiDigit(Peek())) // If dot (.) comes before and after another integer. e.g: 69.420
+                        {
+                            token.Data.Append(ch);
+                            token.Kind = TokenKind.Decimal;
+                            Consume();
+                        }
+                        else if (token.Kind is TokenKind.NullToken && char.IsAsciiDigit(Peek())) // If dot (.) comes before an integer but after a NullToken. e.g: .420
+                        {
+                            token.Data.Append(ch);
+                            token.Kind = TokenKind.Decimal;
+                            Consume();
+                        }
+                        else // It is just a dot (.) operator.
+                        {
+                            EndToken(ref token);
+                            token.Data.Append(ch);
+                            token.Kind = kind;
+                            Consume();
+                            EndToken(ref token);
+                        }
+                    }
+                    else // ch is any other operator symbol.
+                    {
+                        EndToken(ref token);
+                        token.Data.Append(ch);
+                        token.Kind = kind;
+                        Consume();
+                        EndToken(ref token);
+                    }
+                }
+                else // If none of the cases satisy then the character is unsupported by the Lexer.
+                {
+                    token.Data.Append(ch);
+                    token.Kind = TokenKind.BadToken;
                     Consume();
                 }
             }
+        }
+
+        /// <summary> Returns the corresponding enum for the given operator character. Returns NullToken if no operator matches. </summary>
+        /// <param name="ch"> The character to check against. </param>
+        private static (bool, TokenKind) IsOperator(Char ch)
+        {
+            return ch switch
+            {
+                '!' => (true, TokenKind.ExclamationMark),
+                '"' => (true, TokenKind.DoubleQuote),
+                '#' => (true, TokenKind.Octothorpe),
+                '%' => (true, TokenKind.Percentage),
+                '&' => (true, TokenKind.Ampersand),
+                '\'' => (true, TokenKind.SingleQuote),
+                '(' => (true, TokenKind.LeftParenthesis),
+                ')' => (true, TokenKind.RightParenthesis),
+                '*' => (true, TokenKind.Asterisk),
+                '+' => (true, TokenKind.Plus),
+                ',' => (true, TokenKind.Comma),
+                '-' => (true, TokenKind.Minus),
+                '.' => (true, TokenKind.Dot),
+                '/' => (true, TokenKind.ForwardSlash),
+                ':' => (true, TokenKind.Colon),
+                ';' => (true, TokenKind.Semicolon),
+                '<' => (true, TokenKind.LeftAngleBracket),
+                '=' => (true, TokenKind.Equals),
+                '>' => (true, TokenKind.RightAngleBracket),
+                '?' => (true, TokenKind.QuestionMark),
+                '@' => (true, TokenKind.At),
+                '[' => (true, TokenKind.LeftSquareBracket),
+                '\\' => (true, TokenKind.BackwardSlash),
+                ']' => (true, TokenKind.RightSqureBracket),
+                '^' => (true, TokenKind.Caret),
+                '_' => (true, TokenKind.Underscore),
+                '`' => (true, TokenKind.Backtick),
+                '{' => (true, TokenKind.LeftCurlyBrace),
+                '}' => (true, TokenKind.RightCurlyBrace),
+                '~' => (true, TokenKind.Tilde),
+                _ => (false, TokenKind.NullToken)
+            };
         }
 
         /// <summary> Peek ahead in the program string by specified offset. </summary>
@@ -106,7 +192,7 @@ namespace Maho.Syntax
             token.LineNumber = lineNumber;
             token.ColumnNumber = columnNumber;
 
-            tokens.Add(token);
+            Tokens.Add(token);
 
             token.Data.Clear();
             token.Kind = TokenKind.NullToken;

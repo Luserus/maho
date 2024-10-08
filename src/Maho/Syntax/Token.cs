@@ -5,16 +5,16 @@ namespace Maho.Syntax
     /// <summary> Token of the program which serves as the smallest unit of meaningful data the compiler can use. </summary>
     internal sealed class Token
     {
-        /// <value> Data of the Token. </value>
+        /// <summary> Data of the Token. </summary>
         public StringBuilder Data { get; set; } = new();
-        /// <value> Returns the Token data in string form. </value>
+        /// <summary> Returns the Token data in string form. </summary>
         /// <remarks> This field is readonly. </remarks>
         public string Value { get => Data.ToString(); }
-        /// <value> Line number of the Token. </value>
+        /// <summary> Line number of the Token. </summary>
         public int LineNumber { get; set; }
-        /// <value> Column number of the Token. </value>
+        /// <summary> Column number of the Token. </summary>
         public int ColumnNumber { get; set; }
-        /// <value> Token kind of the Token. </values>
+        /// <summary> Token kind of the Token. </summary>
         public TokenKind Kind { get; set; }
     }
 }
