@@ -1,28 +1,33 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Maho.Syntax
 {
     /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-    /// <param name="program"> The program string to lex. </param>
-    /// <param name="tabwidth"> The tab width used by the Lexer to increment column number. By default, it is assumed to be 4. </param>
-    internal sealed class Lexer(string program)
+    internal sealed class Lexer()
     {
         /// <summary> The program string. </summary>
-        /// <remarks> This field is readonly. </remarks>
-        public string Program { get; } = program;
+        /// <remarks> This field is read only. </remarks>
+        public string Program { get; private set; } = null!;
         /// <summary> Tokens lexed by the Lexer. </summary>
-        public List<Token> Tokens { get; } = [];
+        public List<Token> Tokens { get; } = new(100);
 
-        /// <summary> Current index of char being read in the program string. </summary>
-        private int current = 0;
+        /// <summary> Current index of char being read from the program string. </summary>
+        private int current;
         /// <summary> Current Line number in the program. </summary>
-        private int lineNumber = 0;
+        private int lineNumber;
         /// <summary> Current Column number in the program. </summary>
-        private int columnNumber = 0;
+        private int charNumber;
 
         /// <summary> Lexes the program string into individual tokens. </summary>
-        public void Lex()
+        /// <param name="program"> The program string to lex. </param>
+        public void Lex(string program)
         {
+            Program = program;
+            current = default;
+            lineNumber = default;
+            charNumber = default;
+
             Token token = new();
 
             while (current < Program.Length)
@@ -35,6 +40,7 @@ namespace Maho.Syntax
                     token.Data.Append(ch);
                     token.Kind = TokenKind.Whitespace;
                     Consume();
+                    SetTokenData(ref token);
                     EndToken(ref token);
                 }
                 else if (ch == '\t') // If ch is a tabspace.
@@ -43,6 +49,7 @@ namespace Maho.Syntax
                     token.Data.Append(ch);
                     token.Kind = TokenKind.Tabspace;
                     Consume();
+                    SetTokenData(ref token);
                     EndToken(ref token);
                 }
                 else if (ch == '\n' || ch == '\r') // If ch is newline or carriage return.
@@ -50,9 +57,10 @@ namespace Maho.Syntax
                     EndToken(ref token);
                     token.Data.Append(ch);
                     token.Kind = TokenKind.Newline;
-                    Consume();
+                    ++current;
                     lineNumber += 1;
-                    columnNumber = 0;
+                    charNumber = 0;
+                    SetTokenData(ref token);
                     EndToken(ref token);
                 }
                 else if (char.IsLetter(ch)) // If ch is any unicode character.
@@ -61,7 +69,10 @@ namespace Maho.Syntax
                     Consume();
 
                     if (token.Kind is TokenKind.NullToken)
+                    {
                         token.Kind = TokenKind.Identifier;
+                        SetTokenData(ref token);
+                    }
                 }
                 else if (char.IsAsciiDigit(ch)) // If ch is any ASCII Digit [0 - 9].
                 {
@@ -69,7 +80,10 @@ namespace Maho.Syntax
                     Consume();
 
                     if (token.Kind is TokenKind.NullToken)
+                    {
                         token.Kind = TokenKind.Integer;
+                        SetTokenData(ref token);
+                    }
                 }
                 else if (IsOperator(ch) is (true, var kind)) // If ch is any operator symbol.
                 {
@@ -98,6 +112,7 @@ namespace Maho.Syntax
                             token.Data.Append(ch);
                             token.Kind = kind;
                             Consume();
+                            SetTokenData(ref token);
                             EndToken(ref token);
                         }
                     }
@@ -107,6 +122,7 @@ namespace Maho.Syntax
                         token.Data.Append(ch);
                         token.Kind = kind;
                         Consume();
+                        SetTokenData(ref token);
                         EndToken(ref token);
                     }
                 }
@@ -115,13 +131,14 @@ namespace Maho.Syntax
                     token.Data.Append(ch);
                     token.Kind = TokenKind.BadToken;
                     Consume();
+                    SetTokenData(ref token);
                 }
             }
         }
 
         /// <summary> Returns the corresponding enum for the given operator character. Returns NullToken if no operator matches. </summary>
         /// <param name="ch"> The character to check against. </param>
-        private static (bool, TokenKind) IsOperator(Char ch)
+        private static (bool, TokenKind) IsOperator(char ch)
         {
             return ch switch
             {
@@ -159,6 +176,15 @@ namespace Maho.Syntax
             };
         }
 
+        /// <summary> Sets the Token's Line number and Column number. </summary>
+        /// <param name="token"> The Token to have its data set. </param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetTokenData(ref Token token)
+        {
+            token.LineNumber = lineNumber;
+            token.CharNumber = charNumber;
+        }
+
         /// <summary> Peek ahead in the program string by specified offset. </summary>
         /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
         /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
@@ -173,13 +199,12 @@ namespace Maho.Syntax
 
         /// <summary> Consume the current character. </summary>
         /// <param name="currentIncr"> Value by which current index is to be incremented. By default, it is 1. </param>
-        /// <param name="lineIncr"> Value by which Line number is to be incremented. By default it is 0. </param>
-        /// <param name="columnIncr"> Value by which Column number is to be incremented. By default it is 1. </param>
+        /// <param name="charIncr"> Value by which Char number is to be incremented. By default it is 1. </param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void Consume(int currentIncr = 1, int columnIncr = 1)
+        private void Consume(int currentIncr = 1, int charIncr = 1)
         {
             current += currentIncr;
-            columnNumber += columnIncr;
+            charNumber += charIncr;
         }
 
         /// <summary> End the current Token and add it to the Tokens list. </summary>
@@ -189,8 +214,7 @@ namespace Maho.Syntax
             if (token.Kind is TokenKind.NullToken)
                 return;
 
-            token.LineNumber = lineNumber;
-            token.ColumnNumber = columnNumber;
+            token.Value = token.Data.ToString();
 
             Tokens.Add(token);
 

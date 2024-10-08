@@ -4,6 +4,7 @@ namespace Maho.Syntax
     public enum TokenKind
     {
         NullToken,
+        EndToken,
         Whitespace,
         Tabspace,
         Newline,
