@@ -27,46 +27,46 @@ internal enum TokenKind
     MissingToken, // '{The expected token}'
 
     // Single operators:
-    ExclamationMark,
-    DoubleQuote,
-    Octothorpe,
-    Percentage,
-    Ampersand,
-    SingleQuote,
-    LeftParen,
-    RightParen,
-    Asterisk,
-    Plus,
-    Comma,
-    Minus,
-    Dot,
-    ForwardSlash,
-    Colon,
-    Semicolon,
-    LessThanSign,
-    Equals,
-    GreaterThanSign,
-    QuestionMark,
-    At,
-    LeftSquareBracket,
-    BackwardSlash,
-    RightSqureBracket,
-    Caret,
-    Underscore,
-    Backtick,
-    LeftCurlyBrace,
-    VerticalBar,
-    RightCurlyBrace,
-    Tilde,
+    ExclamationMark, // '!'
+    DoubleQuote, // '"'
+    Octothorpe, // '#'
+    Percentage, // '%'
+    Ampersand, // '&'
+    SingleQuote, // '''
+    LeftParen, // '('
+    RightParen, // ')'
+    Asterisk, // '*'
+    Plus, // '+'
+    Comma, // ','
+    Minus, // '-'
+    Dot, // '.'
+    ForwardSlash, // '/'
+    Colon, // ':'
+    Semicolon, // ';'
+    LessThanSign, // '<'
+    Equals, // '='
+    GreaterThanSign, // '>'
+    QuestionMark, // '?'
+    AtSymbol, // '@'
+    LeftSquareBracket, // '['
+    BackwardSlash, // '\'
+    RightSqureBracket, // ']'
+    Caret, // '^'
+    Underscore, // '_'
+    Backtick, // '`'
+    LeftCurlyBrace, // '{'
+    VerticalBar, // '|'
+    RightCurlyBrace, // '}'
+    Tilde, // '~'
 
     // Combined operators:
-    EqualsEquals,
-    ExclamationEquals,
-    LessThanLessThanSigns,
-    GreaterThanGreaterThanSigns,
+    EqualsEquals, // '=='
+    ExclamationEquals, // '!='
+    LessThanLessThanSigns, // '<<'
+    GreaterThanGreaterThanSigns, // '>>'
     LessThanLessThanLessThanSigns, // '<<<' Lmao.
-    LessThanEquals,
-    GreaterThanEquals,
-    AmpersandAmpersand,
-    VerticalBarVerticalBar
+    LessThanEquals, // '<='
+    GreaterThanEquals, // '>='
+    AmpersandAmpersand, // '&&'
+    VerticalBarVerticalBar // '||'
 }

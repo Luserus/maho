@@ -164,7 +164,7 @@ internal sealed class Lexer()
             '=' => (true, TokenKind.Equals),
             '>' => (true, TokenKind.GreaterThanSign),
             '?' => (true, TokenKind.QuestionMark),
-            '@' => (true, TokenKind.At),
+            '@' => (true, TokenKind.AtSymbol),
             '[' => (true, TokenKind.LeftSquareBracket),
             '\\' => (true, TokenKind.BackwardSlash),
             ']' => (true, TokenKind.RightSqureBracket),

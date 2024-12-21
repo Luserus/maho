@@ -44,9 +44,11 @@ internal sealed partial class Parser
         next = Peek().Kind; 
         last = Peek(2).Kind;
 
+        // Pair of 3 operators:
         if (kind is TokenKind.LessThanSign && next is TokenKind.LessThanSign && last is TokenKind.LessThanSign)
             return ("<<<", TokenKind.LessThanLessThanLessThanSigns);
 
+        // Pair os 2 operators:
         else if (kind is TokenKind.Equals && next is TokenKind.Equals)
             return ("==", TokenKind.EqualsEquals);
         else if (kind is TokenKind.ExclamationMark && next is TokenKind.Equals)
@@ -64,8 +66,7 @@ internal sealed partial class Parser
         else if (kind is TokenKind.VerticalBar && next is TokenKind.VerticalBar)
             return ("||", TokenKind.VerticalBarVerticalBar);
 
-        
-
+        // Single operator:
         else if (kind is TokenKind.Plus)
             return ("+", TokenKind.Plus);
         else if (kind is TokenKind.Minus)
@@ -87,6 +88,7 @@ internal sealed partial class Parser
         else if (kind is TokenKind.QuestionMark)
             return ("?", TokenKind.QuestionMark);
 
+        // No operator matched
         return ("\0", TokenKind.NullToken);
     }
 
