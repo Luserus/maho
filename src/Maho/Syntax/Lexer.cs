@@ -206,5 +206,3 @@ internal sealed class Lexer
             return '\0';
     }
 }
-
- 
