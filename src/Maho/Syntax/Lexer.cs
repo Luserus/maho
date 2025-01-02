@@ -101,8 +101,8 @@ internal sealed class Lexer
 
                 tokenKind = TokenKind.Whitespace;
                 kind = SyntaxTriviaKind.Whitespace;
+                buffer.Append(CurrentChar);
                 current++;
-                buffer.Append(CurrentChar);       
             }
             else if (CurrentChar == '\t')
             {
@@ -111,8 +111,8 @@ internal sealed class Lexer
 
                 tokenKind = TokenKind.Tabspace;
                 kind = SyntaxTriviaKind.Whitespace;
-                current++;
                 buffer.Append(CurrentChar);
+                current++;
             }
             else if (CurrentChar == '\r' && Peek() == '\n')
             {
@@ -121,9 +121,9 @@ internal sealed class Lexer
 
                 tokenKind = TokenKind.Newline;
                 kind = SyntaxTriviaKind.EndOfLine;
-                current += 2;
                 buffer.Append(CurrentChar);
                 buffer.Append('\n');
+                current += 2;
             }
             else if (CurrentChar == '\n')
             {
@@ -132,8 +132,8 @@ internal sealed class Lexer
 
                 tokenKind = TokenKind.Newline;
                 kind = SyntaxTriviaKind.EndOfLine;
-                current++;
                 buffer.Append(CurrentChar);
+                current++;
             }
             else
             {
@@ -144,7 +144,7 @@ internal sealed class Lexer
             }
         }
 
-        tokenKind = TokenKind.NullToken;
+        this.kind = TokenKind.NullToken;
         return [.. list];
 
         void AddTrivia()
