@@ -44,11 +44,11 @@ internal sealed partial class Parser
         next = Peek().Kind; 
         last = Peek(2).Kind;
 
-        // Pair of 3 operators:
+        // Pair of 3 operators
         if (kind is TokenKind.LessThanSign && next is TokenKind.LessThanSign && last is TokenKind.LessThanSign)
             return ("<<<", TokenKind.LessThanLessThanLessThanSigns);
 
-        // Pair os 2 operators:
+        // Pair os 2 operators
         else if (kind is TokenKind.Equals && next is TokenKind.Equals)
             return ("==", TokenKind.EqualsEquals);
         else if (kind is TokenKind.ExclamationMark && next is TokenKind.Equals)
@@ -66,7 +66,7 @@ internal sealed partial class Parser
         else if (kind is TokenKind.VerticalBar && next is TokenKind.VerticalBar)
             return ("||", TokenKind.VerticalBarVerticalBar);
 
-        // Single operator:
+        // Single operator
         else if (kind is TokenKind.Plus)
             return ("+", TokenKind.Plus);
         else if (kind is TokenKind.Minus)
@@ -124,7 +124,7 @@ internal sealed partial class Parser
             return Consume();
 
         Consume();
-        return new(CurrentToken.Value, CurrentToken.CharNumber, CurrentToken.LineNumber, CurrentToken.ColumnNumber, TokenKind.MissingToken);
+        return new(CurrentToken.Value, CurrentToken.Span, TokenKind.MissingToken, CurrentToken.LeadingTrivia, CurrentToken.TrailingTrivia);
     }
 
     /// <summary> Matches all the given TokenKinds with current token's TokenKind. </summary>
@@ -145,8 +145,7 @@ internal sealed partial class Parser
             return Consume();
 
         Consume();
-        return new(CurrentToken.Value, CurrentToken.CharNumber, CurrentToken.LineNumber, CurrentToken.ColumnNumber, TokenKind.MissingToken);
-
+        return new(CurrentToken.Value, CurrentToken.Span, TokenKind.MissingToken, CurrentToken.LeadingTrivia, CurrentToken.TrailingTrivia);
     }
 
     /// <summary> Ignores all whitespace and returns the next non-whitespace token without advancing the current index. </summary>

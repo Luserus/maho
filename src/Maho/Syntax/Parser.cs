@@ -153,9 +153,9 @@ internal sealed partial class Parser
             {
                 var leftOpToken = Consume();
                 var rightOpToken = Consume();
-                var (Value, Kind) = GetCombinedTokenData();
+                var (value, kind) = GetCombinedTokenData();
 
-                opToken = new(Value, leftOpToken.CharNumber, leftOpToken.LineNumber, leftOpToken.ColumnNumber, Kind);
+                opToken = new(value, leftOpToken.Span, kind, leftOpToken.LeadingTrivia, rightOpToken.TrailingTrivia);
             }
 
             RemoveSpace();

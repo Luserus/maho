@@ -1,10 +1,12 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Text;
+using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-internal sealed class Lexer()
+internal sealed class Lexer
 {
     /// <summary> The program string. </summary>
     /// <remarks> This field is read only. </remarks>
@@ -14,127 +16,142 @@ internal sealed class Lexer()
 
     /// <summary> Current index of char being read from the program string. </summary>
     private int current;
-    /// <summary> Current Line number in the program. </summary>
-    private int lineNumber;
-    /// <summary> Current Column number in the program. </summary>
-    private int columnNumber;
+    private char CurrentChar => Peek(0);
 
     /// <summary> Lexes the program string into individual tokens. </summary>
-    /// <param name="program"> The program string to lex. </param>
     public void Lex(string program)
     {
         Program = program;
         current = default;
-        lineNumber = 1;
-        columnNumber = 1;
-
-        Token token = new();
+        Tokens.Clear();
 
         while (current < Program.Length)
         {
-            char ch = Program[current];
+            var leadingTrivia = LexTrivia();
+            var (value, span, kind) = LexTokenData();
+            var trailingTrivia = LexTrivia();
 
-            if (ch == ' ') // If ch is whitespace.
-            {
-                EndToken(ref token);
-                token.Data.Append(ch);
-                token.Kind = TokenKind.Whitespace;
-                SetTokenData(ref token);
-                Consume();
-                EndToken(ref token);
-            }
-            else if (ch == '\t') // If ch is a tabspace.
-            {
-                EndToken(ref token);
-                token.Data.Append(ch);
-                token.Kind = TokenKind.Tabspace;
-                SetTokenData(ref token);
-                Consume();
-                EndToken(ref token);
-            }
-            else if (ch == '\n' || ch == '\r') // If ch is newline or carriage return.
-            {
-                EndToken(ref token);
-                token.Data.Append(ch);
-                token.Kind = TokenKind.Newline;
-                SetTokenData(ref token);
-                ++current;
-                lineNumber += 1;
-                columnNumber = 0;
-                EndToken(ref token);
-            }
-            else if (char.IsLetter(ch)) // If ch is any unicode character.
-            {
-                token.Data.Append(ch);
+            Tokens.Add(new(value, span, kind, leadingTrivia, trailingTrivia));
+        }
 
-                if (token.Kind is TokenKind.NullToken)
-                {
-                    token.Kind = TokenKind.Identifier;
-                    SetTokenData(ref token);
-                }
+        // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
+        Tokens.Add(new(string.Empty, new(Program.Length, 0), TokenKind.EndToken, [], []));
+    }
 
-                Consume();
-            }
-            else if (char.IsAsciiDigit(ch)) // If ch is any ASCII Digit [0 - 9].
-            {
-                token.Data.Append(ch);
+    private TokenKind kind = TokenKind.NullToken;
 
-                if (token.Kind is TokenKind.NullToken)
-                {
-                    token.Kind = TokenKind.Integer;
-                    SetTokenData(ref token);
-                }
+    private (string Value, TextSpan Span, TokenKind kind) LexTokenData()
+    {
+        var start = current;
 
-                Consume();
-            }
-            else if (IsOperator(ch) is (true, var kind)) // If ch is any operator symbol.
+        if (char.IsLetter(CurrentChar) || CurrentChar == '_')
+        {
+            kind = TokenKind.Identifier;
+            
+            while (char.IsLetterOrDigit(Peek(0)) || CurrentChar == '_')
+                current++;
+        }
+        else if (char.IsAsciiDigit(CurrentChar))
+        {
+            kind = TokenKind.Integer;
+
+            while (char.IsAsciiDigit(Peek(0)))
+                current++;
+
+            if (IsOperator(CurrentChar) is (true, TokenKind.Dot) && char.IsAsciiDigit(Peek()))
             {
-                if (token.Kind is TokenKind.String)
-                {
-                    token.Data.Append(ch);
-                    Consume();
-                }
-                else if (kind is TokenKind.Dot)
-                {
-                    if (token.Kind is TokenKind.Integer && char.IsAsciiDigit(Peek())) // If dot (.) comes before and after another integer. e.g: 69.420
-                    {
-                        token.Data.Append(ch);
-                        token.Kind = TokenKind.Float;
-                        Consume();
-                    }
-                    else if (token.Kind is TokenKind.NullToken && char.IsAsciiDigit(Peek())) // If dot (.) comes before an integer but after a NullToken. e.g: .420
-                    {
-                        token.Data.Append(ch);
-                        token.Kind = TokenKind.Float;
-                        Consume();
-                    }
-                    else // It is just a dot (.) operator.
-                    {
-                        EndToken(ref token);
-                        token.Data.Append(ch);
-                        token.Kind = kind;
-                        SetTokenData(ref token);
-                        Consume();
-                        EndToken(ref token);
-                    }
-                }
-                else // ch is any other operator symbol.
-                {
-                    EndToken(ref token);
-                    token.Data.Append(ch);
-                    token.Kind = kind;
-                    SetTokenData(ref token);
-                    Consume();
-                    EndToken(ref token);
-                }
+                kind = TokenKind.Float;
+                current++;
+
+                while (char.IsAsciiDigit(Peek(0)))
+                    current++;
             }
-            else // If none of the cases satisy then the character is unsupported by the Lexer.
+        }
+        else if (IsOperator(CurrentChar) is (true, var opKind))
+        {
+            kind = opKind;
+            current++;
+        }
+        else
+        {
+            kind = TokenKind.BadToken;
+            current++;
+        }
+
+        var value = Program[start..current];
+        TextSpan span = new(start, current - start);
+
+        return (value, span, kind);
+    }
+
+    private SyntaxTrivia[] LexTrivia()
+    {
+        List<SyntaxTrivia> list = [];
+        var start = current;
+        StringBuilder buffer = new();
+        var kind = SyntaxTriviaKind.Whitespace;
+        var tokenKind = TokenKind.NullToken;
+
+        while (current < Program.Length)
+        {
+            if (CurrentChar == ' ')
             {
-                token.Data.Append(ch);
-                token.Kind = TokenKind.BadToken;
-                SetTokenData(ref token);
-                Consume();
+                if (tokenKind is not TokenKind.Whitespace && buffer.Length > 0)
+                    AddTrivia();
+
+                tokenKind = TokenKind.Whitespace;
+                kind = SyntaxTriviaKind.Whitespace;
+                current++;
+                buffer.Append(CurrentChar);       
             }
+            else if (CurrentChar == '\t')
+            {
+                if (tokenKind is not TokenKind.Tabspace && buffer.Length > 0)
+                    AddTrivia();
+
+                tokenKind = TokenKind.Tabspace;
+                kind = SyntaxTriviaKind.Whitespace;
+                current++;
+                buffer.Append(CurrentChar);
+            }
+            else if (CurrentChar == '\r' && Peek() == '\n')
+            {
+                if (buffer.Length > 0)
+                    AddTrivia();
+
+                tokenKind = TokenKind.Newline;
+                kind = SyntaxTriviaKind.EndOfLine;
+                current += 2;
+                buffer.Append(CurrentChar);
+                buffer.Append('\n');
+            }
+            else if (CurrentChar == '\n')
+            {
+                if (buffer.Length > 0)
+                    AddTrivia();
+
+                tokenKind = TokenKind.Newline;
+                kind = SyntaxTriviaKind.EndOfLine;
+                current++;
+                buffer.Append(CurrentChar);
+            }
+            else
+            {
+                if (buffer.Length > 0)
+                    AddTrivia();
+
+                break;
+            }
+        }
+
+        tokenKind = TokenKind.NullToken;
+        return [.. list];
+
+        void AddTrivia()
+        {
+            list.Add(new(buffer.ToString(), kind, new(start, buffer.Length)));
+            start = current;
+            buffer.Clear();
         }
     }
 
@@ -169,23 +186,12 @@ internal sealed class Lexer()
             '\\' => (true, TokenKind.BackwardSlash),
             ']' => (true, TokenKind.RightSqureBracket),
             '^' => (true, TokenKind.Caret),
-            '_' => (true, TokenKind.Underscore),
             '`' => (true, TokenKind.Backtick),
             '{' => (true, TokenKind.LeftCurlyBrace),
             '}' => (true, TokenKind.RightCurlyBrace),
             '~' => (true, TokenKind.Tilde),
             _ => (false, TokenKind.NullToken)
         };
-    }
-
-    /// <summary> Sets the Token's Line number and Column number. </summary>
-    /// <param name="token"> The Token to have its data set. </param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void SetTokenData(ref Token token)
-    {
-        token.LineNumber = lineNumber;
-        token.ColumnNumber = columnNumber;
-        token.CharNumber = current + 1;
     }
 
     /// <summary> Peek ahead in the program string by specified offset. </summary>
@@ -199,29 +205,6 @@ internal sealed class Lexer()
         else
             return '\0';
     }
-
-    /// <summary> Consume the current character. </summary>
-    /// <param name="currentIncr"> Value by which current index is to be incremented. By default, it is 1. </param>
-    /// <param name="columnNumIncr"> Value by which column number is to be incremented. By default it is 1. </param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Consume(int currentIncr = 1, int columnNumIncr = 1)
-    {
-        current += currentIncr;
-        columnNumber += columnNumIncr;
-    }
-
-    /// <summary> End the current Token and add it to the Tokens list. </summary>
-    /// <param name="token"> The Token to be added to the list. </param>
-    private void EndToken(ref Token token)
-    {
-        if (token.Kind is TokenKind.NullToken)
-            return;
-
-        token.Value = token.Data.ToString();
-
-        Tokens.Add(token);
-
-        token.Data.Clear();
-        token.Kind = TokenKind.NullToken;
-    }
 }
+
+ 
