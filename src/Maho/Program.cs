@@ -1,8 +1,9 @@
 ﻿using Maho.Syntax;
+using Maho.Text;
 
-Lexer lexer = new();
+Lexer lexer = new(new SourceText("var x = 20;"));
 // Pass the program string that is to be lexed and lex the program string.
-lexer.Lex("var x = 20;");
+lexer.Lex();
 
 
 // Store the lexed tokens for Parsing.

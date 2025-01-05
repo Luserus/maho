@@ -1,27 +1,36 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using System.Text;
 using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-internal sealed class Lexer
+internal sealed partial class Lexer
 {
+    /// <summary> Current index of char being read from the program string. </summary>
+    private int current;
+    /// <summary> The source text of the program. </summary>
+    private readonly SourceText text;
+
     /// <summary> The program string. </summary>
-    /// <remarks> This field is read only. </remarks>
-    public string Program { get; private set; } = null!;
+    public string Program { get; }
     /// <summary> Tokens lexed by the Lexer. </summary>
     public List<Token> Tokens { get; } = new(256);
 
-    /// <summary> Current index of char being read from the program string. </summary>
-    private int current;
-    private char CurrentChar => Peek(0);
+    /// <summary> Current character in the Program that is being read. </summary>
+    private char CurrentChar => Program[current];
 
-    /// <summary> Lexes the program string into individual tokens. </summary>
-    public void Lex(string program)
+    /// <summary> Initializes a new instance of the <see cref="Lexer"/> class. </summary>
+    /// <param name="sourceText"> Source text of the program. </param>
+    public Lexer(SourceText sourceText)
     {
-        Program = program;
+        text = sourceText;
+        Program = text.ToString();
+    }
+
+    /// <summary> Lexes the program string into tokens with trivia. </summary>
+    public void Lex()
+    {
         current = default;
         Tokens.Clear();
 
@@ -35,11 +44,14 @@ internal sealed class Lexer
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
-        Tokens.Add(new(string.Empty, new(Program.Length, 0), TokenKind.EndToken, [], []));
+        Tokens.Add(new("\0", new(Program.Length, 0), TokenKind.EndToken, [], []));
     }
 
+    /// <summary> Current token kind. </summary>
     private TokenKind kind = TokenKind.NullToken;
 
+    /// <summary> Lexes a part of the program and returns the required token data. </summary>
+    /// <returns> The token data for creating a token. </returns>
     private (string Value, TextSpan Span, TokenKind kind) LexTokenData()
     {
         var start = current;
@@ -84,6 +96,8 @@ internal sealed class Lexer
         return (value, span, kind);
     }
 
+    /// <summary> Lexes a part of the program and returns all leading/trailing trivias before/after a token. </summary>
+    /// <returns> The trivias as an array. </returns>
     private SyntaxTrivia[] LexTrivia()
     {
         List<SyntaxTrivia> list = [];
@@ -135,6 +149,16 @@ internal sealed class Lexer
                 buffer.Append(CurrentChar);
                 current++;
             }
+            else if (CurrentChar == '\r')
+            {
+                if (buffer.Length > 0)
+                    AddTrivia();
+
+                tokenKind = TokenKind.Newline;
+                kind = SyntaxTriviaKind.EndOfLine;
+                buffer.Append(CurrentChar);
+                current++;
+            }
             else
             {
                 if (buffer.Length > 0)
@@ -147,62 +171,12 @@ internal sealed class Lexer
         this.kind = TokenKind.NullToken;
         return [.. list];
 
+        // Adds the trivia to the list.
         void AddTrivia()
         {
             list.Add(new(buffer.ToString(), kind, new(start, buffer.Length)));
             start = current;
             buffer.Clear();
         }
-    }
-
-    /// <summary> Returns the corresponding enum for the given operator character. Returns NullToken if no operator matches. </summary>
-    /// <param name="ch"> The character to check against. </param>
-    private static (bool, TokenKind) IsOperator(char ch)
-    {
-        return ch switch
-        {
-            '!' => (true, TokenKind.ExclamationMark),
-            '"' => (true, TokenKind.DoubleQuote),
-            '#' => (true, TokenKind.Octothorpe),
-            '%' => (true, TokenKind.Percentage),
-            '&' => (true, TokenKind.Ampersand),
-            '\'' => (true, TokenKind.SingleQuote),
-            '(' => (true, TokenKind.LeftParen),
-            ')' => (true, TokenKind.RightParen),
-            '*' => (true, TokenKind.Asterisk),
-            '+' => (true, TokenKind.Plus),
-            ',' => (true, TokenKind.Comma),
-            '-' => (true, TokenKind.Minus),
-            '.' => (true, TokenKind.Dot),
-            '/' => (true, TokenKind.ForwardSlash),
-            ':' => (true, TokenKind.Colon),
-            ';' => (true, TokenKind.Semicolon),
-            '<' => (true, TokenKind.LessThanSign),
-            '=' => (true, TokenKind.Equals),
-            '>' => (true, TokenKind.GreaterThanSign),
-            '?' => (true, TokenKind.QuestionMark),
-            '@' => (true, TokenKind.AtSymbol),
-            '[' => (true, TokenKind.LeftSquareBracket),
-            '\\' => (true, TokenKind.BackwardSlash),
-            ']' => (true, TokenKind.RightSqureBracket),
-            '^' => (true, TokenKind.Caret),
-            '`' => (true, TokenKind.Backtick),
-            '{' => (true, TokenKind.LeftCurlyBrace),
-            '}' => (true, TokenKind.RightCurlyBrace),
-            '~' => (true, TokenKind.Tilde),
-            _ => (false, TokenKind.NullToken)
-        };
-    }
-
-    /// <summary> Peek ahead in the program string by specified offset. </summary>
-    /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
-    /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private char Peek(int offset = 1)
-    {
-        if (current + offset < Program.Length)
-            return Program[current + offset];
-        else
-            return '\0';
     }
 }
