@@ -1,8 +1,10 @@
 ﻿using Maho.Syntax;
 using Maho.Text;
 
+// Create a new lexer instance with a test code snippet.
 Lexer lexer = new(new SourceText("var x = 20;"));
-// Pass the program string that is to be lexed and lex the program string.
+
+// Lex the program string.
 lexer.Lex();
 
 
