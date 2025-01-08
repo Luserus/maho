@@ -31,9 +31,6 @@ internal sealed partial class Lexer
     /// <summary> Lexes the program string into tokens with trivia. </summary>
     public void Lex()
     {
-        current = default;
-        Tokens.Clear();
-
         while (current < Program.Length)
         {
             var leadingTrivia = LexTrivia();
