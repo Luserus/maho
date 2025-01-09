@@ -50,6 +50,8 @@ internal sealed partial class Lexer
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private char Peek(int offset = 1) => current + offset < Program.Length ? Program[current + offset] : '\0';
 
+    /// <summary> Gets all the tokens as string in json form. </summary>
+    /// <returns> Tokens in string form. </returns>
     public override string ToString()
     {
         StringBuilder sb = new();

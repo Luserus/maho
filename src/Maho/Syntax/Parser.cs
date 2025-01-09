@@ -11,10 +11,8 @@ internal sealed partial class Parser
     /// <summary> Current index of Token being read from the token list. </summary>
     private int current;
     /// <summary> Current Token being read from the token list. </summary>
-    private Token CurrentToken => Peek(0);
+    private Token CurrentToken => tokens[current];
 
-    /// <summary> Whitespace tokens which are stored for error reporting and formatting. </summary>
-    public List<Token> WhitespaceTokens { get; } = new(256);
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
@@ -22,13 +20,10 @@ internal sealed partial class Parser
     {
         this.tokens = tokens;
         current = default;
-        WhitespaceTokens.Clear();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            RemoveSpace();
             var statement = ParseStatement();
-            RemoveSpace();
         }
         
         var eofToken = Match(TokenKind.EndToken);
@@ -38,7 +33,7 @@ internal sealed partial class Parser
     /// <returns> The expression node. </returns>
     private ExpressionSyntax ParseExpression()
     {
-        if (CurrentToken.Kind is TokenKind.Identifier && IgnoreSpace().Kind is TokenKind.Equals)
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals)
             return ParseAssignmentExpression();
 
         return ParseBinaryExpression();
@@ -51,7 +46,7 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (IgnoreSpace().Kind is TokenKind.Identifier)
+                if (Peek().Kind is TokenKind.Identifier)
                     return ParseVariableInitializationStatement();
                 break;
         }
@@ -64,7 +59,6 @@ internal sealed partial class Parser
     private ExpressionStatementSyntax ParseExpressionStatement()
     {
         var expression = ParseExpression();
-        RemoveSpace();
         var semicolon = Match(TokenKind.Semicolon);
 
         return new(expression, semicolon);
@@ -85,9 +79,7 @@ internal sealed partial class Parser
     private AssignmentExpressionSyntax ParseAssignmentExpression()
     {
         var identiferExpr = ParseIdentifierExpression();
-        RemoveSpace();
         var equalsOperator = Match(TokenKind.Equals);
-        RemoveSpace();
         var expression = ParseExpression();
 
         return new AssignmentExpressionSyntax(identiferExpr, equalsOperator, expression);
@@ -98,9 +90,7 @@ internal sealed partial class Parser
     private VariableInitializationStatementSyntax ParseVariableInitializationStatement()
     {
         var type = Match(TokenKind.Identifier);
-        RemoveSpace();
         var assignmentExpr = ParseAssignmentExpression();
-        RemoveSpace();
         var semicolon = Match(TokenKind.Semicolon);
 
         return new(type, assignmentExpr, semicolon);
@@ -128,9 +118,7 @@ internal sealed partial class Parser
         if (unaryOpPrecedence != 0 && unaryOpPrecedence >= parentPrecedence)
         {
             var opToken = Consume();
-            RemoveSpace();
             var operand = ParseBinaryExpression(unaryOpPrecedence);
-            RemoveSpace();
             left = new UnaryExpressionSyntax(opToken, operand);
         }
         else
@@ -138,7 +126,6 @@ internal sealed partial class Parser
 
         while (true)
         {
-            RemoveSpace();
             var precedence = GetBinaryOperatorPrecedence();
 
             if (precedence == 0 || precedence <= parentPrecedence)
@@ -158,7 +145,6 @@ internal sealed partial class Parser
                 opToken = new(value, leftOpToken.Span, kind, leftOpToken.LeadingTrivia, rightOpToken.TrailingTrivia);
             }
 
-            RemoveSpace();
             var right = ParseBinaryExpression(precedence);
             left = new BinaryExpressionSyntax(left, opToken, right);
         }
