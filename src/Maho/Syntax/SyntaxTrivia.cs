@@ -14,12 +14,3 @@ internal readonly struct SyntaxTrivia(string text, SyntaxTriviaKind kind, TextSp
     /// <summary> The position of the trivia in the source text. </summary>
     public TextSpan Span { get; } = span;
 }
-
-/// <summary> Defines the different kinds of trivia that can be attached to tokens. </summary>
-internal enum SyntaxTriviaKind
-{
-    Whitespace,
-    EndOfLine,
-    SingleLineComment,
-    MultiLineComment
-}
