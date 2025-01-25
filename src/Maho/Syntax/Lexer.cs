@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using Maho.Text;
@@ -20,7 +21,7 @@ internal sealed partial class Lexer
     /// <summary> Current character in the Program that is being read. </summary>
     private char CurrentChar => Program[current];
 
-    /// <summary> Initializes a new instance of the <see cref="Lexer"/> class. </summary>
+    /// <summary> Initializes a new instance of the Lexer class. </summary>
     /// <param name="sourceText"> Source text of the program. </param>
     public Lexer(SourceText sourceText)
     {
@@ -41,7 +42,7 @@ internal sealed partial class Lexer
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
-        Tokens.Add(new("\0", new(Program.Length, 0), TokenKind.EndToken, [], []));
+        Tokens.Add(new("\0", new TextSpan(Program.Length, 0), TokenKind.EndToken, [], []));
     }
 
     /// <summary> Current token kind. </summary>
@@ -97,83 +98,53 @@ internal sealed partial class Lexer
     /// <returns> The trivias as an array. </returns>
     private SyntaxTrivia[] LexTrivia()
     {
-        List<SyntaxTrivia> list = [];
-        var start = current;
-        StringBuilder buffer = new();
-        var kind = SyntaxTriviaKind.Whitespace;
-        var tokenKind = TokenKind.NullToken;
+        List<SyntaxTrivia> trivias = [];
+        var tokenKind = kind;
 
         while (current < Program.Length)
         {
+            SyntaxTriviaKind kind;
+            var start = current;
+            string trivia;
+
             if (CurrentChar == ' ')
             {
-                if (tokenKind is not TokenKind.Whitespace && buffer.Length > 0)
-                    AddTrivia();
-
-                tokenKind = TokenKind.Whitespace;
-                kind = SyntaxTriviaKind.Whitespace;
-                buffer.Append(CurrentChar);
                 current++;
+                kind = SyntaxTriviaKind.Whitespace;
+                tokenKind = TokenKind.Whitespace;
+
+                while (CurrentChar == ' ')
+                    current++;
+
+                trivia = Program[start..current];
+                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
             }
             else if (CurrentChar == '\t')
             {
-                if (tokenKind is not TokenKind.Tabspace && buffer.Length > 0)
-                    AddTrivia();
-
-                tokenKind = TokenKind.Tabspace;
-                kind = SyntaxTriviaKind.Whitespace;
-                buffer.Append(CurrentChar);
                 current++;
-            }
-            else if (CurrentChar == '\r' && Peek() == '\n')
-            {
-                if (buffer.Length > 0)
-                    AddTrivia();
+                kind = SyntaxTriviaKind.Whitespace;
+                tokenKind = TokenKind.Tabspace;
 
-                tokenKind = TokenKind.Newline;
-                kind = SyntaxTriviaKind.EndOfLine;
-                buffer.Append(CurrentChar);
-                buffer.Append('\n');
-                current += 2;
+                while (CurrentChar == '\t')
+                    current++;
+
+                trivia = Program[start..current];
+                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
             }
             else if (CurrentChar == '\n')
             {
-                if (buffer.Length > 0)
-                    AddTrivia();
-
-                tokenKind = TokenKind.Newline;
-                kind = SyntaxTriviaKind.EndOfLine;
-                buffer.Append(CurrentChar);
                 current++;
-            }
-            else if (CurrentChar == '\r')
-            {
-                if (buffer.Length > 0)
-                    AddTrivia();
-
-                tokenKind = TokenKind.Newline;
                 kind = SyntaxTriviaKind.EndOfLine;
-                buffer.Append(CurrentChar);
-                current++;
+                tokenKind = TokenKind.Newline;
+
+                trivia = Program[start..current];
+                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
             }
             else
-            {
-                if (buffer.Length > 0)
-                    AddTrivia();
-
                 break;
-            }
         }
 
-        this.kind = TokenKind.NullToken;
-        return [.. list];
-
-        // Adds the trivia to the list.
-        void AddTrivia()
-        {
-            list.Add(new(buffer.ToString(), kind, new(start, buffer.Length)));
-            start = current;
-            buffer.Clear();
-        }
+        kind = tokenKind;
+        return [.. trivias];
     }
 }

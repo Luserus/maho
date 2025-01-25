@@ -13,7 +13,7 @@ internal sealed class SourceText
     /// <summary> The lines of the source text. </summary>
     public TextLine[] Lines { get; }
 
-    /// <summary> Initializes a new instance of the <see cref="SourceText"/> class. </summary>
+    /// <summary> Initializes a new instance of the SourceText class. </summary>
     /// <param name="text"> Source text. </param>
     public SourceText(string text)
     {
@@ -27,7 +27,7 @@ internal sealed class SourceText
     public char this[int position] => text[position];
 
     /// <summary> Parses the lines of the source text. </summary>
-    /// <returns> An array of <see cref="TextLine"/>. </returns>
+    /// <returns> An array of TextLine. </returns>
     private TextLine[] ParseLines()
     {
         List<TextLine> result = [];
