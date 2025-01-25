@@ -1,9 +1,15 @@
 namespace Maho.Symbols;
 
 /// <summary> Work-In-Progress. This class will represent types in the language. </summary>
-/// <param name="type"> The identifier of the type. </param>
-internal abstract class TypeSymbol(string type)
+internal abstract class TypeSymbol
 {
     /// <summary> The identifier of the type. </summary>
-    public string Type { get; set; } = type;
+    public string Type { get; set; }
+
+    /// <summary> Initializes the TypeSymbol class. </summary>
+    /// <param name="type"> The identifier of the type. </param>
+    public TypeSymbol(string type)
+    {
+        Type = type;
+    }
 }

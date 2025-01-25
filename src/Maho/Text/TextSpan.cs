@@ -1,21 +1,27 @@
 namespace Maho.Text;
 
 /// <summary> Represents a span of text in the source code. </summary>
-/// <param name="start"> Start position of the span. </param>
-/// <param name="length"> Length of the span. </param>
-internal readonly struct TextSpan(int start, int length)
+internal readonly struct TextSpan
 {
     /// <summary> The start position of the span. </summary>
-    public int Start { get; } = start;
+    public int Start { get; }
     /// <summary> The length of the span. </summary>
-    public int Length { get; } = length;
+    public int Length { get; }
     /// <summary> The end position of the span. </summary>
     public int End => Start + Length;
 
-    /// <summary> Creates a new <see cref="TextSpan"/> from start and end positions. </summary>
+    /// <param name="start"> Start position of the span. </param>
+    /// <param name="length"> Length of the span. </param>
+    public TextSpan(int start, int length)
+    {
+        Start = start;
+        Length = length;
+    }
+
+    /// <summary> Creates a new TextSpan from start and end positions. </summary>
     /// <param name="start"> The start position of the span. </param>
     /// <param name="end"> The end position of the span. </param>
-    /// <returns> A new <see cref="TextSpan"/>. </returns>
+    /// <returns> A new TextSpan </returns>
     public static TextSpan FromBounds(int start, int end) => new(start, end - start);
 
     /// <summary> Gets the line number of the start position. </summary>

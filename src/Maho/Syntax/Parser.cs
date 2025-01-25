@@ -35,6 +35,8 @@ internal sealed partial class Parser
     {
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals)
             return ParseAssignmentExpression();
+        else if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Identifier)
+            return ParseVariableInitializationExpression();
 
         return ParseBinaryExpression();
     }
@@ -46,8 +48,8 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (Peek().Kind is TokenKind.Identifier)
-                    return ParseVariableInitializationStatement();
+                if (Peek().Kind is TokenKind.Identifier && Peek(2).Kind is TokenKind.Semicolon)
+                    return ParseVariableDeclarationStatement();
                 break;
         }
 
@@ -85,15 +87,27 @@ internal sealed partial class Parser
         return new AssignmentExpressionSyntax(identiferExpr, equalsOperator, expression);
     }
 
-    /// <summary> Parses a variable initialization statement. </summary>
-    /// <returns> The variable initialization statement node. </returns>
-    private VariableInitializationStatementSyntax ParseVariableInitializationStatement()
+    /// <summary> Parses a variable declaration statement. </summary>
+    /// <returns> The variable declaration statement node. </returns>
+    private VariableDeclarationStatementSyntax ParseVariableDeclarationStatement()
     {
         var type = Match(TokenKind.Identifier);
-        var assignmentExpr = ParseAssignmentExpression();
+        var identifier = Match(TokenKind.Identifier);
         var semicolon = Match(TokenKind.Semicolon);
 
-        return new(type, assignmentExpr, semicolon);
+        return new(type, identifier, semicolon);
+    }
+
+    /// <summary> Parses a variable initialization expression. </summary>
+    /// <returns> The variable initialization expression node. </returns>
+    private VariableInitializationExpressionSyntax ParseVariableInitializationExpression()
+    {
+        var type = Match(TokenKind.Identifier);
+        var identifier = Match(TokenKind.Identifier);
+        var assignmentOp = Match(TokenKind.Equals);
+        var initializer = ParseExpression();
+
+        return new(type, identifier, assignmentOp, initializer);
     }
     
     /// <summary> Parses a primary expression without operator involvement. </summary>
