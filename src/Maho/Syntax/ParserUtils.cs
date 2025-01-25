@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 
 namespace Maho.Syntax;
@@ -38,55 +39,60 @@ internal sealed partial class Parser
     /// <returns> The string value and TokenKind of the combined operators. </returns>
     private (string Value, TokenKind Kind) GetCombinedTokenData()
     {
+        Token nextToken, lastToken;
+
+        nextToken = Peek();
+        lastToken = Peek(2);
+
         TokenKind kind, next, last;
         
         kind = CurrentToken.Kind;
-        next = Peek().Kind; 
-        last = Peek(2).Kind;
+        next = nextToken.Kind; 
+        last = lastToken.Kind;
 
         // Pair of 3 operators
-        if (kind is TokenKind.LessThanSign && next is TokenKind.LessThanSign && last is TokenKind.LessThanSign)
+        if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.LessThanSign && nextToken.TrailingTrivia.Length == 0 && last is TokenKind.LessThanSign)
             return ("<<<", TokenKind.LessThanLessThanLessThanSigns);
 
-        // Pair os 2 operators
-        else if (kind is TokenKind.Equals && next is TokenKind.Equals)
+        // Pair of 2 operators
+        else if (kind is TokenKind.Equals && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
             return ("==", TokenKind.EqualsEquals);
-        else if (kind is TokenKind.ExclamationMark && next is TokenKind.Equals)
+        else if (kind is TokenKind.ExclamationMark && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
             return ("!=", TokenKind.ExclamationEquals);
-        else if (kind is TokenKind.LessThanSign && next is TokenKind.LessThanSign)
+        else if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.LessThanSign)
             return ("<<", TokenKind.LessThanLessThanSigns);
-        else if (kind is TokenKind.GreaterThanSign && next is TokenKind.GreaterThanSign)
+        else if (kind is TokenKind.GreaterThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.GreaterThanSign)
             return (">>", TokenKind.GreaterThanGreaterThanSigns);
-        else if (kind is TokenKind.LessThanSign && next is TokenKind.Equals)
+        else if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
             return ("<=", TokenKind.LessThanEquals);
-        else if (kind is TokenKind.GreaterThanSign && next is TokenKind.Equals)
+        else if (kind is TokenKind.GreaterThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
             return (">=", TokenKind.GreaterThanEquals);
-        else if (kind is TokenKind.Ampersand && next is TokenKind.Ampersand)
+        else if (kind is TokenKind.Ampersand && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Ampersand)
             return ("&&", TokenKind.AmpersandAmpersand);
-        else if (kind is TokenKind.VerticalBar && next is TokenKind.VerticalBar)
+        else if (kind is TokenKind.VerticalBar && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.VerticalBar)
             return ("||", TokenKind.VerticalBarVerticalBar);
 
         // Single operator
         else if (kind is TokenKind.Plus)
-            return ("+", TokenKind.Plus);
+            return ("+", kind);
         else if (kind is TokenKind.Minus)
-            return ("-", TokenKind.Minus);
+            return ("-", kind);
         else if (kind is TokenKind.Asterisk)
-            return ("*", TokenKind.Asterisk);
+            return ("*", kind);
         else if (kind is TokenKind.ForwardSlash)
-            return ("/", TokenKind.ForwardSlash);
+            return ("/", kind);
         else if (kind is TokenKind.Percentage)
-            return ("%", TokenKind.Percentage);
+            return ("%", kind);
         else if (kind is TokenKind.Ampersand)
-            return ("&", TokenKind.Ampersand);
+            return ("&", kind);
         else if (kind is TokenKind.VerticalBar)
-            return ("|", TokenKind.VerticalBar);
+            return ("|", kind);
         else if (kind is TokenKind.LessThanSign)
-            return ("<", TokenKind.LessThanSign);
+            return ("<", kind);
         else if (kind is TokenKind.GreaterThanSign)
-            return (">", TokenKind.GreaterThanSign);
+            return (">", kind);
         else if (kind is TokenKind.QuestionMark)
-            return ("?", TokenKind.QuestionMark);
+            return ("?", kind);
 
         // No operator matched
         return ("\0", TokenKind.NullToken);
@@ -97,13 +103,7 @@ internal sealed partial class Parser
     /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
     /// <returns> Token at the index peeked. Returns last token from the list if the offset added to current index exceeds the token list count. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Token Peek(int offset = 1)
-    {
-        if (current + offset < tokens.Count)
-            return tokens[current + offset];
-        else
-            return tokens[^1];
-    }
+    private Token Peek(int offset = 1) => current + offset < tokens.Count ? tokens[current + offset] : tokens[^1];
 
     /// <summary> Consumes the current token and moves the current index ahead by 1. </summary>
     /// <returns> The token consumed. </returns>
@@ -146,26 +146,5 @@ internal sealed partial class Parser
 
         Consume();
         return new(CurrentToken.Value, CurrentToken.Span, TokenKind.MissingToken, CurrentToken.LeadingTrivia, CurrentToken.TrailingTrivia);
-    }
-
-    /// <summary> Ignores all whitespace and returns the next non-whitespace token without advancing the current index. </summary>
-    /// <returns> Next non-whitespace token. </returns>
-    private Token IgnoreSpace()
-    {
-        var current = this.current;
-
-        while (WhitespacePeek(current).Kind is TokenKind.Whitespace || WhitespacePeek(current).Kind is TokenKind.Tabspace || WhitespacePeek(current).Kind is TokenKind.Newline)
-            current++;
-
-        return WhitespacePeek(current);
-
-        Token WhitespacePeek(int current, int offset = 1) => tokens[current + offset];
-    }
-
-    /// <summary> Adds all the whitespaces until next non-whitespace token to a whitespace List and advances the current index. </summary>
-    private void RemoveSpace()
-    {
-        while (CurrentToken.Kind is TokenKind.Whitespace || CurrentToken.Kind is TokenKind.Tabspace || CurrentToken.Kind is TokenKind.Newline)
-            WhitespaceTokens.Add(Consume());
     }
 }

@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.002.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Maho", "Maho.csproj", "{A5C3B46E-9AA4-4937-80D2-A7E7013591A0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A5C3B46E-9AA4-4937-80D2-A7E7013591A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5C3B46E-9AA4-4937-80D2-A7E7013591A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5C3B46E-9AA4-4937-80D2-A7E7013591A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5C3B46E-9AA4-4937-80D2-A7E7013591A0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0F49E4B8-C998-4512-AA8D-6CB67CE6C47F}
+	EndGlobalSection
+EndGlobal

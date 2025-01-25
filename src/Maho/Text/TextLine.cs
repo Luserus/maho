@@ -1,34 +1,36 @@
 namespace Maho.Text;
 
 /// <summary> Represents a line of text in the source code. </summary>
-/// <param name="text"> The source text. </param>
-/// <param name="start"> The start position of the line. </param>
-/// <param name="length"> The length of the line. </param>
-/// <param name="lengthIncludingLineBreak"> The length of the line including the line break. </param>
-internal readonly struct TextLine(SourceText text, int start, int length, int lengthIncludingLineBreak)
+internal readonly struct TextLine
 {
-    /// <summary> Gets the source text. </summary>
-    public SourceText Text { get; } = text;
-
-    /// <summary> Gets the start position of the line. </summary>
-    public int Start { get; } = start;
-
-    /// <summary> Gets the length of the line. </summary>
-    public int Length { get; } = length;
-
-    /// <summary> Gets the length of the line including the line break. </summary>
-    public int LengthIncludingLineBreak { get; } = lengthIncludingLineBreak;
-
-    /// <summary> Gets the end position of the line. </summary>
+    /// <summary> The source text. </summary>
+    public SourceText Text { get; }
+    /// <summary> The start position of the line. </summary>
+    public int Start { get; }
+    /// <summary> The length of the line. </summary>
+    public int Length { get; }
+    /// <summary> The length of the line including the line break. </summary>
+    public int LengthIncludingLineBreak { get; }
+    /// <summary> The end position of the line. </summary>
     public int End => Start + Length;
-
-    /// <summary> Gets the span of the line. </summary>
+    /// <summary> The span of the line. </summary>
     public TextSpan Span => new(Start, Length);
-
-    /// <summary> Gets the span of the line including the line break. </summary>
+    /// <summary> The span of the line including the line break. </summary>
     public TextSpan SpanIncludingLineBreak => new(Start, LengthIncludingLineBreak);
 
-    /// <summary> Gets the text of the line. </summary>
-    /// <returns> The text of the line. </returns>
+    /// <param name="text"> Source text. </param>
+    /// <param name="start"> Start position of the line. </param>
+    /// <param name="length"> Length of the line. </param>
+    /// <param name="lengthIncludingLineBreak"> Length of the line including the line break. </param>
+    public TextLine(SourceText text, int start, int length, int lengthIncludingLineBreak)
+    {
+        Text = text;
+        Start = start;
+        Length = length;
+        LengthIncludingLineBreak = lengthIncludingLineBreak;
+    }
+
+    /// <summary> The text of the line. </summary>
+    /// <returns> The text of the line as string. </returns>
     public override string ToString() => Text.ToString(Span);
 }
