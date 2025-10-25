@@ -1,103 +1,159 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using Maho.Text;
 
 namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    /// <summary> Returns the unary operator precedence. </summary>
-    /// <returns> The unary operator precedence. </returns>
-    private int GetUnaryOperatorPrecedence()
+    private sealed class OperatorTrieNode
     {
-        var (_, Kind) = GetCombinedTokenData();
-
-        return Kind switch
-        {
-            TokenKind.Plus or TokenKind.Minus or TokenKind.ExclamationMark => 6,
-            _ => 0
-        };
+        public Dictionary<char, OperatorTrieNode> Next { get; } = [];
+        public TokenKind? Kind { get; set; } = null;
     }
 
-    /// <summary> Returns the binary operator precedence. </summary>
-    /// <returns> The binary operator precedence. </returns>
-    private int GetBinaryOperatorPrecedence()
-    {
-        var (_, Kind) = GetCombinedTokenData();
+    private static readonly OperatorTrieNode operatorTrie;
 
-        return Kind switch
+    private static readonly (string Value, TokenKind Kind)[] OperatorDefinitions =
+    [
+        ("<<<", TokenKind.LessThanLessThanLessThanSigns),
+        ("==", TokenKind.EqualsEquals),
+        ("!=", TokenKind.ExclamationEquals),
+        ("<<", TokenKind.LessThanLessThanSigns),
+        (">>", TokenKind.GreaterThanGreaterThanSigns),
+        ("<=", TokenKind.LessThanEquals),
+        (">=", TokenKind.GreaterThanEquals),
+        ("&&", TokenKind.AmpersandAmpersand),
+        ("||", TokenKind.VerticalBarVerticalBar),
+        ("+", TokenKind.Plus),
+        ("-", TokenKind.Minus),
+        ("*", TokenKind.Asterisk),
+        ("/", TokenKind.ForwardSlash),
+        ("%", TokenKind.Percentage),
+        ("&", TokenKind.Ampersand),
+        ("|", TokenKind.VerticalBar),
+        ("<", TokenKind.LessThanSign),
+        (">", TokenKind.GreaterThanSign),
+        ("?", TokenKind.QuestionMark),
+        ("=", TokenKind.Equals)
+    ];
+
+    private static readonly TokenKind[] synchronizationTokens = [TokenKind.Semicolon, TokenKind.RightCurlyBrace, TokenKind.EndToken];
+
+    private static OperatorTrieNode BuildOperatorTrie()
+    {
+        var root = new OperatorTrieNode();
+
+        foreach (var (value, kind) in OperatorDefinitions)
         {
-            TokenKind.Asterisk or TokenKind.ForwardSlash => 5,
-            TokenKind.Plus or TokenKind.Minus => 4,
-            TokenKind.EqualsEquals or TokenKind.ExclamationEquals => 3,
-            TokenKind.AmpersandAmpersand => 2,
-            TokenKind.VerticalBarVerticalBar => 1,
-            _ => 0
-        };
+            var node = root;
+
+            foreach (char ch in value)
+            {
+                if (!node.Next.ContainsKey(ch))
+                    node.Next[ch] = new OperatorTrieNode();
+
+                node = node.Next[ch];
+            }
+
+            node.Kind = kind;
+        }
+
+        return root;
     }
 
     /// <summary> Returns the value and combined form of combined operator token types. </summary>
     /// <returns> The string value and TokenKind of the combined operators. </returns>
-    private (string Value, TokenKind Kind) GetCombinedTokenData()
+    private (TokenKind Kind, int Length) GetCombinedOperatorData()
     {
-        Token nextToken, lastToken;
+        var node = operatorTrie;
+        int length = 0;
+        TokenKind? foundKind = null;
 
-        nextToken = Peek();
-        lastToken = Peek(2);
+        // Read ahead using Peek(i), character by character
+        for (int i = 0; ; i++)
+        {
+            if (!node.Next.TryGetValue(text[Peek(i).Span.Start], out node))
+                break; // no further match
 
-        TokenKind kind, next, last;
-        
-        kind = CurrentToken.Kind;
-        next = nextToken.Kind; 
-        last = lastToken.Kind;
-
-        // Pair of 3 operators
-        if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.LessThanSign && nextToken.TrailingTrivia.Length == 0 && last is TokenKind.LessThanSign)
-            return ("<<<", TokenKind.LessThanLessThanLessThanSigns);
-
-        // Pair of 2 operators
-        else if (kind is TokenKind.Equals && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
-            return ("==", TokenKind.EqualsEquals);
-        else if (kind is TokenKind.ExclamationMark && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
-            return ("!=", TokenKind.ExclamationEquals);
-        else if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.LessThanSign)
-            return ("<<", TokenKind.LessThanLessThanSigns);
-        else if (kind is TokenKind.GreaterThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.GreaterThanSign)
-            return (">>", TokenKind.GreaterThanGreaterThanSigns);
-        else if (kind is TokenKind.LessThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
-            return ("<=", TokenKind.LessThanEquals);
-        else if (kind is TokenKind.GreaterThanSign && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Equals)
-            return (">=", TokenKind.GreaterThanEquals);
-        else if (kind is TokenKind.Ampersand && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.Ampersand)
-            return ("&&", TokenKind.AmpersandAmpersand);
-        else if (kind is TokenKind.VerticalBar && CurrentToken.TrailingTrivia.Length == 0 && next is TokenKind.VerticalBar)
-            return ("||", TokenKind.VerticalBarVerticalBar);
-
-        // Single operator
-        else if (kind is TokenKind.Plus)
-            return ("+", kind);
-        else if (kind is TokenKind.Minus)
-            return ("-", kind);
-        else if (kind is TokenKind.Asterisk)
-            return ("*", kind);
-        else if (kind is TokenKind.ForwardSlash)
-            return ("/", kind);
-        else if (kind is TokenKind.Percentage)
-            return ("%", kind);
-        else if (kind is TokenKind.Ampersand)
-            return ("&", kind);
-        else if (kind is TokenKind.VerticalBar)
-            return ("|", kind);
-        else if (kind is TokenKind.LessThanSign)
-            return ("<", kind);
-        else if (kind is TokenKind.GreaterThanSign)
-            return (">", kind);
-        else if (kind is TokenKind.QuestionMark)
-            return ("?", kind);
-
-        // No operator matched
-        return ("\0", TokenKind.NullToken);
+            length = i + 1;
+            foundKind = node.Kind;
+        }
+                
+        return (foundKind ?? TokenKind.NullToken, length);
     }
 
+
+    [System.Flags]
+    private enum OperatorRole : byte
+    {
+        None = 0,
+        Prefix = 1,
+        Infix = 2,
+        Postfix = 4
+    }
+
+    private readonly struct OperatorEntry
+    {
+        public TokenKind Kind { get; }
+        public OperatorRole Role { get; }
+        public int LeftBindingPower { get; }
+        public int RightBindingPower { get; }
+
+        public bool IsPrefix => (Role & OperatorRole.Prefix) != 0;
+        public bool IsInfix => (Role & OperatorRole.Infix) != 0;
+        public bool IsPostfix => (Role & OperatorRole.Postfix) != 0;
+
+        public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp)
+        {
+            Kind = kind;
+            Role = role;
+            LeftBindingPower = lbp;
+            RightBindingPower = rbp;
+        }
+    }
+
+    private static readonly Dictionary<TokenKind, OperatorEntry> operatorTable = new()
+    {
+        { TokenKind.Plus, new OperatorEntry(TokenKind.Plus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
+        { TokenKind.Minus, new OperatorEntry(TokenKind.Minus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
+        { TokenKind.Asterisk, new OperatorEntry(TokenKind.Asterisk, OperatorRole.Infix, 60, 60) },
+        { TokenKind.ForwardSlash, new OperatorEntry(TokenKind.ForwardSlash, OperatorRole.Infix, 60, 60) },
+        { TokenKind.Percentage, new OperatorEntry(TokenKind.Percentage, OperatorRole.Infix, 60, 60) },
+        { TokenKind.EqualsEquals, new OperatorEntry(TokenKind.EqualsEquals, OperatorRole.Infix, 35, 35) },
+        { TokenKind.ExclamationEquals, new OperatorEntry(TokenKind.ExclamationEquals, OperatorRole.Infix, 35, 35) },
+        { TokenKind.LessThanSign, new OperatorEntry(TokenKind.LessThanSign, OperatorRole.Infix, 40, 40) },
+        { TokenKind.LessThanEquals, new OperatorEntry(TokenKind.LessThanEquals, OperatorRole.Infix, 40, 40) },
+        { TokenKind.GreaterThanSign, new OperatorEntry(TokenKind.GreaterThanSign, OperatorRole.Infix, 40, 40) },
+        { TokenKind.GreaterThanEquals, new OperatorEntry(TokenKind.GreaterThanEquals, OperatorRole.Infix, 40, 40) },
+        { TokenKind.AmpersandAmpersand, new OperatorEntry(TokenKind.AmpersandAmpersand, OperatorRole.Infix, 25, 25) },
+        { TokenKind.VerticalBarVerticalBar, new OperatorEntry(TokenKind.VerticalBarVerticalBar, OperatorRole.Infix, 20, 20) },
+        { TokenKind.Equals, new OperatorEntry(TokenKind.Equals, OperatorRole.Infix, 9, 10) } // Right associative
+    };
+
+    private Token ConsumeOperator()
+    {
+        var (kind, length) = GetCombinedOperatorData();
+
+        Token first = default;
+        Token token = default;
+
+        for (int i = 0; i < length; i++)
+        {
+            token = Consume();
+
+            if (i == 0)
+                first = token;
+        }
+
+        Token last = token;
+
+        return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool DoesTokenStartsExpression(Token token) => (token.Kind is TokenKind.Identifier or TokenKind.Integer or TokenKind.Float or TokenKind.LeftParen) || (operatorTable.ContainsKey(token.Kind) && operatorTable[token.Kind].IsPrefix);
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>
     /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
@@ -115,36 +171,14 @@ internal sealed partial class Parser
         return currentToken;
     }
 
-    /// <summary> Matches the given TokenKind with current token's TokenKind. </summary>
-    /// <param name="other"> The TokenKind to compare current token's TokenKind against. </param>
-    /// <returns> Current token if match is successful, otherwise a missing token. </returns>
-    private Token Match(TokenKind other)
+    private void Synchronize()
     {
-        if (CurrentToken.Kind == other)
-            return Consume();
+        while (CurrentToken.Kind is not TokenKind.EndToken && Array.IndexOf(synchronizationTokens, CurrentToken.Kind) == -1)
+            Consume();
 
-        Consume();
-        return new(CurrentToken.Value, CurrentToken.Span, TokenKind.MissingToken, CurrentToken.LeadingTrivia, CurrentToken.TrailingTrivia);
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+            Consume();
     }
 
-    /// <summary> Matches all the given TokenKinds with current token's TokenKind. </summary>
-    /// <param name="others"> The TokenKinds to compare current token's TokenKind against. </param>
-    /// <returns> Current token if any match is successful, otherwise a missing token. </returns>
-    private Token Match(params TokenKind[] others)
-    {
-        var matched = false;
-
-        foreach (var kind in others)
-            if (CurrentToken.Kind == kind)
-            {
-                matched = true;
-                break;
-            }
-
-        if (matched)
-            return Consume();
-
-        Consume();
-        return new(CurrentToken.Value, CurrentToken.Span, TokenKind.MissingToken, CurrentToken.LeadingTrivia, CurrentToken.TrailingTrivia);
-    }
+    private static bool IsContextualStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.RightCurlyBrace or TokenKind.EndToken;
 }

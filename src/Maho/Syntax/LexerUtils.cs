@@ -48,7 +48,7 @@ internal sealed partial class Lexer
     /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
     /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private char Peek(int offset = 1) => current + offset < Program.Length ? Program[current + offset] : '\0';
+    private char Peek(int offset = 1) => current + offset < text.Length ? text[current + offset] : '\0';
 
     /// <summary> Gets all the tokens as string in json form. </summary>
     /// <returns> Tokens in string form. </returns>
@@ -64,21 +64,6 @@ internal sealed partial class Lexer
             sb.AppendLine("{");
             sb.AppendLine($"    Value: \"{token.Value}\",");
             sb.AppendLine($"    Kind: {token.Kind}\n");
-            sb.AppendLine($"    Trivia");
-            sb.AppendLine("    {");
-            sb.Append("        Leading: \"");
-
-            foreach (var trivia in token.LeadingTrivia)
-                sb.Append(trivia.Text);
-
-            sb.AppendLine("\",");
-            sb.Append("        Trailing: \"");
-
-            foreach (var trivia in token.TrailingTrivia)
-                sb.Append(trivia.Text);
-
-            sb.AppendLine("\"");
-            sb.AppendLine("    }");
             sb.AppendLine("}");
             sb.AppendLine();
         }
