@@ -136,8 +136,8 @@ internal sealed partial class Parser
     {
         var (kind, length) = GetCombinedOperatorData();
 
-        Token first = default;
-        Token token = default;
+        Token first = default!;
+        Token token = default!;
 
         for (int i = 0; i < length; i++)
         {

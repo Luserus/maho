@@ -1,4 +1,4 @@
 namespace Maho.Syntax;
 
 /// <summary> Base class for all Expression nodes. </summary>
-internal abstract class Expression : ISyntaxNode;
+internal abstract class Expression : SyntaxNode;

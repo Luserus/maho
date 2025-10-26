@@ -3,11 +3,11 @@ using Maho.Text;
 namespace Maho.Syntax;
 
 /// <summary> Token of the program which serves as the smallest unit of meaningful data the compiler can use. </summary>
-internal struct Token : ISyntaxNode
+internal sealed class Token : SyntaxNode
 {
     private readonly SourceText source;
     /// <summary> Token data of the Token. </summary>
-    public readonly string Value => source.ToString(Span);
+    public string Value => source.ToString(Span);
     /// <summary> Text span of the Token. </summary>
     public TextSpan Span { get; set; }
     /// <summary> Token kind of the Token. </summary>

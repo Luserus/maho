@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-internal sealed class AssignmentClause : ISyntaxNode
+internal sealed class AssignmentClause : SyntaxNode
 {
     public Token AssignmentOperator { get; }
     public Expression Initializer { get; }

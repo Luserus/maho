@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-internal abstract class NamedSyntax : ISyntaxNode
+internal abstract class NamedSyntax : SyntaxNode
 {
     public Token Identifier { get; }
 

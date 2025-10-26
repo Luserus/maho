@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-internal abstract class FunctionMember : DeclarationSyntax
+internal abstract class FunctionMember : MemberDeclaration
 {
     public FunctionSignature Signature { get; }
 

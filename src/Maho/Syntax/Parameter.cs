@@ -1,8 +1,6 @@
-using Maho.Syntax;
-
 namespace Maho.Syntax;
 
-internal abstract class Parameter : DeclarationSyntax
+internal abstract class Parameter : SyntaxNode
 {
     public ParameterVariableDeclarator Declarator { get; }
     public AssignmentClause? Initializer { get; }

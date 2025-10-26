@@ -1,4 +1,4 @@
 namespace Maho.Syntax;
 
 /// <summary> Base class for all syntax nodes in the syntax tree. </summary>
-internal interface ISyntaxNode;
+internal abstract class SyntaxNode;

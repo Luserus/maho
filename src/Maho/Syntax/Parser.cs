@@ -326,7 +326,7 @@ internal sealed partial class Parser
         var modifiers = ParseModifiers();
         var type = ParseNamedSyntax();
 
-        var nodesAndSeparators = new List<ISyntaxNode>();
+        var nodesAndSeparators = new List<SyntaxNode>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
         {
@@ -558,7 +558,7 @@ internal sealed partial class Parser
 
     private ISeparatedSyntaxList ParseArgumentList()
     {
-        var nodesAndSeparators = new List<ISyntaxNode>();
+        var nodesAndSeparators = new List<SyntaxNode>();
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
@@ -575,7 +575,7 @@ internal sealed partial class Parser
 
     private ISeparatedSyntaxList ParseTypeArgumentList()
     {
-        var nodesAndSeparators = new List<ISyntaxNode>();
+        var nodesAndSeparators = new List<SyntaxNode>();
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -592,7 +592,7 @@ internal sealed partial class Parser
 
     private ISeparatedSyntaxList ParseParameterList()
     {
-        var nodesAndSeparators = new List<ISyntaxNode>();
+        var nodesAndSeparators = new List<SyntaxNode>();
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {

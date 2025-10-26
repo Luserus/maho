@@ -6,18 +6,18 @@ namespace Maho.Syntax;
 
 internal interface ISeparatedSyntaxList
 {
-    public IReadOnlyList<ISyntaxNode> NodesWithSeparators { get; }
+    public IReadOnlyList<SyntaxNode> NodesWithSeparators { get; }
 }
 
-internal readonly struct SeparatedSyntaxList<T> : ISeparatedSyntaxList, IEnumerable<T> where T : ISyntaxNode
+internal readonly struct SeparatedSyntaxList<T> : ISeparatedSyntaxList, IEnumerable<T> where T : SyntaxNode
 {
-    public IReadOnlyList<ISyntaxNode> NodesAndSeparators { get; }
+    public IReadOnlyList<SyntaxNode> NodesAndSeparators { get; }
 
-    public SeparatedSyntaxList(IReadOnlyList<ISyntaxNode> nodesAndSeparators) => NodesAndSeparators = nodesAndSeparators;
+    public SeparatedSyntaxList(IReadOnlyList<SyntaxNode> nodesAndSeparators) => NodesAndSeparators = nodesAndSeparators;
 
     public int Count => NodesAndSeparators.Count(n => n is T);
 
-    public IReadOnlyList<ISyntaxNode> NodesWithSeparators => NodesAndSeparators;
+    public IReadOnlyList<SyntaxNode> NodesWithSeparators => NodesAndSeparators;
 
     public T this[int index] => (T)NodesAndSeparators[index * 2];
 
