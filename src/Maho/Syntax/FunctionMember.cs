@@ -1,8 +1,8 @@
 namespace Maho.Syntax;
 
-internal abstract class FunctionMember : MemberDeclaration
+internal sealed class FunctionMemberDeclaration : MemberDeclaration
 {
-    public FunctionSignature Signature { get; }
+    public Function Function { get; }
 
-    protected FunctionMember(FunctionSignature signature) => Signature = signature;
+    public FunctionMemberDeclaration(Function function) => Function = function;
 }

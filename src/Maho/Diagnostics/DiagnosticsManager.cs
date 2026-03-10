@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -17,7 +16,7 @@ internal sealed class DiagnosticsManager
     public void ReportError(string code, string message, TextSpan span) => Report(new Diagnostic(code, message, span, DiagnosticKind.Error));
 
 
-    public void ReportUnexpectedToken(TextSpan span, string found) => ReportError("MHP0001", $"Unexpected token. '{found}' is not valid in this context.", span);
+    public void ReportUnexpectedToken(TextSpan span, string found) => ReportError("MHC0001", $"Unexpected token. '{found}' is not valid in this context.", span);
         
-    public void ReportMissingToken(TextSpan span, string expected) => ReportError("MHP0002", $"Missing token. Expected '{expected}'.", span);
+    public void ReportMissingToken(TextSpan span, string expected) => ReportError("MHC0002", $"Missing token. Expected '{expected}'.", span);
 }

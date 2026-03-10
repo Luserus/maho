@@ -1,3 +1,3 @@
 namespace Maho.Syntax;
 
-internal abstract class LocalDeclaration : BlockItem;
+internal abstract class LocalDeclaration : Local;

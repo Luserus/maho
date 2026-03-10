@@ -1,4 +1,4 @@
 namespace Maho.Syntax;
 
 /// <summary> Base class for all Statement nodes. </summary>
-internal abstract class Statement : BlockItem;
+internal abstract class Statement : Local;

@@ -1,3 +1,3 @@
 namespace Maho.Syntax;
 
-internal abstract class BlockItem : SyntaxNode;
+internal abstract class Local : SyntaxNode;

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Text;
@@ -16,7 +15,8 @@ internal sealed partial class Parser
     private static readonly OperatorTrieNode operatorTrie;
 
     private static readonly (string Value, TokenKind Kind)[] OperatorDefinitions =
-    [
+    [/// <summary> Returns the value and combined form of combined operator token types. </summary>
+    /// <returns> The string value and TokenKind of the combined operators. </returns>
         ("<<<", TokenKind.LessThanLessThanLessThanSigns),
         ("==", TokenKind.EqualsEquals),
         ("!=", TokenKind.ExclamationEquals),
@@ -46,7 +46,8 @@ internal sealed partial class Parser
         var root = new OperatorTrieNode();
 
         foreach (var (value, kind) in OperatorDefinitions)
-        {
+        {/// <summary> Returns the value and combined form of combined operator token types. </summary>
+    /// <returns> The string value and TokenKind of the combined operators. </returns>
             var node = root;
 
             foreach (char ch in value)
@@ -74,7 +75,12 @@ internal sealed partial class Parser
         // Read ahead using Peek(i), character by character
         for (int i = 0; ; i++)
         {
-            if (!node.Next.TryGetValue(text[Peek(i).Span.Start], out node))
+            var token = Peek(i);
+
+            if (token.Kind is TokenKind.EndToken)
+                break; // end of tokens
+
+            if (!node.Next.TryGetValue(text[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
@@ -173,7 +179,7 @@ internal sealed partial class Parser
 
     private void Synchronize()
     {
-        while (CurrentToken.Kind is not TokenKind.EndToken && Array.IndexOf(synchronizationTokens, CurrentToken.Kind) == -1)
+        while (CurrentToken.Kind is not TokenKind.EndToken && System.Array.IndexOf(synchronizationTokens, CurrentToken.Kind) == -1)
             Consume();
 
         if (CurrentToken.Kind is TokenKind.Semicolon)

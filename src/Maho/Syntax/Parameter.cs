@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-internal abstract class Parameter : SyntaxNode
+internal sealed class Parameter : SyntaxNode
 {
     public ParameterVariableDeclarator Declarator { get; }
     public AssignmentClause? Initializer { get; }
