@@ -3,9 +3,9 @@ namespace Maho.Syntax;
 internal sealed class FunctionLambdaBody : FunctionBody
 {
     public Token LambdaArrow { get; }
-    public Statement Statement { get; }
+    public LocalStatement Statement { get; }
 
-    public FunctionLambdaBody(Token lambdaArrow, Statement statement)
+    public FunctionLambdaBody(Token lambdaArrow, LocalStatement statement)
     {
         LambdaArrow = lambdaArrow;
         Statement = statement;

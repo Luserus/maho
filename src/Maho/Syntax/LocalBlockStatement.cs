@@ -2,13 +2,13 @@ using System.Collections.Generic;
 
 namespace Maho.Syntax;
 
-internal sealed class BlockStatement : Statement
+internal sealed class LocalBlockStatement : LocalStatement
 {
     public Token OpenBrace { get; }
-    public IReadOnlyList<Statement> Statements { get; }
+    public IReadOnlyList<LocalStatement> Statements { get; }
     public Token CloseBrace { get; }
 
-    public BlockStatement(Token openBrace, IReadOnlyList<Statement> statements, Token closeBrace)
+    public LocalBlockStatement(Token openBrace, IReadOnlyList<LocalStatement> statements, Token closeBrace)
     {
         OpenBrace = openBrace;
         Statements = statements;

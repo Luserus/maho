@@ -1,7 +1,6 @@
 namespace Maho.Syntax;
 
-/// <summary> Represents a variable declaration statement node. </summary>
-internal sealed class VariableDeclarationStatement : Statement
+internal sealed class TopLevelVariableDeclarationStatement : TopLevelStatement
 {
     /// <summary> The type of the variable. </summary>
     public NamedSyntax Type { get; }
@@ -9,10 +8,11 @@ internal sealed class VariableDeclarationStatement : Statement
     /// <summary> The statement terminator. </summary>
     public Token Semicolon { get; }
 
-    /// <summary> Initializes the VariableDeclarationStatementSyntax class. </summary>
+    /// <summary> Initializes the TopLevelVariableDeclarationStatementSyntax class. </summary>
     /// <param name="type"> The type of the variable. </param>
+    /// <param name="declarators"> The variable declarators. </param>
     /// <param name="semicolon"> The statement terminator. </param>
-    public VariableDeclarationStatement(NamedSyntax type, ISeparatedSyntaxList declarators, Token semicolon)
+    public TopLevelVariableDeclarationStatement(NamedSyntax type, ISeparatedSyntaxList declarators, Token semicolon)
     {
         Type = type;
         Declarators = declarators;

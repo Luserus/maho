@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
 using Maho.Text;
 
@@ -17,7 +16,7 @@ internal sealed partial class Parser
     /// <summary> Current Token being read from the token list. </summary>
     private Token CurrentToken => tokens[current];
 
-    private List<Statement> statements = [];
+    public CompilationUnit Root { get; private set; } = null!;
 
     private enum StatementParseMode : byte
     {
@@ -28,10 +27,10 @@ internal sealed partial class Parser
 
     static Parser() => operatorTrie = BuildOperatorTrie();
 
-    public Parser(SourceText text, DiagnosticsManager diagnosticsManager)
+    public Parser(SourceText text, DiagnosticsManager diagnostics)
     {
         this.text = text;
-        diagnostics = diagnosticsManager;
+        this.diagnostics = diagnostics;
     } 
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
@@ -41,226 +40,28 @@ internal sealed partial class Parser
         this.tokens = tokens;
         current = default;
 
+        var compilationUnit = ParseCompilationUnit();
+        Root = compilationUnit;
+    }
+
+    private CompilationUnit ParseCompilationUnit()
+    {
+        var members = new List<TopLevel>();
+
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            var statement = ParseStatement();
-            statements.Add(statement);
+            var member = ParseTopLevel();
+            members.Add(member);
         }
 
         var eofToken = Consume();
+
+        return new CompilationUnit(members, eofToken);
     }
 
-    /// <summary> Parses an expression. </summary>
-    /// <returns> The expression node. </returns>
-    private Expression ParseExpression(int minBindingPower = 0)
+    private TopLevel ParseTopLevel()
     {
-        Expression left;
-
-        // NUD: prefix operators or primary
-        var (kind, length) = GetCombinedOperatorData();
-
-        if (length > 0 && operatorTable.TryGetValue(kind, out var prefixEntry) && prefixEntry.IsPrefix)
-        {
-            // consume the prefix operator (combined)
-            var opToken = ConsumeOperator();
-            int rbp = prefixEntry.RightBindingPower;
-            var right = ParseExpression(rbp);
-            left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
-        }
-        else
-            left = ParsePrimaryExpression();
-
-        // LED: loop for postfix (prefer) and infix
-        while (true)
-        {
-            if (CurrentToken.Kind is TokenKind.LeftParen)
-            {
-                var leftParen = Consume();
-                var arguments = ParseArgumentList();
-
-                Token rightParen;
-
-                if (CurrentToken.Kind is not TokenKind.RightParen)
-                {
-                    diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-                    rightParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-                }
-                else
-                    rightParen = Consume();
-
-                left = new CallExpression(left, leftParen, arguments, rightParen);
-                continue;
-            }
-            (kind, length) = GetCombinedOperatorData();
-
-            if (length == 0)
-                break; // no operator here
-
-            if (!operatorTable.TryGetValue(kind, out var entry))
-                break; // operator not in table -> stop (lexer may produce non-op tokens)
-
-            // If postfix possible, prefer it
-            if (entry.IsPostfix)
-            {
-                int lbp = entry.LeftBindingPower;
-
-                if (lbp < minBindingPower)
-                    break;
-
-                // consume combined operator
-                var opToken = ConsumeOperator();
-                left = new UnaryExpression(opToken, left, UnaryPosition.Postfix);
-
-                continue; // allow chaining
-            }
-
-            // If infix possible, handle it
-            if (entry.IsInfix)
-            {
-                int lbp = entry.LeftBindingPower;
-                if (lbp < minBindingPower) 
-                    break;
-
-                // consume combined operator
-                var opTok = ConsumeOperator();
-                int rbp = entry.RightBindingPower;
-                var right = ParseExpression(rbp);
-
-                if (opTok.Kind is TokenKind.Equals)
-                    left = new AssignmentExpression(left, opTok, right);
-                else
-                    left = new BinaryExpression(left, opTok, right);
-
-                continue;
-            }
-
-            break;
-        }
-
-        return left;
-    }
-
-    /// <summary> Parses a statement. </summary>
-    /// <returns> The statement node. </returns>
-    private Statement ParseStatement(StatementParseMode parseMode = StatementParseMode.Normal)
-    {
-        switch (parseMode)
-        {
-            default:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
-                            return ParseIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseVariableDeclarationStatement();
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return new EmptyStatement(Consume());
-
-                    case TokenKind.LeftCurlyBrace:
-                        return ParseBlockStatement();
-                }
-
-                return ParseExpressionStatement(allowFinalExpression: false);
-
-            case StatementParseMode.AllowFinalExpression:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
-                            return ParseIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseVariableDeclarationStatement();
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return new EmptyStatement(Consume());
-                }
-
-                return ParseExpressionStatement(allowFinalExpression: true);
-
-            case StatementParseMode.AllowStatementWithoutSemicolon:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
-                            return ParseIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseVariableDeclarationStatement(allowMissingSemicolon: true);
-                        break;
-
-                    case TokenKind.LeftCurlyBrace:
-                        return ParseBlockStatement();
-                }
-                
-                return new ExpressionStatement(ParseExpression(), new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
-        }
-    }
-
-    /// <summary> Parses a primary expression without operator involvement. </summary>
-    /// <returns> The primary expression node. </returns>
-    private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
-    {
-        TokenKind.LeftParen => ParseParenthesizedExpression(),
-        TokenKind.LeftCurlyBrace => ParseBlockExpression(),
-
-        TokenKind.Identifier => CurrentToken.Value switch
-        {
-            "new" or "put" => ParseObjectCreationExpression(),
-            "if" => ParseIfExpression(),
-            _ => ParseNamedExpression()
-        },
-
-        _ => ParseLiteralExpression()
-    };
-
-    private ParenthesizedExpression ParseParenthesizedExpression()
-    {
-        var leftParen = Consume(); // consume '('
-        var expression = ParseExpression();
-        Token rightParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "')'");
-            rightParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            rightParen = Consume();
-
-        return new ParenthesizedExpression(leftParen, expression, rightParen);
-    }
-
-    /// <summary> Parses an expression statement. </summary>
-    /// <returns> The expression statement node. </returns>
-    private ExpressionStatement ParseExpressionStatement(bool allowFinalExpression)
-    {
-        var expression = ParseExpression();
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowFinalExpression)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []); // Fabricated semicolon
-        else
-            semicolon = Consume();
-
-        return new ExpressionStatement(expression, semicolon, isFinalExpression: allowFinalExpression);
-    }
-
-    private NamedExpression ParseNamedExpression()
-    {
-        var namedSyntax = ParseNamedSyntax();
-
-        if (namedSyntax is GenericName genericName)
-            return new GenericNameExpression(genericName);
-        
-        return new IdentifierExpression((IdentifierName)namedSyntax);
+        return ParseTopLevelStatement();
     }
 
     private bool LooksLikeGenericName()
@@ -351,11 +152,6 @@ internal sealed partial class Parser
         return (lessThan, typeArguments, greaterThan);
     }
 
-    /// <summary> Parses a literal expression. </summary>
-    /// <returns> The literal expression node. </returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private LiteralExpression ParseLiteralExpression() => new(Consume());
-
     private (Token Type, Token Identifier) ParseVariableDeclaration()
     {
         var type = Consume();
@@ -364,6 +160,8 @@ internal sealed partial class Parser
         return (type, identifier);
     }
 
+    /// <summary> Parses a list of modifiers. </summary>
+    /// <returns> The modifier list. </returns>
     private ModifierList ParseModifiers()
     {
         var list = new List<Token>();
@@ -389,63 +187,10 @@ internal sealed partial class Parser
         return new ModifierList(list);
     }
 
-    /// <summary> Parses a variable declaration statement. </summary>
-    /// <returns> The variable declaration statement node. </returns>
-    private VariableDeclarationStatement ParseVariableDeclarationStatement(bool allowMissingSemicolon = false)
-    {
-        var modifiers = ParseModifiers();
-        var type = ParseNamedSyntax();
-
-        var nodesAndSeparators = new List<SyntaxNode>();
-
-        while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
-        {
-            var identifier = new IdentifierName(Consume());
-
-            AssignmentClause? initializer = null;
-
-            if (CurrentToken.Kind is TokenKind.Equals)
-            {
-                var assignmentOp = Consume();
-                var initExpr = ParseExpression();
-
-                initializer = new AssignmentClause(assignmentOp, initExpr);
-            }
-
-            var declarator = new VariableDeclarator(identifier, initializer);
-
-            nodesAndSeparators.Add(declarator);
-
-            if (CurrentToken.Kind is TokenKind.Comma)
-                nodesAndSeparators.Add(Consume());
-            else
-                break;
-        }
-
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowMissingSemicolon)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        else
-            semicolon = Consume();
-
-        return new VariableDeclarationStatement(type, new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators), semicolon);
-    }
-
-        private Expression ParseObjectCreationExpression()
-    {
-        return default!;
-    }
-
-    private (Token OpenBrace, IReadOnlyList<Statement> Statements, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
+    private (Token OpenBrace, IReadOnlyList<LocalStatement> Statements, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
     {
         var openBrace = Consume();
-        var statements = new List<Statement>();
+        var statements = new List<LocalStatement>();
         Expression? finalExpression = null;
 
         switch (allowFinalExpression)
@@ -453,9 +198,9 @@ internal sealed partial class Parser
             case true:
                 while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
                 {
-                    var statement = ParseStatement(StatementParseMode.AllowFinalExpression);
+                    var statement = ParseLocalStatement(StatementParseMode.AllowFinalExpression);
 
-                    if (statement is ExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
+                    if (statement is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
                     {
                         finalExpression = expressionStatement.Expression;
                         break;
@@ -468,7 +213,7 @@ internal sealed partial class Parser
             case false:
                 while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
                 {
-                    var statement = ParseStatement(StatementParseMode.Normal);
+                    var statement = ParseLocalStatement(StatementParseMode.Normal);
                     statements.Add(statement);
                 }
                 break;
@@ -485,116 +230,6 @@ internal sealed partial class Parser
             closeBrace = Consume();
 
         return (openBrace, statements, finalExpression, closeBrace);
-    }
-
-    private BlockExpression ParseBlockExpression()
-    {
-        var (openBrace, statements, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: true);
-
-        return new BlockExpression(openBrace, statements, finalExpression, closeBrace);
-    }
-
-    private BlockStatement ParseBlockStatement()
-    {
-        var (openBrace, statements, _, closeBrace) = ParseBlock(allowFinalExpression: false);
-
-        return new BlockStatement(openBrace, statements, closeBrace);
-    }
-
-    private IfExpression ParseIfExpression()
-    {
-        var ifKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
-
-        var thenExpression = ParseExpression();
-
-        ElseExpression? elseExpression = null;
-
-        if (CurrentToken.Value == "else")
-        {
-            var elseKeyword = Consume();
-            var elseExpr = ParseExpression();
-            elseExpression = new ElseExpression(elseKeyword, elseExpr);
-        }
-
-        return new IfExpression(ifKeyword, openParen, condition, closeParen, thenExpression, elseExpression);
-    }
-
-    private IfStatement ParseIfStatement()
-    {
-        var ifKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
-
-        var thenStatement = ParseStatement();
-
-        ElseStatement? elseStatement = null;
-
-        if (CurrentToken.Value == "else")
-        {
-            var elseKeyword = Consume();
-            var elseStmt = ParseStatement();
-            elseStatement = new ElseStatement(elseKeyword, elseStmt);
-        }
-
-        return new IfStatement(ifKeyword, openParen, condition, closeParen, thenStatement, elseStatement);
-    }
-
-    private CallExpression ParseCallExpression()
-    {
-        var callee = ParseExpression();
-        var openParen = Consume();
-        var arguments = ParseArgumentList();
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
-
-        return new CallExpression(callee, openParen, arguments, closeParen);
     }
 
     private ISeparatedSyntaxList ParseArgumentList()
@@ -702,11 +337,11 @@ internal sealed partial class Parser
     private FunctionBlockBody ParseFunctionBlockBody()
     {
         var openBrace = Consume();
-        var statements = new List<Statement>();
+        var statements = new List<LocalStatement>();
 
         while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
         {
-            var statement = ParseStatement();
+            var statement = ParseLocalStatement();
             statements.Add(statement);
         }
 

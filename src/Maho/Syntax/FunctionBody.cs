@@ -1,3 +1,3 @@
 namespace Maho.Syntax;
 
-internal class FunctionBody;
+internal abstract class FunctionBody;

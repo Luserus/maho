@@ -6,11 +6,11 @@ namespace Maho.Syntax;
 internal sealed class BlockExpression : Expression
 {
     public Token OpenBrace { get; }
-    public IReadOnlyList<Statement> Statements { get; }
+    public IReadOnlyList<LocalStatement> Statements { get; }
     public Expression? FinalExpression { get; }
     public Token CloseBrace { get; }
 
-    public BlockExpression(Token openBrace, IReadOnlyList<Statement> statements, Expression? finalExpression, Token closeBrace)
+    public BlockExpression(Token openBrace, IReadOnlyList<LocalStatement> statements, Expression? finalExpression, Token closeBrace)
     {
         OpenBrace = openBrace;
         Statements = statements;

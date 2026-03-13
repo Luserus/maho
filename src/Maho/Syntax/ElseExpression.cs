@@ -2,12 +2,12 @@ namespace Maho.Syntax;
 
 internal sealed class ElseExpression : Expression
 {
-    public Token ElseKeyword { get; }
+    public Token Keyword { get; }
     public Expression Expression { get; }
 
-    public ElseExpression(Token elseKeyword, Expression expression)
+    public ElseExpression(Token keyword, Expression expression)
     {
-        ElseKeyword = elseKeyword;
+        Keyword = keyword;
         Expression = expression;
     }
 }

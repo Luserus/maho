@@ -6,6 +6,13 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
+    private enum ParseContext
+    {
+        None = 0,
+        TopLevel = 1,
+        Member = 2,
+        Local = 3
+    }
     private sealed class OperatorTrieNode
     {
         public Dictionary<char, OperatorTrieNode> Next { get; } = [];
