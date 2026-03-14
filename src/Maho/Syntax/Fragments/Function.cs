@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-internal readonly struct Function
+internal sealed class Function : SyntaxNode
 {
     public FunctionSignature Signature { get; }
     public FunctionBody Body { get; }

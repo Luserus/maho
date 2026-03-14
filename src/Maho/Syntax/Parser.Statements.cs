@@ -16,8 +16,6 @@ internal sealed partial class Parser
             case TokenKind.Identifier:
                 if (CurrentToken.Value == "if")
                     return ParseTopLevelIfStatement();
-                else if (Peek().Kind is TokenKind.Identifier)
-                    return ParseTopLevelVariableDeclarationStatement();
                 break;
 
             case TokenKind.Semicolon:
@@ -46,50 +44,6 @@ internal sealed partial class Parser
             semicolon = Consume();
 
         return new TopLevelExpressionStatement(expression, semicolon, isFinalExpression: allowFinalExpression);
-    }
-
-    private TopLevelVariableDeclarationStatement ParseTopLevelVariableDeclarationStatement()
-    {
-        var modifiers = ParseModifiers();
-        var type = ParseNamedSyntax();
-
-        var nodesAndSeparators = new List<SyntaxNode>();
-
-        while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
-        {
-            var identifier = new IdentifierName(Consume());
-
-            AssignmentClause? initializer = null;
-
-            if (CurrentToken.Kind is TokenKind.Equals)
-            {
-                var assignmentOp = Consume();
-                var initExpr = ParseExpression();
-
-                initializer = new AssignmentClause(assignmentOp, initExpr);
-            }
-
-            var declarator = new VariableDeclarator(identifier, initializer);
-
-            nodesAndSeparators.Add(declarator);
-
-            if (CurrentToken.Kind is TokenKind.Comma)
-                nodesAndSeparators.Add(Consume());
-            else
-                break;
-        }
-
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            semicolon = Consume();
-
-        return new TopLevelVariableDeclarationStatement(type, new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators), semicolon);
     }
 
     private TopLevelIfStatement ParseTopLevelIfStatement()
@@ -255,34 +209,7 @@ internal sealed partial class Parser
     /// <returns> The local variable declaration statement node. </returns>
     private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(bool allowMissingSemicolon = false)
     {
-        var modifiers = ParseModifiers();
-        var type = ParseNamedSyntax();
-
-        var nodesAndSeparators = new List<SyntaxNode>();
-
-        while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
-        {
-            var identifier = new IdentifierName(Consume());
-
-            AssignmentClause? initializer = null;
-
-            if (CurrentToken.Kind is TokenKind.Equals)
-            {
-                var assignmentOp = Consume();
-                var initExpr = ParseExpression();
-
-                initializer = new AssignmentClause(assignmentOp, initExpr);
-            }
-
-            var declarator = new VariableDeclarator(identifier, initializer);
-
-            nodesAndSeparators.Add(declarator);
-
-            if (CurrentToken.Kind is TokenKind.Comma)
-                nodesAndSeparators.Add(Consume());
-            else
-                break;
-        }
+        var variableDeclaration = ParseVariableDeclaration();
 
         Token semicolon;
 
@@ -296,7 +223,7 @@ internal sealed partial class Parser
         else
             semicolon = Consume();
 
-        return new LocalVariableDeclarationStatement(type, new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators), semicolon);
+        return new LocalVariableDeclarationStatement(variableDeclaration, semicolon);
     }
 
     private LocalIfStatement ParseLocalIfStatement()

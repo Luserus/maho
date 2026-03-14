@@ -1,15 +1,17 @@
+using System.Collections.Generic;
+
 namespace Maho.Syntax;
 
-internal readonly struct FunctionSignature
+internal sealed class FunctionSignature : SyntaxNode
 {
-    public ModifierList Modifiers { get; }
+    public IReadOnlyList<Token> Modifiers { get; }
     public NamedSyntax ReturnType { get; }
     public NamedSyntax Identifier { get; }
     public Token OpenParen { get; }
     public ISeparatedSyntaxList Parameters { get; }
     public Token CloseParen { get; }
 
-    public FunctionSignature(ModifierList modifiers, NamedSyntax returnType, NamedSyntax identifier, Token openParen, ISeparatedSyntaxList parameters, Token closeParen)
+    public FunctionSignature(IReadOnlyList<Token> modifiers, NamedSyntax returnType, NamedSyntax identifier, Token openParen, ISeparatedSyntaxList parameters, Token closeParen)
     {
         Modifiers = modifiers;
         ReturnType = returnType;

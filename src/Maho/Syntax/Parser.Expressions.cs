@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Text;
 
@@ -184,6 +185,51 @@ internal sealed partial class Parser
         return new IfExpression(ifKeyword, openParen, condition, closeParen, thenExpression, elseExpression);
     }
 
+    private (Token OpenBrace, IReadOnlyList<LocalStatement> Statements, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
+    {
+        var openBrace = Consume();
+        var statements = new List<LocalStatement>();
+        Expression? finalExpression = null;
+
+        switch (allowFinalExpression)
+        {
+            case true:
+                while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+                {
+                    var statement = ParseLocalStatement(StatementParseMode.AllowFinalExpression);
+
+                    if (statement is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
+                    {
+                        finalExpression = expressionStatement.Expression;
+                        break;
+                    }
+
+                    statements.Add(statement);
+                }
+                break;
+
+            case false:
+                while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+                {
+                    var statement = ParseLocalStatement(StatementParseMode.Normal);
+                    statements.Add(statement);
+                }
+                break;
+        }
+
+        Token closeBrace;
+
+        if (CurrentToken.Kind is not TokenKind.RightCurlyBrace)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, "}");
+            closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            closeBrace = Consume();
+
+        return (openBrace, statements, finalExpression, closeBrace);
+    }
+
     private BlockExpression ParseBlockExpression()
     {
         var (openBrace, statements, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: true);
@@ -212,5 +258,22 @@ internal sealed partial class Parser
     private Expression ParseObjectCreationExpression()
     {
         return default!;
+    }
+
+    private ISeparatedSyntaxList ParseArgumentList()
+    {
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            nodesAndSeparators.Add(ParseExpression());
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(Consume());
+            else
+                break;
+        }
+
+        return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
 }
