@@ -5,7 +5,7 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    private TopLevel ParseTopLevelDeclarations()
+    private TopLevel ParseTopLevelDeclaration()
     {
         var modifiers = ParseModifiers();
 
@@ -111,15 +111,17 @@ internal sealed partial class Parser
         return new TopLevelFunctionDeclaration(function);
     }
 
-    private MemberTypeDeclaration ParseMemberTypeDeclaration(IReadOnlyList<Token> modifiers)
+    private MemberTypeDeclaration ParseMemberTypeDeclaration(IReadOnlyList<Token>? modifiers = null)
     {
+        modifiers ??= ParseModifiers();
         var type = ParseType(modifiers);
         
         return new MemberTypeDeclaration(type);
     }
 
-    private Member ParseMemberFieldDeclarationOrFunction(IReadOnlyList<Token> modifiers)
+    private Member ParseMemberFieldDeclarationOrFunction(IReadOnlyList<Token>? modifiers = null)
     {
+        modifiers ??= ParseModifiers();
         var type = ParseNamedSyntax();
         var identifier = ParseNamedSyntax();
 
@@ -151,6 +153,43 @@ internal sealed partial class Parser
         var function = ParseFunction(modifiers, returnType, identifier);
 
         return new MemberFunctionDeclaration(function);
+    }
+
+    private Local ParseLocalDeclaration()
+    {
+        var modifiers = ParseModifiers();
+
+        if (CurrentTokenIsTypeDeclarationStart)
+            return ParseLocalTypeDeclaration(modifiers);
+        else
+            return ParseLocalVariableDeclarationStatementOrFunction(modifiers);
+    }
+
+    private LocalTypeDeclaration ParseLocalTypeDeclaration(IReadOnlyList<Token>? modifiers = null)
+    {
+        modifiers ??= ParseModifiers();
+        var type = ParseType(modifiers);
+
+        return new LocalTypeDeclaration(type);
+    }
+
+    private Local ParseLocalVariableDeclarationStatementOrFunction(IReadOnlyList<Token>? modifiers = null)
+    {
+        var type = ParseNamedSyntax();
+        var identifier = ParseNamedSyntax();
+
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+            return ParseLocalFunctionDeclaration(modifiers, type, identifier);
+        else
+            return ParseLocalVariableDeclarationStatement(modifiers, type);
+    
+    }
+
+    private LocalFunctionDeclaration ParseLocalFunctionDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, NamedSyntax? identifier = null)
+    {
+        var function = ParseFunction(modifiers, type, identifier);
+
+        return new LocalFunctionDeclaration(function);
     }
 
     private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null)
@@ -187,13 +226,6 @@ internal sealed partial class Parser
         var declarators = new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators);
 
         return new VariableDeclaration(modifiers,type, declarators);
-    }
-
-    private LocalFunctionDeclaration ParseLocalFunctionDeclaration()
-    {
-        var function = ParseFunction();
-
-        return new LocalFunctionDeclaration(function);
     }
 
     private ISeparatedSyntaxList ParseParameterList()
@@ -288,8 +320,8 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
         {
-            var statement = ParseLocalStatement();
-            locals.Add(statement);
+            var local = ParseLocal();
+            locals.Add(local);
         }
 
         if (CurrentToken.Kind is not TokenKind.RightCurlyBrace)

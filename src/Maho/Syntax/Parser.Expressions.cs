@@ -185,10 +185,10 @@ internal sealed partial class Parser
         return new IfExpression(ifKeyword, openParen, condition, closeParen, thenExpression, elseExpression);
     }
 
-    private (Token OpenBrace, IReadOnlyList<LocalStatement> Statements, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
+    private (Token OpenBrace, IReadOnlyList<Local> Locals, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
     {
         var openBrace = Consume();
-        var statements = new List<LocalStatement>();
+        var locals = new List<Local>();
         Expression? finalExpression = null;
 
         switch (allowFinalExpression)
@@ -196,23 +196,23 @@ internal sealed partial class Parser
             case true:
                 while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
                 {
-                    var statement = ParseLocalStatement(StatementParseMode.AllowFinalExpression);
+                    var local = ParseLocal(StatementParseMode.AllowFinalExpression);
 
-                    if (statement is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
+                    if (local is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
                     {
                         finalExpression = expressionStatement.Expression;
                         break;
                     }
 
-                    statements.Add(statement);
+                    locals.Add(local);
                 }
                 break;
 
             case false:
                 while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
                 {
-                    var statement = ParseLocalStatement(StatementParseMode.Normal);
-                    statements.Add(statement);
+                    var local = ParseLocal(StatementParseMode.Normal);
+                    locals.Add(local);
                 }
                 break;
         }
@@ -227,14 +227,14 @@ internal sealed partial class Parser
         else
             closeBrace = Consume();
 
-        return (openBrace, statements, finalExpression, closeBrace);
+        return (openBrace, locals, finalExpression, closeBrace);
     }
 
     private BlockExpression ParseBlockExpression()
     {
-        var (openBrace, statements, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: true);
+        var (openBrace, locals, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: true);
 
-        return new BlockExpression(openBrace, statements, finalExpression, closeBrace);
+        return new BlockExpression(openBrace, locals, finalExpression, closeBrace);
     }
 
     private CallExpression ParseCallExpression()

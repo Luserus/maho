@@ -49,40 +49,43 @@ internal sealed partial class Parser
 
     private CompilationUnit ParseCompilationUnit()
     {
-        var members = new List<TopLevel>();
+        var topLevels = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            var member = ParseTopLevel();
-            members.Add(member);
+            var topLevel = ParseTopLevel();
+            topLevels.Add(topLevel);
         }
 
         var eofToken = Consume();
 
-        return new CompilationUnit(members, eofToken);
+        return new CompilationUnit(topLevels, eofToken);
     }
 
     private TopLevel ParseTopLevel()
     {
         if (CurrentTokenIsModifier)
-            ParseTopLevelDeclarations();
+            return ParseTopLevelDeclaration();
 
         return ParseTopLevelStatement();
     }
 
     private Member ParseMember()
     {
-        if (CurrentTokenIsModifier)
-        {
-            var modifiers = ParseModifiers();
+        var modifiers = ParseModifiers();
 
-            if (CurrentTokenIsTypeDeclarationStart)
-                return ParseMemberTypeDeclaration(modifiers);
-            else
-                return ParseMemberFieldDeclarationOrFunction(modifiers);
-        }
+        if (CurrentTokenIsTypeDeclarationStart)
+            return ParseMemberTypeDeclaration(modifiers);
         else
-            return ParseMemberFieldDeclarationOrFunction([]);
+            return ParseMemberFieldDeclarationOrFunction(modifiers);
+    }
+
+    private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
+    {
+        if (CurrentTokenIsModifier)
+            return ParseLocalDeclaration();
+        
+        return ParseLocalStatement(parseMode);
     }
 
     private bool LooksLikeGenericName()
@@ -172,7 +175,6 @@ internal sealed partial class Parser
 
         return (lessThan, typeArguments, greaterThan);
     }
-
 
     /// <summary> Parses a list of modifiers. </summary>
     /// <returns> The modifier list. </returns>

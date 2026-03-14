@@ -5,13 +5,13 @@ namespace Maho.Syntax;
 internal sealed class LocalBlockStatement : LocalStatement
 {
     public Token OpenBrace { get; }
-    public IReadOnlyList<LocalStatement> Statements { get; }
+    public IReadOnlyList<Local> Locals { get; }
     public Token CloseBrace { get; }
 
-    public LocalBlockStatement(Token openBrace, IReadOnlyList<LocalStatement> statements, Token closeBrace)
+    public LocalBlockStatement(Token openBrace, IReadOnlyList<Local> locals, Token closeBrace)
     {
         OpenBrace = openBrace;
-        Statements = statements;
+        Locals = locals;
         CloseBrace = closeBrace;
     }
 }

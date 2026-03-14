@@ -117,9 +117,9 @@ internal sealed partial class Parser
 
     private TopLevelBlockStatement ParseTopLevelBlockStatement()
     {
-        var (openBrace, statements, _, closeBrace) = ParseBlock(allowFinalExpression: false);
+        var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
 
-        return new TopLevelBlockStatement(openBrace, statements, closeBrace);
+        return new TopLevelBlockStatement(openBrace, locals, closeBrace);
     }
 
     /// <summary> Parses a local statement. </summary>
@@ -207,9 +207,9 @@ internal sealed partial class Parser
 
     /// <summary> Parses a local variable declaration statement. </summary>
     /// <returns> The local variable declaration statement node. </returns>
-    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(bool allowMissingSemicolon = false)
+    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, bool allowMissingSemicolon = false)
     {
-        var variableDeclaration = ParseVariableDeclaration();
+        var variableDeclaration = ParseVariableDeclaration(modifiers, type);
 
         Token semicolon;
 
@@ -297,8 +297,8 @@ internal sealed partial class Parser
   
     private LocalBlockStatement ParseLocalBlockStatement()
     {
-        var (openBrace, statements, _, closeBrace) = ParseBlock(allowFinalExpression: false);
+        var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
 
-        return new LocalBlockStatement(openBrace, statements, closeBrace);
+        return new LocalBlockStatement(openBrace, locals, closeBrace);
     }
 }
