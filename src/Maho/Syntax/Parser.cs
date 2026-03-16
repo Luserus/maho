@@ -24,8 +24,7 @@ internal sealed partial class Parser
     private enum StatementParseMode : byte
     {
         Normal,
-        AllowFinalExpression,
-        AllowStatementWithoutSemicolon
+        AllowFinalExpression
     }
 
     static Parser() => operatorTrie = BuildOperatorTrie();
@@ -192,7 +191,7 @@ internal sealed partial class Parser
                 case "public":
                 case "static":
                 case "sealed":
-                    list.Add(CurrentToken);
+                    list.Add(Consume());
                     break;
 
                 default:

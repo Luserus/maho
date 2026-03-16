@@ -5,10 +5,7 @@ using Maho.Text;
 namespace Maho.Syntax;
 
 internal sealed partial class Parser
-{
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TopLevelEmptyStatement ParseTopLevelEmptyStatement() => new TopLevelEmptyStatement(Consume());
-    
+{   
     private TopLevelStatement ParseTopLevelStatement()
     {
         switch (CurrentToken.Kind)
@@ -16,6 +13,8 @@ internal sealed partial class Parser
             case TokenKind.Identifier:
                 if (CurrentToken.Value == "if")
                     return ParseTopLevelIfStatement();
+                else if (CurrentToken.Value == "while")
+                    return ParseTopLevelWhileStatement();
                 break;
 
             case TokenKind.Semicolon:
@@ -25,25 +24,26 @@ internal sealed partial class Parser
                 return ParseTopLevelBlockStatement();
         }
 
-        return ParseTopLevelExpressionStatement(allowFinalExpression: false);
+        return ParseTopLevelExpressionStatement();
     }
 
-    private TopLevelExpressionStatement ParseTopLevelExpressionStatement(bool allowFinalExpression)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private TopLevelEmptyStatement ParseTopLevelEmptyStatement() => new TopLevelEmptyStatement(Consume());
+
+    private TopLevelExpressionStatement ParseTopLevelExpressionStatement()
     {
         var expression = ParseExpression();
         Token semicolon;
 
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowFinalExpression)
+        if (CurrentToken.Kind is not TokenKind.Semicolon)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, ";");
             semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
         }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []); // Fabricated semicolon
         else
             semicolon = Consume();
 
-        return new TopLevelExpressionStatement(expression, semicolon, isFinalExpression: allowFinalExpression);
+        return new TopLevelExpressionStatement(expression, semicolon);
     }
 
     private TopLevelIfStatement ParseTopLevelIfStatement()
@@ -134,8 +134,8 @@ internal sealed partial class Parser
                     case TokenKind.Identifier:
                         if (CurrentToken.Value == "if")
                             return ParseLocalIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseLocalVariableDeclarationStatement();
+                        else if (CurrentToken.Value == "while")
+                            return ParseLocalWhileStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -153,8 +153,8 @@ internal sealed partial class Parser
                     case TokenKind.Identifier:
                         if (CurrentToken.Value == "if")
                             return ParseLocalIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseLocalVariableDeclarationStatement();
+                        else if (CurrentToken.Value == "while")
+                            return ParseLocalWhileStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -162,22 +162,6 @@ internal sealed partial class Parser
                 }
 
                 return ParseLocalExpressionStatement(allowFinalExpression: true);
-
-            case StatementParseMode.AllowStatementWithoutSemicolon:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
-                            return ParseLocalIfStatement();
-                        else if (Peek().Kind is TokenKind.Identifier)
-                            return ParseLocalVariableDeclarationStatement(allowMissingSemicolon: true);
-                        break;
-
-                    case TokenKind.LeftCurlyBrace:
-                        return ParseLocalBlockStatement();
-                }
-                
-                return new LocalExpressionStatement(ParseExpression(), new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
         }
     }
 
@@ -207,19 +191,17 @@ internal sealed partial class Parser
 
     /// <summary> Parses a local variable declaration statement. </summary>
     /// <returns> The local variable declaration statement node. </returns>
-    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, bool allowMissingSemicolon = false)
+    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null)
     {
         var variableDeclaration = ParseVariableDeclaration(modifiers, type);
 
         Token semicolon;
 
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowMissingSemicolon)
+        if (CurrentToken.Kind is not TokenKind.Semicolon)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, ";");
             semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
         }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
         else
             semicolon = Consume();
 

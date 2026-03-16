@@ -17,7 +17,8 @@ internal sealed partial class Parser
 
     private TypeSyntax ParseType(IReadOnlyList<Token> modifiers)
     {
-        var kind = CurrentToken.Value switch
+        var kindToken = Consume();
+        var kind = kindToken.Value switch
         {
             "class" => TypeKind.Class,
             "struct" => TypeKind.Struct,
