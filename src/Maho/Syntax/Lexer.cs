@@ -1,6 +1,5 @@
-using System;
 using System.Collections.Generic;
-using System.Text;
+using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
@@ -8,41 +7,39 @@ namespace Maho.Syntax;
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
 internal sealed partial class Lexer
 {
+    private readonly DiagnosticsManager diagnostics;
     /// <summary> Current index of char being read from the program string. </summary>
     private int current;
     /// <summary> The source text of the program. </summary>
     private readonly SourceText text;
 
-    /// <summary> The program string. </summary>
-    public string Program { get; }
+    private char CurrentChar => current >= text.Length ? '\0' : text[current];
+
     /// <summary> Tokens lexed by the Lexer. </summary>
     public List<Token> Tokens { get; } = new(256);
 
-    /// <summary> Current character in the Program that is being read. </summary>
-    private char CurrentChar => Program[current];
-
     /// <summary> Initializes a new instance of the Lexer class. </summary>
     /// <param name="sourceText"> Source text of the program. </param>
-    public Lexer(SourceText sourceText)
+    public Lexer(SourceText sourceText, DiagnosticsManager diagnosticsManager)
     {
         text = sourceText;
-        Program = text.ToString();
+        diagnostics = diagnosticsManager;
     }
 
     /// <summary> Lexes the program string into tokens with trivia. </summary>
     public void Lex()
     {
-        while (current < Program.Length)
+        while (current < text.Length)
         {
             var leadingTrivia = LexTrivia();
-            var (value, span, kind) = LexTokenData();
+            var (span, kind) = LexTokenData();
             var trailingTrivia = LexTrivia();
 
-            Tokens.Add(new(value, span, kind, leadingTrivia, trailingTrivia));
+            Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia));
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
-        Tokens.Add(new("\0", new TextSpan(Program.Length, 0), TokenKind.EndToken, [], []));
+        Tokens.Add(new(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
     }
 
     /// <summary> Current token kind. </summary>
@@ -50,7 +47,7 @@ internal sealed partial class Lexer
 
     /// <summary> Lexes a part of the program and returns the required token data. </summary>
     /// <returns> The token data for creating a token. </returns>
-    private (string Value, TextSpan Span, TokenKind kind) LexTokenData()
+    private (TextSpan Span, TokenKind kind) LexTokenData()
     {
         var start = current;
 
@@ -88,10 +85,9 @@ internal sealed partial class Lexer
             current++;
         }
 
-        var value = Program[start..current];
         TextSpan span = new(start, current - start);
 
-        return (value, span, kind);
+        return (span, kind);
     }
 
     /// <summary> Lexes a part of the program and returns all leading/trailing trivias before/after a token. </summary>
@@ -101,11 +97,10 @@ internal sealed partial class Lexer
         List<SyntaxTrivia> trivias = [];
         var tokenKind = kind;
 
-        while (current < Program.Length)
+        while (current < text.Length)
         {
             SyntaxTriviaKind kind;
             var start = current;
-            string trivia;
 
             if (CurrentChar == ' ')
             {
@@ -116,8 +111,7 @@ internal sealed partial class Lexer
                 while (CurrentChar == ' ')
                     current++;
 
-                trivia = Program[start..current];
-                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
+                trivias.Add(new(kind, new TextSpan(start, current - start)));
             }
             else if (CurrentChar == '\t')
             {
@@ -128,8 +122,7 @@ internal sealed partial class Lexer
                 while (CurrentChar == '\t')
                     current++;
 
-                trivia = Program[start..current];
-                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
+                trivias.Add(new(kind, new TextSpan(start, current - start)));
             }
             else if (CurrentChar == '\n')
             {
@@ -137,8 +130,7 @@ internal sealed partial class Lexer
                 kind = SyntaxTriviaKind.EndOfLine;
                 tokenKind = TokenKind.Newline;
 
-                trivia = Program[start..current];
-                trivias.Add(new(trivia, kind, new TextSpan(start, current - start)));
+                trivias.Add(new(kind, new TextSpan(start, current - start)));
             }
             else
                 break;

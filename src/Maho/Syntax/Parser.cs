@@ -1,11 +1,15 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using Maho.Diagnostics;
+using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Parses the program tokens into Syntax Tree. </summary>
 internal sealed partial class Parser
 {
+    private readonly DiagnosticsManager diagnostics;
+    private readonly SourceText text;
     /// <summary> The tokens to parse. </summary>
     private List<Token> tokens = null!;
     /// <summary> Current index of Token being read from the token list. </summary>
@@ -13,6 +17,24 @@ internal sealed partial class Parser
     /// <summary> Current Token being read from the token list. </summary>
     private Token CurrentToken => tokens[current];
 
+    public CompilationUnit Root { get; private set; } = null!;
+
+    private bool CurrentTokenIsModifier => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "private" or "protected" or "internal" or "public" or "static" or "sealed");
+    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "class" or "struct" or "interface" or "enum");
+
+    private enum StatementParseMode : byte
+    {
+        Normal,
+        AllowFinalExpression
+    }
+
+    static Parser() => operatorTrie = BuildOperatorTrie();
+
+    public Parser(SourceText text, DiagnosticsManager diagnostics)
+    {
+        this.text = text;
+        this.diagnostics = diagnostics;
+    } 
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
@@ -21,148 +43,166 @@ internal sealed partial class Parser
         this.tokens = tokens;
         current = default;
 
+        var compilationUnit = ParseCompilationUnit();
+        Root = compilationUnit;
+    }
+
+    private CompilationUnit ParseCompilationUnit()
+    {
+        var topLevels = new List<TopLevel>();
+
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            var statement = ParseStatement();
-        }
-        
-        var eofToken = Match(TokenKind.EndToken);
-    }
-
-    /// <summary> Parses an expression. </summary>
-    /// <returns> The expression node. </returns>
-    private ExpressionSyntax ParseExpression()
-    {
-        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals)
-            return ParseAssignmentExpression();
-        else if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Identifier)
-            return ParseVariableInitializationExpression();
-
-        return ParseBinaryExpression();
-    }
-
-    /// <summary> Parses a statement. </summary>
-    /// <returns> The statement node. </returns>
-    private StatementSyntax ParseStatement()
-    {
-        switch (CurrentToken.Kind)
-        {
-            case TokenKind.Identifier:
-                if (Peek().Kind is TokenKind.Identifier && Peek(2).Kind is TokenKind.Semicolon)
-                    return ParseVariableDeclarationStatement();
-                break;
+            var topLevel = ParseTopLevel();
+            topLevels.Add(topLevel);
         }
 
-        return ParseExpressionStatement();
+        var eofToken = Consume();
+
+        return new CompilationUnit(topLevels, eofToken);
     }
 
-    /// <summary> Parses an expression statement. </summary>
-    /// <returns> The expression statement node. </returns>
-    private ExpressionStatementSyntax ParseExpressionStatement()
+    private TopLevel ParseTopLevel()
     {
-        var expression = ParseExpression();
-        var semicolon = Match(TokenKind.Semicolon);
+        if (CurrentTokenIsModifier)
+            return ParseTopLevelDeclaration();
 
-        return new(expression, semicolon);
+        return ParseTopLevelStatement();
     }
 
-
-    /// <summary> Parses an identifier expression. </summary>
-    /// <returns> The identifier expression node. </returns>
-    private IdentifierExpressionSyntax ParseIdentifierExpression() => new(Match(TokenKind.Identifier));
-
-    /// <summary> Parses a literal expression. </summary>
-    /// <returns> The literal expression node. </returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private LiteralExpressionSyntax ParseLiteralExpression() => new(Match(TokenKind.Integer, TokenKind.Float, TokenKind.String, TokenKind.Char));
-
-    /// <summary> Parses an assignment expression. </summary>
-    /// <returns> The assignment expression node. </returns>
-    private AssignmentExpressionSyntax ParseAssignmentExpression()
+    private Member ParseMember()
     {
-        var identiferExpr = ParseIdentifierExpression();
-        var equalsOperator = Match(TokenKind.Equals);
-        var expression = ParseExpression();
+        var modifiers = ParseModifiers();
 
-        return new AssignmentExpressionSyntax(identiferExpr, equalsOperator, expression);
-    }
-
-    /// <summary> Parses a variable declaration statement. </summary>
-    /// <returns> The variable declaration statement node. </returns>
-    private VariableDeclarationStatementSyntax ParseVariableDeclarationStatement()
-    {
-        var type = Match(TokenKind.Identifier);
-        var identifier = Match(TokenKind.Identifier);
-        var semicolon = Match(TokenKind.Semicolon);
-
-        return new(type, identifier, semicolon);
-    }
-
-    /// <summary> Parses a variable initialization expression. </summary>
-    /// <returns> The variable initialization expression node. </returns>
-    private VariableInitializationExpressionSyntax ParseVariableInitializationExpression()
-    {
-        var type = Match(TokenKind.Identifier);
-        var identifier = Match(TokenKind.Identifier);
-        var assignmentOp = Match(TokenKind.Equals);
-        var initializer = ParseExpression();
-
-        return new(type, identifier, assignmentOp, initializer);
-    }
-    
-    /// <summary> Parses a primary expression without operator involvement. </summary>
-    /// <returns> The primary expression node. </returns>
-    private ExpressionSyntax ParsePrimaryExpression()
-    {
-        return CurrentToken.Kind switch
-        {
-            TokenKind.Identifier => ParseIdentifierExpression(),
-            _ => ParseLiteralExpression()
-        };
-    }
-
-    /// <summary> Parses binary expression or unary expression depending on operator precedence. </summary>
-    /// <param name="parentPrecedence"> The operator precedence of the parent recursive call. </param>
-    /// <returns> Unary or Binary expression depending on operator precedence. </returns>
-    private ExpressionSyntax ParseBinaryExpression(int parentPrecedence = 0)
-    {
-        ExpressionSyntax left;
-        var unaryOpPrecedence = GetUnaryOperatorPrecedence();
-
-        if (unaryOpPrecedence != 0 && unaryOpPrecedence >= parentPrecedence)
-        {
-            var opToken = Consume();
-            var operand = ParseBinaryExpression(unaryOpPrecedence);
-            left = new UnaryExpressionSyntax(opToken, operand);
-        }
+        if (CurrentTokenIsTypeDeclarationStart)
+            return ParseMemberTypeDeclaration(modifiers);
         else
-            left = ParsePrimaryExpression();
+            return ParseMemberFieldDeclarationOrFunction(modifiers);
+    }
+
+    private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
+    {
+        if (CurrentTokenIsModifier)
+            return ParseLocalDeclaration();
+        
+        return ParseLocalStatement(parseMode);
+    }
+
+    private bool LooksLikeGenericName()
+    {
+        int offset = 1;
+        int depth = 1;
 
         while (true)
         {
-            var precedence = GetBinaryOperatorPrecedence();
+            var token = Peek(offset);
 
-            if (precedence == 0 || precedence <= parentPrecedence)
-                break;
-
-            Token opToken;
-            const int maxCombinedBinaryOpPrecedence = 3;
-
-            if (precedence > maxCombinedBinaryOpPrecedence)
-                opToken = Consume();
-            else
+            switch (token.Kind)
             {
-                var leftOpToken = Consume();
-                var rightOpToken = Consume();
-                var (value, kind) = GetCombinedTokenData();
+                case TokenKind.Identifier:
+                case TokenKind.Comma:
+                    offset++;
+                    continue;
 
-                opToken = new(value, leftOpToken.Span, kind, leftOpToken.LeadingTrivia, rightOpToken.TrailingTrivia);
+                case TokenKind.LessThanSign:
+                    depth++;
+                    offset++;
+                    continue;
+
+                case TokenKind.GreaterThanSign:
+                    depth--;
+                    offset++;
+
+                    if (depth == 0)
+                    {
+                        var next = Peek(offset);
+                        // valid generic if followed by . or identifier or '('
+                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
+                    }
+
+                    continue;
+
+                default:
+                    return false;
             }
+        }
+    }
 
-            var right = ParseBinaryExpression(precedence);
-            left = new BinaryExpressionSyntax(left, opToken, right);
+    private SeparatedSyntaxList<NamedSyntax> ParseTypeArgumentList()
+    {
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
+        {
+            nodesAndSeparators.Add(ParseNamedSyntax());
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(Consume());
+            else
+                break;
         }
 
-        return left;
+        return new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private IdentifierName ParseIdentifierName() => new IdentifierName(Consume());
+
+    private NamedSyntax ParseNamedSyntax()
+    {
+        var identifier = Consume();
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        {
+            var (lessThan, typeArguments, greaterThan) = ParseGenerics();
+            return new GenericName(identifier, lessThan, typeArguments, greaterThan);
+        }
+
+        return new IdentifierName(identifier);
+    }
+    
+    private (Token LessThan, SeparatedSyntaxList<NamedSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
+    {
+        var lessThan = Consume(); // consume '<'
+        var typeArguments = ParseTypeArgumentList();
+
+        Token greaterThan;
+
+        if (CurrentToken.Kind is not TokenKind.GreaterThanSign)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, ">");
+            greaterThan = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            greaterThan = Consume();
+
+        return (lessThan, typeArguments, greaterThan);
+    }
+
+    /// <summary> Parses a list of modifiers. </summary>
+    /// <returns> The modifier list. </returns>
+    private IReadOnlyList<Token> ParseModifiers()
+    {
+        var list = new List<Token>();
+
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            switch (CurrentToken.Value)
+            {
+                case "private":
+                case "protected":
+                case "internal":
+                case "public":
+                case "static":
+                case "sealed":
+                    list.Add(Consume());
+                    break;
+
+                default:
+                    return list;
+            }
+        }
+
+        return list;
     }
 }
