@@ -237,13 +237,33 @@ internal sealed partial class Parser
         return new BlockExpression(openBrace, locals, finalExpression, closeBrace);
     }
 
-    private CallExpression ParseCallExpression()
+    private ObjectCreationExpression ParseObjectCreationExpression()
     {
-        var callee = ParseExpression();
+        var keyword = Consume();
+
+        var kind = keyword.Value switch
+        {
+            "new" => ObjectCreationKind.New,
+            "put" => ObjectCreationKind.Put,
+            _ => throw new System.Exception("Impossible case: keyword is guaranteed to be 'new' or 'put' from parent function.")
+        };
+
+        var type = ParseNamedSyntax();
+
+        if (CurrentToken.Kind is not TokenKind.LeftParen)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
+            var fakeOpenParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+            var emptyArguments = new SeparatedSyntaxList<Expression>(new List<SyntaxNode>());
+            var fakeCloseParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+            return new ObjectCreationExpression(keyword, kind, type, fakeOpenParen, emptyArguments, fakeCloseParen);
+        }
+
         var openParen = Consume();
         var arguments = ParseArgumentList();
-        Token closeParen;
 
+        Token closeParen;
+        
         if (CurrentToken.Kind is not TokenKind.RightParen)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, ")");
@@ -252,15 +272,10 @@ internal sealed partial class Parser
         else
             closeParen = Consume();
 
-        return new CallExpression(callee, openParen, arguments, closeParen);
+        return new ObjectCreationExpression(keyword, kind, type, openParen, arguments, closeParen);
     }
 
-    private Expression ParseObjectCreationExpression()
-    {
-        return default!;
-    }
-
-    private ISeparatedSyntaxList ParseArgumentList()
+    private SeparatedSyntaxList<Expression> ParseArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
 

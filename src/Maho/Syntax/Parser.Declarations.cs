@@ -17,8 +17,9 @@ internal sealed partial class Parser
 
     private TypeSyntax ParseType(IReadOnlyList<Token> modifiers)
     {
-        var kindToken = Consume();
-        var kind = kindToken.Value switch
+        var keyword = Consume();
+
+        var kind = keyword.Value switch
         {
             "class" => TypeKind.Class,
             "struct" => TypeKind.Struct,
@@ -41,7 +42,7 @@ internal sealed partial class Parser
             body = new TypeEmptyBody(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
         }
 
-        return new TypeSyntax(modifiers, kind, name, body);
+        return new TypeSyntax(modifiers, keyword, kind, name, body);
     }
 
     private TypeBlockBody ParseTypeBlockBody()
@@ -85,12 +86,12 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseTopLevelFunctionDeclaration(modifiers, type, identifier);
         else
-            return ParseTopLevelVariableDeclaration(modifiers, type);
+            return ParseTopLevelVariableDeclaration(modifiers, type, (IdentifierName)identifier);
     }
 
-    private TopLevel ParseTopLevelVariableDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type)
+    private TopLevel ParseTopLevelVariableDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, IdentifierName identifier)
     {
-        var declaration = ParseVariableDeclaration(modifiers, type);
+        var declaration = ParseVariableDeclaration(modifiers, type, identifier);
 
         Token semicolon;
 
@@ -129,12 +130,12 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseMemberFunction(modifiers, type, identifier);
         else
-            return ParseMemberFieldDeclaration(modifiers, type, identifier);
+            return ParseMemberFieldDeclaration(modifiers, type, (IdentifierName)identifier);
     }
 
-    private MemberFieldDeclaration ParseMemberFieldDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, NamedSyntax identifier)
+    private MemberFieldDeclaration ParseMemberFieldDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, IdentifierName identifier)
     {
-        var declaration = ParseVariableDeclaration(modifiers, type);
+        var declaration = ParseVariableDeclaration(modifiers, type, identifier);
 
         Token semicolon;
 
@@ -182,7 +183,7 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseLocalFunctionDeclaration(modifiers, type, identifier);
         else
-            return ParseLocalVariableDeclarationStatement(modifiers, type);
+            return ParseLocalVariableDeclarationStatement(modifiers, type, (IdentifierName)identifier);
     
     }
 
@@ -193,16 +194,18 @@ internal sealed partial class Parser
         return new LocalFunctionDeclaration(function);
     }
 
-    private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null)
+    private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, IdentifierName? firstIdentifier = null)
     {
         modifiers ??= ParseModifiers();
         type ??= ParseNamedSyntax();
 
         var nodesAndSeparators = new List<SyntaxNode>();
+        bool isFirst = true;
 
         while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
         {
-            var identifier = new IdentifierName(Consume());
+            var identifier = (isFirst && firstIdentifier is not null) ? firstIdentifier : ParseIdentifierName();
+            isFirst = false;
 
             AssignmentClause? initializer = null;
 
@@ -229,7 +232,7 @@ internal sealed partial class Parser
         return new VariableDeclaration(modifiers,type, declarators);
     }
 
-    private ISeparatedSyntaxList ParseParameterList()
+    private SeparatedSyntaxList<Parameter> ParseParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
 
@@ -237,10 +240,20 @@ internal sealed partial class Parser
         {
             var modifiers = ParseModifiers();
 
-            if (CurrentToken.Kind is TokenKind.Identifier && Peek(2).Kind is TokenKind.Identifier)
+            if (CurrentToken.Kind is TokenKind.Identifier)
             {
                 var type = ParseNamedSyntax();
-                var identifier = new IdentifierName(Consume());
+                IdentifierName identifier;
+
+                if (CurrentToken.Kind is TokenKind.Identifier)
+                {
+                    identifier = ParseIdentifierName();
+                }
+                else
+                {
+                    diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
+                    identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
+                }
 
                 AssignmentClause? initializer = null;
 
@@ -288,7 +301,7 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is not TokenKind.RightParen)
         {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
+            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
             closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
         }
         else

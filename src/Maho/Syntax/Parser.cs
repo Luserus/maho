@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
 using Maho.Text;
 
@@ -116,7 +117,7 @@ internal sealed partial class Parser
                     {
                         var next = Peek(offset);
                         // valid generic if followed by . or identifier or '('
-                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier;
+                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
                     }
 
                     continue;
@@ -127,13 +128,13 @@ internal sealed partial class Parser
         }
     }
 
-    private ISeparatedSyntaxList ParseTypeArgumentList()
+    private SeparatedSyntaxList<NamedSyntax> ParseTypeArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(new IdentifierName(Consume()));
+            nodesAndSeparators.Add(ParseNamedSyntax());
 
             if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());
@@ -141,8 +142,11 @@ internal sealed partial class Parser
                 break;
         }
 
-        return new SeparatedSyntaxList<IdentifierName>(nodesAndSeparators);
+        return new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private IdentifierName ParseIdentifierName() => new IdentifierName(Consume());
 
     private NamedSyntax ParseNamedSyntax()
     {
@@ -157,7 +161,7 @@ internal sealed partial class Parser
         return new IdentifierName(identifier);
     }
     
-    private (Token LessThan, ISeparatedSyntaxList TypeArguments, Token GreaterThan) ParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<NamedSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
     {
         var lessThan = Consume(); // consume '<'
         var typeArguments = ParseTypeArgumentList();

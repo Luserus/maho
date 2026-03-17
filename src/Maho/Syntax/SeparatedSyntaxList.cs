@@ -4,12 +4,7 @@ using System.Linq;
 
 namespace Maho.Syntax;
 
-internal interface ISeparatedSyntaxList
-{
-    public IReadOnlyList<SyntaxNode> NodesWithSeparators { get; }
-}
-
-internal readonly struct SeparatedSyntaxList<T> : ISeparatedSyntaxList, IEnumerable<T> where T : SyntaxNode
+internal readonly struct SeparatedSyntaxList<T> : IEnumerable<T> where T : SyntaxNode
 {
     public IReadOnlyList<SyntaxNode> NodesAndSeparators { get; }
 

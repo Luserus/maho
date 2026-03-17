@@ -8,10 +8,10 @@ internal sealed class FunctionSignature : SyntaxNode
     public NamedSyntax ReturnType { get; }
     public NamedSyntax Identifier { get; }
     public Token OpenParen { get; }
-    public ISeparatedSyntaxList Parameters { get; }
+    public SeparatedSyntaxList<Parameter> Parameters { get; }
     public Token CloseParen { get; }
 
-    public FunctionSignature(IReadOnlyList<Token> modifiers, NamedSyntax returnType, NamedSyntax identifier, Token openParen, ISeparatedSyntaxList parameters, Token closeParen)
+    public FunctionSignature(IReadOnlyList<Token> modifiers, NamedSyntax returnType, NamedSyntax identifier, Token openParen, SeparatedSyntaxList<Parameter> parameters, Token closeParen)
     {
         Modifiers = modifiers;
         ReturnType = returnType;
