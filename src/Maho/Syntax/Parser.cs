@@ -134,6 +134,12 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+            
             nodesAndSeparators.Add(ParseNamedSyntax());
 
             if (CurrentToken.Kind is TokenKind.Comma)

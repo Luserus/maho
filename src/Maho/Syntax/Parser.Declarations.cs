@@ -204,6 +204,12 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
         {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
             var identifier = (isFirst && firstIdentifier is not null) ? firstIdentifier : ParseIdentifierName();
             isFirst = false;
 
@@ -238,39 +244,49 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
             var modifiers = ParseModifiers();
+
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
+            var type = ParseNamedSyntax();
+            IdentifierName identifier;
 
             if (CurrentToken.Kind is TokenKind.Identifier)
             {
-                var type = ParseNamedSyntax();
-                IdentifierName identifier;
-
-                if (CurrentToken.Kind is TokenKind.Identifier)
-                {
-                    identifier = ParseIdentifierName();
-                }
-                else
-                {
-                    diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
-                    identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
-                }
-
-                AssignmentClause? initializer = null;
-
-                if (CurrentToken.Kind is TokenKind.Equals)
-                {
-                    var assignmentOp = Consume();
-                    var initExpr = ParseExpression();
-
-                    initializer = new AssignmentClause(assignmentOp, initExpr);
-                }
-
-                var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
-                var variableDecl = new Parameter(declarator, initializer);
-
-                nodesAndSeparators.Add(variableDecl);
+                identifier = ParseIdentifierName();
             }
-            else if (CurrentToken.Kind is TokenKind.Comma)
+            else
+            {
+                diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
+                identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
+            }
+
+            AssignmentClause? initializer = null;
+
+            if (CurrentToken.Kind is TokenKind.Equals)
+            {
+                var assignmentOp = Consume();
+                var initExpr = ParseExpression();
+
+                initializer = new AssignmentClause(assignmentOp, initExpr);
+            }
+
+            var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
+            var variableDecl = new Parameter(declarator, initializer);
+
+            nodesAndSeparators.Add(variableDecl);
+
+            if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());
             else
                 break;
