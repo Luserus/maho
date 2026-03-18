@@ -294,6 +294,9 @@ internal sealed partial class Parser
                 break;
         }
 
+        if (wasCommaLast)
+            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
 }
