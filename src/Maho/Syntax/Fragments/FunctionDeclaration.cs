@@ -1,11 +1,11 @@
 namespace Maho.Syntax;
 
-internal sealed class Function : SyntaxNode
+internal sealed class FunctionDeclaration : SyntaxNode
 {
     public FunctionSignature Signature { get; }
     public FunctionBody Body { get; }
 
-    public Function(FunctionSignature signature, FunctionBody body)
+    public FunctionDeclaration(FunctionSignature signature, FunctionBody body)
     {
         Signature = signature;
         Body = body;

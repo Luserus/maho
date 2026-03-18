@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace Maho.Syntax;
 
-internal sealed class TypeSyntax : SyntaxNode
+internal sealed class TypeDeclaration : SyntaxNode
 {
     public IReadOnlyList<Token> Modifiers { get; }
     public Token Keyword { get;}
@@ -10,7 +10,7 @@ internal sealed class TypeSyntax : SyntaxNode
     public NamedSyntax Name { get; }
     public TypeBody Body { get; }
 
-    public TypeSyntax(IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBody body)
+    public TypeDeclaration(IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBody body)
     {
         Modifiers = modifiers;
         Keyword = keyword;

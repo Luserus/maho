@@ -15,7 +15,7 @@ internal sealed partial class Parser
             return ParseTopLevelVariableDeclarationOrFunction(modifiers);
     }
 
-    private TypeSyntax ParseType(IReadOnlyList<Token> modifiers)
+    private TypeDeclaration ParseType(IReadOnlyList<Token> modifiers)
     {
         var keyword = Consume();
 
@@ -42,7 +42,7 @@ internal sealed partial class Parser
             body = new TypeEmptyBody(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
         }
 
-        return new TypeSyntax(modifiers, keyword, kind, name, body);
+        return new TypeDeclaration(modifiers, keyword, kind, name, body);
     }
 
     private TypeBlockBody ParseTypeBlockBody()
@@ -201,11 +201,19 @@ internal sealed partial class Parser
 
         var nodesAndSeparators = new List<SyntaxNode>();
         bool isFirst = true;
+        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
         {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
             var identifier = (isFirst && firstIdentifier is not null) ? firstIdentifier : ParseIdentifierName();
             isFirst = false;
+            wasCommaLast = false;
 
             AssignmentClause? initializer = null;
 
@@ -222,10 +230,16 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(declarator);
 
             if (CurrentToken.Kind is TokenKind.Comma)
+            {
                 nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
             else
                 break;
         }
+
+        if (wasCommaLast)
+            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
 
         var declarators = new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators);
 
@@ -238,39 +252,49 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
             var modifiers = ParseModifiers();
+
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
+            var type = ParseNamedSyntax();
+            IdentifierName identifier;
 
             if (CurrentToken.Kind is TokenKind.Identifier)
             {
-                var type = ParseNamedSyntax();
-                IdentifierName identifier;
-
-                if (CurrentToken.Kind is TokenKind.Identifier)
-                {
-                    identifier = ParseIdentifierName();
-                }
-                else
-                {
-                    diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
-                    identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
-                }
-
-                AssignmentClause? initializer = null;
-
-                if (CurrentToken.Kind is TokenKind.Equals)
-                {
-                    var assignmentOp = Consume();
-                    var initExpr = ParseExpression();
-
-                    initializer = new AssignmentClause(assignmentOp, initExpr);
-                }
-
-                var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
-                var variableDecl = new Parameter(declarator, initializer);
-
-                nodesAndSeparators.Add(variableDecl);
+                identifier = ParseIdentifierName();
             }
-            else if (CurrentToken.Kind is TokenKind.Comma)
+            else
+            {
+                diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
+                identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
+            }
+
+            AssignmentClause? initializer = null;
+
+            if (CurrentToken.Kind is TokenKind.Equals)
+            {
+                var assignmentOp = Consume();
+                var initExpr = ParseExpression();
+
+                initializer = new AssignmentClause(assignmentOp, initExpr);
+            }
+
+            var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
+            var variableDecl = new Parameter(declarator, initializer);
+
+            nodesAndSeparators.Add(variableDecl);
+
+            if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());
             else
                 break;
@@ -279,7 +303,7 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<Parameter>(nodesAndSeparators);
     }
 
-    private Function ParseFunction(IReadOnlyList<Token>? modifiers = null, NamedSyntax? returnType = null, NamedSyntax? identifier = null)
+    private FunctionDeclaration ParseFunction(IReadOnlyList<Token>? modifiers = null, NamedSyntax? returnType = null, NamedSyntax? identifier = null)
     {
         modifiers ??= ParseModifiers();
         returnType ??= ParseNamedSyntax();
@@ -311,7 +335,7 @@ internal sealed partial class Parser
 
         var body = ParseFunctionBody();
 
-        return new Function(signature, body);
+        return new FunctionDeclaration(signature, body);
     }
 
     private FunctionBody ParseFunctionBody()

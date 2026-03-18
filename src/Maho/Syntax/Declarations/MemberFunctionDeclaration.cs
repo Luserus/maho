@@ -2,7 +2,7 @@ namespace Maho.Syntax;
 
 internal sealed class MemberFunctionDeclaration : Member
 {
-    public Function Function { get; }
+    public FunctionDeclaration Function { get; }
 
-    public MemberFunctionDeclaration(Function function) => Function = function;
+    public MemberFunctionDeclaration(FunctionDeclaration function) => Function = function;
 }
