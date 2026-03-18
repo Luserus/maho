@@ -131,6 +131,7 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<NamedSyntax> ParseTypeArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
+        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -139,14 +140,21 @@ internal sealed partial class Parser
                 diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
                 break;
             }
-            
+
             nodesAndSeparators.Add(ParseNamedSyntax());
+            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
+            {
                 nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
             else
                 break;
         }
+
+        if (wasCommaLast)
+            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
 
         return new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators);
     }

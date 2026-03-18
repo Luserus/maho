@@ -278,13 +278,18 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Expression> ParseArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
+        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
             nodesAndSeparators.Add(ParseExpression());
+            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
+            {
                 nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
             else
                 break;
         }
