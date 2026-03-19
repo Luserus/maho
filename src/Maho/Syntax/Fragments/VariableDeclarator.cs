@@ -2,10 +2,10 @@ namespace Maho.Syntax;
 
 internal sealed class VariableDeclarator : SyntaxNode
 {
-    public IdentifierName Identifier { get; }
+    public NamedSyntax Identifier { get; }
     public AssignmentClause? Initializer { get; }
 
-    public VariableDeclarator(IdentifierName identifier, AssignmentClause? initializer)
+    public VariableDeclarator(NamedSyntax identifier, AssignmentClause? initializer)
     {
         Identifier = identifier;
         Initializer = initializer;

@@ -20,7 +20,7 @@ internal sealed partial class Parser
             case TokenKind.Semicolon:
                 return ParseTopLevelEmptyStatement();
 
-            case TokenKind.LeftCurlyBrace:
+            case TokenKind.LeftBrace:
                 return ParseTopLevelBlockStatement();
         }
 
@@ -141,7 +141,7 @@ internal sealed partial class Parser
                     case TokenKind.Semicolon:
                         return ParseLocalEmptyStatement();
 
-                    case TokenKind.LeftCurlyBrace:
+                    case TokenKind.LeftBrace:
                         return ParseLocalBlockStatement();
                 }
 
@@ -191,7 +191,7 @@ internal sealed partial class Parser
 
     /// <summary> Parses a local variable declaration statement. </summary>
     /// <returns> The local variable declaration statement node. </returns>
-    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, IdentifierName? firstIdentifier = null)
+    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
     {
         var variableDeclaration = ParseVariableDeclaration(modifiers, type, firstIdentifier);
 

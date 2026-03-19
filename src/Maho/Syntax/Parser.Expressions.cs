@@ -32,7 +32,7 @@ internal sealed partial class Parser
             if (CurrentToken.Kind is TokenKind.LeftParen)
             {
                 var leftParen = Consume();
-                var arguments = ParseArgumentList();
+                var arguments = ParseExpressionArgumentList();
 
                 Token rightParen;
 
@@ -45,6 +45,24 @@ internal sealed partial class Parser
                     rightParen = Consume();
 
                 left = new CallExpression(left, leftParen, arguments, rightParen);
+                continue;
+            }
+            else if (CurrentToken.Kind is TokenKind.LeftBracket)
+            {
+                var leftBracket = Consume();
+                var index = ParseExpression();
+
+                Token rightBracket;
+
+                if (CurrentToken.Kind is not TokenKind.RightBracket)
+                {
+                    diagnostics.ReportMissingToken(CurrentToken.Span, "]");
+                    rightBracket = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+                }
+                else
+                    rightBracket = Consume();
+
+                left = new IndexExpression(left, leftBracket, index, rightBracket);
                 continue;
             }
             (kind, length) = GetCombinedOperatorData();
@@ -101,7 +119,7 @@ internal sealed partial class Parser
     private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
     {
         TokenKind.LeftParen => ParseParenthesizedExpression(),
-        TokenKind.LeftCurlyBrace => ParseBlockExpression(),
+        TokenKind.LeftBrace => ParseBlockExpression(),
 
         TokenKind.Identifier => CurrentToken.Value switch
         {
@@ -118,15 +136,17 @@ internal sealed partial class Parser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
 
-
     private NamedExpression ParseNamedExpression()
     {
-        var namedSyntax = ParseNamedSyntax();
+        var identifier = Consume();
 
-        if (namedSyntax is GenericName genericName)
-            return new GenericNameExpression(genericName);
-        
-        return new IdentifierExpression((IdentifierName)namedSyntax);
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        {
+            var (lessThan, typeArguments, greaterThan) = ParseGenerics();
+            return new GenericNameExpression(identifier, lessThan, typeArguments, greaterThan);
+        }
+
+        return new IdentifierNameExpression(identifier);
     }
 
     private ParenthesizedExpression ParseParenthesizedExpression()
@@ -194,7 +214,7 @@ internal sealed partial class Parser
         switch (allowFinalExpression)
         {
             case true:
-                while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+                while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
                 {
                     var local = ParseLocal(StatementParseMode.AllowFinalExpression);
 
@@ -209,7 +229,7 @@ internal sealed partial class Parser
                 break;
 
             case false:
-                while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+                while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
                 {
                     var local = ParseLocal(StatementParseMode.Normal);
                     locals.Add(local);
@@ -219,7 +239,7 @@ internal sealed partial class Parser
 
         Token closeBrace;
 
-        if (CurrentToken.Kind is not TokenKind.RightCurlyBrace)
+        if (CurrentToken.Kind is not TokenKind.RightBrace)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, "}");
             closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
@@ -248,7 +268,7 @@ internal sealed partial class Parser
             _ => throw new System.Exception("Impossible case: keyword is guaranteed to be 'new' or 'put' from parent function.")
         };
 
-        var type = ParseNamedSyntax();
+        var type = ParseTypeSyntax();
 
         if (CurrentToken.Kind is not TokenKind.LeftParen)
         {
@@ -260,7 +280,7 @@ internal sealed partial class Parser
         }
 
         var openParen = Consume();
-        var arguments = ParseArgumentList();
+        var arguments = ParseExpressionArgumentList();
 
         Token closeParen;
         
@@ -275,7 +295,7 @@ internal sealed partial class Parser
         return new ObjectCreationExpression(keyword, kind, type, openParen, arguments, closeParen);
     }
 
-    private SeparatedSyntaxList<Expression> ParseArgumentList()
+    private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;

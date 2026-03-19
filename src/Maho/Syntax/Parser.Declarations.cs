@@ -32,7 +32,7 @@ internal sealed partial class Parser
 
         TypeBody body;
 
-        if (CurrentToken.Kind is TokenKind.LeftCurlyBrace)
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
             body = ParseTypeBlockBody();
         else if (CurrentToken.Kind is TokenKind.Semicolon)
             body = ParseTypeEmptyBody();
@@ -50,7 +50,7 @@ internal sealed partial class Parser
         var openBrace = Consume();
         var members = new List<Member>();
 
-        while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var member = ParseMember();
             members.Add(member);
@@ -58,7 +58,7 @@ internal sealed partial class Parser
 
         Token closeBrace;
 
-        if (CurrentToken.Kind is not TokenKind.RightCurlyBrace)
+        if (CurrentToken.Kind is not TokenKind.RightBrace)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, "}");
             closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
@@ -80,16 +80,16 @@ internal sealed partial class Parser
 
     private TopLevel ParseTopLevelVariableDeclarationOrFunction(IReadOnlyList<Token> modifiers)
     {
-        var type = ParseNamedSyntax();
+        var type = ParseTypeSyntax();
         var identifier = ParseNamedSyntax();
 
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseTopLevelFunctionDeclaration(modifiers, type, identifier);
         else
-            return ParseTopLevelVariableDeclaration(modifiers, type, (IdentifierName)identifier);
+            return ParseTopLevelVariableDeclaration(modifiers, type, identifier);
     }
 
-    private TopLevel ParseTopLevelVariableDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, IdentifierName identifier)
+    private TopLevel ParseTopLevelVariableDeclaration(IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var declaration = ParseVariableDeclaration(modifiers, type, identifier);
 
@@ -106,7 +106,7 @@ internal sealed partial class Parser
         return new TopLevelVariableDeclaration(declaration, semicolon);
     }
 
-    private TopLevel ParseTopLevelFunctionDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, NamedSyntax identifier)
+    private TopLevel ParseTopLevelFunctionDeclaration(IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var function = ParseFunction(modifiers, type, identifier);
 
@@ -124,16 +124,16 @@ internal sealed partial class Parser
     private Member ParseMemberFieldDeclarationOrFunction(IReadOnlyList<Token>? modifiers = null)
     {
         modifiers ??= ParseModifiers();
-        var type = ParseNamedSyntax();
+        var type = ParseTypeSyntax();
         var identifier = ParseNamedSyntax();
 
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseMemberFunction(modifiers, type, identifier);
         else
-            return ParseMemberFieldDeclaration(modifiers, type, (IdentifierName)identifier);
+            return ParseMemberFieldDeclaration(modifiers, type, identifier);
     }
 
-    private MemberFieldDeclaration ParseMemberFieldDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, IdentifierName identifier)
+    private MemberFieldDeclaration ParseMemberFieldDeclaration(IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var declaration = ParseVariableDeclaration(modifiers, type, identifier);
 
@@ -150,7 +150,7 @@ internal sealed partial class Parser
         return new MemberFieldDeclaration(declaration, semicolon);
     }
 
-    private MemberFunctionDeclaration ParseMemberFunction(IReadOnlyList<Token> modifiers, NamedSyntax returnType, NamedSyntax identifier)
+    private MemberFunctionDeclaration ParseMemberFunction(IReadOnlyList<Token> modifiers, TypeSyntax returnType, NamedSyntax identifier)
     {
         var function = ParseFunction(modifiers, returnType, identifier);
 
@@ -177,27 +177,27 @@ internal sealed partial class Parser
 
     private Local ParseLocalVariableDeclarationStatementOrFunction(IReadOnlyList<Token>? modifiers = null)
     {
-        var type = ParseNamedSyntax();
+        var type = ParseTypeSyntax();
         var identifier = ParseNamedSyntax();
 
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseLocalFunctionDeclaration(modifiers, type, identifier);
         else
-            return ParseLocalVariableDeclarationStatement(modifiers, type, (IdentifierName)identifier);
+            return ParseLocalVariableDeclarationStatement(modifiers, type, identifier);
     
     }
 
-    private LocalFunctionDeclaration ParseLocalFunctionDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, NamedSyntax? identifier = null)
+    private LocalFunctionDeclaration ParseLocalFunctionDeclaration(IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? identifier = null)
     {
         var function = ParseFunction(modifiers, type, identifier);
 
         return new LocalFunctionDeclaration(function);
     }
 
-    private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<Token>? modifiers = null, NamedSyntax? type = null, IdentifierName? firstIdentifier = null)
+    private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
     {
         modifiers ??= ParseModifiers();
-        type ??= ParseNamedSyntax();
+        type ??= ParseTypeSyntax();
 
         var nodesAndSeparators = new List<SyntaxNode>();
         bool isFirst = true;
@@ -211,7 +211,7 @@ internal sealed partial class Parser
                 break;
             }
 
-            var identifier = (isFirst && firstIdentifier is not null) ? firstIdentifier : ParseIdentifierName();
+            var identifier = (isFirst && firstIdentifier is not null) ? firstIdentifier : ParseNamedSyntax();
             isFirst = false;
             wasCommaLast = false;
 
@@ -266,17 +266,17 @@ internal sealed partial class Parser
                 break;
             }
 
-            var type = ParseNamedSyntax();
-            IdentifierName identifier;
+            var type = ParseTypeSyntax();
+            NamedSyntax identifier;
 
             if (CurrentToken.Kind is TokenKind.Identifier)
             {
-                identifier = ParseIdentifierName();
+                identifier = ParseNamedSyntax();
             }
             else
             {
                 diagnostics.ReportMissingToken(CurrentToken.Span, "parameter identifier");
-                identifier = new IdentifierName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
+                identifier = new SimpleName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
             }
 
             AssignmentClause? initializer = null;
@@ -303,10 +303,10 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<Parameter>(nodesAndSeparators);
     }
 
-    private FunctionDeclaration ParseFunction(IReadOnlyList<Token>? modifiers = null, NamedSyntax? returnType = null, NamedSyntax? identifier = null)
+    private FunctionDeclaration ParseFunction(IReadOnlyList<Token>? modifiers = null, TypeSyntax? returnType = null, NamedSyntax? identifier = null)
     {
         modifiers ??= ParseModifiers();
-        returnType ??= ParseNamedSyntax();
+        returnType ??= ParseTypeSyntax();
         identifier ??= ParseNamedSyntax();
 
         Token openParen;
@@ -340,7 +340,7 @@ internal sealed partial class Parser
 
     private FunctionBody ParseFunctionBody()
     {
-        if (CurrentToken.Kind is TokenKind.LeftCurlyBrace)
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseFunctionBlockBody();
         else if (CurrentToken.Kind is TokenKind.Semicolon)
             return ParseFunctionEmptyBody();
@@ -356,13 +356,13 @@ internal sealed partial class Parser
         var openBrace = Consume();
         var locals = new List<Local>();
 
-        while (CurrentToken.Kind is not TokenKind.RightCurlyBrace and not TokenKind.EndToken)
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var local = ParseLocal();
             locals.Add(local);
         }
 
-        if (CurrentToken.Kind is not TokenKind.RightCurlyBrace)
+        if (CurrentToken.Kind is not TokenKind.RightBrace)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, "}");
             var closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
@@ -379,5 +379,177 @@ internal sealed partial class Parser
     {
         var semicolon = Consume();
         return new FunctionEmptyBody(semicolon);
+    }
+
+    private TypeSyntax ParseTypeSyntax()
+    {
+        var type = ParsePrimaryType();
+
+        if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+            return ParseModifiedType(type);
+        else
+            return type;
+    }
+
+    private TypeSyntax ParsePrimaryType()
+    {
+        var identifier = Consume();
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+            return ParseGenericType(identifier);
+        else
+            return new SimpleType(identifier);
+    }
+
+    private GenericType ParseGenericType(Token identifier)
+    {
+        var (lessThan, typeArguments, GreaterThan) = ParseGenerics();
+
+        return new GenericType(identifier, lessThan, typeArguments, GreaterThan);
+    }
+
+    private ModifiedType ParseModifiedType(TypeSyntax baseType)
+    {
+        TypeSyntax type = baseType;
+
+        while (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        {
+            PostfixTypeModifier modifier = CurrentToken.Kind switch
+            {
+                TokenKind.LeftBracket  => ParseArrayTypeModifier(),
+                TokenKind.QuestionMark => ParseOptionalTypeModifier(),
+                TokenKind.Asterisk     => ParsePointerTypeModifier(),
+                TokenKind.Ampersand    => ParseReferenceTypeModifier(),
+                _ => throw new System.InvalidOperationException()
+            };
+
+            type = new ModifiedType(type, modifier);
+        }
+
+        return (ModifiedType)type;
+    }
+
+    private ArrayTypeModifier ParseArrayTypeModifier()
+    {
+        var openBracket = Consume();
+        Expression? size = null;
+
+        if (CurrentToken.Kind is not TokenKind.RightBracket)
+            size = ParseExpression();
+
+        Token closeBracket;
+
+        if (CurrentToken.Kind is not TokenKind.RightBracket)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, "]");
+            closeBracket = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            closeBracket = Consume();
+
+        return new ArrayTypeModifier(openBracket, size, closeBracket);
+    }
+
+    private PointerTypeModifier ParsePointerTypeModifier()
+    {
+        var asterisk = Consume();
+        return new PointerTypeModifier(asterisk);
+    }
+
+    private OptionalTypeModifier ParseOptionalTypeModifier()
+    {
+        var questionMark = Consume();
+        return new OptionalTypeModifier(questionMark);
+    }
+
+    private ReferenceTypeModifier ParseReferenceTypeModifier()
+    {
+        var ampersand = Consume();
+        return new ReferenceTypeModifier(ampersand);
+    }
+
+    /// <summary> Parses a list of modifiers. </summary>
+    /// <returns> The modifier list. </returns>
+    private IReadOnlyList<Token> ParseModifiers()
+    {
+        var list = new List<Token>();
+
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            switch (CurrentToken.Value)
+            {
+                case "private":
+                case "protected":
+                case "internal":
+                case "public":
+                case "static":
+                case "sealed":
+                    list.Add(Consume());
+                    break;
+
+                default:
+                    return list;
+            }
+        }
+
+        return list;
+    }
+
+    private NamedSyntax ParseNamedSyntax()
+    {
+        Token name = Consume();
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+            return ParseGenericName(name);
+        else
+            return new SimpleName(name);
+    }
+
+    private GenericName ParseGenericName(Token name)
+    {
+        var lessThan = Consume();
+        var typeParameters = ParseTypeParameterList();
+        Token greaterThan;
+
+        if (CurrentToken.Kind is not TokenKind.GreaterThanSign)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, ">");
+            greaterThan = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            greaterThan = Consume();
+
+        return new GenericName(name, lessThan, typeParameters, greaterThan);
+    }
+
+    private SeparatedSyntaxList<SimpleName> ParseTypeParameterList()
+    {
+        var nodesAndSeparators = new List<SyntaxNode>();
+        bool wasCommaLast = false;
+
+        while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
+        {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                break;
+            }
+
+            nodesAndSeparators.Add(new SimpleName(Consume()));
+            wasCommaLast = false;
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
+            else
+                break;
+        }
+
+        if (wasCommaLast)
+            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+
+        return new SeparatedSyntaxList<SimpleName>(nodesAndSeparators);
     }
 }

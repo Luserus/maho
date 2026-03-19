@@ -2,7 +2,7 @@ namespace Maho.Syntax;
 
 internal abstract class NamedExpression : Expression
 {
-    public NamedSyntax Identifier { get; }
+    public Token Identifier { get; }
 
-    protected NamedExpression(NamedSyntax identifier) => Identifier = identifier;
+    protected NamedExpression(Token identifier) => Identifier = identifier;
 }

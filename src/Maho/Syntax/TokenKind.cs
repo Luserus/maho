@@ -48,14 +48,14 @@ public enum TokenKind
     GreaterThanSign, // '>'
     QuestionMark, // '?'
     AtSymbol, // '@'
-    LeftSquareBracket, // '['
+    LeftBracket, // '['
     BackwardSlash, // '\'
-    RightSqureBracket, // ']'
+    RightBracket, // ']'
     Caret, // '^'
     Backtick, // '`'
-    LeftCurlyBrace, // '{'
+    LeftBrace, // '{'
     VerticalBar, // '|'
-    RightCurlyBrace, // '}'
+    RightBrace, // '}'
     Tilde, // '~'
 
     // Combined operators

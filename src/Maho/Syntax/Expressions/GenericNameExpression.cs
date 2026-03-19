@@ -2,6 +2,14 @@ namespace Maho.Syntax;
 
 internal sealed class GenericNameExpression : NamedExpression
 {
-    public GenericNameExpression(GenericName genericIdentifier) : base(genericIdentifier)
-    { }
+    public Token LessThanToken { get; }
+    public SeparatedSyntaxList<TypeSyntax> TypeArguments { get; }
+    public Token GreaterThanToken { get; }
+
+    public GenericNameExpression(Token identifier, Token lessThanToken, SeparatedSyntaxList<TypeSyntax> typeArguments, Token greaterThanToken) : base(identifier)
+    {
+        LessThanToken = lessThanToken;
+        TypeArguments = typeArguments;
+        GreaterThanToken = greaterThanToken;
+    }
 }

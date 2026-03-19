@@ -32,13 +32,13 @@ internal sealed partial class Lexer
             '>' => (true, TokenKind.GreaterThanSign),
             '?' => (true, TokenKind.QuestionMark),
             '@' => (true, TokenKind.AtSymbol),
-            '[' => (true, TokenKind.LeftSquareBracket),
+            '[' => (true, TokenKind.LeftBracket),
             '\\' => (true, TokenKind.BackwardSlash),
-            ']' => (true, TokenKind.RightSqureBracket),
+            ']' => (true, TokenKind.RightBracket),
             '^' => (true, TokenKind.Caret),
             '`' => (true, TokenKind.Backtick),
-            '{' => (true, TokenKind.LeftCurlyBrace),
-            '}' => (true, TokenKind.RightCurlyBrace),
+            '{' => (true, TokenKind.LeftBrace),
+            '}' => (true, TokenKind.RightBrace),
             '~' => (true, TokenKind.Tilde),
             _ => (false, TokenKind.NullToken)
         };

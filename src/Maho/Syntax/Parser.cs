@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
 using Maho.Text;
 
@@ -128,7 +127,7 @@ internal sealed partial class Parser
         }
     }
 
-    private SeparatedSyntaxList<NamedSyntax> ParseTypeArgumentList()
+    private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
@@ -141,7 +140,7 @@ internal sealed partial class Parser
                 break;
             }
 
-            nodesAndSeparators.Add(ParseNamedSyntax());
+            nodesAndSeparators.Add(ParseTypeSyntax());
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -156,28 +155,12 @@ internal sealed partial class Parser
         if (wasCommaLast)
             diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
 
-        return new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private IdentifierName ParseIdentifierName() => new IdentifierName(Consume());
-
-    private NamedSyntax ParseNamedSyntax()
-    {
-        var identifier = Consume();
-
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
-        {
-            var (lessThan, typeArguments, greaterThan) = ParseGenerics();
-            return new GenericName(identifier, lessThan, typeArguments, greaterThan);
-        }
-
-        return new IdentifierName(identifier);
+        return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
     
-    private (Token LessThan, SeparatedSyntaxList<NamedSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
     {
-        var lessThan = Consume(); // consume '<'
+        var lessThan = Consume();
         var typeArguments = ParseTypeArgumentList();
 
         Token greaterThan;
@@ -191,32 +174,5 @@ internal sealed partial class Parser
             greaterThan = Consume();
 
         return (lessThan, typeArguments, greaterThan);
-    }
-
-    /// <summary> Parses a list of modifiers. </summary>
-    /// <returns> The modifier list. </returns>
-    private IReadOnlyList<Token> ParseModifiers()
-    {
-        var list = new List<Token>();
-
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            switch (CurrentToken.Value)
-            {
-                case "private":
-                case "protected":
-                case "internal":
-                case "public":
-                case "static":
-                case "sealed":
-                    list.Add(Consume());
-                    break;
-
-                default:
-                    return list;
-            }
-        }
-
-        return list;
     }
 }
