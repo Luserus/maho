@@ -39,15 +39,14 @@ internal sealed partial class Parser
         ("=", TokenKind.Equals)
     ];
 
-    private static readonly TokenKind[] synchronizationTokens = [TokenKind.Semicolon, TokenKind.RightCurlyBrace, TokenKind.EndToken];
+    private static readonly TokenKind[] synchronizationTokens = [TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.EndToken];
 
     private static OperatorTrieNode BuildOperatorTrie()
     {
         var root = new OperatorTrieNode();
 
         foreach (var (value, kind) in OperatorDefinitions)
-        {/// <summary> Returns the value and combined form of combined operator token types. </summary>
-    /// <returns> The string value and TokenKind of the combined operators. </returns>
+        {
             var node = root;
 
             foreach (char ch in value)
@@ -64,8 +63,8 @@ internal sealed partial class Parser
         return root;
     }
 
-    /// <summary> Returns the value and combined form of combined operator token types. </summary>
-    /// <returns> The string value and TokenKind of the combined operators. </returns>
+    /// <summary> Returns the length and combined form of combined operator token types. </summary>
+    /// <returns> The length and TokenKind of the combined operators. </returns>
     private (TokenKind Kind, int Length) GetCombinedOperatorData()
     {
         var node = operatorTrie;
@@ -158,9 +157,6 @@ internal sealed partial class Parser
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool DoesTokenStartsExpression(Token token) => (token.Kind is TokenKind.Identifier or TokenKind.Integer or TokenKind.Float or TokenKind.LeftParen) || (operatorTable.ContainsKey(token.Kind) && operatorTable[token.Kind].IsPrefix);
-
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>
     /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
     /// <returns> Token at the index peeked. Returns last token from the list if the offset added to current index exceeds the token list count. </returns>
@@ -186,5 +182,5 @@ internal sealed partial class Parser
             Consume();
     }
 
-    private static bool IsContextualStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.RightCurlyBrace or TokenKind.EndToken;
+    private static bool IsContextualStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.RightBrace or TokenKind.EndToken;
 }

@@ -1,13 +1,15 @@
 namespace Maho.Syntax;
 
-internal sealed class GenericNameExpression : NamedExpression
+internal sealed class GenericType : TypeSyntax
 {
+    public Token Name { get; }
     public Token LessThanToken { get; }
     public SeparatedSyntaxList<TypeSyntax> TypeArguments { get; }
     public Token GreaterThanToken { get; }
 
-    public GenericNameExpression(Token identifier, Token lessThanToken, SeparatedSyntaxList<TypeSyntax> typeArguments, Token greaterThanToken) : base(identifier)
+    public GenericType(Token name, Token lessThanToken, SeparatedSyntaxList<TypeSyntax> typeArguments, Token greaterThanToken)
     {
+        Name = name;
         LessThanToken = lessThanToken;
         TypeArguments = typeArguments;
         GreaterThanToken = greaterThanToken;

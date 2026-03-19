@@ -5,10 +5,10 @@ namespace Maho.Syntax;
 internal sealed class ParameterVariableDeclarator : SyntaxNode
 {
     public IReadOnlyList<Token> Modifiers { get; }
-    public NamedSyntax Type { get; }
-    public IdentifierName Identifier { get; }
+    public TypeSyntax Type { get; }
+    public NamedSyntax Identifier { get; }
 
-    public ParameterVariableDeclarator(IReadOnlyList<Token> modifiers, NamedSyntax type, IdentifierName identifier)
+    public ParameterVariableDeclarator(IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         Modifiers = modifiers;
         Type = type;

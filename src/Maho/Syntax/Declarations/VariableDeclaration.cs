@@ -6,10 +6,10 @@ internal sealed class VariableDeclaration : SyntaxNode
 {
     public IReadOnlyList<Token> Modifiers { get; }
     /// <summary> The type of the variable. </summary>
-    public NamedSyntax Type { get; }
+    public TypeSyntax Type { get; }
     public SeparatedSyntaxList<VariableDeclarator> Declarators { get; }
 
-    public VariableDeclaration(IReadOnlyList<Token> modifiers, NamedSyntax type, SeparatedSyntaxList<VariableDeclarator> declarators)
+    public VariableDeclaration(IReadOnlyList<Token> modifiers, TypeSyntax type, SeparatedSyntaxList<VariableDeclarator> declarators)
     {
         Modifiers = modifiers;
         Type = type;
