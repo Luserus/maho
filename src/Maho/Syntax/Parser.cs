@@ -63,7 +63,9 @@ internal sealed partial class Parser
 
     private TopLevel ParseTopLevel()
     {
-        if (CurrentTokenIsModifier)
+        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Value == "namespace")
+            return ParseNamespaceDeclaration();
+        else if (CurrentTokenIsModifier)
             return ParseTopLevelDeclaration();
 
         return ParseTopLevelStatement();
@@ -85,46 +87,6 @@ internal sealed partial class Parser
             return ParseLocalDeclaration();
         
         return ParseLocalStatement(parseMode);
-    }
-
-    private bool LooksLikeGenericName()
-    {
-        int offset = 1;
-        int depth = 1;
-
-        while (true)
-        {
-            var token = Peek(offset);
-
-            switch (token.Kind)
-            {
-                case TokenKind.Identifier:
-                case TokenKind.Comma:
-                    offset++;
-                    continue;
-
-                case TokenKind.LessThanSign:
-                    depth++;
-                    offset++;
-                    continue;
-
-                case TokenKind.GreaterThanSign:
-                    depth--;
-                    offset++;
-
-                    if (depth == 0)
-                    {
-                        var next = Peek(offset);
-                        // valid generic if followed by . or identifier or '('
-                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
-                    }
-
-                    continue;
-
-                default:
-                    return false;
-            }
-        }
     }
 
     private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()

@@ -123,7 +123,7 @@ internal sealed partial class Parser
     {
         { TokenKind.Plus, new OperatorEntry(TokenKind.Plus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
         { TokenKind.Minus, new OperatorEntry(TokenKind.Minus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
-        { TokenKind.Asterisk, new OperatorEntry(TokenKind.Asterisk, OperatorRole.Infix, 60, 60) },
+        { TokenKind.Asterisk, new OperatorEntry(TokenKind.Asterisk, OperatorRole.Prefix |OperatorRole.Infix, 60, 60) },
         { TokenKind.ForwardSlash, new OperatorEntry(TokenKind.ForwardSlash, OperatorRole.Infix, 60, 60) },
         { TokenKind.Percentage, new OperatorEntry(TokenKind.Percentage, OperatorRole.Infix, 60, 60) },
         { TokenKind.EqualsEquals, new OperatorEntry(TokenKind.EqualsEquals, OperatorRole.Infix, 35, 35) },
@@ -143,6 +143,9 @@ internal sealed partial class Parser
 
         Token first = default!;
         Token token = default!;
+
+        if (length == 0)
+            return new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {

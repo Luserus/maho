@@ -65,6 +65,21 @@ internal sealed partial class Parser
                 left = new IndexExpression(left, leftBracket, index, rightBracket);
                 continue;
             }
+            else if (CurrentToken.Kind is TokenKind.Dot)
+            {
+                var dot = Consume();
+
+                if (CurrentToken.Kind is not TokenKind.Identifier)
+                {
+                    diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+                    continue;
+                }
+
+                var identifier = Consume();
+                left = new MemberAccessExpression(left, dot, identifier);
+                continue;
+            }
+
             (kind, length) = GetCombinedOperatorData();
 
             if (length == 0)
@@ -270,16 +285,16 @@ internal sealed partial class Parser
 
         var type = ParseTypeSyntax();
 
+        Token openParen;
+
         if (CurrentToken.Kind is not TokenKind.LeftParen)
         {
             diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            var fakeOpenParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-            var emptyArguments = new SeparatedSyntaxList<Expression>(new List<SyntaxNode>());
-            var fakeCloseParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-            return new ObjectCreationExpression(keyword, kind, type, fakeOpenParen, emptyArguments, fakeCloseParen);
+            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
         }
+        else
+            openParen = Consume();
 
-        var openParen = Consume();
         var arguments = ParseExpressionArgumentList();
 
         Token closeParen;

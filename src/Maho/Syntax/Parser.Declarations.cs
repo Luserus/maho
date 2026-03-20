@@ -6,13 +6,54 @@ namespace Maho.Syntax;
 internal sealed partial class Parser
 {
     private TopLevel ParseTopLevelDeclaration()
-    {
+    {   
         var modifiers = ParseModifiers();
 
         if (CurrentTokenIsTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(modifiers);
         else
             return ParseTopLevelVariableDeclarationOrFunction(modifiers);
+    }
+
+    private NamespaceDeclaration ParseNamespaceDeclaration()
+    {
+        var keyword = Consume();
+        var name = ParseNamedSyntax();
+        var body = ParseNamespaceBody();
+
+        return new NamespaceDeclaration(keyword, name, body);
+    }
+
+    private NamespaceBody ParseNamespaceBody()
+    {
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+            return new NamespaceEmptyBody(Consume());
+        else
+            return ParseNamespaceBlockBody();
+    }
+
+    private NamespaceBlockBody ParseNamespaceBlockBody()
+    {
+        var members = new List<TopLevel>();
+        var openBrace = Consume();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var member = ParseTopLevel();
+            members.Add(member);
+        }
+
+        Token closeBrace;
+
+        if (CurrentToken.Kind is not TokenKind.RightBrace)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, "}");
+            closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            closeBrace = Consume();
+
+        return new NamespaceBlockBody(openBrace, members, closeBrace);
     }
 
     private TypeDeclaration ParseType(IReadOnlyList<Token> modifiers)
@@ -386,9 +427,12 @@ internal sealed partial class Parser
         var type = ParsePrimaryType();
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
-            return ParseModifiedType(type);
-        else
-            return type;
+            type = ParseModifiedType(type);
+
+        if (CurrentToken.Kind is TokenKind.Dot)
+            type = ParseQualifiedType(type);
+
+        return type;
     }
 
     private TypeSyntax ParsePrimaryType()
@@ -399,6 +443,14 @@ internal sealed partial class Parser
             return ParseGenericType(identifier);
         else
             return new SimpleType(identifier);
+    }
+
+    private QualifiedType ParseQualifiedType(TypeSyntax firstPart)
+    {
+        var dot = Consume();
+        var next = ParseTypeSyntax();
+
+        return new QualifiedType(firstPart, dot, next);
     }
 
     private GenericType ParseGenericType(Token identifier)
