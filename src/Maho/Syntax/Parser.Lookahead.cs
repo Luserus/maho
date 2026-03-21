@@ -8,44 +8,62 @@ internal sealed partial class Parser
     private int lookaheadCurrent;
     private Token LookaheadCurrentToken => tokens[lookaheadCurrent];
 
-    private bool LooksLikeGenericName()
+    private bool LooksLikeGenericArguments(bool fromLookahead = false)
     {
-        int offset = 1;
-        int depth = 1;
+        if (!fromLookahead)
+            lookaheadCurrent = current;
 
-        while (true)
+        LookaheadConsume(); // less than '<'
+
+        while (LookaheadCurrentToken.Kind is not (TokenKind.GreaterThanSign or TokenKind.EndToken))
         {
-            var token = Peek(offset);
+            var (_, success) = LookaheadParseTypeSyntax();
 
-            switch (token.Kind)
-            {
-                case TokenKind.Identifier:
-                case TokenKind.Comma:
-                    offset++;
-                    continue;
+            if (!success)
+                return false;
 
-                case TokenKind.LessThanSign:
-                    depth++;
-                    offset++;
-                    continue;
+            if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
+                break;
 
-                case TokenKind.GreaterThanSign:
-                    depth--;
-                    offset++;
+            if (LookaheadCurrentToken.Kind is not TokenKind.Comma)
+                return false;
 
-                    if (depth == 0)
-                    {
-                        var next = Peek(offset);
-                        // valid generic if followed by . or identifier or '('
-                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
-                    }
-
-                    continue;
-
-                default:
-                    return false;
-            }
+            LookaheadConsume(); // comma ','
         }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
+            return false;
+
+        return true;
+    }
+
+    private bool LooksLikeGenericParameters(bool fromLookahead = false)
+    {
+        if (!fromLookahead)
+            lookaheadCurrent = current;
+
+        LookaheadConsume(); // less than '<'
+
+        while (LookaheadCurrentToken.Kind is not (TokenKind.GreaterThanSign or TokenKind.EndToken))
+        {
+            if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+                return false;
+            
+            LookaheadConsume(); // identifier
+
+            if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
+                break;
+
+            if (LookaheadCurrentToken.Kind is not TokenKind.Comma)
+                return false;
+
+            LookaheadConsume(); // comma ','
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
+            return false;
+
+        return true;
     }
 
     private bool LooksLikeCastExpression()
@@ -55,7 +73,7 @@ internal sealed partial class Parser
 
         lookaheadCurrent = current;
 
-        LookaheadConsume(); // Left paren
+        LookaheadConsume(); // Left parenGreaterThanSign
         var (_, success) = LookaheadParseTypeSyntax();
 
         if (!success)
@@ -71,7 +89,7 @@ internal sealed partial class Parser
         if (operatorTable.TryGetValue(op.Kind, out var opEntry) && opEntry.Role is not OperatorRole.Infix and not OperatorRole.Postfix)
             return false;
         else if (op.Kind is TokenKind.LeftParen)
-            return false;
+            return true;
 
         return true;
     }
@@ -130,46 +148,6 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
-    }
-
-    private bool LookaheadLooksLikeGenericName()
-    {
-        int offset = 0;
-        int depth = 0;
-
-        while (true)
-        {
-            var token = LookaheadPeek(offset);
-
-            switch (token.Kind)
-            {
-                case TokenKind.Identifier:
-                case TokenKind.Comma:
-                    offset++;
-                    continue;
-
-                case TokenKind.LessThanSign:
-                    depth++;
-                    offset++;
-                    continue;
-
-                case TokenKind.GreaterThanSign:
-                    depth--;
-                    offset++;
-
-                    if (depth == 0)
-                    {
-                        var next = LookaheadPeek(offset);
-                        // valid generic if followed by . or identifier or '('
-                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
-                    }
-
-                    continue;
-
-                default:
-                    return false;
-            }
-        }
     }
 
     private (SeparatedSyntaxList<TypeSyntax> TypeArguments, bool Success) LookaheadParseTypeArgumentList()
@@ -256,7 +234,7 @@ internal sealed partial class Parser
 
         var identifier = LookaheadConsume();
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LookaheadLooksLikeGenericName())
+        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments())
         {
             var (genericType, success) = LookaheadParseGenericType(identifier);
 
@@ -376,7 +354,7 @@ internal sealed partial class Parser
     {
         Token name = LookaheadConsume();
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LookaheadLooksLikeGenericName())
+        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters())
             return LookaheadParseGenericName(name);
         else
             return (new SimpleName(name), true);

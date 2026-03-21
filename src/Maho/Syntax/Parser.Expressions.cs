@@ -155,7 +155,7 @@ internal sealed partial class Parser
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments())
         {
             var (lessThan, typeArguments, greaterThan) = ParseGenerics();
             return new GenericNameExpression(identifier, lessThan, typeArguments, greaterThan);

@@ -439,7 +439,7 @@ internal sealed partial class Parser
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments())
             return ParseGenericType(identifier);
         else
             return new SimpleType(identifier);
@@ -551,7 +551,7 @@ internal sealed partial class Parser
     {
         Token name = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters())
             return ParseGenericName(name);
         else
             return new SimpleName(name);
