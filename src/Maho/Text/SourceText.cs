@@ -6,175 +6,159 @@ using System.Text;
 
 namespace Maho.Text;
 
-/// <summary> Represents the source text of the program. </summary>
+/// <summary>
+/// Represents the source text of the program.
+/// Supports two load modes:
+///   Eager       — file is decoded immediately into a string at construction time.
+///   LazyCached  — file is decoded into a string on first access then cached.
+/// </summary>
 internal sealed class SourceText : IDisposable
 {
-    private readonly string? eagerText;                  // Eager or LazyCached decoded string
-    private readonly MemoryMappedFile? mmf;             // Memory-mapped file for lazy modes
+    private string? cachedText;                         // decoded string, null until loaded in LazyCached mode
+    private readonly MemoryMappedFile? mmf;             // memory-mapped file, kept open for LazyCached lazy decode
     private readonly MemoryMappedViewAccessor? accessor;
-    private readonly long fileLength;
+    private readonly long fileLength;                   // raw byte length of the file
     private readonly SourceTextLoadMode loadMode;
-    private readonly Decoder? utf8Decoder;                        // For LazyStreaming decoding
-    private TextLine[]? lazyLines;                  // Lazy-parsed line info
+    private TextLine[]? lazyLines;                      // line table, parsed on first access
 
+    // --- Public properties ---
+
+    /// <summary> All lines in the source text. Parsed lazily on first access. </summary>
     public TextLine[] Lines => lazyLines ?? ParseLines();
 
-    public int Length => loadMode == SourceTextLoadMode.Eager || loadMode == SourceTextLoadMode.LazyCached
-        ? eagerText!.Length
-        : (int)fileLength; // approx; streaming actual length is dynamic
+    /// <summary> Character length of the source text. </summary>
+    public int Length => EnsureText().Length;
 
-    // Constructor for file-based SourceText
+    /// <summary> Character at the given position. </summary>
+    public char this[int position] => EnsureText()[position];
+
+    // --- Constructors ---
+
+    /// <summary> Loads source text from a file. </summary>
     public SourceText(SourceFile sourceFile)
-    {   
-        if (!File.Exists(sourceFile.FilePath)) 
+    {
+        if (!File.Exists(sourceFile.FilePath))
             throw new FileNotFoundException("Source file not found", sourceFile.FilePath);
 
         loadMode = sourceFile.LoadMode;
+
         var fi = new FileInfo(sourceFile.FilePath);
         fileLength = fi.Length;
 
         if (fileLength == 0)
         {
-            eagerText = string.Empty;
+            cachedText = string.Empty;
             lazyLines = [];
             return;
         }
 
-        switch (loadMode)
+        mmf = MemoryMappedFile.CreateFromFile(
+            sourceFile.FilePath, FileMode.Open, null, 0L, MemoryMappedFileAccess.Read);
+        accessor = mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
+
+        if (loadMode is SourceTextLoadMode.Eager)
         {
-            case SourceTextLoadMode.Eager:
-            case SourceTextLoadMode.LazyCached:
-                mmf = MemoryMappedFile.CreateFromFile(sourceFile.FilePath, FileMode.Open, null, 0L, MemoryMappedFileAccess.Read);
-                accessor = mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
-                eagerText = ReadFullStringFromAccessor();
-                lazyLines = ParseLines();
-                break;
-
-            case SourceTextLoadMode.LazyStreaming:
-                mmf = MemoryMappedFile.CreateFromFile(sourceFile.FilePath, FileMode.Open, null, 0L, MemoryMappedFileAccess.Read);
-                accessor = mmf.CreateViewAccessor(0, fileLength, MemoryMappedFileAccess.Read);
-                utf8Decoder = Encoding.UTF8.GetDecoder();
-                lazyLines = null; // will parse lines lazily
-                break;
-
-            default:
-                break;
+            // Decode immediately and release the MMF — no need to keep it open
+            cachedText = DecodeFromAccessor();
+            lazyLines = ParseLines();
+            accessor.Dispose();
+            mmf.Dispose();
         }
+        // LazyCached: keep mmf/accessor open, decode on first EnsureText() call
     }
 
-    // Constructor from in-memory string
+    /// <summary> Wraps an already-decoded in-memory string. Always eager. </summary>
     public SourceText(string text)
     {
-        eagerText = text ?? string.Empty;
+        cachedText = text ?? string.Empty;
         loadMode = SourceTextLoadMode.Eager;
         lazyLines = ParseLines();
     }
 
-    // Indexer
-    public char this[int position] => loadMode switch
+    /// <summary>
+    /// Returns true if the characters at [position, position + value.Length)
+    /// exactly match value, without allocating a substring.
+    /// </summary>
+    public bool MatchesAt(int position, ReadOnlySpan<char> value)
     {
-        SourceTextLoadMode.Eager => eagerText![position],
-        SourceTextLoadMode.LazyCached => eagerText![position],
-        SourceTextLoadMode.LazyStreaming => ReadCharStreaming(position),
-        _ => throw new InvalidOperationException("Unknown load mode")
-    };
+        var text = EnsureText();
 
-    public override string ToString() => loadMode switch
-    {
-        SourceTextLoadMode.Eager => eagerText!,
-        SourceTextLoadMode.LazyCached => eagerText!,
-        SourceTextLoadMode.LazyStreaming => ReadAllStreaming(),
-        _ => throw new InvalidOperationException("Unknown load mode")
-    };
+        if (position < 0 || position + value.Length > text.Length)
+            return false;
+
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (text[position + i] != value[i])
+                return false;
+        }
+
+        return true;
+    }
+
+    public override string ToString() => EnsureText();
 
     public string ToString(TextSpan span)
     {
-        if (span.Length == 0) return string.Empty;
-        return loadMode switch
-        {
-            SourceTextLoadMode.Eager => eagerText!.Substring(span.Start, span.Length),
-            SourceTextLoadMode.LazyCached => eagerText!.Substring(span.Start, span.Length),
-            SourceTextLoadMode.LazyStreaming => ReadSpanStreaming(span),
-            _ => throw new InvalidOperationException("Unknown load mode")
-        };
-    }
-
-    // --- LazyStreaming helpers ---
-    private char ReadCharStreaming(int position)
-    {
-        if (position < 0 || position >= fileLength) 
-            throw new ArgumentOutOfRangeException(nameof(position));
-
-        byte[] buffer = new byte[4]; // max UTF-8 char length
-        accessor!.ReadArray(position, buffer, 0, 1); // read first byte
-        int charBytes = 1;
-
-        // Determine byte count for this UTF-8 character
-        byte first = buffer[0];
-        if ((first & 0b1000_0000) == 0) charBytes = 1;
-        else if ((first & 0b1110_0000) == 0b1100_0000) charBytes = 2;
-        else if ((first & 0b1111_0000) == 0b1110_0000) charBytes = 3;
-        else if ((first & 0b1111_1000) == 0b1111_0000) charBytes = 4;
-        else throw new InvalidDataException($"Invalid UTF-8 start byte at position {position}");
-
-        if (charBytes > 1)
-            accessor.ReadArray(position, buffer, 0, charBytes);
-
-        char[] chars = new char[2]; // max 2 chars for surrogate pair
-        int count = utf8Decoder!.GetChars(buffer, 0, charBytes, chars, 0);
-        return chars[0];
-    }
-
-    private string ReadSpanStreaming(TextSpan span)
-    {
-        if (span.Length == 0) 
+        if (span.Length == 0)
             return string.Empty;
 
-        byte[] buffer = new byte[span.Length];
-        accessor!.ReadArray(span.Start, buffer, 0, span.Length);
-
-        return Encoding.UTF8.GetString(buffer);
+        return EnsureText().Substring(span.Start, span.Length);
     }
 
-    private string ReadAllStreaming()
+    // --- Private helpers ---
+
+    /// <summary>
+    /// Returns the decoded text, decoding from the memory-mapped file if this is
+    /// LazyCached and the text hasn't been decoded yet.
+    /// </summary>
+    private string EnsureText()
     {
-        byte[] buffer = new byte[fileLength];
-        accessor!.ReadArray(0, buffer, 0, (int)fileLength);
-        return Encoding.UTF8.GetString(buffer);
+        if (cachedText is not null)
+            return cachedText;
+
+        // LazyCached first access — decode now and cache
+        cachedText = DecodeFromAccessor();
+        return cachedText;
     }
 
-    // --- Eager/LazyCached ---
-    private string ReadFullStringFromAccessor()
+    /// <summary> Reads the entire file from the memory-mapped accessor and decodes as UTF-8. </summary>
+    private string DecodeFromAccessor()
     {
-        byte[] buffer = new byte[fileLength];
+        var buffer = new byte[fileLength];
         accessor!.ReadArray(0, buffer, 0, (int)fileLength);
         return Encoding.UTF8.GetString(buffer);
     }
 
     // --- Line parsing ---
+
     private TextLine[] ParseLines()
     {
+        var text = EnsureText();
         var lines = new List<TextLine>();
         int position = 0;
         int lineStart = 0;
-        var textToParse = loadMode == SourceTextLoadMode.LazyStreaming ? ReadAllStreaming() : eagerText!;
 
-        while (position < textToParse.Length)
+        while (position < text.Length)
         {
-            int breakWidth = GetLineBreakWidth(textToParse, position);
-            if (breakWidth == 0) { position++; continue; }
+            int breakWidth = GetLineBreakWidth(text, position);
+
+            if (breakWidth == 0)
+            {
+                position++;
+                continue;
+            }
 
             AddLine(lines, position, lineStart, breakWidth);
             position += breakWidth;
             lineStart = position;
         }
 
+        // Add the final line even if it has no trailing newline
         if (position >= lineStart)
             AddLine(lines, position, lineStart, 0);
 
         lazyLines = [.. lines];
-        
-        return [.. lines];
+        return lazyLines;
     }
 
     private void AddLine(List<TextLine> lines, int position, int start, int breakWidth)
@@ -187,41 +171,41 @@ internal sealed class SourceText : IDisposable
     private static int GetLineBreakWidth(string text, int position)
     {
         char ch = text[position];
-        char next = (position + 1 >= text.Length) ? '\0' : text[position + 1];
+        char next = position + 1 < text.Length ? text[position + 1] : '\0';
 
-        if (ch == '\r' && next == '\n') 
-            return 2;
-        if (ch == '\r' || ch == '\n')
-            return 1;
-            
+        if (ch == '\r' && next == '\n') return 2;  // CRLF
+        if (ch == '\r' || ch == '\n') return 1;    // CR or LF
+
         return 0;
     }
 
+    // --- Line index lookup ---
+
+    /// <summary>
+    /// Returns the zero-based line index for the given character position
+    /// using binary search over the line table.
+    /// </summary>
     public int GetLineIndex(int position)
     {
-        if (lazyLines == null) 
-            ParseLines();
+        var lines = Lines; // ensures lazyLines is populated
 
         int lower = 0;
-        int upper = lazyLines!.Length - 1;
+        int upper = lines.Length - 1;
 
         while (lower <= upper)
         {
             int index = lower + ((upper - lower) >> 1);
-            int start = lazyLines[index].Start;
+            int start = lines[index].Start;
 
-            if (position == start)
-                return index;
-            else if (position < start) 
-                upper = index - 1;
-            else
-                lower = index + 1;
+            if (position == start) return index;
+            if (position < start) upper = index - 1;
+            else lower = index + 1;
         }
 
         return Math.Max(0, lower - 1);
     }
 
-    public void Dispose()
+    void IDisposable.Dispose()
     {
         accessor?.Dispose();
         mmf?.Dispose();

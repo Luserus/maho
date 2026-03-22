@@ -8,46 +8,73 @@ internal sealed partial class Parser
     private int lookaheadCurrent;
     private Token LookaheadCurrentToken => tokens[lookaheadCurrent];
 
-    private bool LooksLikeGenericArguments(bool fromLookahead = false)
+    private enum LookaheadResultContext
+    {
+        Success,
+        MissingDelimeter,
+        MissingSeparator,
+        FailedParseTypeSyntax,
+        IsBinaryOperator,
+        IsLeftParen
+    }
+
+    private (bool Success, LookaheadResultContext Context) LooksLikeGenericArguments(bool fromLookahead = false)
     {
         if (!fromLookahead)
             lookaheadCurrent = current;
 
+        var saved = lookaheadCurrent;
+
         LookaheadConsume(); // less than '<'
 
-        while (LookaheadCurrentToken.Kind is not (TokenKind.GreaterThanSign or TokenKind.EndToken))
+        while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             var (_, success) = LookaheadParseTypeSyntax();
 
             if (!success)
-                return false;
+            {
+                lookaheadCurrent = saved;
+                return (false, LookaheadResultContext.FailedParseTypeSyntax);
+            }
 
             if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
                 break;
 
             if (LookaheadCurrentToken.Kind is not TokenKind.Comma)
-                return false;
+            {
+                lookaheadCurrent = saved;
+                return (false, LookaheadResultContext.MissingSeparator);
+            }
 
             LookaheadConsume(); // comma ','
         }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
-            return false;
+        {
+            lookaheadCurrent = saved;
+            return (false, LookaheadResultContext.MissingDelimeter);
+        }
 
-        return true;
+        lookaheadCurrent = saved;
+        return (true, LookaheadResultContext.Success);
     }
 
-    private bool LooksLikeGenericParameters(bool fromLookahead = false)
+    private (bool Success, LookaheadResultContext Context) LooksLikeGenericParameters(bool fromLookahead = false)
     {
         if (!fromLookahead)
             lookaheadCurrent = current;
 
+        var saved = lookaheadCurrent;
+
         LookaheadConsume(); // less than '<'
 
-        while (LookaheadCurrentToken.Kind is not (TokenKind.GreaterThanSign or TokenKind.EndToken))
+        while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
-                return false;
+            {
+                lookaheadCurrent = saved;
+                return (false, LookaheadResultContext.FailedParseTypeSyntax);
+            }
             
             LookaheadConsume(); // identifier
 
@@ -55,43 +82,47 @@ internal sealed partial class Parser
                 break;
 
             if (LookaheadCurrentToken.Kind is not TokenKind.Comma)
-                return false;
+            {
+                lookaheadCurrent = saved;
+                return (false, LookaheadResultContext.MissingSeparator);
+            }
 
             LookaheadConsume(); // comma ','
         }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
-            return false;
+        {
+            lookaheadCurrent = saved;
+            return (false, LookaheadResultContext.MissingDelimeter);
+        }
 
-        return true;
+        lookaheadCurrent = saved;
+        return (true, LookaheadResultContext.Success);
     }
 
-    private bool LooksLikeCastExpression()
+    private (bool Success, LookaheadResultContext Context) LooksLikeCastExpression()
     {
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-            return false;
-
         lookaheadCurrent = current;
 
-        LookaheadConsume(); // Left parenGreaterThanSign
+        LookaheadConsume(); // Left paren
         var (_, success) = LookaheadParseTypeSyntax();
 
         if (!success)
-            return false;
+            return (false, LookaheadResultContext.FailedParseTypeSyntax);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
-            return false;
+            return (false, LookaheadResultContext.MissingDelimeter);
 
         LookaheadConsume(); // Right paren
 
         var op = LookaheadConsumeOperator();
 
-        if (operatorTable.TryGetValue(op.Kind, out var opEntry) && opEntry.Role is not OperatorRole.Infix and not OperatorRole.Postfix)
-            return false;
+        if (operatorTable.TryGetValue(op.Kind, out var opEntry) && opEntry.Role is OperatorRole.Infix or OperatorRole.Postfix)
+            return (false, LookaheadResultContext.IsBinaryOperator);
         else if (op.Kind is TokenKind.LeftParen)
-            return true;
+            return (true, LookaheadResultContext.IsLeftParen);
 
-        return true;
+        return (true, LookaheadResultContext.Success);
     }
 
     private Token LookaheadConsume()
@@ -234,7 +265,7 @@ internal sealed partial class Parser
 
         var identifier = LookaheadConsume();
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments())
+        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments(fromLookahead: true).Success)
         {
             var (genericType, success) = LookaheadParseGenericType(identifier);
 
@@ -268,7 +299,7 @@ internal sealed partial class Parser
         return (new GenericType(identifier, lessThan, typeArguments, GreaterThan), true);
     }
 
-    private (ModifiedType Type, bool Success) LookaheadParseModifiedType(TypeSyntax baseType)
+    private (TypeSyntax Type, bool Success) LookaheadParseModifiedType(TypeSyntax baseType)
     {
         TypeSyntax type = baseType;
 
@@ -289,7 +320,7 @@ internal sealed partial class Parser
             type = new ModifiedType(type, modifier);
         }
 
-        return ((ModifiedType)type, true);
+        return (type, true);
     }
 
     private (ArrayTypeModifier Type, bool Success) LookaheadParseArrayTypeModifier()
@@ -354,7 +385,7 @@ internal sealed partial class Parser
     {
         Token name = LookaheadConsume();
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters())
+        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters(fromLookahead: true).Success)
             return LookaheadParseGenericName(name);
         else
             return (new SimpleName(name), true);

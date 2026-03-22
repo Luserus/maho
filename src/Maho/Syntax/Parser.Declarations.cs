@@ -439,7 +439,7 @@ internal sealed partial class Parser
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
             return ParseGenericType(identifier);
         else
             return new SimpleType(identifier);
@@ -460,7 +460,7 @@ internal sealed partial class Parser
         return new GenericType(identifier, lessThan, typeArguments, GreaterThan);
     }
 
-    private ModifiedType ParseModifiedType(TypeSyntax baseType)
+    private TypeSyntax ParseModifiedType(TypeSyntax baseType)
     {
         TypeSyntax type = baseType;
 
@@ -478,7 +478,7 @@ internal sealed partial class Parser
             type = new ModifiedType(type, modifier);
         }
 
-        return (ModifiedType)type;
+        return type;
     }
 
     private ArrayTypeModifier ParseArrayTypeModifier()
@@ -551,7 +551,7 @@ internal sealed partial class Parser
     {
         Token name = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters().Success)
             return ParseGenericName(name);
         else
             return new SimpleName(name);
