@@ -11,11 +11,11 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (CurrentToken.Value == "if")
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                     return ParseTopLevelIfStatement();
-                else if (CurrentToken.Value == "while")
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                     return ParseTopLevelWhileStatement();
-                else if (CurrentToken.Value == "return")
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseTopLevelReturnStatement();
                 break;
 
@@ -77,7 +77,7 @@ internal sealed partial class Parser
 
         TopLevelElseStatement? elseStatement = null;
 
-        if (CurrentToken.Value == "else")
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
         {
             var elseKeyword = Consume();
             var elseStmt = ParseTopLevelStatement();
@@ -141,12 +141,14 @@ internal sealed partial class Parser
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
+                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                             return ParseLocalIfStatement();
-                        else if (CurrentToken.Value == "while")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                             return ParseLocalWhileStatement();
-                        else if (CurrentToken.Value == "return")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
+                        else if (LooksLikeVariableDeclaration().Success)
+                            return ParseLocalVariableDeclarationStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -162,12 +164,14 @@ internal sealed partial class Parser
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
+                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                             return ParseLocalIfStatement();
-                        else if (CurrentToken.Value == "while")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                             return ParseLocalWhileStatement();
-                        else if (CurrentToken.Value == "return")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
+                        else if (LooksLikeVariableDeclaration().Success)
+                            return ParseLocalVariableDeclarationStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -250,7 +254,7 @@ internal sealed partial class Parser
 
         LocalElseStatement? elseStatement = null;
 
-        if (CurrentToken.Value == "else")
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
         {
             var elseKeyword = Consume();
             var elseStmt = ParseLocalStatement();

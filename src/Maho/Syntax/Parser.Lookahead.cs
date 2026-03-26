@@ -14,6 +14,7 @@ internal sealed partial class Parser
         MissingDelimeter,
         MissingSeparator,
         FailedParseTypeSyntax,
+        FailedParseNamedSyntax,
         IsBinaryOperator,
         IsLeftParen
     }
@@ -123,6 +124,26 @@ internal sealed partial class Parser
             return (true, LookaheadResultContext.IsLeftParen);
 
         return (true, LookaheadResultContext.Success);
+    }
+
+    private (bool Success, LookaheadResultContext Context) LooksLikeVariableDeclaration()
+    {
+        lookaheadCurrent = current;
+
+        var (_, success) = LookaheadParseTypeSyntax();
+
+        if (!success)
+            return (false, LookaheadResultContext.FailedParseTypeSyntax);
+
+        (_, success) = LookaheadParseNamedSyntax();
+
+        if (!success)
+            return (false, LookaheadResultContext.FailedParseNamedSyntax);
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Equals or TokenKind.Semicolon)
+            return (true, LookaheadResultContext.Success);
+
+        return (false, LookaheadResultContext.MissingDelimeter);
     }
 
     private Token LookaheadConsume()
@@ -361,14 +382,14 @@ internal sealed partial class Parser
 
         while (LookaheadCurrentToken.Kind is not TokenKind.EndToken)
         {
-            switch (LookaheadCurrentToken.Value)
+            switch (LookaheadCurrentToken.MatchingKind)
             {
-                case "private":
-                case "protected":
-                case "internal":
-                case "public":
-                case "static":
-                case "sealed":
+                case MatchingKeywordKind.Private:
+                case MatchingKeywordKind.Protected:
+                case MatchingKeywordKind.Internal:
+                case MatchingKeywordKind.Public:
+                case MatchingKeywordKind.Static:
+                case MatchingKeywordKind.Sealed:
                     list.Add(LookaheadConsume());
                     break;
 

@@ -16,6 +16,7 @@ internal sealed class Token : SyntaxNode
     public SyntaxTrivia[] LeadingTrivia { get; set; }
     /// <summary> Trailing trivia of the Token. </summary>
     public SyntaxTrivia[] TrailingTrivia { get; set; }
+    public MatchingKeywordKind MatchingKind { get; }
 
     /// <summary> Initializes the Token struct. </summary>
     /// <param name="value"> The Token data in string form. </param>
@@ -23,12 +24,14 @@ internal sealed class Token : SyntaxNode
     /// <param name="kind"> Token kind of the Token. </param>
     /// <param name="leadingTrivia"> Leading trivia of the Token. </param>
     /// <param name="trailingTrivia"> Trailing trivia of the Token. </param>
-    public Token(SourceText sourceText, TextSpan span, TokenKind kind, SyntaxTrivia[] leadingTrivia, SyntaxTrivia[] trailingTrivia)
+    public Token(SourceText sourceText, TextSpan span, TokenKind kind, SyntaxTrivia[] leadingTrivia, SyntaxTrivia[] trailingTrivia) : this(sourceText, span, kind, leadingTrivia, trailingTrivia, MatchingKeywordKind.None) {}
+    public Token(SourceText sourceText, TextSpan span, TokenKind kind, SyntaxTrivia[] leadingTrivia, SyntaxTrivia[] trailingTrivia, MatchingKeywordKind matchingKind)
     {
         source = sourceText;
         Span = span;
         Kind = kind;
         LeadingTrivia = leadingTrivia;
         TrailingTrivia = trailingTrivia;
+        MatchingKind = matchingKind;
     }
 }

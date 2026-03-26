@@ -2,15 +2,15 @@ namespace Maho.Syntax;
 
 internal sealed class ArrayTypeModifier : PostfixTypeModifier
 {
-    public Token OpenBracket { get; }
+    public Token LeftBracket { get; }
     public Expression? Size { get; }
-    public Token CloseBracket { get; }
+    public Token RightBracket { get; }
     public PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Array;
 
-    public ArrayTypeModifier(Token openBracket, Expression? size, Token closeBracket)
+    public ArrayTypeModifier(Token leftBracket, Expression? size, Token rightBracket)
     {
-        OpenBracket = openBracket;
+        LeftBracket = leftBracket;
         Size =  size;
-        CloseBracket = closeBracket;
+        RightBracket = rightBracket;
     }
 }

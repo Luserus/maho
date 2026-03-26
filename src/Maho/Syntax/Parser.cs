@@ -18,8 +18,9 @@ internal sealed partial class Parser
 
     public CompilationUnit Root { get; private set; } = null!;
 
-    private bool CurrentTokenIsModifier => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "private" or "protected" or "internal" or "public" or "static" or "sealed");
-    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "class" or "struct" or "interface" or "enum");
+    private bool CurrentTokenIsModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const;
+    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
     private enum StatementParseMode : byte
     {
@@ -63,7 +64,7 @@ internal sealed partial class Parser
 
     private TopLevel ParseTopLevel()
     {
-        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Value == "namespace")
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration();
         else if (CurrentTokenIsModifier)
             return ParseTopLevelDeclaration();

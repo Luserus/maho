@@ -60,12 +60,13 @@ internal sealed partial class Parser
     {
         var keyword = Consume();
 
-        var kind = keyword.Value switch
+        var kind = keyword.MatchingKind switch
         {
-            "class" => TypeKind.Class,
-            "struct" => TypeKind.Struct,
-            "interface" => TypeKind.Interface,
-            "enum" => TypeKind.Enum,
+            MatchingKeywordKind.Class => TypeKind.Class,
+            MatchingKeywordKind.Struct => TypeKind.Struct,
+            MatchingKeywordKind.Interface => TypeKind.Interface,
+            MatchingKeywordKind.Enum => TypeKind.Enum,
+            MatchingKeywordKind.Union => TypeKind.Union,
             _ => throw new System.Exception($"Impossible default case.")
         };
 
@@ -526,23 +527,8 @@ internal sealed partial class Parser
     {
         var list = new List<Token>();
 
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            switch (CurrentToken.Value)
-            {
-                case "private":
-                case "protected":
-                case "internal":
-                case "public":
-                case "static":
-                case "sealed":
-                    list.Add(Consume());
-                    break;
-
-                default:
-                    return list;
-            }
-        }
+        while (CurrentTokenIsModifier)
+            list.Add(Consume());
 
         return list;
     }
