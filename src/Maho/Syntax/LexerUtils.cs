@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using Maho.Text;
 
 namespace Maho.Syntax;
 

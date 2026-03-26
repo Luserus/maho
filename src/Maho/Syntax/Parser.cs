@@ -18,8 +18,9 @@ internal sealed partial class Parser
 
     public CompilationUnit Root { get; private set; } = null!;
 
-    private bool CurrentTokenIsModifier => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "private" or "protected" or "internal" or "public" or "static" or "sealed");
-    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.Kind is TokenKind.Identifier && (CurrentToken.Value is "class" or "struct" or "interface" or "enum");
+    private bool CurrentTokenIsModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const;
+    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
     private enum StatementParseMode : byte
     {
@@ -63,7 +64,9 @@ internal sealed partial class Parser
 
     private TopLevel ParseTopLevel()
     {
-        if (CurrentTokenIsModifier)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
+            return ParseNamespaceDeclaration();
+        else if (CurrentTokenIsModifier)
             return ParseTopLevelDeclaration();
 
         return ParseTopLevelStatement();
@@ -85,46 +88,6 @@ internal sealed partial class Parser
             return ParseLocalDeclaration();
         
         return ParseLocalStatement(parseMode);
-    }
-
-    private bool LooksLikeGenericName()
-    {
-        int offset = 1;
-        int depth = 1;
-
-        while (true)
-        {
-            var token = Peek(offset);
-
-            switch (token.Kind)
-            {
-                case TokenKind.Identifier:
-                case TokenKind.Comma:
-                    offset++;
-                    continue;
-
-                case TokenKind.LessThanSign:
-                    depth++;
-                    offset++;
-                    continue;
-
-                case TokenKind.GreaterThanSign:
-                    depth--;
-                    offset++;
-
-                    if (depth == 0)
-                    {
-                        var next = Peek(offset);
-                        // valid generic if followed by . or identifier or '('
-                        return next.Kind is TokenKind.Dot or TokenKind.LeftParen or TokenKind.Identifier or TokenKind.GreaterThanSign or TokenKind.Comma;
-                    }
-
-                    continue;
-
-                default:
-                    return false;
-            }
-        }
     }
 
     private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()

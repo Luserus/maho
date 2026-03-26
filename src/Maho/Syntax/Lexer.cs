@@ -34,8 +34,12 @@ internal sealed partial class Lexer
             var leadingTrivia = LexTrivia();
             var (span, kind) = LexTokenData();
             var trailingTrivia = LexTrivia();
+            var matching = MatchingKeywordKind.None;
 
-            Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia));
+            if (kind is TokenKind.Identifier)
+                matching = MatchKeywordKind(span);
+
+            Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia, matching));
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
@@ -138,5 +142,34 @@ internal sealed partial class Lexer
 
         kind = tokenKind;
         return [.. trivias];
+    }
+
+    private MatchingKeywordKind MatchKeywordKind(TextSpan span)
+    {
+        return text.ToString(span) switch
+        {
+            "if" => MatchingKeywordKind.If,
+            "else" => MatchingKeywordKind.Else,
+            "while" => MatchingKeywordKind.While,
+            "return" => MatchingKeywordKind.Return,
+            "public" => MatchingKeywordKind.Public,
+            "private" => MatchingKeywordKind.Private,
+            "internal" => MatchingKeywordKind.Internal,
+            "extern" => MatchingKeywordKind.Extern,
+            "protected" => MatchingKeywordKind.Protected,
+            "sealed" => MatchingKeywordKind.Sealed,
+            "namespace" => MatchingKeywordKind.Namespace,
+            "struct" => MatchingKeywordKind.Struct,
+            "class" => MatchingKeywordKind.Class,
+            "enum" => MatchingKeywordKind.Enum,
+            "union" => MatchingKeywordKind.Union,
+            "interface" => MatchingKeywordKind.Interface,
+            "static" => MatchingKeywordKind.Static,
+            "for" => MatchingKeywordKind.For,
+            "new" => MatchingKeywordKind.New,
+            "put" => MatchingKeywordKind.Put,
+            "cons" => MatchingKeywordKind.Const,
+            _ => MatchingKeywordKind.None,
+        };
     }
 }

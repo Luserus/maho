@@ -6,7 +6,7 @@ namespace Maho.Syntax;
 internal sealed partial class Parser
 {
     private TopLevel ParseTopLevelDeclaration()
-    {
+    {   
         var modifiers = ParseModifiers();
 
         if (CurrentTokenIsTypeDeclarationStart)
@@ -15,16 +15,58 @@ internal sealed partial class Parser
             return ParseTopLevelVariableDeclarationOrFunction(modifiers);
     }
 
+    private NamespaceDeclaration ParseNamespaceDeclaration()
+    {
+        var keyword = Consume();
+        var name = ParseNamedSyntax();
+        var body = ParseNamespaceBody();
+
+        return new NamespaceDeclaration(keyword, name, body);
+    }
+
+    private NamespaceBody ParseNamespaceBody()
+    {
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+            return new NamespaceEmptyBody(Consume());
+        else
+            return ParseNamespaceBlockBody();
+    }
+
+    private NamespaceBlockBody ParseNamespaceBlockBody()
+    {
+        var members = new List<TopLevel>();
+        var openBrace = Consume();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var member = ParseTopLevel();
+            members.Add(member);
+        }
+
+        Token closeBrace;
+
+        if (CurrentToken.Kind is not TokenKind.RightBrace)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, "}");
+            closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            closeBrace = Consume();
+
+        return new NamespaceBlockBody(openBrace, members, closeBrace);
+    }
+
     private TypeDeclaration ParseType(IReadOnlyList<Token> modifiers)
     {
         var keyword = Consume();
 
-        var kind = keyword.Value switch
+        var kind = keyword.MatchingKind switch
         {
-            "class" => TypeKind.Class,
-            "struct" => TypeKind.Struct,
-            "interface" => TypeKind.Interface,
-            "enum" => TypeKind.Enum,
+            MatchingKeywordKind.Class => TypeKind.Class,
+            MatchingKeywordKind.Struct => TypeKind.Struct,
+            MatchingKeywordKind.Interface => TypeKind.Interface,
+            MatchingKeywordKind.Enum => TypeKind.Enum,
+            MatchingKeywordKind.Union => TypeKind.Union,
             _ => throw new System.Exception($"Impossible default case.")
         };
 
@@ -386,19 +428,30 @@ internal sealed partial class Parser
         var type = ParsePrimaryType();
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
-            return ParseModifiedType(type);
-        else
-            return type;
+            type = ParseModifiedType(type);
+
+        if (CurrentToken.Kind is TokenKind.Dot)
+            type = ParseQualifiedType(type);
+
+        return type;
     }
 
     private TypeSyntax ParsePrimaryType()
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
             return ParseGenericType(identifier);
         else
             return new SimpleType(identifier);
+    }
+
+    private QualifiedType ParseQualifiedType(TypeSyntax firstPart)
+    {
+        var dot = Consume();
+        var next = ParseTypeSyntax();
+
+        return new QualifiedType(firstPart, dot, next);
     }
 
     private GenericType ParseGenericType(Token identifier)
@@ -408,7 +461,7 @@ internal sealed partial class Parser
         return new GenericType(identifier, lessThan, typeArguments, GreaterThan);
     }
 
-    private ModifiedType ParseModifiedType(TypeSyntax baseType)
+    private TypeSyntax ParseModifiedType(TypeSyntax baseType)
     {
         TypeSyntax type = baseType;
 
@@ -426,7 +479,7 @@ internal sealed partial class Parser
             type = new ModifiedType(type, modifier);
         }
 
-        return (ModifiedType)type;
+        return type;
     }
 
     private ArrayTypeModifier ParseArrayTypeModifier()
@@ -474,23 +527,8 @@ internal sealed partial class Parser
     {
         var list = new List<Token>();
 
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            switch (CurrentToken.Value)
-            {
-                case "private":
-                case "protected":
-                case "internal":
-                case "public":
-                case "static":
-                case "sealed":
-                    list.Add(Consume());
-                    break;
-
-                default:
-                    return list;
-            }
-        }
+        while (CurrentTokenIsModifier)
+            list.Add(Consume());
 
         return list;
     }
@@ -499,7 +537,7 @@ internal sealed partial class Parser
     {
         Token name = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericName())
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters().Success)
             return ParseGenericName(name);
         else
             return new SimpleName(name);

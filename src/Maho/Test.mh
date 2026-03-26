@@ -1,0 +1,10 @@
+static void Test()
+{
+    int x = 10;
+    int y = (int)Input();
+
+    if (x == y)
+        Print(x);
+    else
+        return;
+}

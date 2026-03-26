@@ -12,8 +12,6 @@ internal readonly struct SeparatedSyntaxList<T> : IEnumerable<T> where T : Synta
 
     public int Count => NodesAndSeparators.Count(n => n is T);
 
-    public IReadOnlyList<SyntaxNode> NodesWithSeparators => NodesAndSeparators;
-
     public T this[int index] => (T)NodesAndSeparators[index * 2];
 
     public Token? GetSeparator(int index)

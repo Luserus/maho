@@ -11,10 +11,12 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (CurrentToken.Value == "if")
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                     return ParseTopLevelIfStatement();
-                else if (CurrentToken.Value == "while")
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                     return ParseTopLevelWhileStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                    return ParseTopLevelReturnStatement();
                 break;
 
             case TokenKind.Semicolon:
@@ -75,7 +77,7 @@ internal sealed partial class Parser
 
         TopLevelElseStatement? elseStatement = null;
 
-        if (CurrentToken.Value == "else")
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
         {
             var elseKeyword = Consume();
             var elseStmt = ParseTopLevelStatement();
@@ -122,6 +124,13 @@ internal sealed partial class Parser
         return new TopLevelBlockStatement(openBrace, locals, closeBrace);
     }
 
+    private TopLevelReturnStatement ParseTopLevelReturnStatement()
+    {
+        var statement = ParseReturnStatement();
+
+        return new TopLevelReturnStatement(statement);
+    }
+
     /// <summary> Parses a local statement. </summary>
     /// <returns> The statement node. </returns>
     private LocalStatement ParseLocalStatement(StatementParseMode parseMode = StatementParseMode.Normal)
@@ -132,10 +141,14 @@ internal sealed partial class Parser
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
+                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                             return ParseLocalIfStatement();
-                        else if (CurrentToken.Value == "while")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                             return ParseLocalWhileStatement();
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                            return ParseLocalReturnStatement();
+                        else if (LooksLikeVariableDeclaration().Success)
+                            return ParseLocalVariableDeclarationStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -151,10 +164,14 @@ internal sealed partial class Parser
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
-                        if (CurrentToken.Value == "if")
+                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
                             return ParseLocalIfStatement();
-                        else if (CurrentToken.Value == "while")
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
                             return ParseLocalWhileStatement();
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                            return ParseLocalReturnStatement();
+                        else if (LooksLikeVariableDeclaration().Success)
+                            return ParseLocalVariableDeclarationStatement();
                         break;
 
                     case TokenKind.Semicolon:
@@ -237,7 +254,7 @@ internal sealed partial class Parser
 
         LocalElseStatement? elseStatement = null;
 
-        if (CurrentToken.Value == "else")
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
         {
             var elseKeyword = Consume();
             var elseStmt = ParseLocalStatement();
@@ -282,5 +299,34 @@ internal sealed partial class Parser
         var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
 
         return new LocalBlockStatement(openBrace, locals, closeBrace);
+    }
+
+
+    private LocalReturnStatement ParseLocalReturnStatement()
+    {
+        var statement = ParseReturnStatement();
+
+        return new LocalReturnStatement(statement);
+    }
+
+    private ReturnStatement ParseReturnStatement()
+    {
+        var returnKeyword = Consume();
+        Expression? expression = null;
+
+        if (CurrentToken.Kind is not TokenKind.Semicolon)
+            expression = ParseExpression();
+
+        Token semicolon;
+
+        if (CurrentToken.Kind is not TokenKind.Semicolon)
+        {
+            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
+            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+        }
+        else
+            semicolon = Consume();
+
+        return new ReturnStatement(returnKeyword, expression, semicolon);
     }
 }
