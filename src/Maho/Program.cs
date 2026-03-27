@@ -3,7 +3,7 @@ using Maho.Diagnostics;
 using Maho.Syntax;
 using Maho.Text;
 
-SourceFile file = new SourceFile("/home/luserus/SoftwareDev/Systems/Compiler/maho/src/Maho/Test.mh");
+SourceFile file = new SourceFile("maho/src/Maho/Test.mh");
 SourceText text = new SourceText(file);
 DiagnosticsManager diagnosticsManager = new();
 

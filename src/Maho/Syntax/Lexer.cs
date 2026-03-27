@@ -1,11 +1,13 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Text;
 using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-internal sealed partial class Lexer
+internal sealed class Lexer
 {
     private readonly DiagnosticsManager diagnostics;
     /// <summary> Current index of char being read from the program string. </summary>
@@ -80,8 +82,36 @@ internal sealed partial class Lexer
         }
         else if (IsOperator(CurrentChar) is (true, var opKind))
         {
-            kind = opKind;
             current++;
+
+            if (opKind is TokenKind.SingleQuote)
+            {
+                kind = TokenKind.Char;
+
+                while (CurrentChar != '\'')
+                    current++;
+                
+                current++;
+            }
+            else if (opKind is TokenKind.DoubleQuote)
+            {
+                kind = TokenKind.String;
+
+                while (CurrentChar != '"')
+                    current++;
+
+                current++;
+            }
+            else if (opKind is TokenKind.Dot && kind is not TokenKind.Identifier and not TokenKind.String and not TokenKind.Char and not TokenKind.Float)
+            {
+                kind = TokenKind.Float;
+                current++;
+
+                while (char.IsAsciiDigit(Peek(0)))
+                    current++;
+            }
+            else
+                kind = opKind;
         }
         else
         {
@@ -171,5 +201,71 @@ internal sealed partial class Lexer
             "cons" => MatchingKeywordKind.Const,
             _ => MatchingKeywordKind.None,
         };
+    }
+
+    /// <summary> Returns the corresponding enum for the given operator character. Returns NullToken if no operator matches. </summary>
+    /// <param name="ch"> The character to check against. </param>
+    private static (bool, TokenKind) IsOperator(char ch)
+    {
+        return ch switch
+        {
+            '!' => (true, TokenKind.ExclamationMark),
+            '"' => (true, TokenKind.DoubleQuote),
+            '#' => (true, TokenKind.Octothorpe),
+            '%' => (true, TokenKind.Percentage),
+            '&' => (true, TokenKind.Ampersand),
+            '\'' => (true, TokenKind.SingleQuote),
+            '(' => (true, TokenKind.LeftParen),
+            ')' => (true, TokenKind.RightParen),
+            '*' => (true, TokenKind.Asterisk),
+            '+' => (true, TokenKind.Plus),
+            ',' => (true, TokenKind.Comma),
+            '-' => (true, TokenKind.Minus),
+            '.' => (true, TokenKind.Dot),
+            '/' => (true, TokenKind.ForwardSlash),
+            ':' => (true, TokenKind.Colon),
+            ';' => (true, TokenKind.Semicolon),
+            '<' => (true, TokenKind.LessThanSign),
+            '=' => (true, TokenKind.Equals),
+            '>' => (true, TokenKind.GreaterThanSign),
+            '?' => (true, TokenKind.QuestionMark),
+            '@' => (true, TokenKind.AtSymbol),
+            '[' => (true, TokenKind.LeftBracket),
+            '\\' => (true, TokenKind.BackwardSlash),
+            ']' => (true, TokenKind.RightBracket),
+            '^' => (true, TokenKind.Caret),
+            '`' => (true, TokenKind.Backtick),
+            '{' => (true, TokenKind.LeftBrace),
+            '}' => (true, TokenKind.RightBrace),
+            '~' => (true, TokenKind.Tilde),
+            _ => (false, TokenKind.NullToken)
+        };
+    }
+
+    /// <summary> Peek ahead in the program string by specified offset. </summary>
+    /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>
+    /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private char Peek(int offset = 1) => current + offset < text.Length ? text[current + offset] : '\0';
+
+    /// <summary> Gets all the tokens as string in json form. </summary>
+    /// <returns> Tokens in string form. </returns>
+    public override string ToString()
+    {
+        StringBuilder sb = new();
+
+        sb.AppendLine("Lexed Tokens:\n");
+
+        foreach (var token in Tokens)
+        {
+            sb.AppendLine("Token");
+            sb.AppendLine("{");
+            sb.AppendLine($"    Value: \"{token.Value}\",");
+            sb.AppendLine($"    Kind: {token.Kind}\n");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 }

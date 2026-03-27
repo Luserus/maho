@@ -1,10 +1,11 @@
-static void Test()
-{
-    int x = 10;
-    int y = (int)Input();
+namespace Test;
 
-    if (x == y)
-        Print(x);
-    else
-        return;
+public static int Main(int argc, char*[] argv)
+{
+    Collections.Dictionary<int, char*> dict = [];
+    dict[10] = "nice";
+    float f = .1;
+    f = f + 0.2;
+
+    return 0;
 }
