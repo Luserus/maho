@@ -89,7 +89,10 @@ internal sealed class Lexer
                 kind = TokenKind.Char;
 
                 while (CurrentChar != '\'')
-                    current++;
+                    if (CurrentChar is '\n' or '\r')
+                        break;
+                    else
+                        current++;
                 
                 current++;
             }
@@ -98,7 +101,10 @@ internal sealed class Lexer
                 kind = TokenKind.String;
 
                 while (CurrentChar != '"')
-                    current++;
+                    if (CurrentChar is '\n' or '\r')
+                        break;
+                    else
+                        current++;
 
                 current++;
             }
@@ -108,6 +114,11 @@ internal sealed class Lexer
                 current++;
 
                 while (char.IsAsciiDigit(Peek(0)))
+                    current++;
+            }
+            else if (opKind is TokenKind.BackwardSlash && kind is TokenKind.String or TokenKind.Char)
+            {
+                if (CurrentChar is '"' or '\'')
                     current++;
             }
             else
