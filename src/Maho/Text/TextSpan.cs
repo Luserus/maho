@@ -31,6 +31,8 @@ internal readonly struct TextSpan
     public int GetStartColumn(SourceText sourceText)
     {
         var lineIndex = sourceText.GetLineIndex(Start);
+        // Columns stay relative to the containing line so the same absolute offset can be rendered
+        // consistently in diagnostics and debug payloads.
         var line = sourceText.Lines[lineIndex];
         return Start - line.Start;
     }
@@ -42,6 +44,8 @@ internal readonly struct TextSpan
     public int GetEndColumn(SourceText sourceText)
     {
         var lineIndex = sourceText.GetLineIndex(End);
+        // End positions are treated as exclusive offsets, so this computes the column immediately
+        // after the highlighted span.
         var line = sourceText.Lines[lineIndex];
         return End - line.Start;
     }
