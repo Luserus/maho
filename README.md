@@ -65,6 +65,8 @@ Supported flags:
 - `-a`, `--all`: print both debug views.
 - `--progress`: show per-file analysis progress on `stderr`.
 - `-o`, `--output <path>`: write the requested debug views as JSON to a file.
+- `--diagnostics-output`: Write the final diagnostic report to the specified file.
+- `--diagnostics-format`: Use `text` (default) or `json` for diagnostics output.
 - `-h`, `--help`: print usage information.
 
 When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.

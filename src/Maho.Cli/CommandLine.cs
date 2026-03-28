@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace Maho.Cli;
@@ -23,6 +22,7 @@ internal static class CommandLine
         WriteIndented = true
     };
     private static readonly object statusLock = new();
+    private static bool pendingStatusSeparator;
 
     private enum DiagnosticOutputFormat : byte
     {
@@ -55,15 +55,15 @@ internal static class CommandLine
 
         public void ReportAnalyzing(string displayPath)
         {
-            int current = Interlocked.Increment(ref analyzedFiles);
-
             lock (statusLock)
             {
-                Console.Error.Write(Colorize($"[{current,2}/{TotalFiles,2}]", BrightBlack));
+                int current = ++analyzedFiles;
+                Console.Error.Write(Colorize($"[{current}/{TotalFiles}]", BrightBlack));
                 Console.Error.Write(" ");
                 Console.Error.Write(Colorize("analyzing", Cyan));
                 Console.Error.Write(" ");
                 Console.Error.WriteLine(Colorize(displayPath, Dim));
+                pendingStatusSeparator = true;
             }
         }
     }
@@ -140,6 +140,8 @@ internal static class CommandLine
         }
         else
         {
+            WriteStatusSeparatorIfNeeded();
+
             for (int i = 0; i < results.Length; i++)
             {
                 CompilerAnalysisResult? analysis = results[i].Analysis;
@@ -175,13 +177,18 @@ internal static class CommandLine
         }
         else if (!string.IsNullOrEmpty(diagnosticsOutput))
         {
+            WriteStatusSeparatorIfNeeded();
             Console.Out.Write(diagnosticsOutput);
         }
 
         if (!writeFailed)
         {
+            WriteStatusSeparatorIfNeeded();
+
             for (int i = 0; i < completionMessages.Count; i++)
                 WriteStatus(completionMessages[i]);
+
+            WriteStatusSeparatorIfNeeded();
         }
 
         return hasErrors || writeFailed ? 1 : 0;
@@ -586,7 +593,22 @@ internal static class CommandLine
     private static void WriteStatus(string message)
     {
         lock (statusLock)
+        {
             Console.Error.WriteLine(Colorize(message, BrightBlack));
+            pendingStatusSeparator = true;
+        }
+    }
+
+    private static void WriteStatusSeparatorIfNeeded()
+    {
+        lock (statusLock)
+        {
+            if (!pendingStatusSeparator)
+                return;
+
+            Console.Error.WriteLine();
+            pendingStatusSeparator = false;
+        }
     }
 
     private static string Colorize(string value, string color)
