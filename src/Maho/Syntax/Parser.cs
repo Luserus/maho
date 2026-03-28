@@ -184,6 +184,19 @@ internal sealed partial class Parser
             _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
         };
 
+    private MissingTokenAnchor GetClosingTokenAnchor()
+    {
+        if (current <= 0)
+            return MissingTokenAnchor.BeforeCurrent;
+
+        int currentLine = text.GetLineIndex(CurrentToken.Span.Start);
+        int previousLine = text.GetLineIndex(PreviousToken.Span.End);
+
+        return currentLine > previousLine
+            ? MissingTokenAnchor.AfterPrevious
+            : MissingTokenAnchor.BeforeCurrent;
+    }
+
     private void SynchronizeTo(params TokenKind[] stopKinds)
     {
         while (CurrentToken.Kind is not TokenKind.EndToken)
@@ -228,7 +241,13 @@ internal sealed partial class Parser
         if (CurrentToken.Kind == expectedKind)
             return Consume();
 
-        diagnostics.ReportExpectedToken(GetMissingTokenDiagnosticSpan(MissingTokenAnchor.BeforeCurrent), expectedText, GetTokenDisplay(CurrentToken), context);
+        // When the recovery token starts on a later line, anchor the missing closer at the end of
+        // the previous token so the insertion point stays on the line where the construct started.
+        MissingTokenAnchor anchor = GetClosingTokenAnchor();
+        TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(anchor);
+        int missingTokenPosition = GetMissingTokenPosition(anchor);
+
+        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context);
 
         if (!Contains(recoveryKinds, CurrentToken.Kind))
             SynchronizeTo([expectedKind, .. recoveryKinds]);
@@ -236,7 +255,7 @@ internal sealed partial class Parser
         if (CurrentToken.Kind == expectedKind)
             return Consume();
 
-        return CreateMissingTokenAt(GetMissingTokenPosition(MissingTokenAnchor.BeforeCurrent));
+        return CreateMissingTokenAt(missingTokenPosition);
     }
 
     private Token ExpectIdentifierToken(string? context = null)

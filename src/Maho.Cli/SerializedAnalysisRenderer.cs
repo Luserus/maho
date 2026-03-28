@@ -351,8 +351,15 @@ internal static class SerializedAnalysisRenderer
     private static void PrintDiagnosticContext(TextWriter writer, DiagnosticInfo diagnostic, SourceBuffer buffer, int startLineIndex, int endLineIndex, string accent, int endLineNumber, int endColumn, bool useColor)
     {
         int maxContextLines = 3;
+        bool showNextLineContext =
+            diagnostic.Span.Length == 0 &&
+            startLineIndex == endLineIndex &&
+            endLineIndex + 1 < buffer.Lines.Length &&
+            diagnostic.Span.Start == buffer.Lines[endLineIndex].End;
+
         int lastLineIndex = Math.Min(endLineIndex, startLineIndex + maxContextLines - 1);
-        int lineNumberWidth = Math.Max(2, (lastLineIndex + 1).ToString().Length);
+        int finalDisplayedLineIndex = showNextLineContext ? Math.Min(lastLineIndex + 1, buffer.Lines.Length - 1) : lastLineIndex;
+        int lineNumberWidth = Math.Max(2, (finalDisplayedLineIndex + 1).ToString().Length);
         string? tipIndent = null;
 
         for (int lineIndex = startLineIndex; lineIndex <= lastLineIndex; lineIndex++)
@@ -377,6 +384,27 @@ internal static class SerializedAnalysisRenderer
             // points at the same recovery site as the underline.
             if (lineIndex == startLineIndex)
                 tipIndent = markerIndent;
+        }
+
+        if (showNextLineContext)
+        {
+            SourceLine nextLine = buffer.Lines[endLineIndex + 1];
+            int nextLineNumber = endLineIndex + 2;
+            string renderedNextLine = nextLine.Text.Replace("\t", "    ");
+            string previewText = ClipLineForConnector(renderedNextLine, tipIndent?.Length ?? 0);
+
+            writer.Write(Colorize($"{nextLineNumber.ToString().PadLeft(lineNumberWidth)} | ", Dim, useColor));
+            writer.Write(previewText);
+
+            if (tipIndent is not null)
+            {
+                if (previewText.Length < tipIndent.Length)
+                    writer.Write(new string(' ', tipIndent.Length - previewText.Length));
+
+                writer.Write(Colorize("│", BrightBlack, useColor));
+            }
+
+            writer.WriteLine();
         }
 
         if (tipIndent is not null)
@@ -473,6 +501,17 @@ internal static class SerializedAnalysisRenderer
             return 1;
 
         return text.Substring(safeStart, safeWidth).Replace("\t", "    ").Length;
+    }
+
+    private static string ClipLineForConnector(string text, int connectorColumn)
+    {
+        if (connectorColumn <= 0 || text.Length < connectorColumn)
+            return text;
+
+        if (connectorColumn <= 3)
+            return new string('.', connectorColumn);
+
+        return text[..(connectorColumn - 3)] + "...";
     }
 
     /// <summary>
