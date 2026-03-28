@@ -1,0 +1,13 @@
+namespace Construction;
+
+public class Foo<T>;
+
+public static int Main()
+{
+    Foo<int> foo = new Foo<int>();
+    Foo<int> bar = put Foo<int>();
+    int[] buffer = new int[3];
+    int[] numbers = [1, 2, 3];
+    int chosen = if (1) { 10 } else 20;
+    return chosen;
+}

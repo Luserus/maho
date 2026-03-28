@@ -1,0 +1,7 @@
+public static int Main(char*[] argv)
+{
+    Collections.Dictionary<int, char*[] dict = [];
+    char*[] names = new char*[2][argv[0], ;
+    int?[] flags = [1, , 3];
+    return ;
+}

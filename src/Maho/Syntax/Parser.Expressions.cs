@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Text;
@@ -20,7 +21,7 @@ internal sealed partial class Parser
             // consume the prefix operator (combined)
             var opToken = ConsumeOperator();
             int rbp = prefixEntry.RightBindingPower;
-            var right = ParseExpression(rbp);
+            var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
             left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
         }
         else
@@ -33,16 +34,7 @@ internal sealed partial class Parser
             {
                 var leftParen = Consume();
                 var arguments = ParseExpressionArgumentList();
-
-                Token rightParen;
-
-                if (CurrentToken.Kind is not TokenKind.RightParen)
-                {
-                    diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-                    rightParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-                }
-                else
-                    rightParen = Consume();
+                var rightParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the argument list", TokenKind.Semicolon, TokenKind.RightBrace);
 
                 left = new CallExpression(left, leftParen, arguments, rightParen);
                 continue;
@@ -50,17 +42,8 @@ internal sealed partial class Parser
             else if (CurrentToken.Kind is TokenKind.LeftBracket)
             {
                 var leftBracket = Consume();
-                var index = ParseExpression();
-
-                Token rightBracket;
-
-                if (CurrentToken.Kind is not TokenKind.RightBracket)
-                {
-                    diagnostics.ReportMissingToken(CurrentToken.Span, "]");
-                    rightBracket = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-                }
-                else
-                    rightBracket = Consume();
+                var index = ParseExpectedExpression("for the index expression", MissingTokenAnchor.AfterPrevious);
+                var rightBracket = ExpectClosingToken(TokenKind.RightBracket, "']'", "to close the index expression", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightParen);
 
                 left = new IndexExpression(left, leftBracket, index, rightBracket);
                 continue;
@@ -68,14 +51,7 @@ internal sealed partial class Parser
             else if (CurrentToken.Kind is TokenKind.Dot)
             {
                 var dot = Consume();
-
-                if (CurrentToken.Kind is not TokenKind.Identifier)
-                {
-                    diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
-                    continue;
-                }
-
-                var identifier = Consume();
+                var identifier = ExpectIdentifierToken("after '.'");
                 left = new MemberAccessExpression(left, dot, identifier);
                 continue;
             }
@@ -113,7 +89,7 @@ internal sealed partial class Parser
                 // consume combined operator
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
-                var right = ParseExpression(rbp);
+                var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
 
                 if (opTok.Kind is TokenKind.Equals)
                     left = new AssignmentExpression(left, opTok, right);
@@ -136,15 +112,14 @@ internal sealed partial class Parser
         TokenKind.LeftParen => ParseParenthesizedOrCastExpression(),
         TokenKind.LeftBrace => ParseBlockExpression(),
         TokenKind.LeftBracket => ParseCollectionExpression(),
-
         TokenKind.Identifier => CurrentToken.MatchingKind switch
         {
             MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
             MatchingKeywordKind.If => ParseIfExpression(),
             _ => ParseNamedExpression()
         },
-
-        _ => ParseLiteralExpression()
+        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String => ParseLiteralExpression(),
+        _ => CreateMissingExpression()
     };
 
     /// <summary> Parses a literal expression. </summary>
@@ -180,16 +155,8 @@ internal sealed partial class Parser
     private ParenthesizedExpression ParseParenthesizedExpression()
     {
         var leftParen = Consume(); // consume '('
-        var expression = ParseExpression();
-        Token rightParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "')'");
-            rightParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            rightParen = Consume();
+        var expression = ParseExpectedExpression("inside the parenthesized expression", MissingTokenAnchor.AfterPrevious);
+        var rightParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the parenthesized expression", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightBracket);
 
         return new ParenthesizedExpression(leftParen, expression, rightParen);
     }
@@ -198,9 +165,8 @@ internal sealed partial class Parser
     {
         var leftParen = Consume();
         var type = ParseTypeSyntax();
-        var rightParen = Consume();
-
-        var expression = ParseExpression();
+        var rightParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the cast type", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightBracket);
+        var expression = ParseExpectedExpression("after the cast", MissingTokenAnchor.AfterPrevious);
 
         return new CastExpression(leftParen, type, rightParen, expression);
     }
@@ -208,36 +174,17 @@ internal sealed partial class Parser
     private IfExpression ParseIfExpression()
     {
         var ifKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
-
-        var thenExpression = ParseExpression();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
+        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'if' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var thenExpression = ParseExpectedExpression("for the 'if' then-expression", MissingTokenAnchor.AfterPrevious);
 
         ElseExpression? elseExpression = null;
 
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
         {
             var elseKeyword = Consume();
-            var elseExpr = ParseExpression();
+            var elseExpr = ParseExpectedExpression("for the 'else' expression", MissingTokenAnchor.AfterPrevious);
             elseExpression = new ElseExpression(elseKeyword, elseExpr);
         }
 
@@ -255,6 +202,7 @@ internal sealed partial class Parser
             case true:
                 while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
                 {
+                    var start = current;
                     var local = ParseLocal(StatementParseMode.AllowFinalExpression);
 
                     if (local is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
@@ -264,27 +212,21 @@ internal sealed partial class Parser
                     }
 
                     locals.Add(local);
+                    RecoverLocalIfStalled(start);
                 }
                 break;
 
             case false:
                 while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
                 {
+                    var start = current;
                     var local = ParseLocal(StatementParseMode.Normal);
                     locals.Add(local);
+                    RecoverLocalIfStalled(start);
                 }
                 break;
         }
-
-        Token closeBrace;
-
-        if (CurrentToken.Kind is not TokenKind.RightBrace)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "}");
-            closeBrace = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeBrace = Consume();
+        var closeBrace = ExpectClosingToken(TokenKind.RightBrace, "'}'", "to close the block");
 
         return (openBrace, locals, finalExpression, closeBrace);
     }
@@ -300,16 +242,7 @@ internal sealed partial class Parser
     {
         var leftBracket = Consume();
         var expressions = ParseExpressionList();
-
-        Token rightBracket;
-
-        if (CurrentToken.Kind is not TokenKind.RightBracket)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "]");
-            rightBracket = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            rightBracket = Consume();
+        var rightBracket = ExpectClosingToken(TokenKind.RightBracket, "']'", "to close the collection expression", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightParen);
 
         return new CollectionExpression(leftBracket, expressions, rightBracket);
     }
@@ -321,7 +254,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightBracket and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseExpression());
+            nodesAndSeparators.Add(ParseExpectedExpression("in the collection expression", MissingTokenAnchor.AfterPrevious));
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -334,7 +267,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the collection expression");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
@@ -347,7 +280,7 @@ internal sealed partial class Parser
         {
             MatchingKeywordKind.New => ObjectCreationKind.New,
             MatchingKeywordKind.Put => ObjectCreationKind.Put,
-            _ => throw new System.Exception("Impossible case: keyword is guaranteed to be 'new' or 'put' from parent function.")
+            _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled object creation keyword.")
         };
 
         var type = ParseTypeSyntax();
@@ -362,28 +295,10 @@ internal sealed partial class Parser
 
             return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer);
         }
-
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", $"after '{keyword.Value}'");
 
         var arguments = ParseExpressionArgumentList();
-
-        Token closeParen;
-        
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the argument list", TokenKind.Semicolon, TokenKind.RightBrace);
 
         return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen);
     }
@@ -395,7 +310,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseExpression());
+            nodesAndSeparators.Add(ParseExpectedExpression("in the argument list", MissingTokenAnchor.AfterPrevious));
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -408,7 +323,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the argument list");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }

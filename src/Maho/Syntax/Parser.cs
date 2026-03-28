@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -95,6 +96,7 @@ internal sealed partial class Parser
     private int current;
     /// <summary> Current Token being read from the token list. </summary>
     private Token CurrentToken => tokens[current];
+    private Token PreviousToken => current > 0 ? tokens[current - 1] : tokens[0];
 
     public CompilationUnit Root { get; private set; } = null!;
 
@@ -106,6 +108,12 @@ internal sealed partial class Parser
     {
         Normal,
         AllowFinalExpression
+    }
+
+    private enum MissingTokenAnchor : byte
+    {
+        BeforeCurrent,
+        AfterPrevious
     }
 
     static Parser() => operatorTrie = BuildOperatorTrie();
@@ -120,11 +128,213 @@ internal sealed partial class Parser
     /// <param name="tokens"> The tokens to parse. </param>
     public void Parse(List<Token> tokens)
     {
-        this.tokens = tokens;
+        this.tokens = FilterTokens(tokens);
         current = default;
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
+    }
+
+    private List<Token> FilterTokens(List<Token> sourceTokens)
+    {
+        List<Token> filtered = new(sourceTokens.Count);
+
+        foreach (var token in sourceTokens)
+        {
+            if (token.Kind is TokenKind.BadToken)
+                continue;
+
+            filtered.Add(token);
+        }
+
+        return filtered;
+    }
+
+    private static bool IsLiteralTokenKind(TokenKind kind) =>
+        kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String;
+
+    private static bool IsRecoveryBoundary(TokenKind kind) =>
+        kind is TokenKind.EndToken or TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.Semicolon or TokenKind.Comma;
+
+    private string GetTokenDisplay(Token token) => token.Kind switch
+    {
+        TokenKind.EndToken => "<end of file>",
+        TokenKind.MissingToken => "<missing>",
+        _ when string.IsNullOrEmpty(token.Value) => $"<{token.Kind}>",
+        _ => token.Value
+    };
+
+    private Token CreateMissingToken() => CreateMissingTokenAt(CurrentToken.Span.Start);
+
+    private Token CreateMissingTokenAt(int position) => new(text, new TextSpan(position, 0), TokenKind.MissingToken, [], []);
+
+    private TextSpan GetMissingTokenDiagnosticSpan(MissingTokenAnchor anchor) =>
+        anchor switch
+        {
+            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span,
+            MissingTokenAnchor.AfterPrevious => new TextSpan(PreviousToken.Span.End, 0),
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
+        };
+
+    private int GetMissingTokenPosition(MissingTokenAnchor anchor) =>
+        anchor switch
+        {
+            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span.Start,
+            MissingTokenAnchor.AfterPrevious => PreviousToken.Span.End,
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
+        };
+
+    private void SynchronizeTo(params TokenKind[] stopKinds)
+    {
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            if (Contains(stopKinds, CurrentToken.Kind))
+                break;
+
+            Consume();
+        }
+    }
+
+    private static bool Contains(TokenKind[] kinds, TokenKind kind)
+    {
+        for (int i = 0; i < kinds.Length; i++)
+        {
+            if (kinds[i] == kind)
+                return true;
+        }
+
+        return false;
+    }
+
+    private Token RecoverWithMissingToken()
+    {
+        if (!IsRecoveryBoundary(CurrentToken.Kind))
+            Consume();
+
+        return CreateMissingToken();
+    }
+
+    private Token ExpectToken(TokenKind expectedKind, string expectedText, string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
+    {
+        if (CurrentToken.Kind is var currentKind && currentKind == expectedKind)
+            return Consume();
+
+        diagnostics.ReportExpectedToken(GetMissingTokenDiagnosticSpan(anchor), expectedText, GetTokenDisplay(CurrentToken), context);
+        return CreateMissingTokenAt(GetMissingTokenPosition(anchor));
+    }
+
+    private Token ExpectClosingToken(TokenKind expectedKind, string expectedText, string? context = null, params TokenKind[] recoveryKinds)
+    {
+        if (CurrentToken.Kind == expectedKind)
+            return Consume();
+
+        diagnostics.ReportExpectedToken(GetMissingTokenDiagnosticSpan(MissingTokenAnchor.BeforeCurrent), expectedText, GetTokenDisplay(CurrentToken), context);
+
+        if (!Contains(recoveryKinds, CurrentToken.Kind))
+            SynchronizeTo([expectedKind, .. recoveryKinds]);
+
+        if (CurrentToken.Kind == expectedKind)
+            return Consume();
+
+        return CreateMissingTokenAt(GetMissingTokenPosition(MissingTokenAnchor.BeforeCurrent));
+    }
+
+    private Token ExpectIdentifierToken(string? context = null)
+    {
+        if (CurrentToken.Kind is TokenKind.Identifier)
+            return Consume();
+
+        diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), context);
+        return RecoverWithMissingToken();
+    }
+
+    private bool CanStartExpression()
+    {
+        if (CurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
+            return true;
+
+        if (IsLiteralTokenKind(CurrentToken.Kind))
+            return true;
+
+        var (kind, length) = GetCombinedOperatorData();
+        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix;
+    }
+
+    private Expression CreateMissingExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
+    {
+        diagnostics.ReportExpectedExpression(GetMissingTokenDiagnosticSpan(anchor), GetTokenDisplay(CurrentToken), context);
+
+        if (anchor is MissingTokenAnchor.BeforeCurrent)
+            return new LiteralExpression(RecoverWithMissingToken());
+
+        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(anchor)));
+    }
+
+    private Expression ParseExpectedExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent) =>
+        CanStartExpression() ? ParseExpression() : CreateMissingExpression(context, anchor);
+
+    private bool CanStartTopLevelConstruct() =>
+        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
+        CurrentToken.MatchingKind is MatchingKeywordKind.Namespace ||
+        CurrentTokenIsModifier ||
+        CanStartExpression();
+
+    private bool CanStartMemberConstruct() =>
+        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
+        CurrentTokenIsModifier ||
+        CurrentTokenIsTypeDeclarationStart ||
+        CurrentToken.Kind is TokenKind.Identifier;
+
+    private bool CanStartLocalConstruct() =>
+        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
+        CurrentTokenIsModifier ||
+        CanStartExpression();
+
+    private void SynchronizeConstruct(System.Func<bool> isRecoveryPoint)
+    {
+        if (CurrentToken.Kind is TokenKind.EndToken)
+            return;
+
+        Consume();
+
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            if (CurrentToken.Kind is TokenKind.RightBrace)
+                return;
+
+            if (CurrentToken.Kind is TokenKind.Semicolon)
+            {
+                Consume();
+                return;
+            }
+
+            if (isRecoveryPoint())
+                return;
+
+            Consume();
+        }
+    }
+
+    private void SynchronizeTopLevel() => SynchronizeConstruct(CanStartTopLevelConstruct);
+    private void SynchronizeMember() => SynchronizeConstruct(CanStartMemberConstruct);
+    private void SynchronizeLocal() => SynchronizeConstruct(CanStartLocalConstruct);
+
+    private void RecoverTopLevelIfStalled(int start)
+    {
+        if (current == start)
+            SynchronizeTopLevel();
+    }
+
+    private void RecoverMemberIfStalled(int start)
+    {
+        if (current == start)
+            SynchronizeMember();
+    }
+
+    private void RecoverLocalIfStalled(int start)
+    {
+        if (current == start)
+            SynchronizeLocal();
     }
 
     private CompilationUnit ParseCompilationUnit()
@@ -133,8 +343,10 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
+            var start = current;
             var topLevel = ParseTopLevel();
             topLevels.Add(topLevel);
+            RecoverTopLevelIfStalled(start);
         }
 
         var eofToken = Consume();
@@ -199,12 +411,6 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            if (CurrentToken.Kind is not TokenKind.Identifier)
-            {
-                diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
-                break;
-            }
-
             nodesAndSeparators.Add(ParseTypeSyntax());
             wasCommaLast = false;
 
@@ -218,7 +424,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportUnexpectedToken(CurrentToken.Span, CurrentToken.Value);
+            diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type argument list");
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
@@ -227,16 +433,7 @@ internal sealed partial class Parser
     {
         var lessThan = Consume();
         var typeArguments = ParseTypeArgumentList();
-
-        Token greaterThan;
-
-        if (CurrentToken.Kind is not TokenKind.GreaterThanSign)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ">");
-            greaterThan = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            greaterThan = Consume();
+        var greaterThan = ExpectClosingToken(TokenKind.GreaterThanSign, "'>'", "to close the generic argument list", TokenKind.RightParen, TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.Comma);
 
         return (lessThan, typeArguments, greaterThan);
     }

@@ -1,0 +1,15 @@
+public static int Broken(int argc, char*[] argv
+{
+    call(1, 2, ;
+    if (argc {
+        value = foo(1 2 3;
+    }
+    Collections.Dictionary<int, char*> dict = new Collections.Dictionary<int, char*>(;
+    int[] values = new int[2][1, , 2;
+    return 0
+}
+
+public static int Next()
+{
+    return 1;
+}

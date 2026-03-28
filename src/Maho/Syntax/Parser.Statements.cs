@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using Maho.Text;
@@ -34,16 +35,8 @@ internal sealed partial class Parser
 
     private TopLevelExpressionStatement ParseTopLevelExpressionStatement()
     {
-        var expression = ParseExpression();
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            semicolon = Consume();
+        var expression = ParseExpectedExpression("for the top-level statement");
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the top-level expression", MissingTokenAnchor.AfterPrevious);
 
         return new TopLevelExpressionStatement(expression, semicolon);
     }
@@ -51,27 +44,9 @@ internal sealed partial class Parser
     private TopLevelIfStatement ParseTopLevelIfStatement()
     {
         var ifKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
+        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'if' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
 
         var thenStatement = ParseTopLevelStatement();
 
@@ -90,27 +65,9 @@ internal sealed partial class Parser
     private TopLevelWhileStatement ParseTopLevelWhileStatement()
     {
         var whileKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
+        var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'while' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
 
         var body = ParseTopLevelStatement();
 
@@ -137,7 +94,7 @@ internal sealed partial class Parser
     {
         switch (parseMode)
         {
-            default:
+            case StatementParseMode.Normal:
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
@@ -179,6 +136,9 @@ internal sealed partial class Parser
                 }
 
                 return ParseLocalExpressionStatement(allowFinalExpression: true);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(parseMode), parseMode, "Unhandled statement parse mode.");
         }
     }
 
@@ -190,16 +150,15 @@ internal sealed partial class Parser
     /// <returns> The local expression statement node. </returns>
     private LocalExpressionStatement ParseLocalExpressionStatement(bool allowFinalExpression)
     {
-        var expression = ParseExpression();
+        var expression = ParseExpectedExpression("for the local statement");
         Token semicolon;
 
         if (CurrentToken.Kind is not TokenKind.Semicolon && !allowFinalExpression)
         {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
+            semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local expression", MissingTokenAnchor.AfterPrevious);
         }
         else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []); // Fabricated semicolon
+            semicolon = CreateMissingToken(); // Fabricated semicolon
         else
             semicolon = Consume();
 
@@ -211,16 +170,7 @@ internal sealed partial class Parser
     private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
     {
         var variableDeclaration = ParseVariableDeclaration(modifiers, type, firstIdentifier);
-
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            semicolon = Consume();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local variable declaration", MissingTokenAnchor.AfterPrevious);
 
         return new LocalVariableDeclarationStatement(variableDeclaration, semicolon);
     }
@@ -228,27 +178,9 @@ internal sealed partial class Parser
     private LocalIfStatement ParseLocalIfStatement()
     {
         var ifKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
+        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'if' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
 
         var thenStatement = ParseLocalStatement();
 
@@ -267,27 +199,9 @@ internal sealed partial class Parser
     private LocalWhileStatement ParseLocalWhileStatement()
     {
         var whileKeyword = Consume();
-        Token openParen;
-
-        if (CurrentToken.Kind is not TokenKind.LeftParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, "(");
-            openParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            openParen = Consume();
-
-        var condition = ParseExpression();
-
-        Token closeParen;
-
-        if (CurrentToken.Kind is not TokenKind.RightParen)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ")");
-            closeParen = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            closeParen = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
+        var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'while' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
 
         var body = ParseLocalStatement();
 
@@ -315,17 +229,9 @@ internal sealed partial class Parser
         Expression? expression = null;
 
         if (CurrentToken.Kind is not TokenKind.Semicolon)
-            expression = ParseExpression();
+            expression = ParseExpectedExpression("after 'return'", MissingTokenAnchor.AfterPrevious);
 
-        Token semicolon;
-
-        if (CurrentToken.Kind is not TokenKind.Semicolon)
-        {
-            diagnostics.ReportMissingToken(CurrentToken.Span, ";");
-            semicolon = new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []);
-        }
-        else
-            semicolon = Consume();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the return statement", MissingTokenAnchor.AfterPrevious);
 
         return new ReturnStatement(returnKeyword, expression, semicolon);
     }

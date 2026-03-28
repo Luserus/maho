@@ -1,13 +1,12 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-internal sealed class Lexer
+internal sealed partial class Lexer
 {
     private readonly DiagnosticsManager diagnostics;
     /// <summary> Current index of char being read from the program string. </summary>
@@ -18,7 +17,7 @@ internal sealed class Lexer
     private char CurrentChar => current >= text.Length ? '\0' : text[current];
 
     /// <summary> Tokens lexed by the Lexer. </summary>
-    public List<Token> Tokens { get; } = new(256);
+    public List<Token> Tokens { get; } = new List<Token>(256);
 
     /// <summary> Initializes a new instance of the Lexer class. </summary>
     /// <param name="sourceText"> Source text of the program. </param>
@@ -82,33 +81,11 @@ internal sealed class Lexer
         }
         else if (IsOperator(CurrentChar) is (true, var opKind))
         {
-            current++;
-
             if (opKind is TokenKind.SingleQuote)
-            {
-                kind = TokenKind.Char;
-
-                while (CurrentChar != '\'')
-                    if (CurrentChar is '\n' or '\r')
-                        break;
-                    else
-                        current++;
-                
-                current++;
-            }
+                return LexQuotedLiteral(start, '\'', TokenKind.Char);
             else if (opKind is TokenKind.DoubleQuote)
-            {
-                kind = TokenKind.String;
-
-                while (CurrentChar != '"')
-                    if (CurrentChar is '\n' or '\r')
-                        break;
-                    else
-                        current++;
-
-                current++;
-            }
-            else if (opKind is TokenKind.Dot && kind is not TokenKind.Identifier and not TokenKind.String and not TokenKind.Char and not TokenKind.Float)
+                return LexQuotedLiteral(start, '"', TokenKind.String);
+            else if (opKind is TokenKind.Dot && char.IsAsciiDigit(Peek()))
             {
                 kind = TokenKind.Float;
                 current++;
@@ -116,23 +93,88 @@ internal sealed class Lexer
                 while (char.IsAsciiDigit(Peek(0)))
                     current++;
             }
-            else if (opKind is TokenKind.BackwardSlash && kind is TokenKind.String or TokenKind.Char)
-            {
-                if (CurrentChar is '"' or '\'')
-                    current++;
-            }
             else
+            {
                 kind = opKind;
+                current++;
+            }
         }
         else
         {
             kind = TokenKind.BadToken;
+            diagnostics.ReportBadToken(new TextSpan(start, 1), text.ToString(new TextSpan(start, 1)));
             current++;
         }
 
         TextSpan span = new(start, current - start);
 
         return (span, kind);
+    }
+
+    private (TextSpan Span, TokenKind Kind) LexQuotedLiteral(int start, char terminator, TokenKind tokenKind)
+    {
+        kind = tokenKind;
+        current++; // opening quote
+        int characterCount = 0;
+
+        while (true)
+        {
+            if (CurrentChar == '\0')
+            {
+                ReportUnterminatedLiteral(start, tokenKind);
+                return (new TextSpan(start, current - start), tokenKind);
+            }
+
+            if (CurrentChar is '\r' or '\n')
+            {
+                ReportUnterminatedLiteral(start, tokenKind);
+                return (new TextSpan(start, current - start), tokenKind);
+            }
+
+            if (CurrentChar == terminator)
+            {
+                current++;
+
+                if (tokenKind is TokenKind.Char)
+                    ReportCharacterLiteralLength(start, characterCount);
+
+                return (new TextSpan(start, current - start), tokenKind);
+            }
+
+            if (CurrentChar == '\\')
+            {
+                current++;
+
+                if (CurrentChar == '\0' || CurrentChar is '\r' or '\n')
+                {
+                    ReportUnterminatedLiteral(start, tokenKind);
+                    return (new TextSpan(start, current - start), tokenKind);
+                }
+
+                current++;
+                characterCount++;
+                continue;
+            }
+
+            current++;
+            characterCount++;
+        }
+    }
+
+    private void ReportUnterminatedLiteral(int start, TokenKind tokenKind)
+    {
+        var span = new TextSpan(start, current - start);
+
+        if (tokenKind is TokenKind.String)
+            diagnostics.ReportUnterminatedString(span);
+        else
+            diagnostics.ReportUnterminatedCharacter(span);
+    }
+
+    private void ReportCharacterLiteralLength(int start, int characterCount)
+    {
+        if (characterCount == 0)
+            diagnostics.ReportEmptyCharacterLiteral(new TextSpan(start, current - start));
     }
 
     /// <summary> Lexes a part of the program and returns all leading/trailing trivias before/after a token. </summary>
@@ -209,7 +251,7 @@ internal sealed class Lexer
             "for" => MatchingKeywordKind.For,
             "new" => MatchingKeywordKind.New,
             "put" => MatchingKeywordKind.Put,
-            "cons" => MatchingKeywordKind.Const,
+            "const" => MatchingKeywordKind.Const,
             _ => MatchingKeywordKind.None,
         };
     }
@@ -258,25 +300,4 @@ internal sealed class Lexer
     /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private char Peek(int offset = 1) => current + offset < text.Length ? text[current + offset] : '\0';
-
-    /// <summary> Gets all the tokens as string in json form. </summary>
-    /// <returns> Tokens in string form. </returns>
-    public override string ToString()
-    {
-        StringBuilder sb = new();
-
-        sb.AppendLine("Lexed Tokens:\n");
-
-        foreach (var token in Tokens)
-        {
-            sb.AppendLine("Token");
-            sb.AppendLine("{");
-            sb.AppendLine($"    Value: \"{token.Value}\",");
-            sb.AppendLine($"    Kind: {token.Kind}\n");
-            sb.AppendLine("}");
-            sb.AppendLine();
-        }
-
-        return sb.ToString();
-    }
 }

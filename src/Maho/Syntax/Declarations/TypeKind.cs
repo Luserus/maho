@@ -1,4 +1,4 @@
-namespace Maho.Syntax;
+namespace Maho;
 
 internal enum TypeKind : byte
 {
