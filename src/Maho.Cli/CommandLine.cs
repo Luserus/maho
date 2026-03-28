@@ -33,6 +33,7 @@ internal static class CommandLine
         string FilePath,
         string DisplayPath,
         CompilerAnalysisResult? Analysis,
+        string DebugOutput,
         string DiagnosticOutput,
         string? AnalysisError,
         bool HasErrors);
@@ -169,7 +170,7 @@ internal static class CommandLine
         }
 
         string sourcePath = options.SourcePath is null
-            ? GetDefaultTestFilePath()
+            ? GetDefaultSourcePath()
             : Path.GetFullPath(options.SourcePath);
 
         if (!TryResolveInputFiles(sourcePath, out var files, out var displayRoot, out var resolutionError))
@@ -179,6 +180,7 @@ internal static class CommandLine
         }
 
         bool multipleFiles = files.Count > 1;
+        bool emitPrettyOutput = options.EmitPath is null;
         FileResult[] results = new FileResult[files.Count];
         AnalysisProgress? progress = options.ShowProgress ? new AnalysisProgress(files.Count) : null;
 
@@ -186,22 +188,17 @@ internal static class CommandLine
         {
             string filePath = files[index];
             string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, filePath) : filePath;
-            results[index] = AnalyzeFile(filePath, displayPath, options.Output, progress);
+            results[index] = AnalyzeFile(filePath, displayPath, options.Output, includeFileHeader: multipleFiles, emitPrettyOutput, progress);
         });
 
         bool writeFailed = false;
         string? completionMessage = null;
 
-        if (options.Output is not AnalysisOutput.None)
+        if (options.EmitPath is not null)
         {
             string debugJson = BuildDebugOutput(sourcePath, results);
 
-            if (options.EmitPath is null)
-            {
-                Console.Out.WriteLine(debugJson);
-                completionMessage = "Finished the work. Emitted JSON output to stdout.";
-            }
-            else if (!TryWriteOutputFile(options.EmitPath, debugJson, out var fullOutputPath, out var writeError))
+            if (!TryWriteOutputFile(options.EmitPath, debugJson, out var fullOutputPath, out var writeError))
             {
                 Console.Error.WriteLine(writeError);
                 writeFailed = true;
@@ -216,6 +213,9 @@ internal static class CommandLine
 
         for (int i = 0; i < results.Length; i++)
         {
+            if (!string.IsNullOrEmpty(results[i].DebugOutput))
+                Console.Out.Write(results[i].DebugOutput);
+
             if (!string.IsNullOrEmpty(results[i].DiagnosticOutput))
                 Console.Error.Write(results[i].DiagnosticOutput);
 
@@ -228,7 +228,7 @@ internal static class CommandLine
         return hasErrors || writeFailed ? 1 : 0;
     }
 
-    private static FileResult AnalyzeFile(string filePath, string displayPath, AnalysisOutput output, AnalysisProgress? progress)
+    private static FileResult AnalyzeFile(string filePath, string displayPath, AnalysisOutput output, bool includeFileHeader, bool emitPrettyOutput, AnalysisProgress? progress)
     {
         try
         {
@@ -236,8 +236,11 @@ internal static class CommandLine
 
             CompilerAnalysisResult analysis = MahoCompiler.AnalyzeFile(filePath, output);
 
+            string debugOutput = emitPrettyOutput
+                ? RenderDebugOutput(analysis, displayPath, includeFileHeader)
+                : string.Empty;
             string diagnosticOutput = RenderDiagnostics(analysis, displayPath);
-            return new FileResult(filePath, displayPath, analysis, diagnosticOutput, null, analysis.HasErrors);
+            return new FileResult(filePath, displayPath, analysis, debugOutput, diagnosticOutput, null, analysis.HasErrors);
         }
         catch (Exception ex)
         {
@@ -245,6 +248,7 @@ internal static class CommandLine
                 filePath,
                 displayPath,
                 null,
+                string.Empty,
                 RenderInternalFailure(displayPath, ex),
                 ex.Message,
                 HasErrors: true);
@@ -432,25 +436,72 @@ internal static class CommandLine
         return true;
     }
 
-    private static string GetDefaultTestFilePath() =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "Maho", "Test.mh"));
+    private static string GetDefaultSourcePath() => Path.GetFullPath(Directory.GetCurrentDirectory());
 
     private static void PrintUsage(TextWriter writer)
     {
         writer.WriteLine("Usage: Maho.Cli [options] [source-path]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  -l, --lex       Include the lexer token stream JSON.");
-        writer.WriteLine("  -p, --parse     Include the parser syntax tree JSON.");
-        writer.WriteLine("  -a, --all       Include both debug JSON payloads.");
+        writer.WriteLine("  -l, --lex       Print the lexer token stream.");
+        writer.WriteLine("  -p, --parse     Print the parser syntax tree.");
+        writer.WriteLine("  -a, --all       Print both debug views.");
         writer.WriteLine("      --progress  Show per-file analysis progress on stderr.");
-        writer.WriteLine("  -o, --output    Write the emitted JSON payload to the specified file.");
+        writer.WriteLine("  -o, --output    Write the requested debug views as JSON to the specified file.");
         writer.WriteLine("  -h, --help      Show this help text.");
         writer.WriteLine();
         writer.WriteLine("The source path may be a single '.mh' file or a directory.");
         writer.WriteLine("Directory inputs analyze every '.mh' file recursively.");
-        writer.WriteLine("When no source path is provided, the local Test.mh file is used.");
-        writer.WriteLine("Debug JSON is written to stdout by default; diagnostics and progress are written to stderr.");
+        writer.WriteLine("When no source path is provided, the current working directory is scanned recursively for '.mh' files.");
+        writer.WriteLine("Debug views are printed to stdout when --output is not provided.");
+        writer.WriteLine("When --output is provided, JSON is written to the file and diagnostics/progress stay on stderr.");
+    }
+
+    private static string RenderDebugOutput(CompilerAnalysisResult analysis, string displayPath, bool includeFileHeader)
+    {
+        string? lexerOutput = analysis.LexerOutput;
+        string? parserOutput = analysis.ParserOutput;
+
+        if (string.IsNullOrEmpty(lexerOutput) && string.IsNullOrEmpty(parserOutput))
+            return string.Empty;
+
+        StringBuilder sb = new();
+        bool wroteAnything = false;
+
+        if (includeFileHeader)
+        {
+            sb.AppendLine();
+            sb.AppendLine(Colorize(displayPath, Dim));
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrEmpty(lexerOutput))
+        {
+            sb.Append(lexerOutput);
+
+            if (!lexerOutput.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                sb.AppendLine();
+
+            wroteAnything = true;
+        }
+
+        if (!string.IsNullOrEmpty(parserOutput))
+        {
+            if (wroteAnything)
+                sb.AppendLine();
+
+            sb.Append(parserOutput);
+
+            if (!parserOutput.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+                sb.AppendLine();
+
+            wroteAnything = true;
+        }
+
+        if (wroteAnything && !sb.ToString().EndsWith(Environment.NewLine + Environment.NewLine, StringComparison.Ordinal))
+            sb.AppendLine();
+
+        return sb.ToString();
     }
 
     private static string RenderDiagnostics(CompilerAnalysisResult analysis, string displayPath)

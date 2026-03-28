@@ -44,29 +44,32 @@ dotnet build src/Maho/Maho.csproj
 Run the CLI with:
 
 ```bash
-dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- [options] [source-path]
+./maho [options] [source-path]
 ```
+
+The wrapper script forwards arguments to `dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- ...`, so you can use the shorter command from the repository root.
 
 Examples:
 
 ```bash
-dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- --all src/Maho/Test.mh
-dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- --lex --output artifacts/lex.json src/Maho/Test.mh
-dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- --all --progress src/Maho/Samples
+./maho --all Samples/Valid/Test1.mh
+./maho --lex --output output/test-lex.json Samples/Valid/Test1.mh
+./maho --all --progress Samples
+cd Samples/Valid && ../../maho --all
 ```
 
 Supported flags:
 
-- `-l`, `--lex`: emit lexer JSON.
-- `-p`, `--parse`: emit parser JSON.
-- `-a`, `--all`: emit both lexer and parser JSON.
+- `-l`, `--lex`: print the lexer token stream.
+- `-p`, `--parse`: print the parser syntax tree.
+- `-a`, `--all`: print both debug views.
 - `--progress`: show per-file analysis progress on `stderr`.
-- `-o`, `--output <path>`: write the emitted JSON payload to a file instead of `stdout`.
+- `-o`, `--output <path>`: write the requested debug views as JSON to a file.
 - `-h`, `--help`: print usage information.
 
-When no source path is provided, the CLI analyzes `src/Maho/Test.mh`.
+When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.
 
-JSON output is machine-readable and written to `stdout` by default. Diagnostics, progress, and completion status messages are written to `stderr`, so other tools can safely pipe or deserialize the JSON stream.
+Human-readable debug output is written to `stdout` when `--output` is not provided. When `--output` is present, the requested JSON is written to the file, and diagnostics, progress, and completion status messages remain on `stderr`.
 
 ## Library
 
@@ -74,6 +77,8 @@ The core library exposes `MahoCompiler.AnalyzeFile(...)` and `MahoCompiler.Analy
 
 Both APIs return:
 
+- requested human-readable lexer output,
+- requested human-readable parser output,
 - requested lexer JSON,
 - requested parser JSON,
 - structured diagnostics with file offsets and line/column locations.

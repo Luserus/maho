@@ -1,1463 +1,21 @@
 {
-  "inputPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/src/Maho/Test.mh",
+  "inputPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Valid/Test1.mh",
   "files": [
     {
-      "filePath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/src/Maho/Test.mh",
-      "displayPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/src/Maho/Test.mh",
-      "lexer": {
-        "kind": "lexer",
-        "tokenCount": 55,
-        "tokens": [
-          {
-            "index": 0,
-            "kind": "Identifier",
-            "text": "namespace",
-            "displayText": "namespace",
-            "matchingKind": "Namespace",
-            "span": {
-              "start": 0,
-              "length": 9,
-              "end": 9,
-              "startLine": 1,
-              "startColumn": 1,
-              "endLine": 1,
-              "endColumn": 10
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 9,
-                  "length": 1,
-                  "end": 10,
-                  "startLine": 1,
-                  "startColumn": 10,
-                  "endLine": 1,
-                  "endColumn": 11
-                }
-              }
-            ]
-          },
-          {
-            "index": 1,
-            "kind": "Identifier",
-            "text": "Test",
-            "displayText": "Test",
-            "span": {
-              "start": 10,
-              "length": 4,
-              "end": 14,
-              "startLine": 1,
-              "startColumn": 11,
-              "endLine": 1,
-              "endColumn": 15
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 2,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 14,
-              "length": 1,
-              "end": 15,
-              "startLine": 1,
-              "startColumn": 15,
-              "endLine": 1,
-              "endColumn": 16
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 15,
-                  "length": 1,
-                  "end": 16,
-                  "startLine": 1,
-                  "startColumn": 16,
-                  "endLine": 2,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 16,
-                  "length": 1,
-                  "end": 17,
-                  "startLine": 2,
-                  "startColumn": 1,
-                  "endLine": 3,
-                  "endColumn": 1
-                }
-              }
-            ]
-          },
-          {
-            "index": 3,
-            "kind": "Identifier",
-            "text": "public",
-            "displayText": "public",
-            "matchingKind": "Public",
-            "span": {
-              "start": 17,
-              "length": 6,
-              "end": 23,
-              "startLine": 3,
-              "startColumn": 1,
-              "endLine": 3,
-              "endColumn": 7
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 23,
-                  "length": 1,
-                  "end": 24,
-                  "startLine": 3,
-                  "startColumn": 7,
-                  "endLine": 3,
-                  "endColumn": 8
-                }
-              }
-            ]
-          },
-          {
-            "index": 4,
-            "kind": "Identifier",
-            "text": "static",
-            "displayText": "static",
-            "matchingKind": "Static",
-            "span": {
-              "start": 24,
-              "length": 6,
-              "end": 30,
-              "startLine": 3,
-              "startColumn": 8,
-              "endLine": 3,
-              "endColumn": 14
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 30,
-                  "length": 1,
-                  "end": 31,
-                  "startLine": 3,
-                  "startColumn": 14,
-                  "endLine": 3,
-                  "endColumn": 15
-                }
-              }
-            ]
-          },
-          {
-            "index": 5,
-            "kind": "Identifier",
-            "text": "int",
-            "displayText": "int",
-            "span": {
-              "start": 31,
-              "length": 3,
-              "end": 34,
-              "startLine": 3,
-              "startColumn": 15,
-              "endLine": 3,
-              "endColumn": 18
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 34,
-                  "length": 1,
-                  "end": 35,
-                  "startLine": 3,
-                  "startColumn": 18,
-                  "endLine": 3,
-                  "endColumn": 19
-                }
-              }
-            ]
-          },
-          {
-            "index": 6,
-            "kind": "Identifier",
-            "text": "Main",
-            "displayText": "Main",
-            "span": {
-              "start": 35,
-              "length": 4,
-              "end": 39,
-              "startLine": 3,
-              "startColumn": 19,
-              "endLine": 3,
-              "endColumn": 23
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 7,
-            "kind": "LeftParen",
-            "text": "(",
-            "displayText": "(",
-            "span": {
-              "start": 39,
-              "length": 1,
-              "end": 40,
-              "startLine": 3,
-              "startColumn": 23,
-              "endLine": 3,
-              "endColumn": 24
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 8,
-            "kind": "Identifier",
-            "text": "int",
-            "displayText": "int",
-            "span": {
-              "start": 40,
-              "length": 3,
-              "end": 43,
-              "startLine": 3,
-              "startColumn": 24,
-              "endLine": 3,
-              "endColumn": 27
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 43,
-                  "length": 1,
-                  "end": 44,
-                  "startLine": 3,
-                  "startColumn": 27,
-                  "endLine": 3,
-                  "endColumn": 28
-                }
-              }
-            ]
-          },
-          {
-            "index": 9,
-            "kind": "Identifier",
-            "text": "argc",
-            "displayText": "argc",
-            "span": {
-              "start": 44,
-              "length": 4,
-              "end": 48,
-              "startLine": 3,
-              "startColumn": 28,
-              "endLine": 3,
-              "endColumn": 32
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 10,
-            "kind": "Comma",
-            "text": ",",
-            "displayText": ",",
-            "span": {
-              "start": 48,
-              "length": 1,
-              "end": 49,
-              "startLine": 3,
-              "startColumn": 32,
-              "endLine": 3,
-              "endColumn": 33
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 49,
-                  "length": 1,
-                  "end": 50,
-                  "startLine": 3,
-                  "startColumn": 33,
-                  "endLine": 3,
-                  "endColumn": 34
-                }
-              }
-            ]
-          },
-          {
-            "index": 11,
-            "kind": "Identifier",
-            "text": "char",
-            "displayText": "char",
-            "span": {
-              "start": 50,
-              "length": 4,
-              "end": 54,
-              "startLine": 3,
-              "startColumn": 34,
-              "endLine": 3,
-              "endColumn": 38
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 12,
-            "kind": "Asterisk",
-            "text": "*",
-            "displayText": "*",
-            "span": {
-              "start": 54,
-              "length": 1,
-              "end": 55,
-              "startLine": 3,
-              "startColumn": 38,
-              "endLine": 3,
-              "endColumn": 39
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 13,
-            "kind": "LeftBracket",
-            "text": "[",
-            "displayText": "[",
-            "span": {
-              "start": 55,
-              "length": 1,
-              "end": 56,
-              "startLine": 3,
-              "startColumn": 39,
-              "endLine": 3,
-              "endColumn": 40
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 14,
-            "kind": "RightBracket",
-            "text": "]",
-            "displayText": "]",
-            "span": {
-              "start": 56,
-              "length": 1,
-              "end": 57,
-              "startLine": 3,
-              "startColumn": 40,
-              "endLine": 3,
-              "endColumn": 41
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 57,
-                  "length": 1,
-                  "end": 58,
-                  "startLine": 3,
-                  "startColumn": 41,
-                  "endLine": 3,
-                  "endColumn": 42
-                }
-              }
-            ]
-          },
-          {
-            "index": 15,
-            "kind": "Identifier",
-            "text": "argv",
-            "displayText": "argv",
-            "span": {
-              "start": 58,
-              "length": 4,
-              "end": 62,
-              "startLine": 3,
-              "startColumn": 42,
-              "endLine": 3,
-              "endColumn": 46
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 16,
-            "kind": "RightParen",
-            "text": ")",
-            "displayText": ")",
-            "span": {
-              "start": 62,
-              "length": 1,
-              "end": 63,
-              "startLine": 3,
-              "startColumn": 46,
-              "endLine": 3,
-              "endColumn": 47
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 63,
-                  "length": 1,
-                  "end": 64,
-                  "startLine": 3,
-                  "startColumn": 47,
-                  "endLine": 4,
-                  "endColumn": 1
-                }
-              }
-            ]
-          },
-          {
-            "index": 17,
-            "kind": "LeftBrace",
-            "text": "{",
-            "displayText": "{",
-            "span": {
-              "start": 64,
-              "length": 1,
-              "end": 65,
-              "startLine": 4,
-              "startColumn": 1,
-              "endLine": 4,
-              "endColumn": 2
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 65,
-                  "length": 1,
-                  "end": 66,
-                  "startLine": 4,
-                  "startColumn": 2,
-                  "endLine": 5,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "Whitespace",
-                "text": "    ",
-                "span": {
-                  "start": 66,
-                  "length": 4,
-                  "end": 70,
-                  "startLine": 5,
-                  "startColumn": 1,
-                  "endLine": 5,
-                  "endColumn": 5
-                }
-              }
-            ]
-          },
-          {
-            "index": 18,
-            "kind": "Identifier",
-            "text": "Collections",
-            "displayText": "Collections",
-            "span": {
-              "start": 70,
-              "length": 11,
-              "end": 81,
-              "startLine": 5,
-              "startColumn": 5,
-              "endLine": 5,
-              "endColumn": 16
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 19,
-            "kind": "Dot",
-            "text": ".",
-            "displayText": ".",
-            "span": {
-              "start": 81,
-              "length": 1,
-              "end": 82,
-              "startLine": 5,
-              "startColumn": 16,
-              "endLine": 5,
-              "endColumn": 17
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 20,
-            "kind": "Identifier",
-            "text": "Dictionary",
-            "displayText": "Dictionary",
-            "span": {
-              "start": 82,
-              "length": 10,
-              "end": 92,
-              "startLine": 5,
-              "startColumn": 17,
-              "endLine": 5,
-              "endColumn": 27
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 21,
-            "kind": "LessThanSign",
-            "text": "\u003C",
-            "displayText": "\u003C",
-            "span": {
-              "start": 92,
-              "length": 1,
-              "end": 93,
-              "startLine": 5,
-              "startColumn": 27,
-              "endLine": 5,
-              "endColumn": 28
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 22,
-            "kind": "Identifier",
-            "text": "int",
-            "displayText": "int",
-            "span": {
-              "start": 93,
-              "length": 3,
-              "end": 96,
-              "startLine": 5,
-              "startColumn": 28,
-              "endLine": 5,
-              "endColumn": 31
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 23,
-            "kind": "Comma",
-            "text": ",",
-            "displayText": ",",
-            "span": {
-              "start": 96,
-              "length": 1,
-              "end": 97,
-              "startLine": 5,
-              "startColumn": 31,
-              "endLine": 5,
-              "endColumn": 32
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 97,
-                  "length": 1,
-                  "end": 98,
-                  "startLine": 5,
-                  "startColumn": 32,
-                  "endLine": 5,
-                  "endColumn": 33
-                }
-              }
-            ]
-          },
-          {
-            "index": 24,
-            "kind": "Identifier",
-            "text": "char",
-            "displayText": "char",
-            "span": {
-              "start": 98,
-              "length": 4,
-              "end": 102,
-              "startLine": 5,
-              "startColumn": 33,
-              "endLine": 5,
-              "endColumn": 37
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 25,
-            "kind": "Asterisk",
-            "text": "*",
-            "displayText": "*",
-            "span": {
-              "start": 102,
-              "length": 1,
-              "end": 103,
-              "startLine": 5,
-              "startColumn": 37,
-              "endLine": 5,
-              "endColumn": 38
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 26,
-            "kind": "GreaterThanSign",
-            "text": "\u003E",
-            "displayText": "\u003E",
-            "span": {
-              "start": 103,
-              "length": 1,
-              "end": 104,
-              "startLine": 5,
-              "startColumn": 38,
-              "endLine": 5,
-              "endColumn": 39
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 104,
-                  "length": 1,
-                  "end": 105,
-                  "startLine": 5,
-                  "startColumn": 39,
-                  "endLine": 5,
-                  "endColumn": 40
-                }
-              }
-            ]
-          },
-          {
-            "index": 27,
-            "kind": "Identifier",
-            "text": "dict",
-            "displayText": "dict",
-            "span": {
-              "start": 105,
-              "length": 4,
-              "end": 109,
-              "startLine": 5,
-              "startColumn": 40,
-              "endLine": 5,
-              "endColumn": 44
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 109,
-                  "length": 1,
-                  "end": 110,
-                  "startLine": 5,
-                  "startColumn": 44,
-                  "endLine": 5,
-                  "endColumn": 45
-                }
-              }
-            ]
-          },
-          {
-            "index": 28,
-            "kind": "Equals",
-            "text": "=",
-            "displayText": "=",
-            "span": {
-              "start": 110,
-              "length": 1,
-              "end": 111,
-              "startLine": 5,
-              "startColumn": 45,
-              "endLine": 5,
-              "endColumn": 46
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 111,
-                  "length": 1,
-                  "end": 112,
-                  "startLine": 5,
-                  "startColumn": 46,
-                  "endLine": 5,
-                  "endColumn": 47
-                }
-              }
-            ]
-          },
-          {
-            "index": 29,
-            "kind": "LeftBracket",
-            "text": "[",
-            "displayText": "[",
-            "span": {
-              "start": 112,
-              "length": 1,
-              "end": 113,
-              "startLine": 5,
-              "startColumn": 47,
-              "endLine": 5,
-              "endColumn": 48
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 30,
-            "kind": "RightBracket",
-            "text": "]",
-            "displayText": "]",
-            "span": {
-              "start": 113,
-              "length": 1,
-              "end": 114,
-              "startLine": 5,
-              "startColumn": 48,
-              "endLine": 5,
-              "endColumn": 49
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 31,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 114,
-              "length": 1,
-              "end": 115,
-              "startLine": 5,
-              "startColumn": 49,
-              "endLine": 5,
-              "endColumn": 50
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 115,
-                  "length": 1,
-                  "end": 116,
-                  "startLine": 5,
-                  "startColumn": 50,
-                  "endLine": 6,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "Whitespace",
-                "text": "    ",
-                "span": {
-                  "start": 116,
-                  "length": 4,
-                  "end": 120,
-                  "startLine": 6,
-                  "startColumn": 1,
-                  "endLine": 6,
-                  "endColumn": 5
-                }
-              }
-            ]
-          },
-          {
-            "index": 32,
-            "kind": "Identifier",
-            "text": "dict",
-            "displayText": "dict",
-            "span": {
-              "start": 120,
-              "length": 4,
-              "end": 124,
-              "startLine": 6,
-              "startColumn": 5,
-              "endLine": 6,
-              "endColumn": 9
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 33,
-            "kind": "LeftBracket",
-            "text": "[",
-            "displayText": "[",
-            "span": {
-              "start": 124,
-              "length": 1,
-              "end": 125,
-              "startLine": 6,
-              "startColumn": 9,
-              "endLine": 6,
-              "endColumn": 10
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 34,
-            "kind": "Integer",
-            "text": "10",
-            "displayText": "10",
-            "span": {
-              "start": 125,
-              "length": 2,
-              "end": 127,
-              "startLine": 6,
-              "startColumn": 10,
-              "endLine": 6,
-              "endColumn": 12
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 35,
-            "kind": "RightBracket",
-            "text": "]",
-            "displayText": "]",
-            "span": {
-              "start": 127,
-              "length": 1,
-              "end": 128,
-              "startLine": 6,
-              "startColumn": 12,
-              "endLine": 6,
-              "endColumn": 13
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 128,
-                  "length": 1,
-                  "end": 129,
-                  "startLine": 6,
-                  "startColumn": 13,
-                  "endLine": 6,
-                  "endColumn": 14
-                }
-              }
-            ]
-          },
-          {
-            "index": 36,
-            "kind": "Equals",
-            "text": "=",
-            "displayText": "=",
-            "span": {
-              "start": 129,
-              "length": 1,
-              "end": 130,
-              "startLine": 6,
-              "startColumn": 14,
-              "endLine": 6,
-              "endColumn": 15
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 130,
-                  "length": 1,
-                  "end": 131,
-                  "startLine": 6,
-                  "startColumn": 15,
-                  "endLine": 6,
-                  "endColumn": 16
-                }
-              }
-            ]
-          },
-          {
-            "index": 37,
-            "kind": "String",
-            "text": "\u0022nice\u0022",
-            "displayText": "\u0022nice\u0022",
-            "span": {
-              "start": 131,
-              "length": 6,
-              "end": 137,
-              "startLine": 6,
-              "startColumn": 16,
-              "endLine": 6,
-              "endColumn": 22
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 38,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 137,
-              "length": 1,
-              "end": 138,
-              "startLine": 6,
-              "startColumn": 22,
-              "endLine": 6,
-              "endColumn": 23
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 138,
-                  "length": 1,
-                  "end": 139,
-                  "startLine": 6,
-                  "startColumn": 23,
-                  "endLine": 7,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "Whitespace",
-                "text": "    ",
-                "span": {
-                  "start": 139,
-                  "length": 4,
-                  "end": 143,
-                  "startLine": 7,
-                  "startColumn": 1,
-                  "endLine": 7,
-                  "endColumn": 5
-                }
-              }
-            ]
-          },
-          {
-            "index": 39,
-            "kind": "Identifier",
-            "text": "float",
-            "displayText": "float",
-            "span": {
-              "start": 143,
-              "length": 5,
-              "end": 148,
-              "startLine": 7,
-              "startColumn": 5,
-              "endLine": 7,
-              "endColumn": 10
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 148,
-                  "length": 1,
-                  "end": 149,
-                  "startLine": 7,
-                  "startColumn": 10,
-                  "endLine": 7,
-                  "endColumn": 11
-                }
-              }
-            ]
-          },
-          {
-            "index": 40,
-            "kind": "Identifier",
-            "text": "f",
-            "displayText": "f",
-            "span": {
-              "start": 149,
-              "length": 1,
-              "end": 150,
-              "startLine": 7,
-              "startColumn": 11,
-              "endLine": 7,
-              "endColumn": 12
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 150,
-                  "length": 1,
-                  "end": 151,
-                  "startLine": 7,
-                  "startColumn": 12,
-                  "endLine": 7,
-                  "endColumn": 13
-                }
-              }
-            ]
-          },
-          {
-            "index": 41,
-            "kind": "Equals",
-            "text": "=",
-            "displayText": "=",
-            "span": {
-              "start": 151,
-              "length": 1,
-              "end": 152,
-              "startLine": 7,
-              "startColumn": 13,
-              "endLine": 7,
-              "endColumn": 14
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 152,
-                  "length": 1,
-                  "end": 153,
-                  "startLine": 7,
-                  "startColumn": 14,
-                  "endLine": 7,
-                  "endColumn": 15
-                }
-              }
-            ]
-          },
-          {
-            "index": 42,
-            "kind": "Float",
-            "text": ".1",
-            "displayText": ".1",
-            "span": {
-              "start": 153,
-              "length": 2,
-              "end": 155,
-              "startLine": 7,
-              "startColumn": 15,
-              "endLine": 7,
-              "endColumn": 17
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 43,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 155,
-              "length": 1,
-              "end": 156,
-              "startLine": 7,
-              "startColumn": 17,
-              "endLine": 7,
-              "endColumn": 18
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 156,
-                  "length": 1,
-                  "end": 157,
-                  "startLine": 7,
-                  "startColumn": 18,
-                  "endLine": 8,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "Whitespace",
-                "text": "    ",
-                "span": {
-                  "start": 157,
-                  "length": 4,
-                  "end": 161,
-                  "startLine": 8,
-                  "startColumn": 1,
-                  "endLine": 8,
-                  "endColumn": 5
-                }
-              }
-            ]
-          },
-          {
-            "index": 44,
-            "kind": "Identifier",
-            "text": "f",
-            "displayText": "f",
-            "span": {
-              "start": 161,
-              "length": 1,
-              "end": 162,
-              "startLine": 8,
-              "startColumn": 5,
-              "endLine": 8,
-              "endColumn": 6
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 162,
-                  "length": 1,
-                  "end": 163,
-                  "startLine": 8,
-                  "startColumn": 6,
-                  "endLine": 8,
-                  "endColumn": 7
-                }
-              }
-            ]
-          },
-          {
-            "index": 45,
-            "kind": "Equals",
-            "text": "=",
-            "displayText": "=",
-            "span": {
-              "start": 163,
-              "length": 1,
-              "end": 164,
-              "startLine": 8,
-              "startColumn": 7,
-              "endLine": 8,
-              "endColumn": 8
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 164,
-                  "length": 1,
-                  "end": 165,
-                  "startLine": 8,
-                  "startColumn": 8,
-                  "endLine": 8,
-                  "endColumn": 9
-                }
-              }
-            ]
-          },
-          {
-            "index": 46,
-            "kind": "Identifier",
-            "text": "f",
-            "displayText": "f",
-            "span": {
-              "start": 165,
-              "length": 1,
-              "end": 166,
-              "startLine": 8,
-              "startColumn": 9,
-              "endLine": 8,
-              "endColumn": 10
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 166,
-                  "length": 1,
-                  "end": 167,
-                  "startLine": 8,
-                  "startColumn": 10,
-                  "endLine": 8,
-                  "endColumn": 11
-                }
-              }
-            ]
-          },
-          {
-            "index": 47,
-            "kind": "Plus",
-            "text": "\u002B",
-            "displayText": "\u002B",
-            "span": {
-              "start": 167,
-              "length": 1,
-              "end": 168,
-              "startLine": 8,
-              "startColumn": 11,
-              "endLine": 8,
-              "endColumn": 12
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 168,
-                  "length": 1,
-                  "end": 169,
-                  "startLine": 8,
-                  "startColumn": 12,
-                  "endLine": 8,
-                  "endColumn": 13
-                }
-              }
-            ]
-          },
-          {
-            "index": 48,
-            "kind": "Float",
-            "text": "0.2",
-            "displayText": "0.2",
-            "span": {
-              "start": 169,
-              "length": 3,
-              "end": 172,
-              "startLine": 8,
-              "startColumn": 13,
-              "endLine": 8,
-              "endColumn": 16
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 49,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 172,
-              "length": 1,
-              "end": 173,
-              "startLine": 8,
-              "startColumn": 16,
-              "endLine": 8,
-              "endColumn": 17
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 173,
-                  "length": 1,
-                  "end": 174,
-                  "startLine": 8,
-                  "startColumn": 17,
-                  "endLine": 9,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 174,
-                  "length": 1,
-                  "end": 175,
-                  "startLine": 9,
-                  "startColumn": 1,
-                  "endLine": 10,
-                  "endColumn": 1
-                }
-              },
-              {
-                "kind": "Whitespace",
-                "text": "    ",
-                "span": {
-                  "start": 175,
-                  "length": 4,
-                  "end": 179,
-                  "startLine": 10,
-                  "startColumn": 1,
-                  "endLine": 10,
-                  "endColumn": 5
-                }
-              }
-            ]
-          },
-          {
-            "index": 50,
-            "kind": "Identifier",
-            "text": "return",
-            "displayText": "return",
-            "matchingKind": "Return",
-            "span": {
-              "start": 179,
-              "length": 6,
-              "end": 185,
-              "startLine": 10,
-              "startColumn": 5,
-              "endLine": 10,
-              "endColumn": 11
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "Whitespace",
-                "text": " ",
-                "span": {
-                  "start": 185,
-                  "length": 1,
-                  "end": 186,
-                  "startLine": 10,
-                  "startColumn": 11,
-                  "endLine": 10,
-                  "endColumn": 12
-                }
-              }
-            ]
-          },
-          {
-            "index": 51,
-            "kind": "Integer",
-            "text": "0",
-            "displayText": "0",
-            "span": {
-              "start": 186,
-              "length": 1,
-              "end": 187,
-              "startLine": 10,
-              "startColumn": 12,
-              "endLine": 10,
-              "endColumn": 13
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 52,
-            "kind": "Semicolon",
-            "text": ";",
-            "displayText": ";",
-            "span": {
-              "start": 187,
-              "length": 1,
-              "end": 188,
-              "startLine": 10,
-              "startColumn": 13,
-              "endLine": 10,
-              "endColumn": 14
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": [
-              {
-                "kind": "EndOfLine",
-                "text": "\n",
-                "span": {
-                  "start": 188,
-                  "length": 1,
-                  "end": 189,
-                  "startLine": 10,
-                  "startColumn": 14,
-                  "endLine": 11,
-                  "endColumn": 1
-                }
-              }
-            ]
-          },
-          {
-            "index": 53,
-            "kind": "RightBrace",
-            "text": "}",
-            "displayText": "}",
-            "span": {
-              "start": 189,
-              "length": 1,
-              "end": 190,
-              "startLine": 11,
-              "startColumn": 1,
-              "endLine": 11,
-              "endColumn": 2
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          },
-          {
-            "index": 54,
-            "kind": "EndToken",
-            "text": "",
-            "displayText": "\u003Ceof\u003E",
-            "span": {
-              "start": 190,
-              "length": 0,
-              "end": 190,
-              "startLine": 11,
-              "startColumn": 2,
-              "endLine": 11,
-              "endColumn": 2
-            },
-            "leadingTrivia": [],
-            "trailingTrivia": []
-          }
-        ]
-      },
+      "filePath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Valid/Test1.mh",
+      "displayPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Valid/Test1.mh",
       "parser": {
         "kind": "parser",
         "root": {
           "nodeType": "CompilationUnit",
           "span": {
             "start": 0,
-            "length": 190,
-            "end": 190,
+            "length": 191,
+            "end": 191,
             "startLine": 1,
             "startColumn": 1,
             "endLine": 11,
-            "endColumn": 2
+            "endColumn": 1
           },
           "children": [
             {
@@ -1466,12 +24,12 @@
                 "nodeType": "NamespaceDeclaration",
                 "span": {
                   "start": 0,
-                  "length": 15,
-                  "end": 15,
+                  "length": 16,
+                  "end": 16,
                   "startLine": 1,
                   "startColumn": 1,
                   "endLine": 1,
-                  "endColumn": 16
+                  "endColumn": 17
                 },
                 "children": [
                   {
@@ -1516,12 +74,12 @@
                       "nodeType": "SimpleName",
                       "span": {
                         "start": 10,
-                        "length": 4,
-                        "end": 14,
+                        "length": 5,
+                        "end": 15,
                         "startLine": 1,
                         "startColumn": 11,
                         "endLine": 1,
-                        "endColumn": 15
+                        "endColumn": 16
                       },
                       "children": [
                         {
@@ -1530,16 +88,16 @@
                             "nodeType": "Token",
                             "span": {
                               "start": 10,
-                              "length": 4,
-                              "end": 14,
+                              "length": 5,
+                              "end": 15,
                               "startLine": 1,
                               "startColumn": 11,
                               "endLine": 1,
-                              "endColumn": 15
+                              "endColumn": 16
                             },
                             "tokenKind": "Identifier",
-                            "text": "Test",
-                            "displayText": "Test",
+                            "text": "Basic",
+                            "displayText": "Basic",
                             "leadingTrivia": [],
                             "trailingTrivia": [],
                             "children": []
@@ -1553,13 +111,13 @@
                     "node": {
                       "nodeType": "NamespaceEmptyBody",
                       "span": {
-                        "start": 14,
+                        "start": 15,
                         "length": 1,
-                        "end": 15,
+                        "end": 16,
                         "startLine": 1,
-                        "startColumn": 15,
+                        "startColumn": 16,
                         "endLine": 1,
-                        "endColumn": 16
+                        "endColumn": 17
                       },
                       "children": [
                         {
@@ -1567,13 +125,13 @@
                           "node": {
                             "nodeType": "Token",
                             "span": {
-                              "start": 14,
+                              "start": 15,
                               "length": 1,
-                              "end": 15,
+                              "end": 16,
                               "startLine": 1,
-                              "startColumn": 15,
+                              "startColumn": 16,
                               "endLine": 1,
-                              "endColumn": 16
+                              "endColumn": 17
                             },
                             "tokenKind": "Semicolon",
                             "text": ";",
@@ -1584,11 +142,11 @@
                                 "kind": "EndOfLine",
                                 "text": "\n",
                                 "span": {
-                                  "start": 15,
+                                  "start": 16,
                                   "length": 1,
-                                  "end": 16,
+                                  "end": 17,
                                   "startLine": 1,
-                                  "startColumn": 16,
+                                  "startColumn": 17,
                                   "endLine": 2,
                                   "endColumn": 1
                                 }
@@ -1597,9 +155,9 @@
                                 "kind": "EndOfLine",
                                 "text": "\n",
                                 "span": {
-                                  "start": 16,
+                                  "start": 17,
                                   "length": 1,
-                                  "end": 17,
+                                  "end": 18,
                                   "startLine": 2,
                                   "startColumn": 1,
                                   "endLine": 3,
@@ -1621,12 +179,12 @@
               "node": {
                 "nodeType": "TopLevelFunctionDeclaration",
                 "span": {
-                  "start": 17,
-                  "length": 173,
+                  "start": 18,
+                  "length": 172,
                   "end": 190,
                   "startLine": 3,
                   "startColumn": 1,
-                  "endLine": 11,
+                  "endLine": 10,
                   "endColumn": 2
                 },
                 "children": [
@@ -1635,12 +193,12 @@
                     "node": {
                       "nodeType": "FunctionDeclaration",
                       "span": {
-                        "start": 17,
-                        "length": 173,
+                        "start": 18,
+                        "length": 172,
                         "end": 190,
                         "startLine": 3,
                         "startColumn": 1,
-                        "endLine": 11,
+                        "endLine": 10,
                         "endColumn": 2
                       },
                       "children": [
@@ -1649,9 +207,9 @@
                           "node": {
                             "nodeType": "FunctionSignature",
                             "span": {
-                              "start": 17,
+                              "start": 18,
                               "length": 46,
-                              "end": 63,
+                              "end": 64,
                               "startLine": 3,
                               "startColumn": 1,
                               "endLine": 3,
@@ -1663,9 +221,9 @@
                                 "node": {
                                   "nodeType": "Token",
                                   "span": {
-                                    "start": 17,
+                                    "start": 18,
                                     "length": 6,
-                                    "end": 23,
+                                    "end": 24,
                                     "startLine": 3,
                                     "startColumn": 1,
                                     "endLine": 3,
@@ -1681,9 +239,9 @@
                                       "kind": "Whitespace",
                                       "text": " ",
                                       "span": {
-                                        "start": 23,
+                                        "start": 24,
                                         "length": 1,
-                                        "end": 24,
+                                        "end": 25,
                                         "startLine": 3,
                                         "startColumn": 7,
                                         "endLine": 3,
@@ -1699,9 +257,9 @@
                                 "node": {
                                   "nodeType": "Token",
                                   "span": {
-                                    "start": 24,
+                                    "start": 25,
                                     "length": 6,
-                                    "end": 30,
+                                    "end": 31,
                                     "startLine": 3,
                                     "startColumn": 8,
                                     "endLine": 3,
@@ -1717,9 +275,9 @@
                                       "kind": "Whitespace",
                                       "text": " ",
                                       "span": {
-                                        "start": 30,
+                                        "start": 31,
                                         "length": 1,
-                                        "end": 31,
+                                        "end": 32,
                                         "startLine": 3,
                                         "startColumn": 14,
                                         "endLine": 3,
@@ -1735,9 +293,9 @@
                                 "node": {
                                   "nodeType": "SimpleType",
                                   "span": {
-                                    "start": 31,
+                                    "start": 32,
                                     "length": 3,
-                                    "end": 34,
+                                    "end": 35,
                                     "startLine": 3,
                                     "startColumn": 15,
                                     "endLine": 3,
@@ -1749,9 +307,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 31,
+                                          "start": 32,
                                           "length": 3,
-                                          "end": 34,
+                                          "end": 35,
                                           "startLine": 3,
                                           "startColumn": 15,
                                           "endLine": 3,
@@ -1766,9 +324,9 @@
                                             "kind": "Whitespace",
                                             "text": " ",
                                             "span": {
-                                              "start": 34,
+                                              "start": 35,
                                               "length": 1,
-                                              "end": 35,
+                                              "end": 36,
                                               "startLine": 3,
                                               "startColumn": 18,
                                               "endLine": 3,
@@ -1787,9 +345,9 @@
                                 "node": {
                                   "nodeType": "SimpleName",
                                   "span": {
-                                    "start": 35,
+                                    "start": 36,
                                     "length": 4,
-                                    "end": 39,
+                                    "end": 40,
                                     "startLine": 3,
                                     "startColumn": 19,
                                     "endLine": 3,
@@ -1801,9 +359,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 35,
+                                          "start": 36,
                                           "length": 4,
-                                          "end": 39,
+                                          "end": 40,
                                           "startLine": 3,
                                           "startColumn": 19,
                                           "endLine": 3,
@@ -1825,9 +383,9 @@
                                 "node": {
                                   "nodeType": "Token",
                                   "span": {
-                                    "start": 39,
+                                    "start": 40,
                                     "length": 1,
-                                    "end": 40,
+                                    "end": 41,
                                     "startLine": 3,
                                     "startColumn": 23,
                                     "endLine": 3,
@@ -1846,9 +404,9 @@
                                 "node": {
                                   "nodeType": "Parameter",
                                   "span": {
-                                    "start": 40,
+                                    "start": 41,
                                     "length": 8,
-                                    "end": 48,
+                                    "end": 49,
                                     "startLine": 3,
                                     "startColumn": 24,
                                     "endLine": 3,
@@ -1860,9 +418,9 @@
                                       "node": {
                                         "nodeType": "ParameterVariableDeclarator",
                                         "span": {
-                                          "start": 40,
+                                          "start": 41,
                                           "length": 8,
-                                          "end": 48,
+                                          "end": 49,
                                           "startLine": 3,
                                           "startColumn": 24,
                                           "endLine": 3,
@@ -1874,9 +432,9 @@
                                             "node": {
                                               "nodeType": "SimpleType",
                                               "span": {
-                                                "start": 40,
+                                                "start": 41,
                                                 "length": 3,
-                                                "end": 43,
+                                                "end": 44,
                                                 "startLine": 3,
                                                 "startColumn": 24,
                                                 "endLine": 3,
@@ -1888,9 +446,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 40,
+                                                      "start": 41,
                                                       "length": 3,
-                                                      "end": 43,
+                                                      "end": 44,
                                                       "startLine": 3,
                                                       "startColumn": 24,
                                                       "endLine": 3,
@@ -1905,9 +463,9 @@
                                                         "kind": "Whitespace",
                                                         "text": " ",
                                                         "span": {
-                                                          "start": 43,
+                                                          "start": 44,
                                                           "length": 1,
-                                                          "end": 44,
+                                                          "end": 45,
                                                           "startLine": 3,
                                                           "startColumn": 27,
                                                           "endLine": 3,
@@ -1926,9 +484,9 @@
                                             "node": {
                                               "nodeType": "SimpleName",
                                               "span": {
-                                                "start": 44,
+                                                "start": 45,
                                                 "length": 4,
-                                                "end": 48,
+                                                "end": 49,
                                                 "startLine": 3,
                                                 "startColumn": 28,
                                                 "endLine": 3,
@@ -1940,9 +498,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 44,
+                                                      "start": 45,
                                                       "length": 4,
-                                                      "end": 48,
+                                                      "end": 49,
                                                       "startLine": 3,
                                                       "startColumn": 28,
                                                       "endLine": 3,
@@ -1970,9 +528,9 @@
                                 "node": {
                                   "nodeType": "Parameter",
                                   "span": {
-                                    "start": 50,
+                                    "start": 51,
                                     "length": 12,
-                                    "end": 62,
+                                    "end": 63,
                                     "startLine": 3,
                                     "startColumn": 34,
                                     "endLine": 3,
@@ -1984,9 +542,9 @@
                                       "node": {
                                         "nodeType": "ParameterVariableDeclarator",
                                         "span": {
-                                          "start": 50,
+                                          "start": 51,
                                           "length": 12,
-                                          "end": 62,
+                                          "end": 63,
                                           "startLine": 3,
                                           "startColumn": 34,
                                           "endLine": 3,
@@ -1998,9 +556,9 @@
                                             "node": {
                                               "nodeType": "ModifiedType",
                                               "span": {
-                                                "start": 50,
+                                                "start": 51,
                                                 "length": 7,
-                                                "end": 57,
+                                                "end": 58,
                                                 "startLine": 3,
                                                 "startColumn": 34,
                                                 "endLine": 3,
@@ -2012,9 +570,9 @@
                                                   "node": {
                                                     "nodeType": "ModifiedType",
                                                     "span": {
-                                                      "start": 50,
+                                                      "start": 51,
                                                       "length": 5,
-                                                      "end": 55,
+                                                      "end": 56,
                                                       "startLine": 3,
                                                       "startColumn": 34,
                                                       "endLine": 3,
@@ -2026,9 +584,9 @@
                                                         "node": {
                                                           "nodeType": "SimpleType",
                                                           "span": {
-                                                            "start": 50,
+                                                            "start": 51,
                                                             "length": 4,
-                                                            "end": 54,
+                                                            "end": 55,
                                                             "startLine": 3,
                                                             "startColumn": 34,
                                                             "endLine": 3,
@@ -2040,9 +598,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 50,
+                                                                  "start": 51,
                                                                   "length": 4,
-                                                                  "end": 54,
+                                                                  "end": 55,
                                                                   "startLine": 3,
                                                                   "startColumn": 34,
                                                                   "endLine": 3,
@@ -2064,9 +622,9 @@
                                                         "node": {
                                                           "nodeType": "PointerTypeModifier",
                                                           "span": {
-                                                            "start": 54,
+                                                            "start": 55,
                                                             "length": 1,
-                                                            "end": 55,
+                                                            "end": 56,
                                                             "startLine": 3,
                                                             "startColumn": 38,
                                                             "endLine": 3,
@@ -2078,9 +636,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 54,
+                                                                  "start": 55,
                                                                   "length": 1,
-                                                                  "end": 55,
+                                                                  "end": 56,
                                                                   "startLine": 3,
                                                                   "startColumn": 38,
                                                                   "endLine": 3,
@@ -2105,9 +663,9 @@
                                                   "node": {
                                                     "nodeType": "ArrayTypeModifier",
                                                     "span": {
-                                                      "start": 55,
+                                                      "start": 56,
                                                       "length": 2,
-                                                      "end": 57,
+                                                      "end": 58,
                                                       "startLine": 3,
                                                       "startColumn": 39,
                                                       "endLine": 3,
@@ -2119,9 +677,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 55,
+                                                            "start": 56,
                                                             "length": 1,
-                                                            "end": 56,
+                                                            "end": 57,
                                                             "startLine": 3,
                                                             "startColumn": 39,
                                                             "endLine": 3,
@@ -2140,9 +698,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 56,
+                                                            "start": 57,
                                                             "length": 1,
-                                                            "end": 57,
+                                                            "end": 58,
                                                             "startLine": 3,
                                                             "startColumn": 40,
                                                             "endLine": 3,
@@ -2157,9 +715,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 57,
+                                                                "start": 58,
                                                                 "length": 1,
-                                                                "end": 58,
+                                                                "end": 59,
                                                                 "startLine": 3,
                                                                 "startColumn": 41,
                                                                 "endLine": 3,
@@ -2181,9 +739,9 @@
                                             "node": {
                                               "nodeType": "SimpleName",
                                               "span": {
-                                                "start": 58,
+                                                "start": 59,
                                                 "length": 4,
-                                                "end": 62,
+                                                "end": 63,
                                                 "startLine": 3,
                                                 "startColumn": 42,
                                                 "endLine": 3,
@@ -2195,9 +753,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 58,
+                                                      "start": 59,
                                                       "length": 4,
-                                                      "end": 62,
+                                                      "end": 63,
                                                       "startLine": 3,
                                                       "startColumn": 42,
                                                       "endLine": 3,
@@ -2225,9 +783,9 @@
                                 "node": {
                                   "nodeType": "Token",
                                   "span": {
-                                    "start": 62,
+                                    "start": 63,
                                     "length": 1,
-                                    "end": 63,
+                                    "end": 64,
                                     "startLine": 3,
                                     "startColumn": 46,
                                     "endLine": 3,
@@ -2242,9 +800,9 @@
                                       "kind": "EndOfLine",
                                       "text": "\n",
                                       "span": {
-                                        "start": 63,
+                                        "start": 64,
                                         "length": 1,
-                                        "end": 64,
+                                        "end": 65,
                                         "startLine": 3,
                                         "startColumn": 47,
                                         "endLine": 4,
@@ -2263,12 +821,12 @@
                           "node": {
                             "nodeType": "FunctionBlockBody",
                             "span": {
-                              "start": 64,
-                              "length": 126,
+                              "start": 65,
+                              "length": 125,
                               "end": 190,
                               "startLine": 4,
                               "startColumn": 1,
-                              "endLine": 11,
+                              "endLine": 10,
                               "endColumn": 2
                             },
                             "children": [
@@ -2277,9 +835,9 @@
                                 "node": {
                                   "nodeType": "Token",
                                   "span": {
-                                    "start": 64,
+                                    "start": 65,
                                     "length": 1,
-                                    "end": 65,
+                                    "end": 66,
                                     "startLine": 4,
                                     "startColumn": 1,
                                     "endLine": 4,
@@ -2294,9 +852,9 @@
                                       "kind": "EndOfLine",
                                       "text": "\n",
                                       "span": {
-                                        "start": 65,
+                                        "start": 66,
                                         "length": 1,
-                                        "end": 66,
+                                        "end": 67,
                                         "startLine": 4,
                                         "startColumn": 2,
                                         "endLine": 5,
@@ -2307,9 +865,9 @@
                                       "kind": "Whitespace",
                                       "text": "    ",
                                       "span": {
-                                        "start": 66,
+                                        "start": 67,
                                         "length": 4,
-                                        "end": 70,
+                                        "end": 71,
                                         "startLine": 5,
                                         "startColumn": 1,
                                         "endLine": 5,
@@ -2325,9 +883,9 @@
                                 "node": {
                                   "nodeType": "LocalVariableDeclarationStatement",
                                   "span": {
-                                    "start": 70,
+                                    "start": 71,
                                     "length": 45,
-                                    "end": 115,
+                                    "end": 116,
                                     "startLine": 5,
                                     "startColumn": 5,
                                     "endLine": 5,
@@ -2339,9 +897,9 @@
                                       "node": {
                                         "nodeType": "VariableDeclaration",
                                         "span": {
-                                          "start": 70,
+                                          "start": 71,
                                           "length": 44,
-                                          "end": 114,
+                                          "end": 115,
                                           "startLine": 5,
                                           "startColumn": 5,
                                           "endLine": 5,
@@ -2353,9 +911,9 @@
                                             "node": {
                                               "nodeType": "QualifiedType",
                                               "span": {
-                                                "start": 70,
+                                                "start": 71,
                                                 "length": 34,
-                                                "end": 104,
+                                                "end": 105,
                                                 "startLine": 5,
                                                 "startColumn": 5,
                                                 "endLine": 5,
@@ -2367,9 +925,9 @@
                                                   "node": {
                                                     "nodeType": "SimpleType",
                                                     "span": {
-                                                      "start": 70,
+                                                      "start": 71,
                                                       "length": 11,
-                                                      "end": 81,
+                                                      "end": 82,
                                                       "startLine": 5,
                                                       "startColumn": 5,
                                                       "endLine": 5,
@@ -2381,9 +939,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 70,
+                                                            "start": 71,
                                                             "length": 11,
-                                                            "end": 81,
+                                                            "end": 82,
                                                             "startLine": 5,
                                                             "startColumn": 5,
                                                             "endLine": 5,
@@ -2405,9 +963,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 81,
+                                                      "start": 82,
                                                       "length": 1,
-                                                      "end": 82,
+                                                      "end": 83,
                                                       "startLine": 5,
                                                       "startColumn": 16,
                                                       "endLine": 5,
@@ -2426,9 +984,9 @@
                                                   "node": {
                                                     "nodeType": "GenericType",
                                                     "span": {
-                                                      "start": 82,
+                                                      "start": 83,
                                                       "length": 22,
-                                                      "end": 104,
+                                                      "end": 105,
                                                       "startLine": 5,
                                                       "startColumn": 17,
                                                       "endLine": 5,
@@ -2440,9 +998,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 82,
+                                                            "start": 83,
                                                             "length": 10,
-                                                            "end": 92,
+                                                            "end": 93,
                                                             "startLine": 5,
                                                             "startColumn": 17,
                                                             "endLine": 5,
@@ -2461,9 +1019,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 92,
+                                                            "start": 93,
                                                             "length": 1,
-                                                            "end": 93,
+                                                            "end": 94,
                                                             "startLine": 5,
                                                             "startColumn": 27,
                                                             "endLine": 5,
@@ -2482,9 +1040,9 @@
                                                         "node": {
                                                           "nodeType": "SimpleType",
                                                           "span": {
-                                                            "start": 93,
+                                                            "start": 94,
                                                             "length": 3,
-                                                            "end": 96,
+                                                            "end": 97,
                                                             "startLine": 5,
                                                             "startColumn": 28,
                                                             "endLine": 5,
@@ -2496,9 +1054,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 93,
+                                                                  "start": 94,
                                                                   "length": 3,
-                                                                  "end": 96,
+                                                                  "end": 97,
                                                                   "startLine": 5,
                                                                   "startColumn": 28,
                                                                   "endLine": 5,
@@ -2520,9 +1078,9 @@
                                                         "node": {
                                                           "nodeType": "ModifiedType",
                                                           "span": {
-                                                            "start": 98,
+                                                            "start": 99,
                                                             "length": 5,
-                                                            "end": 103,
+                                                            "end": 104,
                                                             "startLine": 5,
                                                             "startColumn": 33,
                                                             "endLine": 5,
@@ -2534,9 +1092,9 @@
                                                               "node": {
                                                                 "nodeType": "SimpleType",
                                                                 "span": {
-                                                                  "start": 98,
+                                                                  "start": 99,
                                                                   "length": 4,
-                                                                  "end": 102,
+                                                                  "end": 103,
                                                                   "startLine": 5,
                                                                   "startColumn": 33,
                                                                   "endLine": 5,
@@ -2548,9 +1106,9 @@
                                                                     "node": {
                                                                       "nodeType": "Token",
                                                                       "span": {
-                                                                        "start": 98,
+                                                                        "start": 99,
                                                                         "length": 4,
-                                                                        "end": 102,
+                                                                        "end": 103,
                                                                         "startLine": 5,
                                                                         "startColumn": 33,
                                                                         "endLine": 5,
@@ -2572,9 +1130,9 @@
                                                               "node": {
                                                                 "nodeType": "PointerTypeModifier",
                                                                 "span": {
-                                                                  "start": 102,
+                                                                  "start": 103,
                                                                   "length": 1,
-                                                                  "end": 103,
+                                                                  "end": 104,
                                                                   "startLine": 5,
                                                                   "startColumn": 37,
                                                                   "endLine": 5,
@@ -2586,9 +1144,9 @@
                                                                     "node": {
                                                                       "nodeType": "Token",
                                                                       "span": {
-                                                                        "start": 102,
+                                                                        "start": 103,
                                                                         "length": 1,
-                                                                        "end": 103,
+                                                                        "end": 104,
                                                                         "startLine": 5,
                                                                         "startColumn": 37,
                                                                         "endLine": 5,
@@ -2613,9 +1171,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 103,
+                                                            "start": 104,
                                                             "length": 1,
-                                                            "end": 104,
+                                                            "end": 105,
                                                             "startLine": 5,
                                                             "startColumn": 38,
                                                             "endLine": 5,
@@ -2630,9 +1188,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 104,
+                                                                "start": 105,
                                                                 "length": 1,
-                                                                "end": 105,
+                                                                "end": 106,
                                                                 "startLine": 5,
                                                                 "startColumn": 39,
                                                                 "endLine": 5,
@@ -2654,9 +1212,9 @@
                                             "node": {
                                               "nodeType": "VariableDeclarator",
                                               "span": {
-                                                "start": 105,
+                                                "start": 106,
                                                 "length": 9,
-                                                "end": 114,
+                                                "end": 115,
                                                 "startLine": 5,
                                                 "startColumn": 40,
                                                 "endLine": 5,
@@ -2668,9 +1226,9 @@
                                                   "node": {
                                                     "nodeType": "SimpleName",
                                                     "span": {
-                                                      "start": 105,
+                                                      "start": 106,
                                                       "length": 4,
-                                                      "end": 109,
+                                                      "end": 110,
                                                       "startLine": 5,
                                                       "startColumn": 40,
                                                       "endLine": 5,
@@ -2682,9 +1240,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 105,
+                                                            "start": 106,
                                                             "length": 4,
-                                                            "end": 109,
+                                                            "end": 110,
                                                             "startLine": 5,
                                                             "startColumn": 40,
                                                             "endLine": 5,
@@ -2699,9 +1257,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 109,
+                                                                "start": 110,
                                                                 "length": 1,
-                                                                "end": 110,
+                                                                "end": 111,
                                                                 "startLine": 5,
                                                                 "startColumn": 44,
                                                                 "endLine": 5,
@@ -2720,9 +1278,9 @@
                                                   "node": {
                                                     "nodeType": "AssignmentClause",
                                                     "span": {
-                                                      "start": 110,
+                                                      "start": 111,
                                                       "length": 4,
-                                                      "end": 114,
+                                                      "end": 115,
                                                       "startLine": 5,
                                                       "startColumn": 45,
                                                       "endLine": 5,
@@ -2734,9 +1292,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 110,
+                                                            "start": 111,
                                                             "length": 1,
-                                                            "end": 111,
+                                                            "end": 112,
                                                             "startLine": 5,
                                                             "startColumn": 45,
                                                             "endLine": 5,
@@ -2751,9 +1309,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 111,
+                                                                "start": 112,
                                                                 "length": 1,
-                                                                "end": 112,
+                                                                "end": 113,
                                                                 "startLine": 5,
                                                                 "startColumn": 46,
                                                                 "endLine": 5,
@@ -2769,9 +1327,9 @@
                                                         "node": {
                                                           "nodeType": "CollectionExpression",
                                                           "span": {
-                                                            "start": 112,
+                                                            "start": 113,
                                                             "length": 2,
-                                                            "end": 114,
+                                                            "end": 115,
                                                             "startLine": 5,
                                                             "startColumn": 47,
                                                             "endLine": 5,
@@ -2783,9 +1341,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 112,
+                                                                  "start": 113,
                                                                   "length": 1,
-                                                                  "end": 113,
+                                                                  "end": 114,
                                                                   "startLine": 5,
                                                                   "startColumn": 47,
                                                                   "endLine": 5,
@@ -2804,9 +1362,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 113,
+                                                                  "start": 114,
                                                                   "length": 1,
-                                                                  "end": 114,
+                                                                  "end": 115,
                                                                   "startLine": 5,
                                                                   "startColumn": 48,
                                                                   "endLine": 5,
@@ -2837,9 +1395,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 114,
+                                          "start": 115,
                                           "length": 1,
-                                          "end": 115,
+                                          "end": 116,
                                           "startLine": 5,
                                           "startColumn": 49,
                                           "endLine": 5,
@@ -2854,9 +1412,9 @@
                                             "kind": "EndOfLine",
                                             "text": "\n",
                                             "span": {
-                                              "start": 115,
+                                              "start": 116,
                                               "length": 1,
-                                              "end": 116,
+                                              "end": 117,
                                               "startLine": 5,
                                               "startColumn": 50,
                                               "endLine": 6,
@@ -2867,9 +1425,9 @@
                                             "kind": "Whitespace",
                                             "text": "    ",
                                             "span": {
-                                              "start": 116,
+                                              "start": 117,
                                               "length": 4,
-                                              "end": 120,
+                                              "end": 121,
                                               "startLine": 6,
                                               "startColumn": 1,
                                               "endLine": 6,
@@ -2888,9 +1446,9 @@
                                 "node": {
                                   "nodeType": "LocalExpressionStatement",
                                   "span": {
-                                    "start": 120,
+                                    "start": 121,
                                     "length": 18,
-                                    "end": 138,
+                                    "end": 139,
                                     "startLine": 6,
                                     "startColumn": 5,
                                     "endLine": 6,
@@ -2902,9 +1460,9 @@
                                       "node": {
                                         "nodeType": "AssignmentExpression",
                                         "span": {
-                                          "start": 120,
+                                          "start": 121,
                                           "length": 17,
-                                          "end": 137,
+                                          "end": 138,
                                           "startLine": 6,
                                           "startColumn": 5,
                                           "endLine": 6,
@@ -2916,9 +1474,9 @@
                                             "node": {
                                               "nodeType": "IndexExpression",
                                               "span": {
-                                                "start": 120,
+                                                "start": 121,
                                                 "length": 8,
-                                                "end": 128,
+                                                "end": 129,
                                                 "startLine": 6,
                                                 "startColumn": 5,
                                                 "endLine": 6,
@@ -2930,9 +1488,9 @@
                                                   "node": {
                                                     "nodeType": "IdentifierNameExpression",
                                                     "span": {
-                                                      "start": 120,
+                                                      "start": 121,
                                                       "length": 4,
-                                                      "end": 124,
+                                                      "end": 125,
                                                       "startLine": 6,
                                                       "startColumn": 5,
                                                       "endLine": 6,
@@ -2944,9 +1502,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 120,
+                                                            "start": 121,
                                                             "length": 4,
-                                                            "end": 124,
+                                                            "end": 125,
                                                             "startLine": 6,
                                                             "startColumn": 5,
                                                             "endLine": 6,
@@ -2968,9 +1526,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 124,
+                                                      "start": 125,
                                                       "length": 1,
-                                                      "end": 125,
+                                                      "end": 126,
                                                       "startLine": 6,
                                                       "startColumn": 9,
                                                       "endLine": 6,
@@ -2989,9 +1547,9 @@
                                                   "node": {
                                                     "nodeType": "LiteralExpression",
                                                     "span": {
-                                                      "start": 125,
+                                                      "start": 126,
                                                       "length": 2,
-                                                      "end": 127,
+                                                      "end": 128,
                                                       "startLine": 6,
                                                       "startColumn": 10,
                                                       "endLine": 6,
@@ -3003,9 +1561,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 125,
+                                                            "start": 126,
                                                             "length": 2,
-                                                            "end": 127,
+                                                            "end": 128,
                                                             "startLine": 6,
                                                             "startColumn": 10,
                                                             "endLine": 6,
@@ -3027,9 +1585,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 127,
+                                                      "start": 128,
                                                       "length": 1,
-                                                      "end": 128,
+                                                      "end": 129,
                                                       "startLine": 6,
                                                       "startColumn": 12,
                                                       "endLine": 6,
@@ -3044,9 +1602,9 @@
                                                         "kind": "Whitespace",
                                                         "text": " ",
                                                         "span": {
-                                                          "start": 128,
+                                                          "start": 129,
                                                           "length": 1,
-                                                          "end": 129,
+                                                          "end": 130,
                                                           "startLine": 6,
                                                           "startColumn": 13,
                                                           "endLine": 6,
@@ -3065,9 +1623,9 @@
                                             "node": {
                                               "nodeType": "Token",
                                               "span": {
-                                                "start": 129,
+                                                "start": 130,
                                                 "length": 1,
-                                                "end": 130,
+                                                "end": 131,
                                                 "startLine": 6,
                                                 "startColumn": 14,
                                                 "endLine": 6,
@@ -3082,9 +1640,9 @@
                                                   "kind": "Whitespace",
                                                   "text": " ",
                                                   "span": {
-                                                    "start": 130,
+                                                    "start": 131,
                                                     "length": 1,
-                                                    "end": 131,
+                                                    "end": 132,
                                                     "startLine": 6,
                                                     "startColumn": 15,
                                                     "endLine": 6,
@@ -3100,9 +1658,9 @@
                                             "node": {
                                               "nodeType": "LiteralExpression",
                                               "span": {
-                                                "start": 131,
+                                                "start": 132,
                                                 "length": 6,
-                                                "end": 137,
+                                                "end": 138,
                                                 "startLine": 6,
                                                 "startColumn": 16,
                                                 "endLine": 6,
@@ -3114,9 +1672,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 131,
+                                                      "start": 132,
                                                       "length": 6,
-                                                      "end": 137,
+                                                      "end": 138,
                                                       "startLine": 6,
                                                       "startColumn": 16,
                                                       "endLine": 6,
@@ -3141,9 +1699,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 137,
+                                          "start": 138,
                                           "length": 1,
-                                          "end": 138,
+                                          "end": 139,
                                           "startLine": 6,
                                           "startColumn": 22,
                                           "endLine": 6,
@@ -3158,9 +1716,9 @@
                                             "kind": "EndOfLine",
                                             "text": "\n",
                                             "span": {
-                                              "start": 138,
+                                              "start": 139,
                                               "length": 1,
-                                              "end": 139,
+                                              "end": 140,
                                               "startLine": 6,
                                               "startColumn": 23,
                                               "endLine": 7,
@@ -3171,9 +1729,9 @@
                                             "kind": "Whitespace",
                                             "text": "    ",
                                             "span": {
-                                              "start": 139,
+                                              "start": 140,
                                               "length": 4,
-                                              "end": 143,
+                                              "end": 144,
                                               "startLine": 7,
                                               "startColumn": 1,
                                               "endLine": 7,
@@ -3192,9 +1750,9 @@
                                 "node": {
                                   "nodeType": "LocalVariableDeclarationStatement",
                                   "span": {
-                                    "start": 143,
+                                    "start": 144,
                                     "length": 13,
-                                    "end": 156,
+                                    "end": 157,
                                     "startLine": 7,
                                     "startColumn": 5,
                                     "endLine": 7,
@@ -3206,9 +1764,9 @@
                                       "node": {
                                         "nodeType": "VariableDeclaration",
                                         "span": {
-                                          "start": 143,
+                                          "start": 144,
                                           "length": 12,
-                                          "end": 155,
+                                          "end": 156,
                                           "startLine": 7,
                                           "startColumn": 5,
                                           "endLine": 7,
@@ -3220,9 +1778,9 @@
                                             "node": {
                                               "nodeType": "SimpleType",
                                               "span": {
-                                                "start": 143,
+                                                "start": 144,
                                                 "length": 5,
-                                                "end": 148,
+                                                "end": 149,
                                                 "startLine": 7,
                                                 "startColumn": 5,
                                                 "endLine": 7,
@@ -3234,9 +1792,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 143,
+                                                      "start": 144,
                                                       "length": 5,
-                                                      "end": 148,
+                                                      "end": 149,
                                                       "startLine": 7,
                                                       "startColumn": 5,
                                                       "endLine": 7,
@@ -3251,9 +1809,9 @@
                                                         "kind": "Whitespace",
                                                         "text": " ",
                                                         "span": {
-                                                          "start": 148,
+                                                          "start": 149,
                                                           "length": 1,
-                                                          "end": 149,
+                                                          "end": 150,
                                                           "startLine": 7,
                                                           "startColumn": 10,
                                                           "endLine": 7,
@@ -3272,9 +1830,9 @@
                                             "node": {
                                               "nodeType": "VariableDeclarator",
                                               "span": {
-                                                "start": 149,
+                                                "start": 150,
                                                 "length": 6,
-                                                "end": 155,
+                                                "end": 156,
                                                 "startLine": 7,
                                                 "startColumn": 11,
                                                 "endLine": 7,
@@ -3286,9 +1844,9 @@
                                                   "node": {
                                                     "nodeType": "SimpleName",
                                                     "span": {
-                                                      "start": 149,
+                                                      "start": 150,
                                                       "length": 1,
-                                                      "end": 150,
+                                                      "end": 151,
                                                       "startLine": 7,
                                                       "startColumn": 11,
                                                       "endLine": 7,
@@ -3300,9 +1858,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 149,
+                                                            "start": 150,
                                                             "length": 1,
-                                                            "end": 150,
+                                                            "end": 151,
                                                             "startLine": 7,
                                                             "startColumn": 11,
                                                             "endLine": 7,
@@ -3317,9 +1875,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 150,
+                                                                "start": 151,
                                                                 "length": 1,
-                                                                "end": 151,
+                                                                "end": 152,
                                                                 "startLine": 7,
                                                                 "startColumn": 12,
                                                                 "endLine": 7,
@@ -3338,9 +1896,9 @@
                                                   "node": {
                                                     "nodeType": "AssignmentClause",
                                                     "span": {
-                                                      "start": 151,
+                                                      "start": 152,
                                                       "length": 4,
-                                                      "end": 155,
+                                                      "end": 156,
                                                       "startLine": 7,
                                                       "startColumn": 13,
                                                       "endLine": 7,
@@ -3352,9 +1910,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 151,
+                                                            "start": 152,
                                                             "length": 1,
-                                                            "end": 152,
+                                                            "end": 153,
                                                             "startLine": 7,
                                                             "startColumn": 13,
                                                             "endLine": 7,
@@ -3369,9 +1927,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 152,
+                                                                "start": 153,
                                                                 "length": 1,
-                                                                "end": 153,
+                                                                "end": 154,
                                                                 "startLine": 7,
                                                                 "startColumn": 14,
                                                                 "endLine": 7,
@@ -3387,9 +1945,9 @@
                                                         "node": {
                                                           "nodeType": "LiteralExpression",
                                                           "span": {
-                                                            "start": 153,
+                                                            "start": 154,
                                                             "length": 2,
-                                                            "end": 155,
+                                                            "end": 156,
                                                             "startLine": 7,
                                                             "startColumn": 15,
                                                             "endLine": 7,
@@ -3401,9 +1959,9 @@
                                                               "node": {
                                                                 "nodeType": "Token",
                                                                 "span": {
-                                                                  "start": 153,
+                                                                  "start": 154,
                                                                   "length": 2,
-                                                                  "end": 155,
+                                                                  "end": 156,
                                                                   "startLine": 7,
                                                                   "startColumn": 15,
                                                                   "endLine": 7,
@@ -3434,9 +1992,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 155,
+                                          "start": 156,
                                           "length": 1,
-                                          "end": 156,
+                                          "end": 157,
                                           "startLine": 7,
                                           "startColumn": 17,
                                           "endLine": 7,
@@ -3451,9 +2009,9 @@
                                             "kind": "EndOfLine",
                                             "text": "\n",
                                             "span": {
-                                              "start": 156,
+                                              "start": 157,
                                               "length": 1,
-                                              "end": 157,
+                                              "end": 158,
                                               "startLine": 7,
                                               "startColumn": 18,
                                               "endLine": 8,
@@ -3464,9 +2022,9 @@
                                             "kind": "Whitespace",
                                             "text": "    ",
                                             "span": {
-                                              "start": 157,
+                                              "start": 158,
                                               "length": 4,
-                                              "end": 161,
+                                              "end": 162,
                                               "startLine": 8,
                                               "startColumn": 1,
                                               "endLine": 8,
@@ -3485,9 +2043,9 @@
                                 "node": {
                                   "nodeType": "LocalExpressionStatement",
                                   "span": {
-                                    "start": 161,
+                                    "start": 162,
                                     "length": 12,
-                                    "end": 173,
+                                    "end": 174,
                                     "startLine": 8,
                                     "startColumn": 5,
                                     "endLine": 8,
@@ -3499,9 +2057,9 @@
                                       "node": {
                                         "nodeType": "AssignmentExpression",
                                         "span": {
-                                          "start": 161,
+                                          "start": 162,
                                           "length": 11,
-                                          "end": 172,
+                                          "end": 173,
                                           "startLine": 8,
                                           "startColumn": 5,
                                           "endLine": 8,
@@ -3513,9 +2071,9 @@
                                             "node": {
                                               "nodeType": "IdentifierNameExpression",
                                               "span": {
-                                                "start": 161,
+                                                "start": 162,
                                                 "length": 1,
-                                                "end": 162,
+                                                "end": 163,
                                                 "startLine": 8,
                                                 "startColumn": 5,
                                                 "endLine": 8,
@@ -3527,9 +2085,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 161,
+                                                      "start": 162,
                                                       "length": 1,
-                                                      "end": 162,
+                                                      "end": 163,
                                                       "startLine": 8,
                                                       "startColumn": 5,
                                                       "endLine": 8,
@@ -3544,9 +2102,9 @@
                                                         "kind": "Whitespace",
                                                         "text": " ",
                                                         "span": {
-                                                          "start": 162,
+                                                          "start": 163,
                                                           "length": 1,
-                                                          "end": 163,
+                                                          "end": 164,
                                                           "startLine": 8,
                                                           "startColumn": 6,
                                                           "endLine": 8,
@@ -3565,9 +2123,9 @@
                                             "node": {
                                               "nodeType": "Token",
                                               "span": {
-                                                "start": 163,
+                                                "start": 164,
                                                 "length": 1,
-                                                "end": 164,
+                                                "end": 165,
                                                 "startLine": 8,
                                                 "startColumn": 7,
                                                 "endLine": 8,
@@ -3582,9 +2140,9 @@
                                                   "kind": "Whitespace",
                                                   "text": " ",
                                                   "span": {
-                                                    "start": 164,
+                                                    "start": 165,
                                                     "length": 1,
-                                                    "end": 165,
+                                                    "end": 166,
                                                     "startLine": 8,
                                                     "startColumn": 8,
                                                     "endLine": 8,
@@ -3600,9 +2158,9 @@
                                             "node": {
                                               "nodeType": "BinaryExpression",
                                               "span": {
-                                                "start": 165,
+                                                "start": 166,
                                                 "length": 7,
-                                                "end": 172,
+                                                "end": 173,
                                                 "startLine": 8,
                                                 "startColumn": 9,
                                                 "endLine": 8,
@@ -3614,9 +2172,9 @@
                                                   "node": {
                                                     "nodeType": "IdentifierNameExpression",
                                                     "span": {
-                                                      "start": 165,
+                                                      "start": 166,
                                                       "length": 1,
-                                                      "end": 166,
+                                                      "end": 167,
                                                       "startLine": 8,
                                                       "startColumn": 9,
                                                       "endLine": 8,
@@ -3628,9 +2186,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 165,
+                                                            "start": 166,
                                                             "length": 1,
-                                                            "end": 166,
+                                                            "end": 167,
                                                             "startLine": 8,
                                                             "startColumn": 9,
                                                             "endLine": 8,
@@ -3645,9 +2203,9 @@
                                                               "kind": "Whitespace",
                                                               "text": " ",
                                                               "span": {
-                                                                "start": 166,
+                                                                "start": 167,
                                                                 "length": 1,
-                                                                "end": 167,
+                                                                "end": 168,
                                                                 "startLine": 8,
                                                                 "startColumn": 10,
                                                                 "endLine": 8,
@@ -3666,9 +2224,9 @@
                                                   "node": {
                                                     "nodeType": "Token",
                                                     "span": {
-                                                      "start": 167,
+                                                      "start": 168,
                                                       "length": 1,
-                                                      "end": 168,
+                                                      "end": 169,
                                                       "startLine": 8,
                                                       "startColumn": 11,
                                                       "endLine": 8,
@@ -3683,9 +2241,9 @@
                                                         "kind": "Whitespace",
                                                         "text": " ",
                                                         "span": {
-                                                          "start": 168,
+                                                          "start": 169,
                                                           "length": 1,
-                                                          "end": 169,
+                                                          "end": 170,
                                                           "startLine": 8,
                                                           "startColumn": 12,
                                                           "endLine": 8,
@@ -3701,9 +2259,9 @@
                                                   "node": {
                                                     "nodeType": "LiteralExpression",
                                                     "span": {
-                                                      "start": 169,
+                                                      "start": 170,
                                                       "length": 3,
-                                                      "end": 172,
+                                                      "end": 173,
                                                       "startLine": 8,
                                                       "startColumn": 13,
                                                       "endLine": 8,
@@ -3715,9 +2273,9 @@
                                                         "node": {
                                                           "nodeType": "Token",
                                                           "span": {
-                                                            "start": 169,
+                                                            "start": 170,
                                                             "length": 3,
-                                                            "end": 172,
+                                                            "end": 173,
                                                             "startLine": 8,
                                                             "startColumn": 13,
                                                             "endLine": 8,
@@ -3745,9 +2303,9 @@
                                       "node": {
                                         "nodeType": "Token",
                                         "span": {
-                                          "start": 172,
+                                          "start": 173,
                                           "length": 1,
-                                          "end": 173,
+                                          "end": 174,
                                           "startLine": 8,
                                           "startColumn": 16,
                                           "endLine": 8,
@@ -3762,25 +2320,12 @@
                                             "kind": "EndOfLine",
                                             "text": "\n",
                                             "span": {
-                                              "start": 173,
-                                              "length": 1,
-                                              "end": 174,
-                                              "startLine": 8,
-                                              "startColumn": 17,
-                                              "endLine": 9,
-                                              "endColumn": 1
-                                            }
-                                          },
-                                          {
-                                            "kind": "EndOfLine",
-                                            "text": "\n",
-                                            "span": {
                                               "start": 174,
                                               "length": 1,
                                               "end": 175,
-                                              "startLine": 9,
-                                              "startColumn": 1,
-                                              "endLine": 10,
+                                              "startLine": 8,
+                                              "startColumn": 17,
+                                              "endLine": 9,
                                               "endColumn": 1
                                             }
                                           },
@@ -3791,9 +2336,9 @@
                                               "start": 175,
                                               "length": 4,
                                               "end": 179,
-                                              "startLine": 10,
+                                              "startLine": 9,
                                               "startColumn": 1,
-                                              "endLine": 10,
+                                              "endLine": 9,
                                               "endColumn": 5
                                             }
                                           }
@@ -3812,9 +2357,9 @@
                                     "start": 179,
                                     "length": 9,
                                     "end": 188,
-                                    "startLine": 10,
+                                    "startLine": 9,
                                     "startColumn": 5,
-                                    "endLine": 10,
+                                    "endLine": 9,
                                     "endColumn": 14
                                   },
                                   "children": [
@@ -3826,9 +2371,9 @@
                                           "start": 179,
                                           "length": 9,
                                           "end": 188,
-                                          "startLine": 10,
+                                          "startLine": 9,
                                           "startColumn": 5,
-                                          "endLine": 10,
+                                          "endLine": 9,
                                           "endColumn": 14
                                         },
                                         "children": [
@@ -3840,9 +2385,9 @@
                                                 "start": 179,
                                                 "length": 6,
                                                 "end": 185,
-                                                "startLine": 10,
+                                                "startLine": 9,
                                                 "startColumn": 5,
-                                                "endLine": 10,
+                                                "endLine": 9,
                                                 "endColumn": 11
                                               },
                                               "tokenKind": "Identifier",
@@ -3858,9 +2403,9 @@
                                                     "start": 185,
                                                     "length": 1,
                                                     "end": 186,
-                                                    "startLine": 10,
+                                                    "startLine": 9,
                                                     "startColumn": 11,
-                                                    "endLine": 10,
+                                                    "endLine": 9,
                                                     "endColumn": 12
                                                   }
                                                 }
@@ -3876,9 +2421,9 @@
                                                 "start": 186,
                                                 "length": 1,
                                                 "end": 187,
-                                                "startLine": 10,
+                                                "startLine": 9,
                                                 "startColumn": 12,
-                                                "endLine": 10,
+                                                "endLine": 9,
                                                 "endColumn": 13
                                               },
                                               "children": [
@@ -3890,9 +2435,9 @@
                                                       "start": 186,
                                                       "length": 1,
                                                       "end": 187,
-                                                      "startLine": 10,
+                                                      "startLine": 9,
                                                       "startColumn": 12,
-                                                      "endLine": 10,
+                                                      "endLine": 9,
                                                       "endColumn": 13
                                                     },
                                                     "tokenKind": "Integer",
@@ -3914,9 +2459,9 @@
                                                 "start": 187,
                                                 "length": 1,
                                                 "end": 188,
-                                                "startLine": 10,
+                                                "startLine": 9,
                                                 "startColumn": 13,
-                                                "endLine": 10,
+                                                "endLine": 9,
                                                 "endColumn": 14
                                               },
                                               "tokenKind": "Semicolon",
@@ -3931,9 +2476,9 @@
                                                     "start": 188,
                                                     "length": 1,
                                                     "end": 189,
-                                                    "startLine": 10,
+                                                    "startLine": 9,
                                                     "startColumn": 14,
-                                                    "endLine": 11,
+                                                    "endLine": 10,
                                                     "endColumn": 1
                                                   }
                                                 }
@@ -3955,16 +2500,30 @@
                                     "start": 189,
                                     "length": 1,
                                     "end": 190,
-                                    "startLine": 11,
+                                    "startLine": 10,
                                     "startColumn": 1,
-                                    "endLine": 11,
+                                    "endLine": 10,
                                     "endColumn": 2
                                   },
                                   "tokenKind": "RightBrace",
                                   "text": "}",
                                   "displayText": "}",
                                   "leadingTrivia": [],
-                                  "trailingTrivia": [],
+                                  "trailingTrivia": [
+                                    {
+                                      "kind": "EndOfLine",
+                                      "text": "\n",
+                                      "span": {
+                                        "start": 190,
+                                        "length": 1,
+                                        "end": 191,
+                                        "startLine": 10,
+                                        "startColumn": 2,
+                                        "endLine": 11,
+                                        "endColumn": 1
+                                      }
+                                    }
+                                  ],
                                   "children": []
                                 }
                               }
@@ -3982,13 +2541,13 @@
               "node": {
                 "nodeType": "Token",
                 "span": {
-                  "start": 190,
+                  "start": 191,
                   "length": 0,
-                  "end": 190,
+                  "end": 191,
                   "startLine": 11,
-                  "startColumn": 2,
+                  "startColumn": 1,
                   "endLine": 11,
-                  "endColumn": 2
+                  "endColumn": 1
                 },
                 "tokenKind": "EndToken",
                 "text": "",

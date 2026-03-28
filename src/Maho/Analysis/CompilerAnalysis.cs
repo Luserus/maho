@@ -34,6 +34,9 @@ public sealed record CompilerAnalysisResult(
     string? ParserJson,
     IReadOnlyList<DiagnosticInfo> Diagnostics)
 {
+    public string? LexerOutput { get; init; }
+    public string? ParserOutput { get; init; }
+
     public bool HasErrors
     {
         get
@@ -82,9 +85,13 @@ public static class MahoCompiler
 
         return new CompilerAnalysisResult(
             sourcePath,
-            output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null,
-            output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null,
-            CreateDiagnostics(diagnosticsManager, text));
+            output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToJson() : null,
+            output.HasFlag(AnalysisOutput.Parser) ? parser.ToJson() : null,
+            CreateDiagnostics(diagnosticsManager, text))
+        {
+            LexerOutput = output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null,
+            ParserOutput = output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null
+        };
     }
 
     private static DiagnosticInfo[] CreateDiagnostics(DiagnosticsManager diagnosticsManager, SourceText text)

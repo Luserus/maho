@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -7,7 +6,7 @@ using Maho.Text;
 namespace Maho.Syntax;
 
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
-internal sealed class Lexer
+internal sealed partial class Lexer
 {
     private readonly DiagnosticsManager diagnostics;
     /// <summary> Current index of char being read from the program string. </summary>
@@ -301,27 +300,4 @@ internal sealed class Lexer
     /// <returns> char at the index peeked. Returns '\0' if the offset added to current index exceeds the program string length. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private char Peek(int offset = 1) => current + offset < text.Length ? text[current + offset] : '\0';
-
-    /// <summary> Gets a formatted string representation of the token stream for debugging. </summary>
-    /// <returns> The token stream as JSON. </returns>
-    public override string ToString()
-    {
-        DebugLexerTokenInfo[] tokens = new DebugLexerTokenInfo[Tokens.Count];
-
-        for (int i = 0; i < tokens.Length; i++)
-        {
-            var token = Tokens[i];
-            tokens[i] = new DebugLexerTokenInfo(
-                i,
-                token.Kind.ToString(),
-                token.Value,
-                DebugJson.GetDisplayText(token),
-                DebugJson.GetMatchingKind(token.MatchingKind),
-                DebugJson.CreateSpan(text, token.Span),
-                DebugJson.CreateTrivia(text, token.LeadingTrivia),
-                DebugJson.CreateTrivia(text, token.TrailingTrivia));
-        }
-
-        return DebugJson.Serialize(new DebugLexerInfo("lexer", tokens.Length, tokens));
-    }
 }
