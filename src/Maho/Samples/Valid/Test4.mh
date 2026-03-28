@@ -1,0 +1,13 @@
+namespace Modifiers;
+
+public class Graph<TKey, TValue>
+{
+    public Collections.Dictionary<TKey, TValue*[]> Edges;
+
+    public TValue*[] Build(TKey key, TValue*[] fallback)
+    {
+        TValue*[] values = [];
+        TValue first = fallback[0];
+        return fallback;
+    }
+}

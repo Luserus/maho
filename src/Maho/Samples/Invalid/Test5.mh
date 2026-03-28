@@ -1,0 +1,7 @@
+public static int Main()
+{
+    $;
+    string text = "unterminated
+    char none = '';
+    return 0;
+}
