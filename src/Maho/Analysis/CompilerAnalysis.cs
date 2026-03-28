@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Maho.Diagnostics;
 using Maho.Syntax;
@@ -7,56 +6,12 @@ using Maho.Text;
 
 namespace Maho;
 
-[Flags]
-public enum AnalysisOutput
-{
-    None = 0,
-    Lexer = 1 << 0,
-    Parser = 1 << 1
-}
-
-public enum DiagnosticSeverity : byte
-{
-    Info,
-    Warning,
-    Error
-}
-
-public sealed record TextLocation(int Line, int Column);
-
-public sealed record TextSpanInfo(int Start, int Length, int End, TextLocation StartLocation, TextLocation EndLocation);
-
-public sealed record DiagnosticInfo(string Code, string Message, DiagnosticSeverity Severity, TextSpanInfo Span);
-
-public sealed record CompilerAnalysisResult(
-    string SourcePath,
-    string? LexerJson,
-    string? ParserJson,
-    IReadOnlyList<DiagnosticInfo> Diagnostics)
-{
-    public string? LexerOutput { get; init; }
-    public string? ParserOutput { get; init; }
-
-    public bool HasErrors
-    {
-        get
-        {
-            for (int i = 0; i < Diagnostics.Count; i++)
-            {
-                if (Diagnostics[i].Severity is DiagnosticSeverity.Error)
-                    return true;
-            }
-
-            return false;
-        }
-    }
-}
-
 public static class MahoCompiler
 {
     public static CompilerAnalysisResult AnalyzeFile(string filePath, AnalysisOutput output = AnalysisOutput.None)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        if (string.IsNullOrWhiteSpace(filePath))
+            throw new ArgumentException("Source file path cannot be empty.", nameof(filePath));
 
         string fullPath = Path.GetFullPath(filePath);
 
@@ -66,8 +21,11 @@ public static class MahoCompiler
 
     public static CompilerAnalysisResult AnalyzeText(string sourceText, AnalysisOutput output = AnalysisOutput.None, string sourcePath = "<memory>")
     {
-        ArgumentNullException.ThrowIfNull(sourceText);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        if (sourceText is null)
+            throw new ArgumentNullException(nameof(sourceText), "Source text cannot be null.");
+
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            throw new ArgumentException("Source path cannot be empty.", nameof(sourcePath));
 
         using SourceText text = new(sourceText);
         return AnalyzeCore(text, sourcePath, output);
@@ -83,15 +41,14 @@ public static class MahoCompiler
         Parser parser = new(text, diagnosticsManager);
         parser.Parse(lexer.Tokens);
 
+        DiagnosticInfo[] diagnostics = CreateDiagnostics(diagnosticsManager, text);
+
         return new CompilerAnalysisResult(
             sourcePath,
             output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToJson() : null,
             output.HasFlag(AnalysisOutput.Parser) ? parser.ToJson() : null,
-            CreateDiagnostics(diagnosticsManager, text))
-        {
-            LexerOutput = output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null,
-            ParserOutput = output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null
-        };
+            diagnostics,
+            DebugJson.Serialize(diagnostics));
     }
 
     private static DiagnosticInfo[] CreateDiagnostics(DiagnosticsManager diagnosticsManager, SourceText text)
@@ -115,7 +72,8 @@ public static class MahoCompiler
     {
         DiagnosticKind.Info => DiagnosticSeverity.Info,
         DiagnosticKind.Warning => DiagnosticSeverity.Warning,
-        _ => DiagnosticSeverity.Error
+        DiagnosticKind.Error => DiagnosticSeverity.Error,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled diagnostic kind.")
     };
 
     internal static TextSpanInfo CreateSpanInfo(TextSpan span, SourceText text) =>

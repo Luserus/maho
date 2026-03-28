@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Maho.Text;
 
@@ -60,7 +61,7 @@ internal sealed partial class Parser
             MatchingKeywordKind.Interface => TypeKind.Interface,
             MatchingKeywordKind.Enum => TypeKind.Enum,
             MatchingKeywordKind.Union => TypeKind.Union,
-            _ => throw new System.Exception($"Impossible default case.")
+            _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled type declaration keyword.")
         };
 
         var name = ParseNamedSyntax();

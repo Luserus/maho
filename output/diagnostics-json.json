@@ -1,0 +1,83 @@
+{
+  "inputPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Invalid/Test6.mh",
+  "files": [
+    {
+      "filePath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Invalid/Test6.mh",
+      "displayPath": "/home/luserus/SoftwareDev/Systems/Compiler/maho/Samples/Invalid/Test6.mh",
+      "diagnostics": [
+        {
+          "code": "MHC1003",
+          "message": "Expected an identifier after \u0027,\u0027 in the parameter list, found \u0027)\u0027.",
+          "severity": 2,
+          "span": {
+            "start": 33,
+            "length": 1,
+            "end": 34,
+            "startLocation": {
+              "line": 1,
+              "column": 34
+            },
+            "endLocation": {
+              "line": 1,
+              "column": 35
+            }
+          }
+        },
+        {
+          "code": "MHC1003",
+          "message": "Expected an identifier after \u0027.\u0027, found \u0027;\u0027.",
+          "severity": 2,
+          "span": {
+            "start": 45,
+            "length": 1,
+            "end": 46,
+            "startLocation": {
+              "line": 3,
+              "column": 9
+            },
+            "endLocation": {
+              "line": 3,
+              "column": 10
+            }
+          }
+        },
+        {
+          "code": "MHC1001",
+          "message": "Expected \u0027(\u0027 after \u0027if\u0027, found \u0027return\u0027.",
+          "severity": 2,
+          "span": {
+            "start": 54,
+            "length": 6,
+            "end": 60,
+            "startLocation": {
+              "line": 4,
+              "column": 8
+            },
+            "endLocation": {
+              "line": 4,
+              "column": 14
+            }
+          }
+        },
+        {
+          "code": "MHC1001",
+          "message": "Expected \u0027)\u0027 to close the \u0027if\u0027 condition, found \u00270\u0027.",
+          "severity": 2,
+          "span": {
+            "start": 61,
+            "length": 1,
+            "end": 62,
+            "startLocation": {
+              "line": 4,
+              "column": 15
+            },
+            "endLocation": {
+              "line": 4,
+              "column": 16
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

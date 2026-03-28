@@ -17,7 +17,7 @@ internal sealed partial class Lexer
     private char CurrentChar => current >= text.Length ? '\0' : text[current];
 
     /// <summary> Tokens lexed by the Lexer. </summary>
-    public List<Token> Tokens { get; } = new(256);
+    public List<Token> Tokens { get; } = new List<Token>(256);
 
     /// <summary> Initializes a new instance of the Lexer class. </summary>
     /// <param name="sourceText"> Source text of the program. </param>

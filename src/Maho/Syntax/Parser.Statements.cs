@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using Maho.Text;
@@ -93,7 +94,7 @@ internal sealed partial class Parser
     {
         switch (parseMode)
         {
-            default:
+            case StatementParseMode.Normal:
                 switch (CurrentToken.Kind)
                 {
                     case TokenKind.Identifier:
@@ -135,6 +136,9 @@ internal sealed partial class Parser
                 }
 
                 return ParseLocalExpressionStatement(allowFinalExpression: true);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(parseMode), parseMode, "Unhandled statement parse mode.");
         }
     }
 

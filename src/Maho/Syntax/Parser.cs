@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -170,15 +171,17 @@ internal sealed partial class Parser
     private TextSpan GetMissingTokenDiagnosticSpan(MissingTokenAnchor anchor) =>
         anchor switch
         {
+            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span,
             MissingTokenAnchor.AfterPrevious => new TextSpan(PreviousToken.Span.End, 0),
-            _ => CurrentToken.Span
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
         };
 
     private int GetMissingTokenPosition(MissingTokenAnchor anchor) =>
         anchor switch
         {
+            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span.Start,
             MissingTokenAnchor.AfterPrevious => PreviousToken.Span.End,
-            _ => CurrentToken.Span.Start
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
         };
 
     private void SynchronizeTo(params TokenKind[] stopKinds)

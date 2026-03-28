@@ -1,11 +1,8 @@
-using System.Collections.Generic;
-using Maho.Symbols;
-
 namespace Maho.Resolution;
 
 internal sealed class Scope
 {
-    private Scope? parent;
+    private readonly Scope? parent;
 
     public Scope(Scope? parent = null)
     {

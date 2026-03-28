@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Text;
@@ -279,7 +280,7 @@ internal sealed partial class Parser
         {
             MatchingKeywordKind.New => ObjectCreationKind.New,
             MatchingKeywordKind.Put => ObjectCreationKind.Put,
-            _ => throw new System.Exception("Impossible case: keyword is guaranteed to be 'new' or 'put' from parent function.")
+            _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled object creation keyword.")
         };
 
         var type = ParseTypeSyntax();
