@@ -63,10 +63,13 @@ These methods matter because they define stable diagnostic codes and text for le
 - `ReportExpectedExpression(...)`
 - `ReportExpectedIdentifier(...)`
 - `ReportExpectedType(...)`
+- `ReportExpectedSemicolon(...)`
+- `ReportExpectedClosingToken(...)`
+- `ReportExpectedBody(...)`
 - `ReportUnexpectedToken(...)`
 - `ReportMissingToken(...)`
 
-The notable design choice is that most parser diagnostics are variations of one message shape: "expected X, found Y". That keeps error reporting consistent and makes the renderer-side hint table manageable.
+The notable design choice is that parser diagnostics still share one message shape, "expected X, found Y", but the most common recovery sites now get dedicated codes. That keeps messages consistent while giving the CLI room to show better tips for missing semicolons, closing delimiters, and bodies.
 
 ### Private helpers
 

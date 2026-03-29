@@ -2,7 +2,7 @@ namespace Maho.Syntax;
 
 internal sealed partial class Lexer
 {
-    public string ToJson()
+    public override string ToString()
     {
         DebugLexerTokenInfo[] tokens = new DebugLexerTokenInfo[Tokens.Count];
 

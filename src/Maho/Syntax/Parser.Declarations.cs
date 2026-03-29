@@ -10,7 +10,7 @@ internal sealed partial class Parser
     {   
         var modifiers = ParseModifiers();
 
-        if (CurrentTokenIsTypeDeclarationStart)
+        if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(modifiers);
         else
             return ParseTopLevelVariableDeclarationOrFunction(modifiers);
@@ -74,7 +74,7 @@ internal sealed partial class Parser
             body = ParseTypeEmptyBody();
         else
         {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "a type body", GetTokenDisplay(CurrentToken), "after the type declaration");
+            diagnostics.ReportExpectedBody(CurrentToken.Span, "a type body", GetTokenDisplay(CurrentToken), "after the type declaration");
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
@@ -172,7 +172,7 @@ internal sealed partial class Parser
     {
         var modifiers = ParseModifiers();
 
-        if (CurrentTokenIsTypeDeclarationStart)
+        if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(modifiers);
         else
             return ParseLocalVariableDeclarationStatementOrFunction(modifiers);
@@ -346,7 +346,7 @@ internal sealed partial class Parser
             return ParseFunctionEmptyBody();
         else
         {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "a function body", GetTokenDisplay(CurrentToken), "after the function signature");
+            diagnostics.ReportExpectedBody(CurrentToken.Span, "a function body", GetTokenDisplay(CurrentToken), "after the function signature");
             return new FunctionEmptyBody(CreateMissingToken());
         }
     }
@@ -366,7 +366,7 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is not TokenKind.RightBrace)
         {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "'}'", GetTokenDisplay(CurrentToken), "to close the function body");
+            diagnostics.ReportExpectedClosingToken(CurrentToken.Span, "'}'", GetTokenDisplay(CurrentToken), "to close the function body");
             SynchronizeTo(TokenKind.RightBrace);
             var closeBrace = CurrentToken.Kind is TokenKind.RightBrace ? Consume() : CreateMissingToken();
             return new FunctionBlockBody(openBrace, locals, closeBrace);
@@ -486,7 +486,7 @@ internal sealed partial class Parser
     {
         var list = new List<Token>();
 
-        while (CurrentTokenIsModifier)
+        while (IsCurrentTokenModifier)
             list.Add(Consume());
 
         return list;

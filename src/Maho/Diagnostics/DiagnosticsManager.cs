@@ -48,49 +48,68 @@ internal sealed class DiagnosticsManager
     /// Reports an invalid token emitted by the lexer, preserving the offending text when possible.
     /// </summary>
     public void ReportBadToken(TextSpan span, string tokenText) =>
-        ReportError("MHC0001", $"Invalid token {FormatTokenText(tokenText)}.", span);
+        ReportError("MH0001", $"Invalid token {FormatTokenText(tokenText)}.", span);
 
     /// <summary>
     /// Reports a string literal that could not be closed before the lexer had to recover.
     /// </summary>
     public void ReportUnterminatedString(TextSpan span) =>
-        ReportError("MHC0002", "Unterminated string literal.", span);
+        ReportError("MH0002", "Unterminated string literal.", span);
 
     /// <summary>
     /// Reports a character literal that could not be closed before the lexer had to recover.
     /// </summary>
     public void ReportUnterminatedCharacter(TextSpan span) =>
-        ReportError("MHC0003", "Unterminated character literal.", span);
+        ReportError("MH0003", "Unterminated character literal.", span);
 
     /// <summary>
     /// Reports a character literal whose delimiters contain no payload.
     /// </summary>
     public void ReportEmptyCharacterLiteral(TextSpan span) =>
-        ReportError("MHC0004", "Character literal cannot be empty.", span);
+        ReportError("MH0004", "Character literal cannot be empty.", span);
 
     /// <summary>
     /// Reports a parser recovery site where a specific token kind was required.
     /// </summary>
     public void ReportExpectedToken(TextSpan span, string expected, string found, string? context = null) =>
-        ReportError("MHC1001", CreateExpectedMessage(expected, found, context), span);
+        ReportError("MH1001", CreateExpectedMessage(expected, found, context), span);
 
     /// <summary>
     /// Reports a parser recovery site where an expression was needed to continue meaningfully.
     /// </summary>
     public void ReportExpectedExpression(TextSpan span, string found, string? context = null) =>
-        ReportError("MHC1002", CreateExpectedMessage("an expression", found, context), span);
+        ReportError("MH1002", CreateExpectedMessage("an expression", found, context), span);
 
     /// <summary>
     /// Reports a parser recovery site where an identifier-shaped token was required.
     /// </summary>
     public void ReportExpectedIdentifier(TextSpan span, string found, string? context = null) =>
-        ReportError("MHC1003", CreateExpectedMessage("an identifier", found, context), span);
+        ReportError("MH1003", CreateExpectedMessage("an identifier", found, context), span);
 
     /// <summary>
     /// Reports a parser recovery site where type syntax was required.
     /// </summary>
     public void ReportExpectedType(TextSpan span, string found, string? context = null) =>
-        ReportError("MHC1004", CreateExpectedMessage("a type", found, context), span);
+        ReportError("MH1004", CreateExpectedMessage("a type", found, context), span);
+
+    /// <summary>
+    /// Reports a parser recovery site where a terminating semicolon was required.
+    /// </summary>
+    public void ReportExpectedSemicolon(TextSpan span, string found, string? context = null) =>
+        ReportError("MH1005", CreateExpectedMessage("';'", found, context), span);
+
+    /// <summary>
+    /// Reports a parser recovery site where a closing delimiter was required to finish the current
+    /// construct.
+    /// </summary>
+    public void ReportExpectedClosingToken(TextSpan span, string expected, string found, string? context = null) =>
+        ReportError("MH1006", CreateExpectedMessage(expected, found, context), span);
+
+    /// <summary>
+    /// Reports a parser recovery site where a declaration or type body was required.
+    /// </summary>
+    public void ReportExpectedBody(TextSpan span, string expected, string found, string? context = null) =>
+        ReportError("MH1007", CreateExpectedMessage(expected, found, context), span);
 
     /// <summary>
     /// Reports a generic parser mismatch when no narrower expectation is available.

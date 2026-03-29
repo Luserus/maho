@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -100,9 +99,9 @@ internal sealed partial class Parser
 
     public CompilationUnit Root { get; private set; } = null!;
 
-    private bool CurrentTokenIsModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+    private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                             MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const;
-    private bool CurrentTokenIsTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
+    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
     private enum StatementParseMode : byte
     {
@@ -135,9 +134,9 @@ internal sealed partial class Parser
         Root = compilationUnit;
     }
 
-    private List<Token> FilterTokens(List<Token> sourceTokens)
+    private static List<Token> FilterTokens(List<Token> sourceTokens)
     {
-        List<Token> filtered = new(sourceTokens.Count);
+        List<Token> filtered = new List<Token>(sourceTokens.Count);
 
         foreach (var token in sourceTokens)
         {
@@ -153,208 +152,7 @@ internal sealed partial class Parser
     private static bool IsLiteralTokenKind(TokenKind kind) =>
         kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String;
 
-    private static bool IsRecoveryBoundary(TokenKind kind) =>
-        kind is TokenKind.EndToken or TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.Semicolon or TokenKind.Comma;
-
-    private string GetTokenDisplay(Token token) => token.Kind switch
-    {
-        TokenKind.EndToken => "<end of file>",
-        TokenKind.MissingToken => "<missing>",
-        _ when string.IsNullOrEmpty(token.Value) => $"<{token.Kind}>",
-        _ => token.Value
-    };
-
-    private Token CreateMissingToken() => CreateMissingTokenAt(CurrentToken.Span.Start);
-
-    private Token CreateMissingTokenAt(int position) => new(text, new TextSpan(position, 0), TokenKind.MissingToken, [], []);
-
-    private TextSpan GetMissingTokenDiagnosticSpan(MissingTokenAnchor anchor) =>
-        anchor switch
-        {
-            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span,
-            MissingTokenAnchor.AfterPrevious => new TextSpan(PreviousToken.Span.End, 0),
-            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
-        };
-
-    private int GetMissingTokenPosition(MissingTokenAnchor anchor) =>
-        anchor switch
-        {
-            MissingTokenAnchor.BeforeCurrent => CurrentToken.Span.Start,
-            MissingTokenAnchor.AfterPrevious => PreviousToken.Span.End,
-            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
-        };
-
-    private MissingTokenAnchor GetClosingTokenAnchor()
-    {
-        if (current <= 0)
-            return MissingTokenAnchor.BeforeCurrent;
-
-        int currentLine = text.GetLineIndex(CurrentToken.Span.Start);
-        int previousLine = text.GetLineIndex(PreviousToken.Span.End);
-
-        return currentLine > previousLine
-            ? MissingTokenAnchor.AfterPrevious
-            : MissingTokenAnchor.BeforeCurrent;
-    }
-
-    private void SynchronizeTo(params TokenKind[] stopKinds)
-    {
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            if (Contains(stopKinds, CurrentToken.Kind))
-                break;
-
-            Consume();
-        }
-    }
-
-    private static bool Contains(TokenKind[] kinds, TokenKind kind)
-    {
-        for (int i = 0; i < kinds.Length; i++)
-        {
-            if (kinds[i] == kind)
-                return true;
-        }
-
-        return false;
-    }
-
-    private Token RecoverWithMissingToken()
-    {
-        if (!IsRecoveryBoundary(CurrentToken.Kind))
-            Consume();
-
-        return CreateMissingToken();
-    }
-
-    private Token ExpectToken(TokenKind expectedKind, string expectedText, string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
-    {
-        if (CurrentToken.Kind is var currentKind && currentKind == expectedKind)
-            return Consume();
-
-        diagnostics.ReportExpectedToken(GetMissingTokenDiagnosticSpan(anchor), expectedText, GetTokenDisplay(CurrentToken), context);
-        return CreateMissingTokenAt(GetMissingTokenPosition(anchor));
-    }
-
-    private Token ExpectClosingToken(TokenKind expectedKind, string expectedText, string? context = null, params TokenKind[] recoveryKinds)
-    {
-        if (CurrentToken.Kind == expectedKind)
-            return Consume();
-
-        // When the recovery token starts on a later line, anchor the missing closer at the end of
-        // the previous token so the insertion point stays on the line where the construct started.
-        MissingTokenAnchor anchor = GetClosingTokenAnchor();
-        TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(anchor);
-        int missingTokenPosition = GetMissingTokenPosition(anchor);
-
-        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context);
-
-        if (!Contains(recoveryKinds, CurrentToken.Kind))
-            SynchronizeTo([expectedKind, .. recoveryKinds]);
-
-        if (CurrentToken.Kind == expectedKind)
-            return Consume();
-
-        return CreateMissingTokenAt(missingTokenPosition);
-    }
-
-    private Token ExpectIdentifierToken(string? context = null)
-    {
-        if (CurrentToken.Kind is TokenKind.Identifier)
-            return Consume();
-
-        diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), context);
-        return RecoverWithMissingToken();
-    }
-
-    private bool CanStartExpression()
-    {
-        if (CurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
-            return true;
-
-        if (IsLiteralTokenKind(CurrentToken.Kind))
-            return true;
-
-        var (kind, length) = GetCombinedOperatorData();
-        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix;
-    }
-
-    private Expression CreateMissingExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
-    {
-        diagnostics.ReportExpectedExpression(GetMissingTokenDiagnosticSpan(anchor), GetTokenDisplay(CurrentToken), context);
-
-        if (anchor is MissingTokenAnchor.BeforeCurrent)
-            return new LiteralExpression(RecoverWithMissingToken());
-
-        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(anchor)));
-    }
-
-    private Expression ParseExpectedExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent) =>
-        CanStartExpression() ? ParseExpression() : CreateMissingExpression(context, anchor);
-
-    private bool CanStartTopLevelConstruct() =>
-        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
-        CurrentToken.MatchingKind is MatchingKeywordKind.Namespace ||
-        CurrentTokenIsModifier ||
-        CanStartExpression();
-
-    private bool CanStartMemberConstruct() =>
-        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
-        CurrentTokenIsModifier ||
-        CurrentTokenIsTypeDeclarationStart ||
-        CurrentToken.Kind is TokenKind.Identifier;
-
-    private bool CanStartLocalConstruct() =>
-        CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
-        CurrentTokenIsModifier ||
-        CanStartExpression();
-
-    private void SynchronizeConstruct(System.Func<bool> isRecoveryPoint)
-    {
-        if (CurrentToken.Kind is TokenKind.EndToken)
-            return;
-
-        Consume();
-
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            if (CurrentToken.Kind is TokenKind.RightBrace)
-                return;
-
-            if (CurrentToken.Kind is TokenKind.Semicolon)
-            {
-                Consume();
-                return;
-            }
-
-            if (isRecoveryPoint())
-                return;
-
-            Consume();
-        }
-    }
-
-    private void SynchronizeTopLevel() => SynchronizeConstruct(CanStartTopLevelConstruct);
-    private void SynchronizeMember() => SynchronizeConstruct(CanStartMemberConstruct);
-    private void SynchronizeLocal() => SynchronizeConstruct(CanStartLocalConstruct);
-
-    private void RecoverTopLevelIfStalled(int start)
-    {
-        if (current == start)
-            SynchronizeTopLevel();
-    }
-
-    private void RecoverMemberIfStalled(int start)
-    {
-        if (current == start)
-            SynchronizeMember();
-    }
-
-    private void RecoverLocalIfStalled(int start)
-    {
-        if (current == start)
-            SynchronizeLocal();
-    }
+    
 
     private CompilationUnit ParseCompilationUnit()
     {
@@ -399,7 +197,7 @@ internal sealed partial class Parser
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration();
-        else if (CurrentTokenIsModifier)
+        else if (IsCurrentTokenModifier)
             return ParseTopLevelDeclaration();
 
         return ParseTopLevelStatement();
@@ -409,7 +207,7 @@ internal sealed partial class Parser
     {
         var modifiers = ParseModifiers();
 
-        if (CurrentTokenIsTypeDeclarationStart)
+        if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(modifiers);
         else
             return ParseMemberFieldDeclarationOrFunction(modifiers);
@@ -417,7 +215,7 @@ internal sealed partial class Parser
 
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
-        if (CurrentTokenIsModifier)
+        if (IsCurrentTokenModifier)
             return ParseLocalDeclaration();
         
         return ParseLocalStatement(parseMode);
@@ -504,6 +302,17 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+    }
+
+    private static bool Contains(TokenKind[] kinds, TokenKind kind)
+    {
+        for (int i = 0; i < kinds.Length; i++)
+        {
+            if (kinds[i] == kind)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>

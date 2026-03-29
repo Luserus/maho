@@ -63,8 +63,8 @@ public static class MahoCompiler
 
         return new CompilerAnalysisResult(
             sourcePath,
-            output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToJson() : null,
-            output.HasFlag(AnalysisOutput.Parser) ? parser.ToJson() : null,
+            output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null,
+            output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null,
             diagnostics,
             DebugJson.Serialize(diagnostics));
     }

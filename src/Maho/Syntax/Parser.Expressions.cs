@@ -241,20 +241,20 @@ internal sealed partial class Parser
     private CollectionExpression ParseCollectionExpression()
     {
         var leftBracket = Consume();
-        var expressions = ParseExpressionList();
+        var expressions = ParseExpressionList(TokenKind.RightBracket);
         var rightBracket = ExpectClosingToken(TokenKind.RightBracket, "']'", "to close the collection expression", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightParen);
 
         return new CollectionExpression(leftBracket, expressions, rightBracket);
     }
 
-    private SeparatedSyntaxList<Expression> ParseExpressionList()
+    private SeparatedSyntaxList<Expression> ParseExpressionList(TokenKind delimiter)
     {
         List<SyntaxNode> nodesAndSeparators = [];
         bool wasCommaLast = false;
 
-        while (CurrentToken.Kind is not TokenKind.RightBracket and not TokenKind.EndToken)
+        while (CurrentToken.Kind != delimiter && CurrentToken.Kind is not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseExpectedExpression("in the collection expression", MissingTokenAnchor.AfterPrevious));
+            nodesAndSeparators.Add(ParseExpectedExpression("in the expression list", MissingTokenAnchor.AfterPrevious));
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -270,6 +270,15 @@ internal sealed partial class Parser
             diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the collection expression");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
+    }
+
+    private CollectionInitializer ParseCollectionInitializer()
+    {
+        var leftBrace = Consume();
+        var expressions = ParseExpressionList(TokenKind.RightBrace);
+        var rightBrace = ExpectClosingToken(TokenKind.RightBracket, "'}'", "to close the collection initializer", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightParen);
+
+        return new CollectionInitializer(leftBrace, expressions, rightBrace);
     }
 
     private ObjectCreationExpression ParseObjectCreationExpression()
@@ -288,10 +297,10 @@ internal sealed partial class Parser
         if (type is ModifiedType { Modifier: ArrayTypeModifier arrayModifier } arrayType && CurrentToken.Kind is not TokenKind.LeftParen)
         {
             var elementType = arrayType.Type;
-            CollectionExpression? initializer = null;
+            CollectionInitializer? initializer = null;
 
-            if (CurrentToken.Kind is TokenKind.LeftBracket)
-                initializer = ParseCollectionExpression();
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+                initializer = ParseCollectionInitializer();
 
             return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer);
         }

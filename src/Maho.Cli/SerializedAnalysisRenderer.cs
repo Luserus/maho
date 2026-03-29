@@ -508,10 +508,10 @@ internal static class SerializedAnalysisRenderer
         if (connectorColumn <= 0 || text.Length < connectorColumn)
             return text;
 
-        if (connectorColumn <= 3)
+        if (connectorColumn <= 4)
             return new string('.', connectorColumn);
 
-        return text[..(connectorColumn - 3)] + "...";
+        return text[..(connectorColumn - 4)] + "...";
     }
 
     /// <summary>
@@ -520,14 +520,17 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private static string GetDiagnosticTip(DiagnosticInfo diagnostic) => diagnostic.Code switch
     {
-        "MHC0001" => "Remove or replace this token.",
-        "MHC0002" => "Add the closing double quote before the line ends.",
-        "MHC0003" => "Add the closing single quote before the line ends.",
-        "MHC0004" => "Add at least one character between the quotes.",
-        "MHC1001" => "Insert the missing token here.",
-        "MHC1002" => "Add an expression here.",
-        "MHC1003" => "Add an identifier here.",
-        "MHC1004" => "Add a type here.",
+        "MH0001" => "Remove or replace this token.",
+        "MH0002" => "Add the closing double quote before the line ends.",
+        "MH0003" => "Add the closing single quote before the line ends.",
+        "MH0004" => "Add at least one character between the quotes.",
+        "MH1001" => "Insert the missing token here.",
+        "MH1002" => "Add an expression here.",
+        "MH1003" => "Add an identifier here.",
+        "MH1004" => "Add a type here.",
+        "MH1005" => "Terminate this construct with a semicolon.",
+        "MH1006" => "Add the closing delimiter for this construct.",
+        "MH1007" => "Add a body here or terminate the declaration correctly.",
         _ => "Check this location."
     };
 

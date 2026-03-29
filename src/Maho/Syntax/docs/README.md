@@ -103,6 +103,7 @@ The parser is intentionally split across multiple files:
 
 - `Parser.cs`: central parser type and shared state.
 - `Parser.Lookahead.cs`: token inspection helpers and predictive parsing support.
+- `Parser.Diagnostics.cs`: parser-specific recovery and diagnostic emission helpers.
 - `Parser.Declarations.cs`: declaration grammar.
 - `Parser.Expressions.cs`: expression grammar.
 - `Parser.Statements.cs`: statement grammar.
@@ -113,6 +114,7 @@ This split is worth knowing before editing anything substantial. The runtime typ
 The lexer has a similar split:
 
 - `Lexer.cs`: tokenization logic.
+- `Lexer.Diagnostics.cs`: lexer-specific diagnostic emission helpers.
 - `Lexer.Debug.cs`: serialized token-stream projection.
 
 ## Debug serialization hooks
