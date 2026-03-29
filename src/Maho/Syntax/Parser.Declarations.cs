@@ -496,7 +496,7 @@ internal sealed partial class Parser
     {
         Token name = ExpectIdentifierToken("for the name");
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters().Success)
+        if (CurrentToken.Kind is TokenKind.LessThanSign)
             return ParseGenericName(name);
         else
             return new SimpleName(name);
@@ -506,7 +506,7 @@ internal sealed partial class Parser
     {
         var lessThan = Consume();
         var typeParameters = ParseTypeParameterList();
-        var greaterThan = ExpectClosingToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list", TokenKind.RightParen, TokenKind.Semicolon, TokenKind.RightBrace);
+        var greaterThan = ExpectClosingToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list", TokenKind.LeftBrace, TokenKind.LeftParen, TokenKind.LeftBracket);
 
         return new GenericName(name, lessThan, typeParameters, greaterThan);
     }

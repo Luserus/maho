@@ -254,6 +254,9 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind != delimiter && CurrentToken.Kind is not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is TokenKind.Semicolon)
+                break;
+                
             nodesAndSeparators.Add(ParseExpectedExpression("in the expression list", MissingTokenAnchor.AfterPrevious));
             wasCommaLast = false;
 
@@ -319,7 +322,11 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is TokenKind.Semicolon)
+                break;
+            
             nodesAndSeparators.Add(ParseExpectedExpression("in the argument list", MissingTokenAnchor.AfterPrevious));
+
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
