@@ -19,17 +19,6 @@
 4. Diagnostics are projected into public `DiagnosticInfo` records with line/column metadata.
 5. Optional lexer/parser debug JSON is emitted, depending on `AnalysisOutput`.
 
-## What this guide intentionally does not do
-
-You asked to avoid deep documentation for core analysis internals like lexer, parser, and resolver logic. Because of that, the docs under `Syntax` focus on:
-
-- tree shape,
-- folder layout,
-- debug serialization hooks,
-- and how to navigate the syntax model.
-
-They do not try to narrate the full parsing algorithm.
-
 ## Best starting points
 
 - For public API questions: [`Analysis/docs/README.md`](../Analysis/docs/README.md)
