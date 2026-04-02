@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Maho.Diagnostics;
+using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 

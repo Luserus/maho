@@ -1,98 +1,164 @@
 # Resolution Guide
 
-`src/Maho/Resolution` is the placeholder boundary for future semantic analysis and name/type resolution.
+`src/Maho/Resolution` is now the live semantic bridge between parsed syntax and the compiler's symbol model.
 
-Right now this folder is intentionally light in code, but it still deserves deeper documentation because it defines a major architectural boundary: syntax is not meant to silently grow semantic behavior forever.
+This folder is no longer just a placeholder. It already contains:
 
-In other words, `Resolution` is where "parsed source" is expected to become "understood program".
+- pass orchestration,
+- nested scope construction,
+- declaration symbol discovery,
+- declaration-site type resolution,
+- and reusable semantic state for later passes.
+
+## Current architecture
+
+The entry point is `Resolver`.
+
+`Resolver` builds a fresh `ResolutionContext`, runs each `ResolutionPass` in sequence, and returns a `ResolutionResult`.
+
+That gives the subsystem a simple rule for growth:
+
+- mutable build-time state lives in `ResolutionContext`,
+- stable queryable output lives in `ResolutionResult`,
+- and each semantic stage becomes its own `ResolutionPass`.
 
 ## Files in this folder
 
-- `Resolver.cs`: future semantic driver.
-- `Scope.cs`: current shell for nested scope tracking.
+- `Resolver.cs`: pass coordinator.
+- `ResolutionPass.cs`: base type for semantic passes.
+- `ResolutionContext.cs`: mutable per-run state and resolution maps.
+- `ResolutionResult.cs`: stable resolved output for later consumers.
+- `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
+- `SymbolDiscoveryPass.cs`: first pass that predeclares symbols and resolves declaration signatures.
+- `ResolvedTypeReference.cs`: semantic representation for resolved declaration-site type syntax.
 
-## Why this folder matters before it is implemented
+## What pass 1 does today
 
-Even in its current skeletal state, this folder answers a useful design question: where should the next layer of compiler intelligence go?
+`SymbolDiscoveryPass` runs in two phases per scope:
 
-The answer is not:
+1. predeclare
+2. resolve
 
-- inside syntax node types,
-- inside the CLI,
-- inside diagnostics rendering,
-- or scattered across parser recovery code.
+That split matters because declarations in the same scope need to exist before their signatures are fully interpreted. The first pass therefore:
 
-The answer is here, alongside symbols and downstream semantic diagnostics.
+- creates namespace, type, function, type-parameter, parameter, and variable symbols,
+- creates scopes for namespaces, types, functions, blocks, and embedded statement bodies,
+- records syntax-to-symbol and syntax-to-scope associations,
+- resolves function return types,
+- resolves parameter types,
+- resolves variable declaration types,
+- resolves generic arity for type and function declarations,
+- and computes declaration keys for overload-like function/type identity.
 
-That separation matters because syntax and semantics evolve at different speeds. Syntax cares about source form; resolution will care about meaning, lookup, accessibility, and well-typed relationships.
+In other words, pass 1 does not just collect names. It establishes most declaration metadata that later passes will depend on.
 
-## Current state
+## Scopes
 
-### `Resolver`
+`Scope` stores:
 
-`Resolver` exists as an explicit subsystem marker, but it does not implement behavior yet.
+- `Parent`
+- `OwnerSymbol`
+- `Boundary`
+- declared symbols
+- child scopes
 
-That is valuable in itself: the repository already distinguishes syntax construction from later semantic passes, even if the semantic layer is still under construction.
+Lookup is lexical. `Lookup(name)` searches the current scope first and then walks outward through parent scopes.
 
-When this type starts filling out, it will likely become the pass coordinator that:
+The scope table intentionally stores same-name symbols together. Distinguishing legal overload sets from duplicates is a later semantic decision, not a scope-storage concern.
 
-- walks syntax trees,
-- opens and closes scopes,
-- constructs semantic symbols,
-- performs name lookup,
-- and emits semantic diagnostics.
+## Resolved declaration data
 
-### `Scope`
+The first pass resolves several useful pieces of semantic information up front.
 
-`Scope` currently stores only a `parent` reference supplied through the constructor.
+### Symbol identity
 
-That means the intended shape is already visible:
+Symbols now carry:
 
-- scopes are nested,
-- child scopes can walk outward,
-- symbol lookup tables and scope-specific state have not been added yet.
+- `Name`
+- `ParentSymbol`
+- metadata names
+- qualified metadata names
 
-That makes `Scope` the first concrete hint about intended lookup direction: inner scopes should be able to fail locally and then consult enclosing scopes without the syntax tree itself owning that logic.
+That makes nested declarations and generic declarations stable to compare later.
 
-## Relationship to neighboring folders
+### Type declarations
 
-- `Syntax` tells you what appeared in source.
-- `Symbols` tells you the semantic entities the compiler expects to model.
-- `Resolution` is the layer that should connect those two worlds.
-- `Diagnostics` will likely receive additional semantic error production through this stage later.
+`TypeSymbol` carries:
 
-So if you think of the front-end as stages, `Resolution` is the missing bridge between parse-time structure and semantic understanding.
+- declaration arity,
+- resolved type parameters,
+- and a `TypeDeclarationKey`.
 
-## What will probably land here later
+### Function declarations
 
-The code is not there yet, but the folder is the natural home for:
+`FunctionSymbol` carries:
 
-- lexical and nested scope construction,
-- symbol declaration/registration passes,
-- type/name lookup,
-- duplicate definition checks,
-- unresolved identifier diagnostics,
-- and eventually type-directed semantic validation.
+- declaration arity,
+- resolved type parameters,
+- resolved parameters,
+- resolved return type,
+- parameter count,
+- parameter signature key,
+- and a `FunctionDeclarationKey`.
 
-That is documentation of intent, not a claim that those passes already exist.
+This is the current foundation for overload and duplicate-signature analysis.
 
-## How to use this folder today
+### Type references
 
-- Treat it as a roadmap boundary, not an implementation hotspot.
-- If you are adding symbols, bindings, or semantic diagnostics later, this is the folder that should start absorbing that work.
-- If you are just tracing today's runtime behavior, you can usually skip this folder.
+`ResolvedTypeReference` models resolved declaration-site type syntax.
 
-## Reading order once this grows
+Current shapes include:
 
-When semantic work starts landing, the likely order to read will be:
+- named type references,
+- qualified type references,
+- and modified type references.
+
+These references also store candidate symbols, so later passes can distinguish:
+
+- fully resolved cases,
+- ambiguous cases,
+- and unresolved cases
+
+without reparsing the syntax.
+
+## Resolution maps
+
+`ResolutionContext` and `ResolutionResult` expose maps for:
+
+- syntax node -> declared symbol
+- syntax node -> scope
+- symbol -> owning scope
+- type syntax -> resolved type reference
+
+That allows later passes to reuse the first-pass work directly instead of rediscovering declarations.
+
+## What should land here next
+
+Natural next passes include:
+
+- duplicate declaration and duplicate signature diagnostics,
+- identifier lookup for expression/name uses,
+- generic argument arity validation,
+- namespace/type/member access resolution,
+- and type-directed semantic validation.
+
+Those passes should consume the data built by `SymbolDiscoveryPass` rather than rebuilding declaration state themselves.
+
+## Extension guidance
+
+- If the feature introduces new declaration forms or new declaration-site metadata, extend `SymbolDiscoveryPass` and the symbol model.
+- If the feature consumes existing declaration/scope/type-reference state, add a new `ResolutionPass`.
+- If a new pass needs to reuse state later, store it in `ResolutionContext` and project it through `ResolutionResult`.
+
+## Reading order
+
+Recommended order:
 
 1. `Scope.cs`
-2. symbol declarations in `Symbols`
-3. `Resolver.cs`
-4. semantic diagnostics paths
+2. symbol types in `../Symbols`
+3. `ResolutionContext.cs`
+4. `SymbolDiscoveryPass.cs`
+5. `Resolver.cs`
+6. `ResolutionResult.cs`
 
-That order reflects the probable dependency direction: lookup/state first, pass orchestration second.
-
-## Traversal tip
-
-Read [`../Symbols/docs/README.md`](../../Symbols/docs/README.md) before implementing anything substantial here. Resolution is where symbol abstractions will eventually become live semantic state.
+That order follows the actual dependency direction in the subsystem.
