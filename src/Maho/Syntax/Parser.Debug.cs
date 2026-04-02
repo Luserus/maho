@@ -8,7 +8,7 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    public string ToJson()
+    public override string ToString()
     {
         Dictionary<SyntaxNode, TextSpan?> spanCache = [];
         return DebugJson.Serialize(new DebugParserInfo("parser", Root is null ? null : CreateNodeView(Root, spanCache)));

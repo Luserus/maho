@@ -10,7 +10,7 @@ internal sealed partial class Parser
     {   
         var modifiers = ParseModifiers();
 
-        if (CurrentTokenIsTypeDeclarationStart)
+        if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(modifiers);
         else
             return ParseTopLevelVariableDeclarationOrFunction(modifiers);
@@ -45,7 +45,7 @@ internal sealed partial class Parser
             members.Add(member);
             RecoverTopLevelIfStalled(start);
         }
-        var closeBrace = ExpectClosingToken(TokenKind.RightBrace, "'}'", "to close the namespace body");
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the namespace body");
 
         return new NamespaceBlockBody(openBrace, members, closeBrace);
     }
@@ -74,7 +74,7 @@ internal sealed partial class Parser
             body = ParseTypeEmptyBody();
         else
         {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "a type body", GetTokenDisplay(CurrentToken), "after the type declaration");
+            diagnostics.ReportExpectedBody(CurrentToken.Span, "a type body", GetTokenDisplay(CurrentToken), "after the type declaration");
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
@@ -93,7 +93,7 @@ internal sealed partial class Parser
             members.Add(member);
             RecoverMemberIfStalled(start);
         }
-        var closeBrace = ExpectClosingToken(TokenKind.RightBrace, "'}'", "to close the type body");
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the type body");
 
         return new TypeBlockBody(openBrace, members, closeBrace);
     }
@@ -172,7 +172,7 @@ internal sealed partial class Parser
     {
         var modifiers = ParseModifiers();
 
-        if (CurrentTokenIsTypeDeclarationStart)
+        if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(modifiers);
         else
             return ParseLocalVariableDeclarationStatementOrFunction(modifiers);
@@ -315,7 +315,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the parameter list");
+            diagnostics.ReportExpectedParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the parameter list");
 
         return new SeparatedSyntaxList<Parameter>(nodesAndSeparators);
     }
@@ -329,7 +329,7 @@ internal sealed partial class Parser
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the function name");
 
         var parameters = ParseParameterList();
-        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the parameter list", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the parameter list");
 
         var signature = new FunctionSignature(modifiers, returnType, identifier, openParen, parameters, closeParen);
 
@@ -346,7 +346,7 @@ internal sealed partial class Parser
             return ParseFunctionEmptyBody();
         else
         {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "a function body", GetTokenDisplay(CurrentToken), "after the function signature");
+            diagnostics.ReportExpectedBody(CurrentToken.Span, "a function body", GetTokenDisplay(CurrentToken), "after the function signature");
             return new FunctionEmptyBody(CreateMissingToken());
         }
     }
@@ -364,18 +364,8 @@ internal sealed partial class Parser
             RecoverLocalIfStalled(start);
         }
 
-        if (CurrentToken.Kind is not TokenKind.RightBrace)
-        {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "'}'", GetTokenDisplay(CurrentToken), "to close the function body");
-            SynchronizeTo(TokenKind.RightBrace);
-            var closeBrace = CurrentToken.Kind is TokenKind.RightBrace ? Consume() : CreateMissingToken();
-            return new FunctionBlockBody(openBrace, locals, closeBrace);
-        }
-        else
-        {
-            var closeBrace = Consume();
-            return new FunctionBlockBody(openBrace, locals, closeBrace);
-        }
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the function body");
+        return new FunctionBlockBody(openBrace, locals, closeBrace);
     }
 
     private FunctionEmptyBody ParseFunctionEmptyBody()
@@ -457,7 +447,7 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is not TokenKind.RightBracket)
             size = ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious);
 
-        var closeBracket = ExpectClosingToken(TokenKind.RightBracket, "']'", "to close the array type modifier", TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.RightParen, TokenKind.Comma);
+        var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the array type modifier");
 
         return new ArrayTypeModifier(openBracket, size, closeBracket);
     }
@@ -486,7 +476,7 @@ internal sealed partial class Parser
     {
         var list = new List<Token>();
 
-        while (CurrentTokenIsModifier)
+        while (IsCurrentTokenModifier)
             list.Add(Consume());
 
         return list;
@@ -496,7 +486,7 @@ internal sealed partial class Parser
     {
         Token name = ExpectIdentifierToken("for the name");
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters().Success)
+        if (CurrentToken.Kind is TokenKind.LessThanSign)
             return ParseGenericName(name);
         else
             return new SimpleName(name);
@@ -506,7 +496,7 @@ internal sealed partial class Parser
     {
         var lessThan = Consume();
         var typeParameters = ParseTypeParameterList();
-        var greaterThan = ExpectClosingToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list", TokenKind.RightParen, TokenKind.Semicolon, TokenKind.RightBrace);
+        var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list");
 
         return new GenericName(name, lessThan, typeParameters, greaterThan);
     }
@@ -537,7 +527,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type parameter list");
+            diagnostics.ReportExpectedTypeParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type parameter list");
 
         return new SeparatedSyntaxList<SimpleName>(nodesAndSeparators);
     }

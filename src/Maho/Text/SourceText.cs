@@ -47,6 +47,8 @@ internal sealed class SourceText : IDisposable
 
         if (fileLength == 0)
         {
+            // Empty files bypass the memory-mapped path entirely so downstream code still sees a
+            // fully initialized text object with a consistent empty-line table.
             cachedText = string.Empty;
             lazyLines = [];
             return;
@@ -58,13 +60,14 @@ internal sealed class SourceText : IDisposable
 
         if (loadMode is SourceTextLoadMode.Eager)
         {
-            // Decode immediately and release the MMF — no need to keep it open
+            // Eager mode pays the decode cost once up front and immediately releases the OS-backed
+            // mapping so the rest of analysis works against a normal managed string.
             cachedText = DecodeFromAccessor();
             lazyLines = ParseLines();
             accessor.Dispose();
             mmf.Dispose();
         }
-        // LazyCached: keep mmf/accessor open, decode on first EnsureText() call
+        // LazyCached keeps the mapping alive until somebody actually asks for decoded characters.
     }
 
     /// <summary> Wraps an already-decoded in-memory string. Always eager. </summary>
@@ -116,7 +119,7 @@ internal sealed class SourceText : IDisposable
         if (cachedText is not null)
             return cachedText;
 
-        // LazyCached first access — decode now and cache
+        // The first text read in LazyCached mode flips the object into a normal cached-string view.
         cachedText = DecodeFromAccessor();
         return cachedText;
     }
@@ -153,7 +156,7 @@ internal sealed class SourceText : IDisposable
             lineStart = position;
         }
 
-        // Add the final line even if it has no trailing newline
+        // Keep the trailing unterminated line addressable; diagnostics rely on this behavior.
         if (position >= lineStart)
             AddLine(lines, position, lineStart, 0);
 
@@ -187,11 +190,13 @@ internal sealed class SourceText : IDisposable
     /// </summary>
     public int GetLineIndex(int position)
     {
-        var lines = Lines; // ensures lazyLines is populated
+        var lines = Lines; // Forces line parsing once, then reuses the cached table for all lookups.
 
         int lower = 0;
         int upper = lines.Length - 1;
 
+        // Offset-to-line lookup is on hot paths for diagnostics and spans, so use binary search
+        // rather than scanning the line table from the start.
         while (lower <= upper)
         {
             int index = lower + ((upper - lower) >> 1);

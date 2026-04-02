@@ -46,7 +46,7 @@ internal sealed partial class Parser
         var ifKeyword = Consume();
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
         var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'if' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'if' condition");
 
         var thenStatement = ParseTopLevelStatement();
 
@@ -67,7 +67,7 @@ internal sealed partial class Parser
         var whileKeyword = Consume();
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
         var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'while' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
 
         var body = ParseTopLevelStatement();
 
@@ -180,7 +180,7 @@ internal sealed partial class Parser
         var ifKeyword = Consume();
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
         var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'if' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'if' condition");
 
         var thenStatement = ParseLocalStatement();
 
@@ -201,7 +201,7 @@ internal sealed partial class Parser
         var whileKeyword = Consume();
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
         var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectClosingToken(TokenKind.RightParen, "')'", "to close the 'while' condition", TokenKind.LeftBrace, TokenKind.Semicolon, TokenKind.RightBrace);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
 
         var body = ParseLocalStatement();
 
