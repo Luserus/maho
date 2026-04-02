@@ -250,7 +250,7 @@ internal sealed partial class Parser
     {
         var lessThan = Consume();
         var typeArguments = ParseTypeArgumentList();
-        var greaterThan = ExpectClosingToken(TokenKind.GreaterThanSign, "'>'", "to close the generic argument list", TokenKind.RightParen, TokenKind.Semicolon, TokenKind.RightBrace, TokenKind.Comma);
+        var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic argument list");
 
         return (lessThan, typeArguments, greaterThan);
     }

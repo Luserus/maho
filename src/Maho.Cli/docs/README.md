@@ -205,7 +205,7 @@ They are what keep tabs and zero-length spans from producing broken caret alignm
 
 ### Message and style helpers
 
-- `GetDiagnosticTip(...)`: hard-coded hints for known parser/lexer diagnostics, including parser-specific tips for semicolons, closing delimiters, and missing bodies.
+- `GetDiagnosticTip(...)`: small hints for a few known diagnostics, with parser-specific wording mostly derived from the serialized expected text.
 - `GetDiagnosticColor(...)`: maps severities to colors.
 - `FormatTriviaSummary(...)` and `FormatTriviaKinds(...)`: compact trivia presentation for lexer output.
 - `FormatTokenValue(...)`, `FormatSpan(...)`, `Escape(...)`: formatting helpers for token/debug text.

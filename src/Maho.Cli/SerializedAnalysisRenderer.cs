@@ -428,9 +428,7 @@ internal static class SerializedAnalysisRenderer
         writer.Write(Colorize($"{new string(' ', lineNumberWidth)} | ", Dim, useColor));
         writer.Write(indent);
         writer.Write(Colorize("└─ ", BrightBlack, useColor));
-        writer.Write(Colorize("tip", Cyan, useColor));
-        writer.Write(": ");
-        writer.WriteLine(Colorize(GetDiagnosticTip(diagnostic), Dim, useColor));
+        writer.WriteLine(Colorize(GetDiagnosticTip(diagnostic), Cyan, useColor));
     }
 
     /// <summary>
@@ -518,21 +516,38 @@ internal static class SerializedAnalysisRenderer
     /// Provides lightweight remediation hints for known diagnostic codes while leaving unknown codes
     /// with a generic prompt.
     /// </summary>
-    private static string GetDiagnosticTip(DiagnosticInfo diagnostic) => diagnostic.Code switch
+    private static string GetDiagnosticTip(DiagnosticInfo diagnostic)
     {
-        "MH0001" => "Remove or replace this token.",
-        "MH0002" => "Add the closing double quote before the line ends.",
-        "MH0003" => "Add the closing single quote before the line ends.",
-        "MH0004" => "Add at least one character between the quotes.",
-        "MH1001" => "Insert the missing token here.",
-        "MH1002" => "Add an expression here.",
-        "MH1003" => "Add an identifier here.",
-        "MH1004" => "Add a type here.",
-        "MH1005" => "Terminate this construct with a semicolon.",
-        "MH1006" => "Add the closing delimiter for this construct.",
-        "MH1007" => "Add a body here or terminate the declaration correctly.",
-        _ => "Check this location."
-    };
+        string? codeTip = diagnostic.Code switch
+        {
+            "MH0000" => "Remove or replace this token.",
+            "MH0001" => "Add the closing \" before the line ends.",
+            "MH0002" => "Add the closing ' before the line ends.",
+            "MH0003" => "Add at least one character between the ''.",
+            "MH0008" => "Add a body here or terminate the declaration correctly.",
+            _ => null
+        };
+
+        if (codeTip is not null)
+            return codeTip;
+
+        if (TryCreateExpectedTextTip(diagnostic.ExpectedText, out string expectedTextTip))
+            return expectedTextTip;
+
+        return "Check here.";
+    }
+
+    private static bool TryCreateExpectedTextTip(string? expectedText, out string tip)
+    {
+        if (string.IsNullOrWhiteSpace(expectedText) || string.Equals(expectedText, "valid syntax", StringComparison.Ordinal))
+        {
+            tip = string.Empty;
+            return false;
+        }
+
+        tip = $"Add {expectedText} here.";
+        return true;
+    }
 
     /// <summary>
     /// Maps diagnostic severities to the accent color used consistently across summaries and

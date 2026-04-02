@@ -86,7 +86,8 @@ public static class MahoCompiler
                 diagnostic.DiagnosticCode,
                 diagnostic.Message,
                 MapSeverity(diagnostic.Kind),
-                CreateSpanInfo(diagnostic.Span, text));
+                CreateSpanInfo(diagnostic.Span, text),
+                diagnostic.ExpectedText);
         }
 
         return diagnostics;

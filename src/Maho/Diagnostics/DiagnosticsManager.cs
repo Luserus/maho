@@ -43,73 +43,79 @@ internal sealed class DiagnosticsManager
     /// </summary>
     public void ReportError(string code, string message, TextSpan span) => Report(new Diagnostic(code, message, span, DiagnosticKind.Error));
 
+    /// <summary>
+    /// Reports an error diagnostic that also preserves the expected syntax text for downstream
+    /// renderers that want to produce more specific remediation hints.
+    /// </summary>
+    private void ReportExpected(string code, string expected, string found, TextSpan span, string? context = null) =>
+        Report(new Diagnostic(code, CreateExpectedMessage(expected, found, context), span, DiagnosticKind.Error, expected));
+
 
     /// <summary>
     /// Reports an invalid token emitted by the lexer, preserving the offending text when possible.
     /// </summary>
     public void ReportBadToken(TextSpan span, string tokenText) =>
-        ReportError("MH0001", $"Invalid token {FormatTokenText(tokenText)}.", span);
+        ReportError("MH0000", $"Invalid token {FormatTokenText(tokenText)}.", span);
 
     /// <summary>
     /// Reports a string literal that could not be closed before the lexer had to recover.
     /// </summary>
     public void ReportUnterminatedString(TextSpan span) =>
-        ReportError("MH0002", "Unterminated string literal.", span);
+        ReportError("MH0001", "Unterminated string literal.", span);
 
     /// <summary>
     /// Reports a character literal that could not be closed before the lexer had to recover.
     /// </summary>
     public void ReportUnterminatedCharacter(TextSpan span) =>
-        ReportError("MH0003", "Unterminated character literal.", span);
+        ReportError("MH0002", "Unterminated character literal.", span);
 
     /// <summary>
     /// Reports a character literal whose delimiters contain no payload.
     /// </summary>
     public void ReportEmptyCharacterLiteral(TextSpan span) =>
-        ReportError("MH0004", "Character literal cannot be empty.", span);
+        ReportError("MH0003", "Character literal cannot be empty.", span);
 
     /// <summary>
     /// Reports a parser recovery site where a specific token kind was required.
     /// </summary>
     public void ReportExpectedToken(TextSpan span, string expected, string found, string? context = null) =>
-        ReportError("MH1001", CreateExpectedMessage(expected, found, context), span);
+        ReportExpected("MH0004", expected, found, span, context);
 
     /// <summary>
     /// Reports a parser recovery site where an expression was needed to continue meaningfully.
     /// </summary>
     public void ReportExpectedExpression(TextSpan span, string found, string? context = null) =>
-        ReportError("MH1002", CreateExpectedMessage("an expression", found, context), span);
+        ReportExpected("MH0005", "an expression", found, span, context);
 
     /// <summary>
     /// Reports a parser recovery site where an identifier-shaped token was required.
     /// </summary>
     public void ReportExpectedIdentifier(TextSpan span, string found, string? context = null) =>
-        ReportError("MH1003", CreateExpectedMessage("an identifier", found, context), span);
+        ReportExpected("MH0006", "an identifier", found, span, context);
 
     /// <summary>
     /// Reports a parser recovery site where type syntax was required.
     /// </summary>
     public void ReportExpectedType(TextSpan span, string found, string? context = null) =>
-        ReportError("MH1004", CreateExpectedMessage("a type", found, context), span);
-
-    /// <summary>
-    /// Reports a parser recovery site where a terminating semicolon was required.
-    /// </summary>
-    public void ReportExpectedSemicolon(TextSpan span, string found, string? context = null) =>
-        ReportError("MH1005", CreateExpectedMessage("';'", found, context), span);
-
-    /// <summary>
-    /// Reports a parser recovery site where a closing delimiter was required to finish the current
-    /// construct.
-    /// </summary>
-    public void ReportExpectedClosingToken(TextSpan span, string expected, string found, string? context = null) =>
-        ReportError("MH1006", CreateExpectedMessage(expected, found, context), span);
+        ReportExpected("MH0007", "a type", found, span, context);
 
     /// <summary>
     /// Reports a parser recovery site where a declaration or type body was required.
     /// </summary>
     public void ReportExpectedBody(TextSpan span, string expected, string found, string? context = null) =>
-        ReportError("MH1007", CreateExpectedMessage(expected, found, context), span);
+        ReportExpected("MH0008", expected, found, span, context);
+
+    /// <summary>
+    /// Reports a parser recovery site where parameter syntax was required.
+    /// </summary>
+    public void ReportExpectedParameter(TextSpan span, string found, string? context = null) =>
+        ReportExpected("MH0009", "a parameter", found, span, context);
+
+    /// <summary>
+    /// Reports a parser recovery site where a type parameter syntax was required.
+    /// </summary>
+    public void ReportExpectedTypeParameter(TextSpan span, string found, string? context = null) =>
+        ReportExpected("MH0010", "a type parameter", found, span, context);
 
     /// <summary>
     /// Reports a generic parser mismatch when no narrower expectation is available.

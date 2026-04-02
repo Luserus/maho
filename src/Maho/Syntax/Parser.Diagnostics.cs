@@ -49,18 +49,6 @@ internal sealed partial class Parser
             : MissingTokenAnchor.BeforeCurrent;
     }
 
-    private void ReportExpectedTokenDiagnostic(TextSpan span, TokenKind expectedKind, string expectedText, string? context)
-    {
-        string found = GetTokenDisplay(CurrentToken);
-
-        if (expectedKind is TokenKind.Semicolon)
-            diagnostics.ReportExpectedSemicolon(span, found, context);
-        else if (IsClosingToken(expectedKind))
-            diagnostics.ReportExpectedClosingToken(span, expectedText, found, context);
-        else
-            diagnostics.ReportExpectedToken(span, expectedText, found, context);
-    }
-
     private Token RecoverWithMissingToken()
     {
         if (!IsRecoveryBoundary(CurrentToken.Kind))
@@ -71,31 +59,16 @@ internal sealed partial class Parser
 
     private Token ExpectToken(TokenKind expectedKind, string expectedText, string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
     {
-        if (CurrentToken.Kind is var currentKind && currentKind == expectedKind)
-            return Consume();
-
-        ReportExpectedTokenDiagnostic(GetMissingTokenDiagnosticSpan(anchor), expectedKind, expectedText, context);
-        return CreateMissingTokenAt(GetMissingTokenPosition(anchor));
-    }
-
-    private Token ExpectClosingToken(TokenKind expectedKind, string expectedText, string? context = null, params TokenKind[] recoveryKinds)
-    {
         if (CurrentToken.Kind == expectedKind)
             return Consume();
 
-        // When the recovery token starts on a later line, anchor the missing closer at the end of
-        // the previous token so the insertion point stays on the line where the construct started.
-        MissingTokenAnchor anchor = GetClosingTokenAnchor();
-        TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(anchor);
-        int missingTokenPosition = GetMissingTokenPosition(anchor);
+        MissingTokenAnchor effectiveAnchor = IsClosingToken(expectedKind)
+            ? GetClosingTokenAnchor()
+            : anchor;
+        TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
+        int missingTokenPosition = GetMissingTokenPosition(effectiveAnchor);
 
-        diagnostics.ReportExpectedClosingToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context);
-
-        if (!Contains(recoveryKinds, CurrentToken.Kind))
-            SynchronizeTo([expectedKind, .. recoveryKinds]);
-
-        if (CurrentToken.Kind == expectedKind)
-            return Consume();
+        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context);
 
         return CreateMissingTokenAt(missingTokenPosition);
     }

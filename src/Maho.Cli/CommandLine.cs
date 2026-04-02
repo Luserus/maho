@@ -91,17 +91,17 @@ internal static class CommandLine
         public int TotalFiles { get; } = totalFiles;
 
         /// <summary>
-        /// Emits one synchronized progress line for a file that has entered analysis. The increment
+        /// Emits one synchronized progress line for a file that has finished analysis. The increment
         /// happens under the shared status lock so progress and completion messages stay readable.
         /// </summary>
-        public void ReportAnalyzing(string displayPath)
+        public void ReportAnalyzed(string displayPath)
         {
             lock (statusLock)
             {
                 int current = ++analyzedFiles;
                 Console.Error.Write(Colorize($"[{current}/{TotalFiles}]", BrightBlack));
                 Console.Error.Write(" ");
-                Console.Error.Write(Colorize("analyzing", Cyan));
+                Console.Error.Write(Colorize("analyzed", Cyan));
                 Console.Error.Write(" ");
                 Console.Error.WriteLine(Colorize(displayPath, Dim));
                 pendingStatusSeparator = true;
@@ -255,9 +255,8 @@ internal static class CommandLine
     {
         try
         {
-            progress?.ReportAnalyzing(displayPath);
-
             CompilerAnalysisResult analysis = MahoCompiler.AnalyzeFile(filePath, output);
+            progress?.ReportAnalyzed(displayPath);
             return new FileResult(filePath, displayPath, analysis, null, IsInternalError: false, analysis.HasErrors);
         }
         catch (Exception ex)

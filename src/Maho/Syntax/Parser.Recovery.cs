@@ -5,17 +5,6 @@ internal sealed partial class Parser
     private static bool IsRecoveryBoundary(TokenKind kind) =>
         kind is TokenKind.EndToken or TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.Semicolon or TokenKind.Comma;
 
-    private void SynchronizeTo(params TokenKind[] stopKinds)
-    {
-        while (CurrentToken.Kind is not TokenKind.EndToken)
-        {
-            if (Contains(stopKinds, CurrentToken.Kind))
-                break;
-
-            Consume();
-        }
-    }
-
     private bool CanStartExpression()
     {
         if (CurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
