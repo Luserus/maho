@@ -19,20 +19,14 @@ internal sealed class FunctionSymbol : DeclaredSymbol
     public IReadOnlyList<ParameterSymbol> Parameters => parameters;
 
     public FunctionSymbol(string name, Symbol parentSymbol, SyntaxNode declaration, int arity)
-        : base(SymbolKind.Function, name, parentSymbol, declaration)
-    {
-        Arity = arity;
-    }
+        : base(SymbolKind.Function, name, parentSymbol, declaration) => Arity = arity;
 
     public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters)
     {
         typeParameters = resolvedTypeParameters;
     }
 
-    public void ResolveParameters(IReadOnlyList<ParameterSymbol> resolvedParameters)
-    {
-        parameters = resolvedParameters;
-    }
+    public void ResolveParameters(IReadOnlyList<ParameterSymbol> resolvedParameters) => parameters = resolvedParameters;
 
     public void ResolveSignature(ResolvedTypeReference returnType)
     {

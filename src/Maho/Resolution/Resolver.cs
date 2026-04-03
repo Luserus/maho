@@ -4,9 +4,7 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-/// <summary>
-/// Runs the configured semantic passes for one parsed compilation unit.
-/// </summary>
+/// <summary> Runs the configured semantic passes for one parsed compilation unit. </summary>
 internal sealed class Resolver
 {
     private static readonly IReadOnlyList<ResolutionPass> Passes =
@@ -14,9 +12,7 @@ internal sealed class Resolver
         new SymbolDiscoveryPass()
     ];
 
-    /// <summary>
-    /// Resolves semantic state and appends semantic diagnostics to the shared diagnostics sink.
-    /// </summary>
+    /// <summary> Resolves semantic state and appends semantic diagnostics to the shared diagnostics sink. </summary>
     public ResolutionResult Resolve(CompilationUnit root, DiagnosticsManager diagnostics)
     {
         ResolutionContext context = new(root, diagnostics);

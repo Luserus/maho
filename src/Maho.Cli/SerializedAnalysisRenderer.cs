@@ -657,19 +657,13 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private static T DeserializeJson<T>(string json)
     {
-        T? value = JsonSerializer.Deserialize<T>(json, JsonOptions);
-
         // A null result here means the serialized contract drifted, which is a renderer bug rather
         // than a recoverable formatting oddity.
-        if (value is null)
-            throw new InvalidOperationException($"Failed to deserialize {typeof(T).Name}.");
-
+        T? value = JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new InvalidOperationException($"Failed to deserialize {typeof(T).Name}.");
         return value;
     }
 
-    /// <summary>
-    /// Applies ANSI color only when the current rendering mode and output stream can support it.
-    /// </summary>
+    /// <summary> Applies ANSI color only when the current rendering mode and output stream can support it. </summary>
     private static string Colorize(string value, string color, bool useColor)
     {
         if (!useColor || !ShouldUseColor())
@@ -724,9 +718,7 @@ internal static class SerializedAnalysisRenderer
     {
         private readonly SourceLine[] lines;
 
-        /// <summary>
-        /// Gets the parsed line table used for excerpt rendering and span-to-line translation.
-        /// </summary>
+        /// <summary> Gets the parsed line table used for excerpt rendering and span-to-line translation. </summary>
         public SourceLine[] Lines => lines;
 
         /// <summary>
@@ -744,9 +736,7 @@ internal static class SerializedAnalysisRenderer
         /// </summary>
         public static SourceBuffer Load(string filePath) => new(File.ReadAllText(filePath));
 
-        /// <summary>
-        /// Maps an absolute character offset to its containing line via binary search.
-        /// </summary>
+        /// <summary> Maps an absolute character offset to its containing line via binary search. </summary>
         public int GetLineIndex(int position)
         {
             int lower = 0;

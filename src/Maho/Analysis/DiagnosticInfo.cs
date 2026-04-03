@@ -1,8 +1,6 @@
 namespace Maho;
 
-/// <summary>
-/// Public diagnostic payload exposed to API consumers.
-/// </summary>
+/// <summary> Public diagnostic payload exposed to API consumers. </summary>
 /// <param name="Code">Stable diagnostic identifier intended for tooling and tests.</param>
 /// <param name="Message">Human-readable description of the problem.</param>
 /// <param name="Severity">Normalized severity category for the problem.</param>

@@ -5,9 +5,7 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-/// <summary>
-/// Represents one lexical scope and the symbols declared directly inside it.
-/// </summary>
+/// <summary> Represents one lexical scope and the symbols declared directly inside it. </summary>
 internal sealed class Scope
 {
     private readonly Dictionary<string, List<Symbol>> symbolsByName = new(StringComparer.Ordinal);
@@ -20,9 +18,7 @@ internal sealed class Scope
     public IReadOnlyList<Scope> Children => children;
     public IReadOnlyList<Symbol> DeclaredSymbols => declaredSymbols;
 
-    /// <summary>
-    /// Creates a child scope and links it into the parent scope tree immediately.
-    /// </summary>
+    /// <summary> Creates a child scope and links it into the parent scope tree immediately. </summary>
     public Scope(Scope? parent, SyntaxNode boundary, Symbol? ownerSymbol = null)
     {
         Parent = parent;
@@ -67,10 +63,7 @@ internal sealed class Scope
             : Array.Empty<Symbol>();
     }
 
-    /// <summary>
-    /// Returns every visible symbol with the requested name by walking outward through parent
-    /// scopes.
-    /// </summary>
+    /// <summary> Returns every visible symbol with the requested name by walking outward through parent scopes. </summary>
     public IEnumerable<Symbol> Lookup(string name)
     {
         for (Scope? current = this; current is not null; current = current.Parent)

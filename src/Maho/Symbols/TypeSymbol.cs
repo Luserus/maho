@@ -19,8 +19,5 @@ internal sealed class TypeSymbol : DeclaredSymbol
         DeclarationKey = new TypeDeclarationKey(name, arity);
     }
 
-    public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters)
-    {
-        typeParameters = resolvedTypeParameters;
-    }
+    public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
 }

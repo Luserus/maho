@@ -9,8 +9,7 @@ namespace Maho.Resolution;
 
 /// <summary>
 /// First semantic pass. It predeclares symbols for each scope, resolves declaration signatures and
-/// declaration-site type references, and records the scope/symbol tables that later passes build
-/// on.
+/// declaration-site type references, and records the scope/symbol tables that later passes build on.
 /// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {

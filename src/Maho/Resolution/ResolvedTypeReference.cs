@@ -4,9 +4,7 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-/// <summary>
-/// Base semantic model for declaration-site type syntax after the first pass interprets it.
-/// </summary>
+/// <summary> Base semantic model for declaration-site type syntax after the first pass interprets it. </summary>
 internal abstract class ResolvedTypeReference
 {
     protected ResolvedTypeReference(TypeSyntax syntax, IReadOnlyList<Symbol> candidateSymbols)
@@ -16,17 +14,13 @@ internal abstract class ResolvedTypeReference
     }
 
     public TypeSyntax Syntax { get; }
-    /// <summary>
-    /// Candidate declarations that matched this reference during first-pass lookup.
-    /// </summary>
+    /// <summary> Candidate declarations that matched this reference during first-pass lookup. </summary>
     public IReadOnlyList<Symbol> CandidateSymbols { get; }
     public abstract string DisplayName { get; }
     public abstract string SignatureKey { get; }
 }
 
-/// <summary>
-/// Represents an unqualified or generic named type reference.
-/// </summary>
+/// <summary> Represents an unqualified or generic named type reference. </summary>
 internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
 {
     public string Name { get; }
@@ -78,9 +72,7 @@ internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
     }
 }
 
-/// <summary>
-/// Represents a qualified type reference such as <c>A.B</c>.
-/// </summary>
+/// <summary> Represents a qualified type reference such as <c>A.B</c>. </summary>
 internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
 {
     public ResolvedTypeReference Left { get; }
@@ -110,10 +102,7 @@ internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
     }
 }
 
-/// <summary>
-/// Represents a type reference with a postfix modifier such as <c>[]</c>, <c>*</c>, <c>&amp;</c>,
-/// or <c>?</c>.
-/// </summary>
+/// <summary> Represents a type reference with a postfix modifier such as <c>[]</c>, <c>*</c>, <c>&amp;</c>, or <c>?</c>. </summary>
 internal sealed class ResolvedModifiedTypeReference : ResolvedTypeReference
 {
     public ResolvedTypeReference ElementType { get; }
