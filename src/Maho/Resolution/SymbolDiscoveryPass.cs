@@ -8,8 +8,8 @@ using Maho.Text;
 namespace Maho.Resolution;
 
 /// <summary>
-/// First semantic pass. It predeclares symbols for each scope, resolves declaration signatures and
-/// declaration-site type references, and records the scope/symbol tables that later passes build on.
+/// First semantic pass. It predeclares symbols for each scope and records the scope/symbol tables
+/// that later passes build on.
 /// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
@@ -17,10 +17,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private DiagnosticsManager Diagnostics => context.Diagnostics;
 
     /// <summary>
-    /// Runs the declaration pipeline in two phases so same-scope declarations exist before their
-    /// signatures are interpreted.
+    /// Runs the declaration pipeline in two phases so same-scope declarations exist before later
+    /// passes interpret declaration signatures and bodies.
     /// </summary>
-    public override void Execute(ResolutionContext context)
+    public override void ExecuteUnit(ResolutionContext context)
     {
         this.context = context;
 
@@ -335,18 +335,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         Scope functionScope = context.ResolveSymbolScope(symbol, declaration, scope);
-        ResolvedTypeReference returnType = ResolveTypeReference(declaration.Signature.ReturnType, functionScope);
-
-        for (int i = 0; i < declaration.Signature.Parameters.Count; i++)
-        {
-            Parameter parameter = declaration.Signature.Parameters[i];
-            ParameterSymbol parameterSymbol = symbol.Parameters[i];
-            ResolvedTypeReference parameterType = ResolveTypeReference(parameter.Declarator.Type, functionScope);
-            parameterSymbol.ResolveType(parameterType);
-        }
-
-        symbol.ResolveSignature(returnType);
-        ReportDuplicateFunctionDeclarationIfNeeded(symbol, declaration.Signature.Identifier, scope);
 
         switch (declaration.Body)
         {
@@ -416,8 +404,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveVariableDeclaration(VariableDeclaration declaration, Scope scope)
     {
-        ResolvedTypeReference resolvedType = ResolveTypeReference(declaration.Type, scope);
-
         foreach (VariableDeclarator declarator in declaration.Declarators)
         {
             if (!context.TryResolveDeclaredSymbol(declarator, out Symbol? declared) || declared is not VariableSymbol symbol)
@@ -425,8 +411,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declarator.Identifier), $"variable declaration '{GetDeclaredName(declarator.Identifier)}'");
                 continue;
             }
-
-            symbol.ResolveType(resolvedType);
         }
     }
 
@@ -684,149 +668,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolveLocalStatement(statement, statementScope, containerSymbol);
     }
 
-    private ResolvedTypeReference ResolveTypeReference(TypeSyntax syntax, Scope scope) => ResolveTypeReference(syntax, scope, containerScopes: null, allowNamespaceCandidates: false);
-
-    private ResolvedTypeReference ResolveTypeReference(TypeSyntax syntax, Scope scope, IReadOnlyList<Scope>? containerScopes, bool allowNamespaceCandidates)
-    {
-        if (context.TryResolveTypeReference(syntax, out ResolvedTypeReference? resolved) && resolved is not null)
-            return resolved;
-
-        ResolvedTypeReference created = syntax switch
-        {
-            SimpleType simpleType => ResolveNamedTypeReference(simpleType, simpleType.Name.Value, arity: 0, [], scope, containerScopes, allowNamespaceCandidates),
-            GenericType genericType => ResolveGenericTypeReference(genericType, scope, containerScopes, allowNamespaceCandidates),
-            QualifiedType qualifiedType => ResolveQualifiedTypeReference(qualifiedType, scope, containerScopes),
-            ModifiedType modifiedType => ResolveModifiedTypeReference(modifiedType, scope, containerScopes, allowNamespaceCandidates),
-            _ => throw new InvalidOperationException($"Unhandled type syntax '{syntax.GetType().Name}'.")
-        };
-
-        context.ResolveTypeReference(syntax, created);
-        return created;
-    }
-
-    private ResolvedTypeReference ResolveGenericTypeReference(GenericType genericType, Scope scope, IReadOnlyList<Scope>? containerScopes, bool allowNamespaceCandidates)
-    {
-        List<ResolvedTypeReference> typeArguments = new(genericType.TypeArguments.Count);
-
-        foreach (TypeSyntax typeArgument in genericType.TypeArguments)
-            typeArguments.Add(ResolveTypeReference(typeArgument, scope));
-
-        return ResolveNamedTypeReference(genericType, genericType.Name.Value, genericType.TypeArguments.Count, typeArguments, scope, containerScopes, allowNamespaceCandidates);
-    }
-
-    private ResolvedTypeReference ResolveQualifiedTypeReference(QualifiedType qualifiedType, Scope scope, IReadOnlyList<Scope>? containerScopes)
-    {
-        ResolvedTypeReference left = ResolveTypeReference(qualifiedType.Left, scope, containerScopes, allowNamespaceCandidates: true);
-        IReadOnlyList<Scope> nextContainerScopes = GetContainerScopes(left.CandidateSymbols);
-        ResolvedTypeReference right = ResolveTypeReference(qualifiedType.Right, scope, nextContainerScopes, allowNamespaceCandidates: false);
-
-        return new ResolvedQualifiedTypeReference(qualifiedType, left, right, right.CandidateSymbols);
-    }
-
-    private ResolvedTypeReference ResolveModifiedTypeReference(ModifiedType modifiedType, Scope scope, IReadOnlyList<Scope>? containerScopes, bool allowNamespaceCandidates)
-    {
-        ResolvedTypeReference elementType = ResolveTypeReference(modifiedType.Type, scope, containerScopes, allowNamespaceCandidates);
-
-        if (modifiedType.Modifier is null)
-        {
-            Diagnostics.ReportResolutionStateError(GetTypeSpan(modifiedType), $"type modifier on '{elementType.DisplayName}'");
-            return elementType;
-        }
-
-        return new ResolvedModifiedTypeReference(modifiedType, elementType, modifiedType.Modifier);
-    }
-
-    private ResolvedNamedTypeReference ResolveNamedTypeReference(
-        TypeSyntax syntax,
-        string name,
-        int arity,
-        IReadOnlyList<ResolvedTypeReference> typeArguments,
-        Scope scope,
-        IReadOnlyList<Scope>? containerScopes,
-        bool allowNamespaceCandidates)
-    {
-        List<Symbol> candidates = LookupTypeCandidates(name, arity, scope, containerScopes, allowNamespaceCandidates);
-        string? signatureIdentity = GetUniqueTypeReferenceIdentity(candidates);
-
-        return new ResolvedNamedTypeReference(syntax, name, arity, typeArguments, candidates, signatureIdentity);
-    }
-
-    private List<Symbol> LookupTypeCandidates(string name, int arity, Scope scope, IReadOnlyList<Scope>? containerScopes, bool allowNamespaceCandidates)
-    {
-        List<Symbol> matches = [];
-
-        if (containerScopes is not null)
-        {
-            for (int i = 0; i < containerScopes.Count; i++)
-                AddLocalTypeCandidates(containerScopes[i], name, arity, allowNamespaceCandidates, matches);
-
-            return matches;
-        }
-
-        foreach (Symbol symbol in scope.Lookup(name))
-        {
-            if (MatchesTypeCandidate(symbol, arity, allowNamespaceCandidates))
-                matches.Add(symbol);
-        }
-
-        return matches;
-    }
-
-    private static void AddLocalTypeCandidates(Scope scope, string name, int arity, bool allowNamespaceCandidates, List<Symbol> matches)
-    {
-        IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(name);
-
-        for (int i = 0; i < localSymbols.Count; i++)
-        {
-            Symbol symbol = localSymbols[i];
-
-            if (MatchesTypeCandidate(symbol, arity, allowNamespaceCandidates))
-                matches.Add(symbol);
-        }
-    }
-
-    private static bool MatchesTypeCandidate(Symbol symbol, int arity, bool allowNamespaceCandidates) => symbol switch
-    {
-        TypeParameterSymbol when arity == 0 => true,
-        TypeSymbol typeSymbol when typeSymbol.Arity == arity => true,
-        NamespaceSymbol when allowNamespaceCandidates && arity == 0 => true,
-        _ => false
-    };
-
-    private IReadOnlyList<Scope> GetContainerScopes(IReadOnlyList<Symbol> symbols)
-    {
-        List<Scope> scopes = [];
-
-        for (int i = 0; i < symbols.Count; i++)
-        {
-            Symbol symbol = symbols[i];
-
-            if (symbol is not NamespaceSymbol and not TypeSymbol)
-                continue;
-
-            if (!context.TryResolveSymbolScope(symbol, out Scope? scopeForSymbol) || scopeForSymbol is null)
-                continue;
-
-            scopes.Add(scopeForSymbol);
-        }
-
-        return scopes;
-    }
-
-    private static string? GetUniqueTypeReferenceIdentity(IReadOnlyList<Symbol> candidates)
-    {
-        if (candidates.Count != 1)
-            return null;
-
-        return candidates[0] switch
-        {
-            TypeParameterSymbol typeParameter => typeParameter.SignatureIdentity,
-            TypeSymbol typeSymbol => typeSymbol.QualifiedMetadataName,
-            NamespaceSymbol namespaceSymbol => namespaceSymbol.QualifiedMetadataName,
-            _ => null
-        };
-    }
-
     private void ReportDuplicateTypeDeclarationIfNeeded(TypeSymbol symbol, NamedSyntax nameSyntax, Scope scope)
     {
         IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(symbol.Name);
@@ -841,28 +682,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             if (localSymbol is TypeSymbol other && other.DeclarationKey == symbol.DeclarationKey)
             {
                 Diagnostics.ReportDuplicateTypeDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name, symbol.Arity);
-                return;
-            }
-        }
-    }
-
-    private void ReportDuplicateFunctionDeclarationIfNeeded(FunctionSymbol symbol, NamedSyntax nameSyntax, Scope scope)
-    {
-        if (symbol.DeclarationKey is not FunctionDeclarationKey declarationKey)
-            return;
-
-        IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(symbol.Name);
-
-        for (int i = 0; i < localSymbols.Count; i++)
-        {
-            Symbol localSymbol = localSymbols[i];
-
-            if (ReferenceEquals(localSymbol, symbol))
-                return;
-
-            if (localSymbol is FunctionSymbol other && other.DeclarationKey is FunctionDeclarationKey otherKey && otherKey == declarationKey)
-            {
-                Diagnostics.ReportDuplicateFunctionDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name, symbol.Arity);
                 return;
             }
         }
@@ -914,30 +733,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         _ => default
     };
 
-    private static TextSpan GetTypeSpan(TypeSyntax type) => type switch
-    {
-        SimpleType simpleType => simpleType.Name.Span,
-        GenericType genericType => TextSpan.FromBounds(genericType.Name.Span.Start, genericType.GreaterThanToken.Span.End),
-        QualifiedType qualifiedType => TextSpan.FromBounds(GetTypeSpan(qualifiedType.Left).Start, GetTypeSpan(qualifiedType.Right).End),
-        ModifiedType modifiedType when modifiedType.Modifier is not null => TextSpan.FromBounds(GetTypeSpan(modifiedType.Type).Start, GetPostfixModifierSpan(modifiedType.Modifier).End),
-        ModifiedType modifiedType => GetTypeSpan(modifiedType.Type),
-        _ => default
-    };
-
-    private static TextSpan GetPostfixModifierSpan(PostfixTypeModifier modifier) => modifier switch
-    {
-        ArrayTypeModifier arrayTypeModifier => TextSpan.FromBounds(arrayTypeModifier.LeftBracket.Span.Start, arrayTypeModifier.RightBracket.Span.End),
-        OptionalTypeModifier optionalTypeModifier => optionalTypeModifier.QuestionMark.Span,
-        PointerTypeModifier pointerTypeModifier => pointerTypeModifier.Asterisk.Span,
-        ReferenceTypeModifier referenceTypeModifier => referenceTypeModifier.Ampersand.Span,
-        _ => default
-    };
-
     private static TextSpan GetSyntaxSpan(SyntaxNode syntax) => syntax switch
     {
         TypeDeclaration typeDeclaration => TextSpan.FromBounds(typeDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(typeDeclaration.Name).End),
         NamespaceDeclaration namespaceDeclaration => TextSpan.FromBounds(namespaceDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(namespaceDeclaration.Name).End),
-        FunctionDeclaration functionDeclaration => TextSpan.FromBounds(GetTypeSpan(functionDeclaration.Signature.ReturnType).Start, functionDeclaration.Signature.CloseParen.Span.End),
+        FunctionDeclaration functionDeclaration => TextSpan.FromBounds(GetNamedSyntaxSpan(functionDeclaration.Signature.Identifier).Start, functionDeclaration.Signature.CloseParen.Span.End),
         LocalBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
         TopLevelBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
         LocalStatement localStatement => GetLocalStatementSpan(localStatement),
@@ -950,7 +750,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         LocalIfStatement ifStatement => TextSpan.FromBounds(ifStatement.Keyword.Span.Start, ifStatement.CloseParen.Span.End),
         LocalWhileStatement whileStatement => TextSpan.FromBounds(whileStatement.Keyword.Span.Start, whileStatement.CloseParen.Span.End),
         LocalElseStatement elseStatement => elseStatement.Keyword.Span,
-        LocalVariableDeclarationStatement variableDeclaration => GetTypeSpan(variableDeclaration.Declaration.Type),
+        LocalVariableDeclarationStatement variableDeclaration => GetNamedSyntaxSpan(variableDeclaration.Declaration.Declarators[0].Identifier),
         LocalExpressionStatement expressionStatement => expressionStatement.Semicolon.Span,
         LocalReturnStatement returnStatement => returnStatement.Statement.Keyword.Span,
         LocalEmptyStatement emptyStatement => emptyStatement.Semicolon.Span,

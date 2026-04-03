@@ -5,30 +5,28 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-/// <summary> Mutable state shared across all resolution passes for one compilation unit. </summary>
+/// <summary> Mutable semantic state for one compilation unit inside a coordinated project resolution run. </summary>
 internal sealed class ResolutionContext
 {
     private readonly Dictionary<SyntaxNode, Scope> scopes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<SyntaxNode, Symbol> declaredSymbols = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<Symbol, Scope> symbolScopes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<TypeSyntax, ResolvedTypeReference> resolvedTypeReferences = new(ReferenceEqualityComparer.Instance);
 
+    public ResolutionCoordinatorContext Project { get; }
     public CompilationUnit Root { get; }
-    public DiagnosticsManager Diagnostics { get; }
-    public NamespaceSymbol GlobalNamespace { get; }
-    public Scope GlobalScope { get; }
+    public DiagnosticsManager Diagnostics => Project.Diagnostics;
+    public NamespaceSymbol GlobalNamespace => Project.GlobalNamespace;
+    public Scope GlobalScope => Project.GlobalScope;
+    public IReadOnlyList<ResolutionProjectReference> References => Project.References;
 
-    /// <summary> Creates the global semantic state for the compilation unit being resolved. </summary>
-    public ResolutionContext(CompilationUnit root, DiagnosticsManager diagnostics)
+    /// <summary> Creates the unit-local semantic state for one compilation unit. </summary>
+    public ResolutionContext(CompilationUnit root, ResolutionCoordinatorContext project)
     {
+        Project = project;
         Root = root;
-        Diagnostics = diagnostics;
-        GlobalNamespace = new NamespaceSymbol(string.Empty, parentSymbol: null, root);
-        GlobalScope = new Scope(parent: null, boundary: root, ownerSymbol: GlobalNamespace);
 
         ResolveDeclaredSymbol(root, GlobalNamespace);
         ResolveScope(root, GlobalScope);
-        symbolScopes.Add(GlobalNamespace, GlobalScope);
     }
 
     /// <summary> Declares a symbol and associates the declaring syntax with it. </summary>
@@ -54,7 +52,7 @@ internal sealed class ResolutionContext
         ResolveScope(syntax, scope);
 
         if (ownerSymbol is not null)
-            symbolScopes.TryAdd(ownerSymbol, scope);
+            Project.ResolveSymbolScope(ownerSymbol, scope);
 
         return scope;
     }
@@ -62,7 +60,7 @@ internal sealed class ResolutionContext
     /// <summary> Resolves the scope owned by a symbol, creating it on first use. </summary>
     public Scope ResolveSymbolScope(Symbol ownerSymbol, SyntaxNode syntax, Scope parent)
     {
-        if (symbolScopes.TryGetValue(ownerSymbol, out Scope? existing))
+        if (Project.TryResolveSymbolScope(ownerSymbol, out Scope? existing) && existing is not null)
         {
             ResolveScope(syntax, existing);
             return existing;
@@ -71,7 +69,7 @@ internal sealed class ResolutionContext
         return CreateChildScope(syntax, parent, ownerSymbol);
     }
 
-    public bool TryResolveSymbolScope(Symbol symbol, out Scope? scope) => symbolScopes.TryGetValue(symbol, out scope);
+    public bool TryResolveSymbolScope(Symbol symbol, out Scope? scope) => Project.TryResolveSymbolScope(symbol, out scope);
 
     public bool TryResolveScope(SyntaxNode syntax, out Scope? scope) => scopes.TryGetValue(syntax, out scope);
 
@@ -104,6 +102,6 @@ internal sealed class ResolutionContext
             GlobalScope,
             scopes,
             declaredSymbols,
-            symbolScopes,
+            Project.SymbolScopes,
             resolvedTypeReferences);
 }
