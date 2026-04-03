@@ -59,6 +59,7 @@ public static class MahoCompiler
 
         Parser parser = new(text, diagnosticsManager);
         parser.Parse(lexer.Tokens);
+        _ = new Resolver().Resolve(parser.Root, diagnosticsManager);
 
         DiagnosticInfo[] diagnostics = CreateDiagnostics(diagnosticsManager, text);
 

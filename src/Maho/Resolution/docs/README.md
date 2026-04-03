@@ -47,7 +47,9 @@ That split matters because declarations in the same scope need to exist before t
 - resolves function return types,
 - resolves parameter types,
 - resolves variable declaration types,
+- resolves declaration-site type syntax into candidate-based semantic references,
 - resolves generic arity for type and function declarations,
+- reports duplicate type and function declarations,
 - and computes declaration keys for overload-like function/type identity.
 
 In other words, pass 1 does not just collect names. It establishes most declaration metadata that later passes will depend on.
@@ -113,7 +115,7 @@ Current shapes include:
 - qualified type references,
 - and modified type references.
 
-These references also store candidate symbols, so later passes can distinguish:
+These references store candidate symbols rather than eagerly reporting lookup failures, so later passes can distinguish:
 
 - fully resolved cases,
 - ambiguous cases,
@@ -136,7 +138,6 @@ That allows later passes to reuse the first-pass work directly instead of redisc
 
 Natural next passes include:
 
-- duplicate declaration and duplicate signature diagnostics,
 - identifier lookup for expression/name uses,
 - generic argument arity validation,
 - namespace/type/member access resolution,

@@ -1,10 +1,13 @@
-using System;
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Symbols;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Mutable state shared across all resolution passes for one compilation unit.
+/// </summary>
 internal sealed class ResolutionContext
 {
     private readonly Dictionary<SyntaxNode, Scope> scopes = new(ReferenceEqualityComparer.Instance);
@@ -13,12 +16,17 @@ internal sealed class ResolutionContext
     private readonly Dictionary<TypeSyntax, ResolvedTypeReference> resolvedTypeReferences = new(ReferenceEqualityComparer.Instance);
 
     public CompilationUnit Root { get; }
+    public DiagnosticsManager Diagnostics { get; }
     public NamespaceSymbol GlobalNamespace { get; }
     public Scope GlobalScope { get; }
 
-    public ResolutionContext(CompilationUnit root)
+    /// <summary>
+    /// Creates the global semantic state for the compilation unit being resolved.
+    /// </summary>
+    public ResolutionContext(CompilationUnit root, DiagnosticsManager diagnostics)
     {
         Root = root;
+        Diagnostics = diagnostics;
         GlobalNamespace = new NamespaceSymbol(string.Empty, parentSymbol: null, root);
         GlobalScope = new Scope(parent: null, boundary: root, ownerSymbol: GlobalNamespace);
 
@@ -27,31 +35,43 @@ internal sealed class ResolutionContext
         symbolScopes.Add(GlobalNamespace, GlobalScope);
     }
 
+    /// <summary>
+    /// Declares a symbol and associates the declaring syntax with it.
+    /// </summary>
     public void DeclareSymbol(SyntaxNode syntax, Symbol symbol, Scope scope)
     {
         scope.Declare(symbol);
         ResolveDeclaredSymbol(syntax, symbol);
     }
 
+    /// <summary>
+    /// Associates a syntax node with a semantic symbol.
+    /// </summary>
     public void ResolveDeclaredSymbol(SyntaxNode syntax, Symbol symbol)
     {
         if (declaredSymbols.TryGetValue(syntax, out Symbol? existing) && !ReferenceEquals(existing, symbol))
-            throw new InvalidOperationException($"Syntax node '{syntax.GetType().Name}' is already bound to a different symbol.");
+            return;
 
         declaredSymbols[syntax] = symbol;
     }
 
+    /// <summary>
+    /// Creates and records a nested lexical scope.
+    /// </summary>
     public Scope CreateChildScope(SyntaxNode syntax, Scope parent, Symbol? ownerSymbol = null)
     {
         Scope scope = new(parent, syntax, ownerSymbol);
         ResolveScope(syntax, scope);
 
         if (ownerSymbol is not null)
-            symbolScopes.Add(ownerSymbol, scope);
+            symbolScopes.TryAdd(ownerSymbol, scope);
 
         return scope;
     }
 
+    /// <summary>
+    /// Resolves the scope owned by a symbol, creating it on first use.
+    /// </summary>
     public Scope ResolveSymbolScope(Symbol ownerSymbol, SyntaxNode syntax, Scope parent)
     {
         if (symbolScopes.TryGetValue(ownerSymbol, out Scope? existing))
@@ -69,18 +89,24 @@ internal sealed class ResolutionContext
 
     public bool TryResolveDeclaredSymbol(SyntaxNode syntax, out Symbol? symbol) => declaredSymbols.TryGetValue(syntax, out symbol);
 
+    /// <summary>
+    /// Associates one syntax node with the scope that semantically contains it.
+    /// </summary>
     public void ResolveScope(SyntaxNode syntax, Scope scope)
     {
         if (scopes.TryGetValue(syntax, out Scope? existing) && !ReferenceEquals(existing, scope))
-            throw new InvalidOperationException($"Syntax node '{syntax.GetType().Name}' is already bound to a different scope.");
+            return;
 
         scopes[syntax] = scope;
     }
 
+    /// <summary>
+    /// Stores the semantic interpretation of declaration-site type syntax for later passes.
+    /// </summary>
     public void ResolveTypeReference(TypeSyntax syntax, ResolvedTypeReference typeReference)
     {
         if (resolvedTypeReferences.TryGetValue(syntax, out ResolvedTypeReference? existing) && !ReferenceEquals(existing, typeReference))
-            throw new InvalidOperationException($"Type syntax '{syntax.GetType().Name}' is already resolved to a different type reference.");
+            return;
 
         resolvedTypeReferences[syntax] = typeReference;
     }

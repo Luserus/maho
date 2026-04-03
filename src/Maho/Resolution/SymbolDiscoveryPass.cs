@@ -1,14 +1,26 @@
 using System;
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Symbols;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// First semantic pass. It predeclares symbols for each scope, resolves declaration signatures and
+/// declaration-site type references, and records the scope/symbol tables that later passes build
+/// on.
+/// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
     private ResolutionContext context = null!;
+    private DiagnosticsManager Diagnostics => context.Diagnostics;
 
+    /// <summary>
+    /// Runs the declaration pipeline in two phases so same-scope declarations exist before their
+    /// signatures are interpreted.
+    /// </summary>
     public override void Execute(ResolutionContext context)
     {
         this.context = context;
@@ -19,14 +31,34 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void PredeclareTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
     {
+        // A namespace with a semicolon acts like a file-scoped namespace: every following
+        // top-level declaration belongs to that namespace until this member list ends.
+        Scope currentScope = scope;
+        Symbol currentContainerSymbol = containerSymbol;
+
         for (int i = 0; i < members.Count; i++)
-            PredeclareTopLevel(members[i], scope, containerSymbol);
+        {
+            TopLevel member = members[i];
+            PredeclareTopLevel(member, currentScope, currentContainerSymbol);
+
+            if (member is NamespaceDeclaration { Body: NamespaceEmptyBody } namespaceDeclaration)
+                (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespaceDeclaration, currentScope, currentContainerSymbol);
+        }
     }
 
     private void ResolveTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
     {
+        Scope currentScope = scope;
+        Symbol currentContainerSymbol = containerSymbol;
+
         for (int i = 0; i < members.Count; i++)
-            ResolveTopLevel(members[i], scope, containerSymbol);
+        {
+            TopLevel member = members[i];
+            ResolveTopLevel(member, currentScope, currentContainerSymbol);
+
+            if (member is NamespaceDeclaration { Body: NamespaceEmptyBody } namespaceDeclaration)
+                (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespaceDeclaration, currentScope, currentContainerSymbol);
+        }
     }
 
     private void PredeclareTopLevel(TopLevel topLevel, Scope scope, Symbol containerSymbol)
@@ -73,11 +105,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 break;
 
             case TopLevelTypeDeclaration typeDeclaration:
-                ResolveTypeDeclaration(typeDeclaration.Type, scope, containerSymbol);
+                ResolveTypeDeclaration(typeDeclaration.Type, scope);
                 break;
 
             case TopLevelFunctionDeclaration functionDeclaration:
-                ResolveFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol);
+                ResolveFunctionDeclaration(functionDeclaration.Function, scope);
                 break;
 
             case TopLevelVariableDeclaration variableDeclaration:
@@ -128,6 +160,20 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             ResolveTopLevels(blockBody.Members, currentScope, currentSymbol);
     }
 
+    private (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclaration declaration, Scope scope, Symbol parentSymbol)
+    {
+        Scope currentScope = scope;
+        Symbol currentSymbol = parentSymbol;
+
+        foreach (SimpleName part in EnumerateSimpleNames(declaration.Name))
+        {
+            currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
+            currentScope = context.ResolveSymbolScope(currentSymbol, part, currentScope);
+        }
+
+        return (currentScope, currentSymbol);
+    }
+
     private NamespaceSymbol GetOrDeclareNamespace(SimpleName nameSyntax, Scope scope, Symbol parentSymbol)
     {
         string name = nameSyntax.Name.Value;
@@ -167,12 +213,16 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return symbol;
     }
 
-    private void ResolveTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
+    private void ResolveTypeDeclaration(TypeDeclaration declaration, Scope scope)
     {
         if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? declared) || declared is not TypeSymbol symbol)
-            throw new InvalidOperationException($"Type declaration '{GetDeclaredName(declaration.Name)}' was not predeclared.");
+        {
+            Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declaration.Name), $"type declaration '{GetDeclaredName(declaration.Name)}'");
+            return;
+        }
 
         Scope typeScope = context.ResolveSymbolScope(symbol, declaration, scope);
+        ReportDuplicateTypeDeclarationIfNeeded(symbol, declaration.Name, scope);
 
         if (declaration.Body is TypeBlockBody blockBody)
             ResolveMembers(blockBody.Members, typeScope, symbol);
@@ -222,11 +272,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         switch (member)
         {
             case MemberTypeDeclaration typeDeclaration:
-                ResolveTypeDeclaration(typeDeclaration.Type, scope, containerSymbol);
+                ResolveTypeDeclaration(typeDeclaration.Type, scope);
                 break;
 
             case MemberFunctionDeclaration functionDeclaration:
-                ResolveFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol);
+                ResolveFunctionDeclaration(functionDeclaration.Function, scope);
                 break;
 
             case MemberFieldDeclaration fieldDeclaration:
@@ -277,10 +327,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return symbol;
     }
 
-    private void ResolveFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
+    private void ResolveFunctionDeclaration(FunctionDeclaration declaration, Scope scope)
     {
         if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? declared) || declared is not FunctionSymbol symbol)
-            throw new InvalidOperationException($"Function declaration '{GetDeclaredName(declaration.Signature.Identifier)}' was not predeclared.");
+        {
+            Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declaration.Signature.Identifier), $"function declaration '{GetDeclaredName(declaration.Signature.Identifier)}'");
+            return;
+        }
 
         Scope functionScope = context.ResolveSymbolScope(symbol, declaration, scope);
         ResolvedTypeReference returnType = ResolveTypeReference(declaration.Signature.ReturnType, functionScope);
@@ -294,6 +347,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         symbol.ResolveSignature(returnType);
+        ReportDuplicateFunctionDeclarationIfNeeded(symbol, declaration.Signature.Identifier, scope);
 
         switch (declaration.Body)
         {
@@ -313,7 +367,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private IReadOnlyList<TypeParameterSymbol> PredeclareTypeParameters(NamedSyntax nameSyntax, Symbol ownerSymbol, Scope ownerScope)
+    private List<TypeParameterSymbol> PredeclareTypeParameters(NamedSyntax nameSyntax, Symbol ownerSymbol, Scope ownerScope)
     {
         if (nameSyntax is not GenericName genericName)
             return [];
@@ -332,7 +386,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return typeParameters;
     }
 
-    private IReadOnlyList<ParameterSymbol> PredeclareParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, Symbol functionSymbol)
+    private List<ParameterSymbol> PredeclareParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, Symbol functionSymbol)
     {
         List<ParameterSymbol> resolvedParameters = new(parameters.Count);
 
@@ -368,7 +422,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         foreach (VariableDeclarator declarator in declaration.Declarators)
         {
             if (!context.TryResolveDeclaredSymbol(declarator, out Symbol? declared) || declared is not VariableSymbol symbol)
-                throw new InvalidOperationException($"Variable declaration '{GetDeclaredName(declarator.Identifier)}' was not predeclared.");
+            {
+                Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declarator.Identifier), $"variable declaration '{GetDeclaredName(declarator.Identifier)}'");
+                continue;
+            }
 
             symbol.ResolveType(resolvedType);
         }
@@ -422,11 +479,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         switch (local)
         {
             case LocalTypeDeclaration typeDeclaration:
-                ResolveTypeDeclaration(typeDeclaration.Type, scope, containerSymbol);
+                ResolveTypeDeclaration(typeDeclaration.Type, scope);
                 break;
 
             case LocalFunctionDeclaration functionDeclaration:
-                ResolveFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol);
+                ResolveFunctionDeclaration(functionDeclaration.Function, scope);
                 break;
 
             case LocalVariableDeclarationStatement variableDeclaration:
@@ -591,7 +648,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private void ResolveLocalBlock(SyntaxNode boundary, IReadOnlyList<Local> locals, Scope scope, Symbol containerSymbol)
     {
         if (!context.TryResolveScope(boundary, out Scope? blockScope) || blockScope is null)
-            throw new InvalidOperationException($"Block '{boundary.GetType().Name}' was not predeclared.");
+        {
+            Diagnostics.ReportResolutionStateError(GetSyntaxSpan(boundary), $"block '{boundary.GetType().Name}'");
+            return;
+        }
 
         ResolveLocals(locals, blockScope, containerSymbol);
     }
@@ -617,7 +677,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         if (!context.TryResolveScope(statement, out Scope? statementScope) || statementScope is null)
-            throw new InvalidOperationException($"Embedded statement '{statement.GetType().Name}' was not predeclared.");
+        {
+            Diagnostics.ReportResolutionStateError(GetSyntaxSpan(statement), $"embedded statement '{statement.GetType().Name}'");
+            return;
+        }
 
         ResolveLocalStatement(statement, statementScope, containerSymbol);
     }
@@ -664,7 +727,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private ResolvedTypeReference ResolveModifiedTypeReference(ModifiedType modifiedType, Scope scope, IReadOnlyList<Scope>? containerScopes, bool allowNamespaceCandidates)
     {
         ResolvedTypeReference elementType = ResolveTypeReference(modifiedType.Type, scope, containerScopes, allowNamespaceCandidates);
-        return new ResolvedModifiedTypeReference(modifiedType, elementType);
+
+        if (modifiedType.Modifier is null)
+        {
+            Diagnostics.ReportResolutionStateError(GetTypeSpan(modifiedType), $"type modifier on '{elementType.DisplayName}'");
+            return elementType;
+        }
+
+        return new ResolvedModifiedTypeReference(modifiedType, elementType, modifiedType.Modifier);
     }
 
     private ResolvedNamedTypeReference ResolveNamedTypeReference(
@@ -758,6 +828,47 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         };
     }
 
+    private void ReportDuplicateTypeDeclarationIfNeeded(TypeSymbol symbol, NamedSyntax nameSyntax, Scope scope)
+    {
+        IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(symbol.Name);
+
+        for (int i = 0; i < localSymbols.Count; i++)
+        {
+            Symbol localSymbol = localSymbols[i];
+
+            if (ReferenceEquals(localSymbol, symbol))
+                return;
+
+            if (localSymbol is TypeSymbol other && other.DeclarationKey == symbol.DeclarationKey)
+            {
+                Diagnostics.ReportDuplicateTypeDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name, symbol.Arity);
+                return;
+            }
+        }
+    }
+
+    private void ReportDuplicateFunctionDeclarationIfNeeded(FunctionSymbol symbol, NamedSyntax nameSyntax, Scope scope)
+    {
+        if (symbol.DeclarationKey is not FunctionDeclarationKey declarationKey)
+            return;
+
+        IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(symbol.Name);
+
+        for (int i = 0; i < localSymbols.Count; i++)
+        {
+            Symbol localSymbol = localSymbols[i];
+
+            if (ReferenceEquals(localSymbol, symbol))
+                return;
+
+            if (localSymbol is FunctionSymbol other && other.DeclarationKey is FunctionDeclarationKey otherKey && otherKey == declarationKey)
+            {
+                Diagnostics.ReportDuplicateFunctionDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name, symbol.Arity);
+                return;
+            }
+        }
+    }
+
     private static string GetDeclaredName(NamedSyntax name) => name switch
     {
         SimpleName simpleName => simpleName.Name.Value,
@@ -793,4 +904,70 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.");
         }
     }
+
+    private static TextSpan GetNamedSyntaxSpan(NamedSyntax name) => name switch
+    {
+        SimpleName simpleName => simpleName.Name.Span,
+        GenericName genericName => TextSpan.FromBounds(genericName.Name.Span.Start, genericName.GreaterThanToken.Span.End),
+        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => TextSpan.FromBounds(
+            GetNamedSyntaxSpan(qualifiedName.Parts[0]).Start,
+            GetNamedSyntaxSpan(qualifiedName.Parts[qualifiedName.Parts.Count - 1]).End),
+        _ => default
+    };
+
+    private static TextSpan GetTypeSpan(TypeSyntax type) => type switch
+    {
+        SimpleType simpleType => simpleType.Name.Span,
+        GenericType genericType => TextSpan.FromBounds(genericType.Name.Span.Start, genericType.GreaterThanToken.Span.End),
+        QualifiedType qualifiedType => TextSpan.FromBounds(GetTypeSpan(qualifiedType.Left).Start, GetTypeSpan(qualifiedType.Right).End),
+        ModifiedType modifiedType when modifiedType.Modifier is not null => TextSpan.FromBounds(GetTypeSpan(modifiedType.Type).Start, GetPostfixModifierSpan(modifiedType.Modifier).End),
+        ModifiedType modifiedType => GetTypeSpan(modifiedType.Type),
+        _ => default
+    };
+
+    private static TextSpan GetPostfixModifierSpan(PostfixTypeModifier modifier) => modifier switch
+    {
+        ArrayTypeModifier arrayTypeModifier => TextSpan.FromBounds(arrayTypeModifier.LeftBracket.Span.Start, arrayTypeModifier.RightBracket.Span.End),
+        OptionalTypeModifier optionalTypeModifier => optionalTypeModifier.QuestionMark.Span,
+        PointerTypeModifier pointerTypeModifier => pointerTypeModifier.Asterisk.Span,
+        ReferenceTypeModifier referenceTypeModifier => referenceTypeModifier.Ampersand.Span,
+        _ => default
+    };
+
+    private static TextSpan GetSyntaxSpan(SyntaxNode syntax) => syntax switch
+    {
+        TypeDeclaration typeDeclaration => TextSpan.FromBounds(typeDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(typeDeclaration.Name).End),
+        NamespaceDeclaration namespaceDeclaration => TextSpan.FromBounds(namespaceDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(namespaceDeclaration.Name).End),
+        FunctionDeclaration functionDeclaration => TextSpan.FromBounds(GetTypeSpan(functionDeclaration.Signature.ReturnType).Start, functionDeclaration.Signature.CloseParen.Span.End),
+        LocalBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
+        TopLevelBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
+        LocalStatement localStatement => GetLocalStatementSpan(localStatement),
+        TopLevelStatement topLevelStatement => GetTopLevelStatementSpan(topLevelStatement),
+        _ => default
+    };
+
+    private static TextSpan GetLocalStatementSpan(LocalStatement statement) => statement switch
+    {
+        LocalIfStatement ifStatement => TextSpan.FromBounds(ifStatement.Keyword.Span.Start, ifStatement.CloseParen.Span.End),
+        LocalWhileStatement whileStatement => TextSpan.FromBounds(whileStatement.Keyword.Span.Start, whileStatement.CloseParen.Span.End),
+        LocalElseStatement elseStatement => elseStatement.Keyword.Span,
+        LocalVariableDeclarationStatement variableDeclaration => GetTypeSpan(variableDeclaration.Declaration.Type),
+        LocalExpressionStatement expressionStatement => expressionStatement.Semicolon.Span,
+        LocalReturnStatement returnStatement => returnStatement.Statement.Keyword.Span,
+        LocalEmptyStatement emptyStatement => emptyStatement.Semicolon.Span,
+        LocalBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
+        _ => default
+    };
+
+    private static TextSpan GetTopLevelStatementSpan(TopLevelStatement statement) => statement switch
+    {
+        TopLevelIfStatement ifStatement => TextSpan.FromBounds(ifStatement.Keyword.Span.Start, ifStatement.CloseParen.Span.End),
+        TopLevelWhileStatement whileStatement => TextSpan.FromBounds(whileStatement.Keyword.Span.Start, whileStatement.CloseParen.Span.End),
+        TopLevelElseStatement elseStatement => elseStatement.Keyword.Span,
+        TopLevelExpressionStatement expressionStatement => expressionStatement.Semicolon.Span,
+        TopLevelReturnStatement returnStatement => returnStatement.Statement.Keyword.Span,
+        TopLevelEmptyStatement emptyStatement => emptyStatement.Semicolon.Span,
+        TopLevelBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
+        _ => default
+    };
 }

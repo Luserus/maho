@@ -4,6 +4,9 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Stable semantic output produced by the resolution pipeline.
+/// </summary>
 internal sealed class ResolutionResult
 {
     public CompilationUnit Root { get; }
@@ -32,11 +35,24 @@ internal sealed class ResolutionResult
         TypeReferences = typeReferences;
     }
 
+    /// <summary>
+    /// Attempts to resolve the scope associated with a syntax node.
+    /// </summary>
     public bool TryResolveScope(SyntaxNode syntax, out Scope? scope) => Scopes.TryGetValue(syntax, out scope);
 
+    /// <summary>
+    /// Attempts to resolve the symbol declared by a syntax node.
+    /// </summary>
     public bool TryResolveDeclaredSymbol(SyntaxNode syntax, out Symbol? symbol) => DeclaredSymbols.TryGetValue(syntax, out symbol);
 
+    /// <summary>
+    /// Attempts to resolve the scope owned by a symbol.
+    /// </summary>
     public bool TryResolveSymbolScope(Symbol symbol, out Scope? scope) => SymbolScopes.TryGetValue(symbol, out scope);
 
+    /// <summary>
+    /// Attempts to resolve the semantic type-reference model created for declaration-site type
+    /// syntax.
+    /// </summary>
     public bool TryResolveTypeReference(TypeSyntax syntax, out ResolvedTypeReference? typeReference) => TypeReferences.TryGetValue(syntax, out typeReference);
 }

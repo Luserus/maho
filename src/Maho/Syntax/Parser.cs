@@ -125,13 +125,14 @@ internal sealed partial class Parser
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
-    public void Parse(List<Token> tokens)
+    public CompilationUnit Parse(List<Token> tokens)
     {
         this.tokens = FilterTokens(tokens);
         current = default;
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
+        return compilationUnit;
     }
 
     private static List<Token> FilterTokens(List<Token> sourceTokens)
@@ -302,17 +303,6 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
-    }
-
-    private static bool Contains(TokenKind[] kinds, TokenKind kind)
-    {
-        for (int i = 0; i < kinds.Length; i++)
-        {
-            if (kinds[i] == kind)
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>

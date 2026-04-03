@@ -131,6 +131,46 @@ internal sealed class DiagnosticsManager
         ReportExpectedToken(span, expected, "<missing>");
 
     /// <summary>
+    /// Reports a type reference that could not be matched to any visible declaration.
+    /// </summary>
+    public void ReportUnresolvedTypeReference(TextSpan span, string typeName) =>
+        ReportError("MH1000", $"Could not resolve type '{typeName}'.", span);
+
+    /// <summary>
+    /// Reports a type reference that matched more than one visible declaration.
+    /// </summary>
+    public void ReportAmbiguousTypeReference(TextSpan span, string typeName) =>
+        ReportError("MH1001", $"Type '{typeName}' is ambiguous in the current scope.", span);
+
+    /// <summary>
+    /// Reports a duplicate type declaration in one lexical scope.
+    /// </summary>
+    public void ReportDuplicateTypeDeclaration(TextSpan span, string typeName, int arity) =>
+        ReportError(
+            "MH1002",
+            arity == 0
+                ? $"Type '{typeName}' is already declared in this scope."
+                : $"Type '{typeName}' with arity {arity} is already declared in this scope.",
+            span);
+
+    /// <summary>
+    /// Reports a duplicate function declaration with the same generic arity and parameter shape.
+    /// </summary>
+    public void ReportDuplicateFunctionDeclaration(TextSpan span, string functionName, int arity) =>
+        ReportError(
+            "MH1003",
+            arity == 0
+                ? $"Function '{functionName}' with the same parameter types is already declared in this scope."
+                : $"Function '{functionName}' with arity {arity} and the same parameter types is already declared in this scope.",
+            span);
+
+    /// <summary>
+    /// Reports that resolution state became inconsistent without crashing the analysis pipeline.
+    /// </summary>
+    public void ReportResolutionStateError(TextSpan span, string subject) =>
+        ReportError("MH1099", $"Resolution state became inconsistent while resolving {subject}.", span);
+
+    /// <summary>
     /// Builds the shared parser message shape so every expected-X diagnostic reads consistently,
     /// adding contextual wording only when it disambiguates the recovery site.
     /// </summary>

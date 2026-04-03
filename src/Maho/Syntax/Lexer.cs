@@ -28,7 +28,7 @@ internal sealed partial class Lexer
     }
 
     /// <summary> Lexes the program string into tokens with trivia. </summary>
-    public void Lex()
+    public List<Token> Lex()
     {
         while (current < text.Length)
         {
@@ -45,6 +45,8 @@ internal sealed partial class Lexer
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
         Tokens.Add(new(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
+
+        return Tokens;
     }
 
     /// <summary> Current token kind. </summary>

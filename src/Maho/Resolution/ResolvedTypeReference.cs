@@ -1,10 +1,12 @@
-using System;
 using System.Collections.Generic;
 using Maho.Symbols;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Base semantic model for declaration-site type syntax after the first pass interprets it.
+/// </summary>
 internal abstract class ResolvedTypeReference
 {
     protected ResolvedTypeReference(TypeSyntax syntax, IReadOnlyList<Symbol> candidateSymbols)
@@ -14,11 +16,17 @@ internal abstract class ResolvedTypeReference
     }
 
     public TypeSyntax Syntax { get; }
+    /// <summary>
+    /// Candidate declarations that matched this reference during first-pass lookup.
+    /// </summary>
     public IReadOnlyList<Symbol> CandidateSymbols { get; }
     public abstract string DisplayName { get; }
     public abstract string SignatureKey { get; }
 }
 
+/// <summary>
+/// Represents an unqualified or generic named type reference.
+/// </summary>
 internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
 {
     public string Name { get; }
@@ -70,6 +78,9 @@ internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
     }
 }
 
+/// <summary>
+/// Represents a qualified type reference such as <c>A.B</c>.
+/// </summary>
 internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
 {
     public ResolvedTypeReference Left { get; }
@@ -99,6 +110,10 @@ internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
     }
 }
 
+/// <summary>
+/// Represents a type reference with a postfix modifier such as <c>[]</c>, <c>*</c>, <c>&amp;</c>,
+/// or <c>?</c>.
+/// </summary>
 internal sealed class ResolvedModifiedTypeReference : ResolvedTypeReference
 {
     public ResolvedTypeReference ElementType { get; }
@@ -106,12 +121,12 @@ internal sealed class ResolvedModifiedTypeReference : ResolvedTypeReference
     public override string DisplayName { get; }
     public override string SignatureKey { get; }
 
-    public ResolvedModifiedTypeReference(ModifiedType syntax, ResolvedTypeReference elementType)
+    public ResolvedModifiedTypeReference(ModifiedType syntax, ResolvedTypeReference elementType, PostfixTypeModifier modifier)
         : base(syntax, [])
     {
         ElementType = elementType;
-        Modifier = syntax.Modifier ?? throw new InvalidOperationException("ModifiedType is missing a postfix modifier.");
-        string suffix = GetModifierSuffix(Modifier);
+        Modifier = modifier;
+        string suffix = GetModifierSuffix(modifier);
         DisplayName = $"{elementType.DisplayName}{suffix}";
         SignatureKey = $"{elementType.SignatureKey}{suffix}";
     }
@@ -123,6 +138,6 @@ internal sealed class ResolvedModifiedTypeReference : ResolvedTypeReference
         OptionalTypeModifier => "?",
         PointerTypeModifier => "*",
         ReferenceTypeModifier => "&",
-        _ => throw new InvalidOperationException($"Unhandled postfix modifier '{modifier.GetType().Name}'.")
+        _ => throw new System.InvalidOperationException($"Unhandled postfix modifier '{modifier.GetType().Name}'.")
     };
 }
