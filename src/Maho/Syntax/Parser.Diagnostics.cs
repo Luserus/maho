@@ -1,4 +1,5 @@
 using System;
+using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
@@ -8,12 +9,11 @@ internal sealed partial class Parser
     private static bool IsClosingToken(TokenKind kind) =>
         kind is TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.GreaterThanSign;
 
-    private string GetTokenDisplay(Token token) => token.Kind switch
+    private DiagnosticText GetTokenDisplay(Token token) => token.Kind switch
     {
-        TokenKind.EndToken => "<end of file>",
-        TokenKind.MissingToken => "<missing>",
-        _ when string.IsNullOrEmpty(token.Value) => $"<{token.Kind}>",
-        _ => token.Value
+        TokenKind.EndToken => DiagnosticText.EndOfFile,
+        TokenKind.MissingToken => DiagnosticText.MissingToken,
+        _ => DiagnosticText.SourceSpan(text, token.Span)
     };
 
     private Token CreateMissingToken() => CreateMissingTokenAt(CurrentToken.Span.Start);

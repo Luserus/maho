@@ -4,12 +4,12 @@ namespace Maho.Symbols;
 internal abstract class Symbol
 {
     public SymbolKind Kind { get; }
-    public string Name { get; }
+    public SymbolName Name { get; }
     public Symbol? ParentSymbol { get; }
-    public virtual string MetadataName => Name;
+    public virtual string MetadataName => Name.ToString();
     public string QualifiedMetadataName => GetQualifiedMetadataName();
 
-    protected Symbol(SymbolKind kind, string name, Symbol? parentSymbol)
+    protected Symbol(SymbolKind kind, SymbolName name, Symbol? parentSymbol)
     {
         Kind = kind;
         Name = name;

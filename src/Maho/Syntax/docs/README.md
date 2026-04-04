@@ -16,6 +16,7 @@ The docs here go deep on structure and navigation, but intentionally stop short 
 
 - `SyntaxNode.cs`: common base type for syntax nodes.
 - `CompilationUnit.cs`: root node.
+- `SyntaxTree.cs`: batch-level parse result that groups all compilation units once parsing is done.
 - `TopLevel.cs`, `Member.cs`, `Local.cs`: category base types used to separate grammar layers.
 - `Token.cs`: syntax token object, including trivia and matching-keyword metadata.
 - `SyntaxTrivia.cs` and `SyntaxTriviaKind.cs`: whitespace/comment side-channel attached to tokens.
@@ -41,9 +42,10 @@ When analysis runs through syntax today, the path is effectively:
 
 1. `SourceText` exposes characters and line boundaries.
 2. `Lexer` consumes that text and produces `Token` objects plus trivia.
-3. `Parser` consumes the token stream and produces a `CompilationUnit`.
-4. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
-5. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
+3. Each `Parser` consumes one token stream and produces one `CompilationUnit`.
+4. Once every file has been parsed, those roots are grouped into a `SyntaxTree`.
+5. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
+6. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
 
 That means syntax is both a computation layer and a long-lived data model.
 
@@ -66,6 +68,19 @@ The root node. It owns:
 
 - `Members`: top-level syntax items
 - `EndToken`: the terminal EOF token
+
+### `SyntaxTree`
+
+The project-level syntax handoff. It owns:
+
+- `Name`: stable identity for the parsed batch
+- `Roots`: all parsed compilation units
+
+This is the intentional barrier between parsing and resolution. Parsers can run independently per
+file, but semantic passes start only after the final `SyntaxTree` has been assembled.
+
+It also inherits `SyntaxNode`, so it acts as the real root-of-roots node for project-wide semantic
+state rather than merely being an external container object.
 
 ### `TopLevel`, `Member`, `Local`
 

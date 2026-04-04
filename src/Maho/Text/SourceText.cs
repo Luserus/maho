@@ -78,24 +78,13 @@ internal sealed class SourceText : IDisposable
         lazyLines = ParseLines();
     }
 
-    /// <summary>
-    /// Returns true if the characters at [position, position + value.Length)
-    /// exactly match value, without allocating a substring.
-    /// </summary>
-    public bool MatchesAt(int position, ReadOnlySpan<char> value)
+    /// <summary> Returns a non-allocating character view over one source span. </summary>
+    public ReadOnlySpan<char> AsSpan(TextSpan span)
     {
-        var text = EnsureText();
+        if (span.Length == 0)
+            return [];
 
-        if (position < 0 || position + value.Length > text.Length)
-            return false;
-
-        for (int i = 0; i < value.Length; i++)
-        {
-            if (text[position + i] != value[i])
-                return false;
-        }
-
-        return true;
+        return EnsureText().AsSpan(span.Start, span.Length);
     }
 
     public override string ToString() => EnsureText();

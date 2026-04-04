@@ -58,8 +58,9 @@ public static class MahoCompiler
         lexer.Lex();
 
         Parser parser = new(text, diagnosticsManager);
-        parser.Parse(lexer.Tokens);
-        _ = new Resolver().Resolve(parser.Root, diagnosticsManager);
+        CompilationUnit root = parser.Parse(lexer.Tokens);
+        SyntaxTree syntaxTree = SyntaxTree.CreateSingleRoot(root, sourcePath);
+        _ = new Resolver(diagnosticsManager).Resolve(syntaxTree);
 
         DiagnosticInfo[] diagnostics = CreateDiagnostics(diagnosticsManager, text);
 

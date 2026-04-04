@@ -56,9 +56,10 @@ Loads a file-backed source. The interesting part is the split behavior:
 
 In-memory constructor. Always eager because the text already exists as a managed string.
 
-### `MatchesAt(int position, ReadOnlySpan<char> value)`
+### `AsSpan(TextSpan span)`
 
-A small but useful performance helper: compare characters in place without allocating a substring.
+Returns a non-allocating `ReadOnlySpan<char>` view over a source span. This is the preferred path
+for hot code such as keyword matching in the lexer.
 
 ### `ToString()` and `ToString(TextSpan span)`
 

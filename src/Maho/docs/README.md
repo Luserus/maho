@@ -16,8 +16,10 @@
 1. `MahoCompiler.AnalyzeFile(...)` or `MahoCompiler.AnalyzeText(...)` creates a `SourceText`.
 2. A shared `DiagnosticsManager` is passed through analysis so lexer and parser can report into one collection.
 3. The lexer and parser run.
-4. Diagnostics are projected into public `DiagnosticInfo` records with line/column metadata.
-5. Optional lexer/parser debug JSON is emitted, depending on `AnalysisOutput`.
+4. Parsed compilation units are grouped into a `SyntaxTree`.
+5. Resolution starts from that syntax-tree boundary rather than interleaving with parsing.
+6. Diagnostics are projected into public `DiagnosticInfo` records with line/column metadata.
+7. Optional lexer/parser debug JSON is emitted, depending on `AnalysisOutput`.
 
 ## Best starting points
 

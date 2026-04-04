@@ -1,3 +1,3 @@
 namespace Maho.Symbols;
 
-internal readonly record struct TypeDeclarationKey(string Name, int Arity);
+internal readonly record struct TypeDeclarationKey(SymbolName Name, int Arity);

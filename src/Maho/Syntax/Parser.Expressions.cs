@@ -307,13 +307,20 @@ internal sealed partial class Parser
 
             return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer);
         }
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", $"after '{keyword.Value}'");
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", GetObjectCreationContext(keyword.MatchingKind));
 
         var arguments = ParseExpressionArgumentList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the argument list");
 
         return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen);
     }
+
+    private static string GetObjectCreationContext(MatchingKeywordKind keywordKind) => keywordKind switch
+    {
+        MatchingKeywordKind.New => "after 'new'",
+        MatchingKeywordKind.Put => "after 'put'",
+        _ => "after the object creation keyword"
+    };
 
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {

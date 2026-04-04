@@ -1,3 +1,4 @@
+using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
@@ -5,7 +6,7 @@ namespace Maho.Syntax;
 internal sealed partial class Lexer
 {
     private void ReportBadToken(int start) =>
-        diagnostics.ReportBadToken(new TextSpan(start, 1), text.ToString(new TextSpan(start, 1)));
+        diagnostics.ReportBadToken(new TextSpan(start, 1), DiagnosticText.SourceSpan(text, new TextSpan(start, 1)));
 
     private void ReportUnterminatedLiteral(int start, TokenKind tokenKind)
     {

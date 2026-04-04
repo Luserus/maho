@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Maho.Diagnostics;
 using Maho.Symbols;
+using Maho.Syntax;
 
 namespace Maho.Resolution;
 
@@ -12,7 +13,7 @@ internal sealed class ResolutionCoordinatorContext
 
     public string ProjectName { get; }
     public DiagnosticsManager Diagnostics { get; }
-    public ProjectRootSyntax ProjectRoot { get; }
+    public SyntaxTree Root { get; }
     public NamespaceSymbol GlobalNamespace { get; }
     public Scope GlobalScope { get; }
     public IReadOnlyList<ResolutionProjectReference> References { get; }
@@ -21,17 +22,17 @@ internal sealed class ResolutionCoordinatorContext
 
     public ResolutionCoordinatorContext(ResolutionProject project, DiagnosticsManager diagnostics)
     {
-        ProjectName = project.Name;
+        ProjectName = project.SyntaxTree.Name;
         Diagnostics = diagnostics;
         References = project.References;
-        ProjectRoot = new ProjectRootSyntax(project.Name);
-        GlobalNamespace = new NamespaceSymbol(string.Empty, parentSymbol: null, ProjectRoot);
-        GlobalScope = new Scope(parent: null, boundary: ProjectRoot, ownerSymbol: GlobalNamespace);
+        Root = project.SyntaxTree;
+        GlobalNamespace = new NamespaceSymbol(SymbolName.Empty, parentSymbol: null, Root);
+        GlobalScope = new Scope(parent: null, boundary: Root, ownerSymbol: GlobalNamespace);
 
         symbolScopes.Add(GlobalNamespace, GlobalScope);
 
-        for (int i = 0; i < project.Units.Count; i++)
-            units.Add(new ResolutionContext(project.Units[i], this));
+        for (int i = 0; i < Root.Roots.Count; i++)
+            units.Add(new ResolutionContext(Root.Roots[i], this));
     }
 
     public bool TryResolveSymbolScope(Symbol symbol, out Scope? scope) => symbolScopes.TryGetValue(symbol, out scope);

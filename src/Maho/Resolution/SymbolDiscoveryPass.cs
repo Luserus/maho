@@ -175,7 +175,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private NamespaceSymbol GetOrDeclareNamespace(SimpleName nameSyntax, Scope scope, Symbol parentSymbol)
     {
-        string name = nameSyntax.Name.Value;
+        SymbolName name = SymbolName.FromToken(nameSyntax.Name);
         IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(name);
 
         for (int i = 0; i < localSymbols.Count; i++)
@@ -195,7 +195,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private TypeSymbol PredeclareTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
     {
         int arity = GetDeclaredArity(declaration.Name);
-        string name = GetDeclaredName(declaration.Name);
+        SymbolName name = GetDeclaredName(declaration.Name);
         TypeSymbol symbol = new(name, parentSymbol, declaration, arity);
 
         context.DeclareSymbol(declaration, symbol, scope);
@@ -290,7 +290,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private FunctionSymbol PredeclareFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
     {
         int arity = GetDeclaredArity(declaration.Signature.Identifier);
-        string name = GetDeclaredName(declaration.Signature.Identifier);
+        SymbolName name = GetDeclaredName(declaration.Signature.Identifier);
         FunctionSymbol symbol = new(name, parentSymbol, declaration, arity);
 
         context.DeclareSymbol(declaration, symbol, scope);
@@ -364,7 +364,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         for (int i = 0; i < genericName.TypeParameters.Count; i++)
         {
             SimpleName typeParameterName = genericName.TypeParameters[i];
-            TypeParameterSymbol typeParameter = new(typeParameterName.Name.Value, ownerSymbol, typeParameterName, i);
+            TypeParameterSymbol typeParameter = new(SymbolName.FromToken(typeParameterName.Name), ownerSymbol, typeParameterName, i);
             context.DeclareSymbol(typeParameterName, typeParameter, ownerScope);
             typeParameters.Add(typeParameter);
         }
@@ -380,7 +380,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         for (int i = 0; i < parameters.Count; i++)
         {
             Parameter parameter = parameters[i];
-            string name = GetDeclaredName(parameter.Declarator.Identifier);
+            SymbolName name = GetDeclaredName(parameter.Declarator.Identifier);
             ParameterSymbol symbol = new(name, functionSymbol, parameter, i);
 
             context.DeclareSymbol(parameter, symbol, scope);
@@ -395,7 +395,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         foreach (VariableDeclarator declarator in declaration.Declarators)
         {
-            string name = GetDeclaredName(declarator.Identifier);
+            SymbolName name = GetDeclaredName(declarator.Identifier);
             VariableSymbol symbol = new(name, parentSymbol, declarator);
 
             context.DeclareSymbol(declarator, symbol, scope);
@@ -681,16 +681,16 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             if (localSymbol is TypeSymbol other && other.DeclarationKey == symbol.DeclarationKey)
             {
-                Diagnostics.ReportDuplicateTypeDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name, symbol.Arity);
+                Diagnostics.ReportDuplicateTypeDeclaration(GetNamedSyntaxSpan(nameSyntax), symbol.Name.ToString(), symbol.Arity);
                 return;
             }
         }
     }
 
-    private static string GetDeclaredName(NamedSyntax name) => name switch
+    private static SymbolName GetDeclaredName(NamedSyntax name) => name switch
     {
-        SimpleName simpleName => simpleName.Name.Value,
-        GenericName genericName => genericName.Name.Value,
+        SimpleName simpleName => SymbolName.FromToken(simpleName.Name),
+        GenericName genericName => SymbolName.FromToken(genericName.Name),
         QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredName(qualifiedName.Parts[qualifiedName.Parts.Count - 1]),
         _ => throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.")
     };

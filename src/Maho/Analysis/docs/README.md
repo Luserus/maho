@@ -43,9 +43,11 @@ This is the orchestration seam inside the library:
 1. create one `DiagnosticsManager`,
 2. run the lexer,
 3. run the parser,
-4. project diagnostics,
-5. optionally serialize lexer/parser debug views,
-6. return a `CompilerAnalysisResult`.
+4. wrap the parsed root in a `SyntaxTree`,
+5. start resolution only after that syntax-tree boundary exists,
+6. project diagnostics,
+7. optionally serialize lexer/parser debug views,
+8. return a `CompilerAnalysisResult`.
 
 The lexer/parser internals are intentionally out of scope for these docs, but this method is still important because it defines the analysis contract boundary.
 

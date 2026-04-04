@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -215,29 +216,31 @@ internal sealed partial class Lexer
 
     private MatchingKeywordKind MatchKeywordKind(TextSpan span)
     {
-        return text.ToString(span) switch
+        ReadOnlySpan<char> identifier = text.AsSpan(span);
+
+        return identifier.Length switch
         {
-            "if" => MatchingKeywordKind.If,
-            "else" => MatchingKeywordKind.Else,
-            "while" => MatchingKeywordKind.While,
-            "return" => MatchingKeywordKind.Return,
-            "public" => MatchingKeywordKind.Public,
-            "private" => MatchingKeywordKind.Private,
-            "internal" => MatchingKeywordKind.Internal,
-            "extern" => MatchingKeywordKind.Extern,
-            "protected" => MatchingKeywordKind.Protected,
-            "sealed" => MatchingKeywordKind.Sealed,
-            "namespace" => MatchingKeywordKind.Namespace,
-            "struct" => MatchingKeywordKind.Struct,
-            "class" => MatchingKeywordKind.Class,
-            "enum" => MatchingKeywordKind.Enum,
-            "union" => MatchingKeywordKind.Union,
-            "interface" => MatchingKeywordKind.Interface,
-            "static" => MatchingKeywordKind.Static,
-            "for" => MatchingKeywordKind.For,
-            "new" => MatchingKeywordKind.New,
-            "put" => MatchingKeywordKind.Put,
-            "const" => MatchingKeywordKind.Const,
+            2 when identifier.SequenceEqual("if") => MatchingKeywordKind.If,
+            3 when identifier.SequenceEqual("for") => MatchingKeywordKind.For,
+            3 when identifier.SequenceEqual("new") => MatchingKeywordKind.New,
+            3 when identifier.SequenceEqual("put") => MatchingKeywordKind.Put,
+            4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
+            4 when identifier.SequenceEqual("enum") => MatchingKeywordKind.Enum,
+            5 when identifier.SequenceEqual("while") => MatchingKeywordKind.While,
+            5 when identifier.SequenceEqual("class") => MatchingKeywordKind.Class,
+            5 when identifier.SequenceEqual("union") => MatchingKeywordKind.Union,
+            5 when identifier.SequenceEqual("const") => MatchingKeywordKind.Const,
+            6 when identifier.SequenceEqual("return") => MatchingKeywordKind.Return,
+            6 when identifier.SequenceEqual("public") => MatchingKeywordKind.Public,
+            6 when identifier.SequenceEqual("extern") => MatchingKeywordKind.Extern,
+            6 when identifier.SequenceEqual("sealed") => MatchingKeywordKind.Sealed,
+            6 when identifier.SequenceEqual("struct") => MatchingKeywordKind.Struct,
+            6 when identifier.SequenceEqual("static") => MatchingKeywordKind.Static,
+            7 when identifier.SequenceEqual("private") => MatchingKeywordKind.Private,
+            8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
+            9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,
+            9 when identifier.SequenceEqual("namespace") => MatchingKeywordKind.Namespace,
+            9 when identifier.SequenceEqual("interface") => MatchingKeywordKind.Interface,
             _ => MatchingKeywordKind.None,
         };
     }

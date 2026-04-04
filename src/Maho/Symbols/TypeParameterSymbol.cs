@@ -4,18 +4,19 @@ namespace Maho.Symbols;
 
 internal sealed class TypeParameterSymbol : DeclaredSymbol
 {
-    public int Ordinal { get; }
-    public string SignatureIdentity { get; }
+    private string? signatureIdentity;
 
-    public TypeParameterSymbol(string name, Symbol parentSymbol, SyntaxNode declaration, int ordinal)
-        : base(SymbolKind.TypeParameter, name, parentSymbol, declaration)
+    public int Ordinal { get; }
+    public string SignatureIdentity => signatureIdentity ??= CreateSignatureIdentity();
+
+    public TypeParameterSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int ordinal)
+        : base(SymbolKind.TypeParameter, name, parentSymbol, declaration) => Ordinal = ordinal;
+
+    private string CreateSignatureIdentity() => ParentSymbol switch
     {
-        Ordinal = ordinal;
-        SignatureIdentity = parentSymbol switch
-        {
-            FunctionSymbol => $"!!{ordinal}",
-            TypeSymbol typeSymbol => $"!{typeSymbol.QualifiedMetadataName}:{ordinal}",
-            _ => $"!{parentSymbol.QualifiedMetadataName}:{ordinal}"
-        };
-    }
+        FunctionSymbol => $"!!{Ordinal}",
+        TypeSymbol typeSymbol => $"!{typeSymbol.QualifiedMetadataName}:{Ordinal}",
+        Symbol parentSymbol => $"!{parentSymbol.QualifiedMetadataName}:{Ordinal}",
+        _ => $"!!{Ordinal}"
+    };
 }

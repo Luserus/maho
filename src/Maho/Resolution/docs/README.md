@@ -13,11 +13,14 @@ It now supports:
 ## Current architecture
 
 The public semantic entrypoint inside the front-end is still `Resolver`, but `Resolver` is now only a facade.
+Like `Lexer` and `Parser`, it is created with a shared `DiagnosticsManager`, then `Resolve(...)`
+runs the actual semantic work.
 
 The actual orchestration happens in `ResolutionCoordinator`.
 
-The model is split into three layers:
+The model is split into four layers:
 
+- `SyntaxTree`: post-parse syntax root for all compilation units
 - `ResolutionProject`: input model for one project-wide resolution run
 - `ResolutionCoordinatorContext`: mutable shared project state
 - `ResolutionContext`: mutable per-compilation-unit state
@@ -37,7 +40,7 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `Resolver.cs`: thin facade over the project-level coordinator.
 - `ResolutionCoordinator.cs`: runs passes across the project.
 - `ResolutionCoordinatorContext.cs`: shared mutable state for one project resolution run.
-- `ResolutionProject.cs`: input container for compilation units and project references.
+- `ResolutionProject.cs`: input container for a syntax tree and project references.
 - `ResolutionProjectResult.cs`: stable project-wide semantic result.
 - `ResolutionProjectReference.cs`: external project semantic surface for future cross-project lookup.
 - `ResolutionPass.cs`: base type for semantic passes with project and unit hooks.
@@ -46,7 +49,6 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
 - `SymbolDiscoveryPass.cs`: first pass that predeclares symbols and builds the project-wide declaration graph.
 - `ResolvedTypeReference.cs`: semantic representation reserved for later declaration/type-resolution passes.
-- `ProjectRootSyntax.cs`: synthetic syntax boundary for project-wide semantic state.
 
 ## Pass model
 
@@ -72,14 +74,18 @@ Examples:
 
 - project name
 - shared diagnostics sink
-- synthetic project root
+- syntax-tree root
 - global namespace symbol
 - global scope
 - project references
 - shared symbol-to-scope table
 - all unit contexts participating in the run
 
-This is the layer that allows declarations from different files to land in one shared namespace/scope graph.
+This is the layer that allows declarations from different files to land in one shared namespace/scope graph after parsing has already finished for the whole syntax tree.
+
+`SyntaxTree` itself now serves as the project-wide syntax boundary. Because it inherits
+`SyntaxNode`, the global namespace and global scope can anchor directly to the root-of-roots node
+instead of using a separate synthetic placeholder type.
 
 ### Unit-local
 
@@ -148,6 +154,10 @@ even though no pass uses that path yet.
 - child scopes
 
 Lookup is lexical. `Lookup(name)` searches the current scope first and then walks outward through parent scopes.
+
+The scope table keys declarations by `SymbolName`, which is a source-backed name value rather than
+an eagerly allocated `string`. That keeps pass-1 declaration storage and duplicate checks
+allocation-free for names.
 
 The scope table intentionally stores same-name symbols together. Distinguishing legal overload sets from duplicates is a semantic-pass concern, not a storage concern.
 

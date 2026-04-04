@@ -8,30 +8,28 @@ internal sealed class FunctionSymbol : DeclaredSymbol
 {
     private IReadOnlyList<TypeParameterSymbol> typeParameters = [];
     private IReadOnlyList<ParameterSymbol> parameters = [];
+    private string? parameterSignatureKey;
 
     public int Arity { get; }
-    public override string MetadataName => Arity == 0 ? Name : $"{Name}``{Arity}";
+    public override string MetadataName => Arity == 0 ? Name.ToString() : $"{Name}``{Arity}";
     public ResolvedTypeReference? ReturnType { get; private set; }
     public FunctionDeclarationKey? DeclarationKey { get; private set; }
     public int ParameterCount => parameters.Count;
-    public string ParameterSignatureKey { get; private set; } = "()";
+    public string ParameterSignatureKey => parameterSignatureKey ??= "()";
     public IReadOnlyList<TypeParameterSymbol> TypeParameters => typeParameters;
     public IReadOnlyList<ParameterSymbol> Parameters => parameters;
 
-    public FunctionSymbol(string name, Symbol parentSymbol, SyntaxNode declaration, int arity)
+    public FunctionSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int arity)
         : base(SymbolKind.Function, name, parentSymbol, declaration) => Arity = arity;
 
-    public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters)
-    {
-        typeParameters = resolvedTypeParameters;
-    }
+    public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
 
     public void ResolveParameters(IReadOnlyList<ParameterSymbol> resolvedParameters) => parameters = resolvedParameters;
 
     public void ResolveSignature(ResolvedTypeReference returnType)
     {
         ReturnType = returnType;
-        ParameterSignatureKey = BuildParameterSignatureKey(parameters);
+        parameterSignatureKey = BuildParameterSignatureKey(parameters);
         DeclarationKey = new FunctionDeclarationKey(Name, Arity, ParameterSignatureKey);
     }
 

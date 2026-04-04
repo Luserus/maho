@@ -5,9 +5,9 @@ namespace Maho.Syntax;
 /// <summary> Token of the program which serves as the smallest unit of meaningful data the compiler can use. </summary>
 internal sealed class Token : SyntaxNode
 {
-    private readonly SourceText source;
+    internal SourceText Source { get; }
     /// <summary> Token data of the Token. </summary>
-    public string Value => source.ToString(Span);
+    public string Value => Source.ToString(Span);
     /// <summary> Text span of the Token. </summary>
     public TextSpan Span { get; set; }
     /// <summary> Token kind of the Token. </summary>
@@ -27,7 +27,7 @@ internal sealed class Token : SyntaxNode
     public Token(SourceText sourceText, TextSpan span, TokenKind kind, SyntaxTrivia[] leadingTrivia, SyntaxTrivia[] trailingTrivia) : this(sourceText, span, kind, leadingTrivia, trailingTrivia, MatchingKeywordKind.None) {}
     public Token(SourceText sourceText, TextSpan span, TokenKind kind, SyntaxTrivia[] leadingTrivia, SyntaxTrivia[] trailingTrivia, MatchingKeywordKind matchingKind)
     {
-        source = sourceText;
+        Source = sourceText;
         Span = span;
         Kind = kind;
         LeadingTrivia = leadingTrivia;

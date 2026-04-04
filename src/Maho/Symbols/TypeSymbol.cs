@@ -8,11 +8,11 @@ internal sealed class TypeSymbol : DeclaredSymbol
     private IReadOnlyList<TypeParameterSymbol> typeParameters = [];
 
     public int Arity { get; }
-    public override string MetadataName => Arity == 0 ? Name : $"{Name}`{Arity}";
+    public override string MetadataName => Arity == 0 ? Name.ToString() : $"{Name}`{Arity}";
     public TypeDeclarationKey DeclarationKey { get; }
     public IReadOnlyList<TypeParameterSymbol> TypeParameters => typeParameters;
 
-    public TypeSymbol(string name, Symbol parentSymbol, SyntaxNode declaration, int arity)
+    public TypeSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int arity)
         : base(SymbolKind.Type, name, parentSymbol, declaration)
     {
         Arity = arity;
