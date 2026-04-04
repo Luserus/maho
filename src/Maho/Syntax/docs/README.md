@@ -136,7 +136,7 @@ The lexer has a similar split:
 
 These are the syntax-side methods that matter for CLI/debug features.
 
-### `Lexer.ToJson()`
+### `Lexer.ToString()`
 
 Defined in `Lexer.Debug.cs`. It walks `Tokens` and projects each one into `DebugLexerTokenInfo`, including:
 
@@ -148,7 +148,7 @@ Defined in `Lexer.Debug.cs`. It walks `Tokens` and projects each one into `Debug
 
 This is the syntax-side producer for the CLI's token stream view and debug JSON output.
 
-### `Parser.ToJson()`
+### `Parser.ToString()`
 
 Defined in `Parser.Debug.cs`. It serializes the parser root into a tree of `DebugParserNodeInfo`.
 
