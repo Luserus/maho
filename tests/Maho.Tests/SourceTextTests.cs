@@ -35,7 +35,7 @@ public sealed class SourceTextTests
             Assert.Equal('o', text[0]);
             Assert.Equal("one", text.Lines[0].ToString());
             Assert.Equal("wo", text.ToString(new TextSpan(5, 2)));
-            Assert.Equal("two".AsSpan(), text.AsSpan(new TextSpan(4, 3)).ToString().AsSpan());
+            Assert.Equal("two", text.AsSpan(new TextSpan(4, 3)).ToString());
         }
         finally
         {

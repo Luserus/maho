@@ -7,7 +7,7 @@ namespace Maho.Tests;
 public sealed class ResolutionTests
 {
     [Fact]
-    public void Resolve_SingleUnit_CreatesDeclarationSymbolsAndScopes()
+    public void Resolve_SymbolDiscovery_CreatesDeclarationSymbolsAndScopes()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             namespace Demo;
@@ -15,6 +15,19 @@ public sealed class ResolutionTests
             public class Box<T>
             {
                 public T Value;
+                public class Nested;
+
+                public static int Make(int argc)
+                {
+                    public class LocalBox;
+                    public static int LocalFunc()
+                    {
+                        return 0;
+                    }
+
+                    int value;
+                    return 0;
+                }
             }
 
             public static int Main(int argc)
@@ -29,16 +42,39 @@ public sealed class ResolutionTests
         ResolutionResult result = CompilerTestBed.ResolveProject(root).Units[0];
         TopLevelTypeDeclaration typeWrapper = Assert.IsType<TopLevelTypeDeclaration>(root.Members[1]);
         TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[2]);
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(typeWrapper.Type.Body);
+        MemberFieldDeclaration field = Assert.IsType<MemberFieldDeclaration>(typeBody.Members[0]);
+        MemberTypeDeclaration nestedType = Assert.IsType<MemberTypeDeclaration>(typeBody.Members[1]);
+        MemberFunctionDeclaration memberFunction = Assert.IsType<MemberFunctionDeclaration>(typeBody.Members[2]);
+        FunctionBlockBody memberFunctionBody = Assert.IsType<FunctionBlockBody>(memberFunction.Function.Body);
+        LocalTypeDeclaration localType = Assert.IsType<LocalTypeDeclaration>(memberFunctionBody.Locals[0]);
+        LocalFunctionDeclaration localFunction = Assert.IsType<LocalFunctionDeclaration>(memberFunctionBody.Locals[1]);
+        Assert.IsType<LocalVariableDeclarationStatement>(memberFunctionBody.Locals[2]);
 
         Assert.True(result.TryResolveDeclaredSymbol(typeWrapper.Type, out Symbol? typeSymbol));
         Assert.True(result.TryResolveDeclaredSymbol(functionWrapper.Function, out Symbol? functionSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(nestedType.Type, out Symbol? nestedTypeSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(memberFunction.Function, out Symbol? memberFunctionSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(localType.Type, out Symbol? localTypeSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(localFunction.Function, out Symbol? localFunctionSymbol));
 
         TypeSymbol resolvedType = Assert.IsType<TypeSymbol>(typeSymbol);
         FunctionSymbol resolvedFunction = Assert.IsType<FunctionSymbol>(functionSymbol);
+        Assert.IsType<TypeSymbol>(nestedTypeSymbol);
+        Assert.IsType<FunctionSymbol>(memberFunctionSymbol);
+        Assert.IsType<TypeSymbol>(localTypeSymbol);
+        Assert.IsType<FunctionSymbol>(localFunctionSymbol);
 
         Assert.Equal(1, resolvedType.Arity);
         Assert.Single(resolvedType.TypeParameters);
         Assert.Equal(1, resolvedFunction.ParameterCount);
+        Assert.Empty(result.TypeReferences);
+
+        Assert.True(result.TryResolveScope(typeWrapper.Type.Body, out Scope? typeScope));
+        Assert.NotNull(typeScope);
+        Assert.Contains(typeScope.DeclaredSymbols, symbol => symbol is TypeSymbol type && type.Name.ToString() == "Nested");
+        Assert.Contains(typeScope.DeclaredSymbols, symbol => symbol is FunctionSymbol function && function.Name.ToString() == "Make");
+
         Assert.True(result.TryResolveScope(functionWrapper.Function.Body, out Scope? functionScope));
         Assert.NotNull(functionScope);
         Assert.Contains(functionScope.DeclaredSymbols, symbol => symbol is ParameterSymbol parameter && parameter.Name.ToString() == "argc");
@@ -46,7 +82,7 @@ public sealed class ResolutionTests
     }
 
     [Fact]
-    public void Resolve_MultipleUnits_MergesSharedNamespaceScope()
+    public void Resolve_SymbolDiscovery_MergesSharedNamespaceScopeAcrossUnits()
     {
         var (_, diagnostics1, _, root1) = CompilerTestBed.Parse("""
             namespace Demo;
