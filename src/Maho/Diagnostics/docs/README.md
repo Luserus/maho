@@ -8,6 +8,7 @@ This is where lexer/parser code reports problems before those problems are proje
 
 - `DiagnosticKind.cs`: severity category used internally.
 - `Diagnostic.cs`: raw internal diagnostic object.
+- `DiagnosticText.cs`: deferred source-backed or synthetic text used while building diagnostics.
 - `DiagnosticsManager.cs`: collector and message factory.
 
 ## Type guide
@@ -37,6 +38,8 @@ Important members:
 
 - `Diagnostics`: exposes the accumulated list as `IReadOnlyList<Diagnostic>`.
 - `HasErrors`: quick check for any `Error` diagnostic.
+
+It is also safe for concurrent reporting now, which matters for semantic passes that collect unit facts in parallel before merging them later.
 
 ## `DiagnosticsManager` function guide
 
@@ -93,6 +96,7 @@ That small normalization step is why the same diagnostic helper can produce read
 
 - Diagnostic codes are effectively part of the external contract once renderers and tests start relying on them.
 - `DiagnosticsManager` is intentionally stateful and centralized; it keeps message formatting out of lexer/parser control flow.
+- `DiagnosticText` keeps source snippets span-based until a message actually needs to be materialized.
 - The folder does not know about JSON, colors, or pretty terminal output. Those responsibilities belong downstream in `Analysis` and the CLI renderer.
 
 ## Reading order

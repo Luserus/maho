@@ -31,6 +31,7 @@ These files are intentionally declarative: they define the tree that the parser 
 - Some names look similar across declarations and expressions, for example generic names. That is intentional; syntax often needs both declaration-side and usage-side forms.
 - `ElseExpression` existing as its own node tells you the tree preserves source structure closely rather than collapsing everything into a single if-expression payload.
 - Construction syntax is split into several node types instead of one mega-node with many optional fields, which usually makes parser output easier to inspect.
+- The expression tree is syntax-only. Semantic meaning such as type binding, overload selection, or control-flow correctness belongs to later resolution passes.
 
 ## Traversal tip
 

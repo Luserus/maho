@@ -10,7 +10,7 @@ This is the densest structural part of the repository today. Even if the semanti
 - how parser/lexer state is exposed to debug tooling,
 - and where future semantic work will attach once syntax is no longer the only mature stage.
 
-The docs here go deep on structure and navigation, but intentionally stop short of adding in-code comments to parser/lexer/resolution files until that logic settles.
+The docs here go deep on structure and navigation, and they aim to stay in sync with the parser, lexer, and debug serialization code as it evolves.
 
 ## Top-level files
 
@@ -44,8 +44,9 @@ When analysis runs through syntax today, the path is effectively:
 2. `Lexer` consumes that text and produces `Token` objects plus trivia.
 3. Each `Parser` consumes one token stream and produces one `CompilationUnit`.
 4. Once every file has been parsed, those roots are grouped into a `SyntaxTree`.
-5. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
-6. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
+5. Resolution starts only after that project-wide syntax boundary exists.
+6. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
+7. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
 
 That means syntax is both a computation layer and a long-lived data model.
 

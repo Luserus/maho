@@ -6,14 +6,17 @@ using Maho.Text;
 
 namespace Maho.Syntax;
 
+/// <summary> Debug serialization helpers for parser output. </summary>
 internal sealed partial class Parser
 {
+    /// <summary> Serializes the parsed syntax tree into the stable debug schema. </summary>
     public override string ToString()
     {
         Dictionary<SyntaxNode, TextSpan?> spanCache = [];
         return DebugJson.Serialize(new DebugParserInfo("parser", Root is null ? null : CreateNodeView(Root, spanCache)));
     }
 
+    /// <summary> Projects one syntax node into a recursive debug DTO tree. </summary>
     private DebugParserNodeInfo CreateNodeView(SyntaxNode node, Dictionary<SyntaxNode, TextSpan?> spanCache)
     {
         TextSpan? span = GetSpan(node, spanCache);
@@ -52,6 +55,10 @@ internal sealed partial class Parser
             childItems);
     }
 
+    /// <summary>
+    /// Computes a best-effort span for composite nodes by spanning from the first to the last child
+    /// that carries source coordinates.
+    /// </summary>
     private TextSpan? GetSpan(SyntaxNode node, Dictionary<SyntaxNode, TextSpan?> spanCache)
     {
         if (spanCache.TryGetValue(node, out TextSpan? cachedSpan))
@@ -88,6 +95,7 @@ internal sealed partial class Parser
         return span;
     }
 
+    /// <summary> Reflects over public properties to discover syntax children in declaration order. </summary>
     private static List<(string Name, SyntaxNode Node)> GetChildren(SyntaxNode node)
     {
         List<(string Name, SyntaxNode Node)> children = [];

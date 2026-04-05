@@ -44,7 +44,9 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `ResolutionProjectResult.cs`: stable project-wide semantic result.
 - `ResolutionProjectReference.cs`: external project semantic surface for future cross-project lookup.
 - `ResolutionPass.cs`: base type for semantic passes with project and unit hooks.
+- `ResolutionExecutionMode.cs`: scheduler hint for how a pass wants its unit work to run.
 - `ResolutionContext.cs`: mutable per-unit semantic state and resolution maps.
+- `ResolutionPassUnitResult.cs`: base type for collect-then-merge unit results.
 - `ResolutionResult.cs`: stable per-unit semantic result.
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
 - `SymbolDiscoveryPass.cs`: first pass that predeclares symbols and builds the project-wide declaration graph.
@@ -58,12 +60,18 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `ExecuteUnit(...)`
 - `AfterProject(...)`
 
+It also exposes an execution mode that tells the coordinator how unit work is scheduled:
+
+- `Sequential`: unit work mutates shared project state directly, so the pass runs one unit at a time.
+- `ParallelUnitLocal`: each unit can run independently because it only reads frozen shared state and writes unit-local state.
+- `ParallelCollectThenMerge`: units first collect local facts in parallel, then the coordinator merges those facts into project state sequentially.
+
 That gives later semantic work room to choose the right scheduling shape instead of forcing everything into the first pass or into a purely unit-local traversal.
 
 Examples:
 
-- A declaration-merging pass can do project-wide setup, then process units, then finalize.
-- A pure body-checking pass can do all its work in `ExecuteUnit(...)`.
+- A declaration-merging pass can collect unit facts in parallel, then merge them in project order.
+- A pure body-checking pass can do all its work in `ExecuteUnit(...)` with `ParallelUnitLocal`.
 - A cross-project validation pass can read project references during `AfterProject(...)`.
 
 ## Project-wide vs unit-local state
@@ -83,9 +91,7 @@ Examples:
 
 This is the layer that allows declarations from different files to land in one shared namespace/scope graph after parsing has already finished for the whole syntax tree.
 
-`SyntaxTree` itself now serves as the project-wide syntax boundary. Because it inherits
-`SyntaxNode`, the global namespace and global scope can anchor directly to the root-of-roots node
-instead of using a separate synthetic placeholder type.
+`SyntaxTree` itself serves as the project-wide syntax boundary. Because it inherits `SyntaxNode`, the global namespace and global scope can anchor directly to the root-of-roots node instead of using a separate synthetic placeholder type.
 
 ### Unit-local
 
@@ -104,9 +110,9 @@ So the current design already distinguishes:
 
 ## What pass 1 does today
 
-`SymbolDiscoveryPass` is still the first semantic pass, but it now runs under the coordinator as a per-unit pass against shared project state.
+`SymbolDiscoveryPass` is still the first semantic pass, but it runs as a collect-then-merge pass.
 
-Inside each unit it still uses two phases:
+Inside merge it still uses two phases:
 
 1. predeclare
 2. resolve
@@ -119,10 +125,12 @@ The first pass currently:
 - creates scopes for namespaces, types, functions, blocks, and embedded statement bodies
 - records syntax-to-symbol and syntax-to-scope associations
 - resolves generic arity for type and function declarations
-- reports duplicate type declarations
-- and contributes declarations into shared project-wide scope state
+- collects each compilation unit into a unit-local discovery plan first
+- then merges those plans into the shared project-wide scope state
 
-This means the first pass is project-aware but still stays focused on symbol discovery. Later passes can handle type references, `var`, overload signatures, and similar semantic work in one place instead of fragmenting that logic across the early pipeline.
+Duplicate declaration diagnostics are intentionally deferred for now. That keeps pass 1 focused on building the declaration graph without prematurely choosing language rules for partial declarations, forward declarations, or future merging behavior.
+
+This means the first pass is project-aware, parallel-friendly, and still stays focused on symbol discovery. Later passes can handle type references, `var`, overload signatures, and similar semantic work in one place instead of fragmenting that logic across the early pipeline.
 
 ## Cross-project infrastructure
 
@@ -155,9 +163,7 @@ even though no pass uses that path yet.
 
 Lookup is lexical. `Lookup(name)` searches the current scope first and then walks outward through parent scopes.
 
-The scope table keys declarations by `SymbolName`, which is a source-backed name value rather than
-an eagerly allocated `string`. That keeps pass-1 declaration storage and duplicate checks
-allocation-free for names.
+The scope table keys declarations by `SymbolName`, which is a source-backed name value rather than an eagerly allocated `string`. That keeps pass-1 declaration storage allocation-free for names.
 
 The scope table intentionally stores same-name symbols together. Distinguishing legal overload sets from duplicates is a semantic-pass concern, not a storage concern.
 

@@ -41,6 +41,8 @@ The duplication between top-level and local statement nodes is intentional and w
 
 That makes the syntax tree more explicit, even if it produces more files.
 
+The payoff is that parser and later semantic code can tell whether a statement appeared in top-level or local scope without reconstructing that context from parent chains.
+
 ## How to traverse this folder
 
 - Start with `TopLevelStatement` or `LocalStatement` depending on the scope you are tracing.

@@ -147,8 +147,7 @@ Source:
 
 Produced by:
 
-- `Lexer.ToJson()`
-- `DebugJson.Serialize(...)`
+- the core library's lexer debug serialization path
 
 Consumed by:
 
@@ -190,8 +189,7 @@ Source:
 
 Produced by:
 
-- `Parser.ToJson()`
-- `DebugJson.Serialize(...)`
+- the core library's parser debug serialization path
 
 Consumed by:
 

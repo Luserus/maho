@@ -1,7 +1,9 @@
 namespace Maho.Syntax;
 
+/// <summary> Debug serialization helpers for lexer output. </summary>
 internal sealed partial class Lexer
 {
+    /// <summary> Serializes the current token stream for inspection and snapshot output. </summary>
     public override string ToString()
     {
         DebugLexerTokenInfo[] tokens = new DebugLexerTokenInfo[Tokens.Count];

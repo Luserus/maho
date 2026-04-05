@@ -17,6 +17,11 @@ internal sealed class Diagnostic
     public DiagnosticKind Kind { get; }
     public string? ExpectedText { get; }
     public DiagnosticMessageKind MessageKind { get; }
+    /// <summary>
+    /// Source buffer the diagnostic belongs to. Batch analysis uses this to route project-wide
+    /// diagnostics back to the correct file result after shared passes have completed.
+    /// </summary>
+    public SourceText? Source { get; }
 
     /// <summary> Materializes the final diagnostic message at the presentation boundary. </summary>
     public string Message => MessageKind switch
@@ -31,7 +36,7 @@ internal sealed class Diagnostic
     /// Captures one reported problem together with its stable code, rendered message, raw source
     /// span, and internal severity category.
     /// </summary>
-    public Diagnostic(string diagnosticCode, string message, TextSpan span, DiagnosticKind kind, string? expectedText = null)
+    public Diagnostic(string diagnosticCode, string message, TextSpan span, DiagnosticKind kind, string? expectedText = null, SourceText? source = null)
     {
         DiagnosticCode = diagnosticCode;
         this.message = message;
@@ -39,18 +44,20 @@ internal sealed class Diagnostic
         Kind = kind;
         ExpectedText = expectedText;
         MessageKind = DiagnosticMessageKind.Fixed;
+        Source = source;
     }
 
-    public Diagnostic(string diagnosticCode, DiagnosticText foundText, TextSpan span, DiagnosticKind kind)
+    public Diagnostic(string diagnosticCode, DiagnosticText foundText, TextSpan span, DiagnosticKind kind, SourceText? source = null)
     {
         DiagnosticCode = diagnosticCode;
         this.foundText = foundText;
         Span = span;
         Kind = kind;
         MessageKind = DiagnosticMessageKind.BadToken;
+        Source = source ?? foundText.Source;
     }
 
-    public Diagnostic(string diagnosticCode, string expectedText, DiagnosticText foundText, TextSpan span, DiagnosticKind kind, string? context = null)
+    public Diagnostic(string diagnosticCode, string expectedText, DiagnosticText foundText, TextSpan span, DiagnosticKind kind, string? context = null, SourceText? source = null)
     {
         DiagnosticCode = diagnosticCode;
         ExpectedText = expectedText;
@@ -59,6 +66,7 @@ internal sealed class Diagnostic
         Kind = kind;
         this.context = context;
         MessageKind = DiagnosticMessageKind.Expected;
+        Source = source ?? foundText.Source;
     }
 
     private static string CreateExpectedMessage(string expected, DiagnosticText found, string? context)

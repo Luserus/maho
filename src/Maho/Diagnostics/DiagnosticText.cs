@@ -21,6 +21,11 @@ internal readonly struct DiagnosticText
     }
 
     public DiagnosticTextKind Kind { get; }
+    /// <summary>
+    /// Source buffer this deferred text originates from, when it represents a span of source
+    /// rather than a synthetic literal such as <c>&lt;missing&gt;</c>.
+    /// </summary>
+    public SourceText? Source => source;
 
     public static DiagnosticText SourceSpan(SourceText source, TextSpan span) => new(DiagnosticTextKind.SourceSpan, source, span, literal: null);
 

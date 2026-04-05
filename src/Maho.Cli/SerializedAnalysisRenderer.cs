@@ -13,17 +13,28 @@ namespace Maho.Cli;
 /// </summary>
 internal static class SerializedAnalysisRenderer
 {
+    /// <summary> ANSI reset sequence used after colorized renderer output. </summary>
     private const string Reset = "\u001b[0m";
+    /// <summary> ANSI dim sequence used for low-emphasis structure such as paths and spans. </summary>
     private const string Dim = "\u001b[2m";
+    /// <summary> ANSI bright-white sequence used for strong emphasis such as diagnostic headings. </summary>
     private const string BrightWhite = "\u001b[97m";
+    /// <summary> ANSI red sequence used for error-level text. </summary>
     private const string Red = "\u001b[31m";
+    /// <summary> ANSI yellow sequence used for warning-level text. </summary>
     private const string Yellow = "\u001b[33m";
+    /// <summary> ANSI cyan sequence used for secondary accents and tips. </summary>
     private const string Cyan = "\u001b[36m";
+    /// <summary> ANSI bright-black sequence used for subdued UI chrome. </summary>
     private const string BrightBlack = "\u001b[90m";
+    /// <summary> ANSI green sequence used for syntax node labels. </summary>
     private const string Green = "\u001b[32m";
+    /// <summary> ANSI blue sequence used for token labels. </summary>
     private const string Blue = "\u001b[34m";
+    /// <summary> ANSI magenta sequence used for matching-keyword annotations. </summary>
     private const string Magenta = "\u001b[35m";
 
+    /// <summary> Shared JSON settings for renderer DTO deserialization. </summary>
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -694,8 +705,11 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private readonly struct SourceLine
     {
+        /// <summary> Sliced line text with tabs preserved for renderer-specific expansion. </summary>
         public string Text { get; }
+        /// <summary> Absolute start offset of this line in the original source file. </summary>
         public int Start { get; }
+        /// <summary> Absolute end offset of this line in the original source file. </summary>
         public int End { get; }
 
         /// <summary>
@@ -716,6 +730,7 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private sealed class SourceBuffer
     {
+        /// <summary> Parsed source lines used for diagnostics excerpt rendering. </summary>
         private readonly SourceLine[] lines;
 
         /// <summary> Gets the parsed line table used for excerpt rendering and span-to-line translation. </summary>
@@ -822,16 +837,34 @@ internal static class SerializedAnalysisRenderer
     /// <summary>
     /// DTO used by the renderer when consuming serialized span information from compiler output.
     /// </summary>
+    /// <param name="Start">Absolute start offset.</param>
+    /// <param name="Length">Span length in characters.</param>
+    /// <param name="End">Absolute end offset.</param>
+    /// <param name="StartLine">One-based start line.</param>
+    /// <param name="StartColumn">One-based start column.</param>
+    /// <param name="EndLine">One-based end line.</param>
+    /// <param name="EndColumn">One-based end column.</param>
     private sealed record SerializedTextSpanInfo(int Start, int Length, int End, int StartLine, int StartColumn, int EndLine, int EndColumn);
 
     /// <summary>
     /// DTO used by the renderer when consuming serialized trivia information from compiler output.
     /// </summary>
+    /// <param name="Kind">Serialized trivia kind.</param>
+    /// <param name="Text">Captured trivia text.</param>
+    /// <param name="Span">Span covered by the trivia.</param>
     private sealed record SerializedSyntaxTriviaInfo(string Kind, string Text, SerializedTextSpanInfo Span);
 
     /// <summary>
     /// Renderer-side view of one serialized token in the lexer debug payload.
     /// </summary>
+    /// <param name="Index">Zero-based token index.</param>
+    /// <param name="Kind">Serialized token kind.</param>
+    /// <param name="Text">Original token text.</param>
+    /// <param name="DisplayText">Preformatted display text supplied by the core serializer.</param>
+    /// <param name="MatchingKind">Optional matching keyword kind for identifier tokens.</param>
+    /// <param name="Span">Token span.</param>
+    /// <param name="LeadingTrivia">Trivia that precedes the token.</param>
+    /// <param name="TrailingTrivia">Trivia that follows the token.</param>
     private sealed record SerializedLexerTokenInfo(
         int Index,
         string Kind,
@@ -845,17 +878,31 @@ internal static class SerializedAnalysisRenderer
     /// <summary>
     /// Root DTO for serialized lexer output.
     /// </summary>
+    /// <param name="Kind">Serialized payload kind.</param>
+    /// <param name="TokenCount">Number of tokens in the stream.</param>
+    /// <param name="Tokens">Token payloads in source order.</param>
     private sealed record SerializedLexerInfo(string Kind, int TokenCount, IReadOnlyList<SerializedLexerTokenInfo> Tokens);
 
     /// <summary>
     /// Associates a child parser node with the property name it came from so tree rendering can
     /// expose structural intent rather than only raw child order.
     /// </summary>
+    /// <param name="PropertyName">Name of the parent property that produced the child.</param>
+    /// <param name="Node">Child node payload.</param>
     private sealed record SerializedParserChildInfo(string PropertyName, SerializedParserNodeInfo Node);
 
     /// <summary>
     /// Renderer-side view of one serialized parser node.
     /// </summary>
+    /// <param name="NodeType">Serialized syntax node type.</param>
+    /// <param name="Span">Optional node span.</param>
+    /// <param name="TokenKind">Optional token kind for token-shaped nodes.</param>
+    /// <param name="Text">Original token text, when available.</param>
+    /// <param name="DisplayText">Preformatted display text supplied by the core serializer.</param>
+    /// <param name="MatchingKind">Optional matching keyword kind.</param>
+    /// <param name="LeadingTrivia">Leading trivia payload, if present.</param>
+    /// <param name="TrailingTrivia">Trailing trivia payload, if present.</param>
+    /// <param name="Children">Serialized child nodes in structural order.</param>
     private sealed record SerializedParserNodeInfo(
         string NodeType,
         SerializedTextSpanInfo? Span,
@@ -870,5 +917,7 @@ internal static class SerializedAnalysisRenderer
     /// <summary>
     /// Root DTO for serialized parser output.
     /// </summary>
+    /// <param name="Kind">Serialized payload kind.</param>
+    /// <param name="Root">Root parser node, if parsing succeeded.</param>
     private sealed record SerializedParserInfo(string Kind, SerializedParserNodeInfo? Root);
 }

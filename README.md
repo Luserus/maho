@@ -15,9 +15,10 @@ Today the core can:
 - load `.mh` source files,
 - lex and parse them,
 - return lexer and parser debug views as JSON,
-- report structured diagnostics for invalid syntax.
+- report structured diagnostics for invalid syntax,
+- run project-wide resolution over parsed compilation units.
 
-Semantic analysis, resolution, and code generation are still in progress.
+The semantic layer is still growing, and code generation is not implemented yet.
 
 ## Build
 
@@ -76,6 +77,8 @@ Human-readable debug output is written to `stdout` when `--output` is not provid
 ## Library
 
 The core library exposes `MahoCompiler.AnalyzeFile(...)` and `MahoCompiler.AnalyzeText(...)`.
+
+It also exposes `MahoCompiler.AnalyzeFiles(...)` for batch analysis, which keeps file-level parallelism inside the library instead of making the CLI manage it directly.
 
 Both APIs return:
 

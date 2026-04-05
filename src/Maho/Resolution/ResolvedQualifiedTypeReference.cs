@@ -7,11 +7,21 @@ namespace Maho.Resolution;
 /// <summary> Represents a qualified type reference such as <c>A.B</c>. </summary>
 internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
 {
-    public ResolvedTypeReference Left { get; }
-    public ResolvedTypeReference Right { get; }
-    public override string DisplayName { get; }
-    public override string SignatureKey { get; }
+    /// <summary> Cached display name built only if a consumer needs the human-readable form. </summary>
+    private string? displayName;
+    /// <summary> Cached signature key built only if a semantic comparison actually needs it. </summary>
+    private string? signatureKey;
 
+    /// <summary> Left side of the qualification chain. </summary>
+    public ResolvedTypeReference Left { get; }
+    /// <summary> Right side of the qualification chain. </summary>
+    public ResolvedTypeReference Right { get; }
+    /// <summary> Human-readable qualified display form. </summary>
+    public override string DisplayName => displayName ??= $"{Left.DisplayName}.{Right.DisplayName}";
+    /// <summary> Stable semantic signature form for the qualified reference. </summary>
+    public override string SignatureKey => signatureKey ??= BuildSignatureKey(CandidateSymbols, Left, Right);
+
+    /// <summary> Creates a semantic model for a qualified type reference such as <c>A.B</c>. </summary>
     public ResolvedQualifiedTypeReference(
         QualifiedType syntax,
         ResolvedTypeReference left,
@@ -21,10 +31,12 @@ internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
     {
         Left = left;
         Right = right;
-        DisplayName = $"{left.DisplayName}.{right.DisplayName}";
-        SignatureKey = BuildSignatureKey(candidateSymbols, left, right);
     }
 
+    /// <summary>
+    /// Prefers an actual resolved candidate's fully qualified metadata name when lookup was
+    /// unambiguous; otherwise falls back to composing the left/right signature chain.
+    /// </summary>
     private static string BuildSignatureKey(IReadOnlyList<Symbol> candidates, ResolvedTypeReference left, ResolvedTypeReference right)
     {
         if (candidates.Count == 1)

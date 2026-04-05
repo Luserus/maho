@@ -10,8 +10,10 @@ This folder matters because it defines what leaves the compiler:
 
 ## Files in this folder
 
-- `CompilerAnalysis.cs`: the public static entrypoint on `MahoCompiler`.
-- `CompilerAnalysisResult.cs`: immutable result payload.
+- `MahoCompiler.cs`: public compiler entrypoint and orchestration for single-file and batch analysis.
+- `CompilerAnalysisResult.cs`: immutable single-file result payload.
+- `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
+- `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)`.
 - `AnalysisOutput.cs`: flags that decide which debug payloads are included.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
@@ -35,6 +37,19 @@ Important detail:
 The in-memory companion to `AnalyzeFile(...)`. It is the API to use for tests, editor integrations, or any caller that already has source text in memory.
 
 The notable behavior is that it still requires a `sourcePath` string so the downstream result has a stable identity, even for virtual documents.
+
+### `AnalyzeFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string projectName = "<project>")`
+
+The batch companion to `AnalyzeFile(...)`. It moves file-level parallel orchestration into the core
+compiler library so callers such as the CLI do not need to own `Parallel.For(...)` around compiler
+entrypoints.
+
+Important details:
+
+- input paths are normalized up front,
+- each file result is preserved even if another file fails,
+- the returned `CompilerProjectAnalysisResult` keeps file results in input order,
+- this API centralizes batch scheduling policy inside the compiler library.
 
 ### `AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)`
 
@@ -94,6 +109,32 @@ Fields:
 #### `HasErrors`
 
 Scans the diagnostics list for any `Error` severity. It is intentionally derived rather than stored so the result cannot drift out of sync with the diagnostics collection.
+
+### `CompilerBatchFileResult`
+
+One file outcome inside a compiler-owned batch run.
+
+Fields:
+
+- `SourcePath`: normalized file identity.
+- `Analysis`: successful single-file analysis payload, when available.
+- `AnalysisError`: formatted failure text when analysis did not complete.
+- `IsInternalError`: whether the failure should be treated as a compiler fault.
+- `HasErrors`: whether the file contributes to a failing batch.
+
+### `CompilerProjectAnalysisResult`
+
+Top-level immutable batch result returned by `AnalyzeFiles(...)`.
+
+Fields:
+
+- `ProjectName`: friendly identity for the analyzed batch.
+- `Files`: ordered file outcomes.
+
+#### `HasErrors`
+
+Scans file outcomes for any failing file so callers can branch on batch success without
+re-implementing error aggregation.
 
 ### `DiagnosticInfo`
 
@@ -156,7 +197,7 @@ These are not compiler-domain nodes. They are transport types designed for inspe
 
 ## Reading tips
 
-- Start with `CompilerAnalysis.cs` if you want the public API.
+- Start with `MahoCompiler.cs` if you want the public API.
 - Start with `DebugJson.cs` if you are changing emitted lexer/parser JSON.
 - Jump to [`../Text/docs/README.md`](../../Text/docs/README.md) if span math or line/column projection looks wrong.
 - Jump to [`../Diagnostics/docs/README.md`](../../Diagnostics/docs/README.md) if the payload content is wrong before serialization even happens.

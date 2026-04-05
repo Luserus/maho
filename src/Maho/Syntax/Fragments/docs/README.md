@@ -53,6 +53,8 @@ That is usually helpful for:
 - precise diagnostics,
 - and later semantic passes that want to know exactly which syntax form appeared.
 
+It also keeps the parser output stable when body shapes or modifier combinations grow new variants, because those variants can get their own nodes instead of being squeezed into optional fields on an existing type.
+
 ## Traversal tip
 
 When a declaration node references a body, modifier, or declarator type you do not recognize, check this folder before assuming it is hidden inside parser logic.
