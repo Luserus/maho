@@ -154,7 +154,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         /// <summary> Collects generic type-parameter declarations from a name syntax when present. </summary>
-        private TypeParameterPlan[] CollectTypeParameters(NamedSyntax nameSyntax)
+        private static TypeParameterPlan[] CollectTypeParameters(NamedSyntax nameSyntax)
         {
             if (nameSyntax is not GenericName genericName)
                 return [];
@@ -171,7 +171,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         /// <summary> Collects parameter declarations and preserves their source order / ordinals. </summary>
-        private ParameterPlan[] CollectParameters(SeparatedSyntaxList<Parameter> parameters)
+        private static ParameterPlan[] CollectParameters(SeparatedSyntaxList<Parameter> parameters)
         {
             ParameterPlan[] plans = new ParameterPlan[parameters.Count];
 
@@ -185,7 +185,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         /// <summary> Collects one variable declaration into a plan per declarator. </summary>
-        private VariableDeclarationPlan CollectVariableDeclaration(VariableDeclaration declaration)
+        private static VariableDeclarationPlan CollectVariableDeclaration(VariableDeclaration declaration)
         {
             VariableDeclaratorPlan[] declarators = new VariableDeclaratorPlan[declaration.Declarators.Count];
 
