@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using Maho.Symbols;
 using Maho.Syntax;
 
@@ -8,16 +8,17 @@ namespace Maho.Resolution;
 internal abstract class ResolvedTypeReference
 {
     /// <summary> Creates one semantic type-reference object from parser type syntax. </summary>
-    protected ResolvedTypeReference(TypeSyntax syntax, IReadOnlyList<Symbol> candidateSymbols)
+    protected ResolvedTypeReference(TypeSyntax syntax, Symbol[] candidateSymbols)
     {
         Syntax = syntax;
-        CandidateSymbols = candidateSymbols;
+        this.candidateSymbols = candidateSymbols;
     }
 
     /// <summary> Original parser type syntax this semantic model came from. </summary>
     public TypeSyntax Syntax { get; }
     /// <summary> Candidate declarations that matched this reference during first-pass lookup. </summary>
-    public IReadOnlyList<Symbol> CandidateSymbols { get; }
+    private readonly Symbol[] candidateSymbols;
+    public ReadOnlySpan<Symbol> CandidateSymbols => candidateSymbols;
     /// <summary> Human-readable display form used for diagnostics/debugging. </summary>
     public abstract string DisplayName { get; }
     /// <summary> Stable semantic signature form used for later comparison and caching. </summary>

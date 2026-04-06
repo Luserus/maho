@@ -56,12 +56,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         public UnitPlan Collect() => new(root, CollectTopLevels(root.Members));
 
         /// <summary> Collects plans for every top-level syntax item in source order. </summary>
-        private List<TopLevelPlan> CollectTopLevels(IReadOnlyList<TopLevel> members)
+        private TopLevelPlan[] CollectTopLevels(IReadOnlyList<TopLevel> members)
         {
-            List<TopLevelPlan> plans = new(members.Count);
+            TopLevelPlan[] plans = new TopLevelPlan[members.Count];
 
             for (int i = 0; i < members.Count; i++)
-                plans.Add(CollectTopLevel(members[i]));
+                plans[i] = CollectTopLevel(members[i]);
 
             return plans;
         }
@@ -83,10 +83,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// </summary>
         private NamespacePlan CollectNamespace(NamespaceDeclaration declaration)
         {
-            List<NamespacePartPlan> parts = new();
-
-            foreach (SimpleName part in EnumerateSimpleNames(declaration.Name))
-                parts.Add(new NamespacePartPlan(part, SymbolName.FromToken(part.Name)));
+            NamespacePartPlan[] parts = new NamespacePartPlan[CountSimpleNames(declaration.Name)];
+            int partIndex = 0;
+            CollectNamespaceParts(declaration.Name, parts, ref partIndex);
 
             return declaration.Body switch
             {
@@ -99,7 +98,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// <summary> Collects the declaration shape for one type, including member plans. </summary>
         private TypeDeclarationPlan CollectTypeDeclaration(TypeDeclaration declaration)
         {
-            List<MemberPlan> members = declaration.Body is TypeBlockBody blockBody
+            MemberPlan[] members = declaration.Body is TypeBlockBody blockBody
                 ? CollectMembers(blockBody.Members)
                 : [];
 
@@ -112,12 +111,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         /// <summary> Collects member declaration plans in source order. </summary>
-        private List<MemberPlan> CollectMembers(IReadOnlyList<Member> members)
+        private MemberPlan[] CollectMembers(IReadOnlyList<Member> members)
         {
-            List<MemberPlan> plans = new(members.Count);
+            MemberPlan[] plans = new MemberPlan[members.Count];
 
             for (int i = 0; i < members.Count; i++)
-                plans.Add(CollectMember(members[i]));
+                plans[i] = CollectMember(members[i]);
 
             return plans;
         }
@@ -155,31 +154,31 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
 
         /// <summary> Collects generic type-parameter declarations from a name syntax when present. </summary>
-        private List<TypeParameterPlan> CollectTypeParameters(NamedSyntax nameSyntax)
+        private TypeParameterPlan[] CollectTypeParameters(NamedSyntax nameSyntax)
         {
             if (nameSyntax is not GenericName genericName)
                 return [];
 
-            List<TypeParameterPlan> plans = new(genericName.TypeParameters.Count);
+            TypeParameterPlan[] plans = new TypeParameterPlan[genericName.TypeParameters.Count];
 
             for (int i = 0; i < genericName.TypeParameters.Count; i++)
             {
                 SimpleName typeParameterName = genericName.TypeParameters[i];
-                plans.Add(new TypeParameterPlan(typeParameterName, SymbolName.FromToken(typeParameterName.Name), i));
+                plans[i] = new TypeParameterPlan(typeParameterName, SymbolName.FromToken(typeParameterName.Name), i);
             }
 
             return plans;
         }
 
         /// <summary> Collects parameter declarations and preserves their source order / ordinals. </summary>
-        private List<ParameterPlan> CollectParameters(SeparatedSyntaxList<Parameter> parameters)
+        private ParameterPlan[] CollectParameters(SeparatedSyntaxList<Parameter> parameters)
         {
-            List<ParameterPlan> plans = new(parameters.Count);
+            ParameterPlan[] plans = new ParameterPlan[parameters.Count];
 
             for (int i = 0; i < parameters.Count; i++)
             {
                 Parameter parameter = parameters[i];
-                plans.Add(new ParameterPlan(parameter, parameter.Declarator, GetDeclaredName(parameter.Declarator.Identifier), i));
+                plans[i] = new ParameterPlan(parameter, parameter.Declarator, GetDeclaredName(parameter.Declarator.Identifier), i);
             }
 
             return plans;
@@ -188,24 +187,24 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// <summary> Collects one variable declaration into a plan per declarator. </summary>
         private VariableDeclarationPlan CollectVariableDeclaration(VariableDeclaration declaration)
         {
-            List<VariableDeclaratorPlan> declarators = new(declaration.Declarators.Count);
+            VariableDeclaratorPlan[] declarators = new VariableDeclaratorPlan[declaration.Declarators.Count];
 
             for (int i = 0; i < declaration.Declarators.Count; i++)
             {
                 VariableDeclarator declarator = declaration.Declarators[i];
-                declarators.Add(new VariableDeclaratorPlan(declarator, GetDeclaredName(declarator.Identifier)));
+                declarators[i] = new VariableDeclaratorPlan(declarator, GetDeclaredName(declarator.Identifier));
             }
 
             return new VariableDeclarationPlan(declaration, declarators);
         }
 
         /// <summary> Collects local declaration plans in source order. </summary>
-        private List<LocalPlan> CollectLocals(IReadOnlyList<Local> locals)
+        private LocalPlan[] CollectLocals(IReadOnlyList<Local> locals)
         {
-            List<LocalPlan> plans = new(locals.Count);
+            LocalPlan[] plans = new LocalPlan[locals.Count];
 
             for (int i = 0; i < locals.Count; i++)
-                plans.Add(CollectLocal(locals[i]));
+                plans[i] = CollectLocal(locals[i]);
 
             return plans;
         }
@@ -282,12 +281,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// First phase for top-level plans. This creates symbols/scopes before nested bodies are
         /// resolved so later declarations can already see same-scope containers.
         /// </summary>
-        private void PredeclareTopLevels(IReadOnlyList<TopLevelPlan> members, Scope scope, Symbol containerSymbol)
+        private void PredeclareTopLevels(TopLevelPlan[] members, Scope scope, Symbol containerSymbol)
         {
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
 
-            for (int i = 0; i < members.Count; i++)
+            for (int i = 0; i < members.Length; i++)
             {
                 TopLevelPlan member = members[i];
                 PredeclareTopLevel(member, currentScope, currentContainerSymbol);
@@ -301,12 +300,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// Second phase for top-level plans. This resolves bodies and nested declarations against the
         /// already-created container symbols/scopes from the predeclare phase.
         /// </summary>
-        private void ResolveTopLevels(IReadOnlyList<TopLevelPlan> members, Scope scope, Symbol containerSymbol)
+        private void ResolveTopLevels(TopLevelPlan[] members, Scope scope, Symbol containerSymbol)
         {
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
 
-            for (int i = 0; i < members.Count; i++)
+            for (int i = 0; i < members.Length; i++)
             {
                 TopLevelPlan member = members[i];
                 ResolveTopLevel(member, currentScope, currentContainerSymbol);
@@ -385,7 +384,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Count; i++)
+            for (int i = 0; i < plan.Parts.Length; i++)
             {
                 NamespacePartPlan part = plan.Parts[i];
                 NamespaceSymbol namespaceSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
@@ -406,7 +405,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Count; i++)
+            for (int i = 0; i < plan.Parts.Length; i++)
             {
                 NamespacePartPlan part = plan.Parts[i];
                 currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
@@ -422,7 +421,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Count; i++)
+            for (int i = 0; i < plan.Parts.Length; i++)
             {
                 NamespacePartPlan part = plan.Parts[i];
                 currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
@@ -458,7 +457,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope typeScope = context.ResolveSymbolScope(symbol, plan.Declaration, scope);
             context.ResolveScope(plan.Declaration.Body, typeScope);
 
-            IReadOnlyList<TypeParameterSymbol> typeParameters = PredeclareTypeParameters(plan.TypeParameters, symbol, typeScope);
+            TypeParameterSymbol[] typeParameters = PredeclareTypeParameters(plan.TypeParameters, symbol, typeScope);
             symbol.ResolveTypeParameters(typeParameters);
 
             PredeclareMembers(plan.Members, typeScope, symbol);
@@ -477,15 +476,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             ResolveMembers(plan.Members, typeScope, symbol);
         }
 
-        private void PredeclareMembers(IReadOnlyList<MemberPlan> members, Scope scope, Symbol containerSymbol)
+        private void PredeclareMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < members.Count; i++)
+            for (int i = 0; i < members.Length; i++)
                 PredeclareMember(members[i], scope, containerSymbol);
         }
 
-        private void ResolveMembers(IReadOnlyList<MemberPlan> members, Scope scope, Symbol containerSymbol)
+        private void ResolveMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < members.Count; i++)
+            for (int i = 0; i < members.Length; i++)
                 ResolveMember(members[i], scope, containerSymbol);
         }
 
@@ -547,10 +546,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             context.ResolveScope(plan.Declaration.Signature, functionScope);
             context.ResolveScope(plan.Declaration.Body, functionScope);
 
-            IReadOnlyList<TypeParameterSymbol> typeParameters = PredeclareTypeParameters(plan.TypeParameters, symbol, functionScope);
+            TypeParameterSymbol[] typeParameters = PredeclareTypeParameters(plan.TypeParameters, symbol, functionScope);
             symbol.ResolveTypeParameters(typeParameters);
 
-            IReadOnlyList<ParameterSymbol> parameters = PredeclareParameters(plan.Parameters, functionScope, symbol);
+            ParameterSymbol[] parameters = PredeclareParameters(plan.Parameters, functionScope, symbol);
             symbol.ResolveParameters(parameters);
 
             switch (plan.Body)
@@ -601,33 +600,33 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private List<TypeParameterSymbol> PredeclareTypeParameters(IReadOnlyList<TypeParameterPlan> typeParameters, Symbol ownerSymbol, Scope ownerScope)
+        private TypeParameterSymbol[] PredeclareTypeParameters(TypeParameterPlan[] typeParameters, Symbol ownerSymbol, Scope ownerScope)
         {
-            List<TypeParameterSymbol> symbols = new(typeParameters.Count);
+            TypeParameterSymbol[] symbols = new TypeParameterSymbol[typeParameters.Length];
 
-            for (int i = 0; i < typeParameters.Count; i++)
+            for (int i = 0; i < typeParameters.Length; i++)
             {
                 TypeParameterPlan plan = typeParameters[i];
                 TypeParameterSymbol symbol = new(plan.Name, ownerSymbol, plan.Syntax, plan.Ordinal);
                 context.DeclareSymbol(plan.Syntax, symbol, ownerScope);
-                symbols.Add(symbol);
+                symbols[i] = symbol;
             }
 
             return symbols;
         }
 
-        private List<ParameterSymbol> PredeclareParameters(IReadOnlyList<ParameterPlan> parameters, Scope scope, Symbol functionSymbol)
+        private ParameterSymbol[] PredeclareParameters(ParameterPlan[] parameters, Scope scope, Symbol functionSymbol)
         {
-            List<ParameterSymbol> resolvedParameters = new(parameters.Count);
+            ParameterSymbol[] resolvedParameters = new ParameterSymbol[parameters.Length];
 
-            for (int i = 0; i < parameters.Count; i++)
+            for (int i = 0; i < parameters.Length; i++)
             {
                 ParameterPlan plan = parameters[i];
                 ParameterSymbol symbol = new(plan.Name, functionSymbol, plan.Parameter, plan.Ordinal);
 
                 context.DeclareSymbol(plan.Parameter, symbol, scope);
                 context.ResolveDeclaredSymbol(plan.Declarator, symbol);
-                resolvedParameters.Add(symbol);
+                resolvedParameters[i] = symbol;
             }
 
             return resolvedParameters;
@@ -635,7 +634,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void PredeclareVariableDeclaration(VariableDeclarationPlan plan, Scope scope, Symbol parentSymbol)
         {
-            for (int i = 0; i < plan.Declarators.Count; i++)
+            for (int i = 0; i < plan.Declarators.Length; i++)
             {
                 VariableDeclaratorPlan declarator = plan.Declarators[i];
                 VariableSymbol symbol = new(declarator.Name, parentSymbol, declarator.Declarator);
@@ -645,7 +644,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void ResolveVariableDeclaration(VariableDeclarationPlan plan)
         {
-            for (int i = 0; i < plan.Declarators.Count; i++)
+            for (int i = 0; i < plan.Declarators.Length; i++)
             {
                 VariableDeclaratorPlan declarator = plan.Declarators[i];
 
@@ -654,15 +653,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void PredeclareLocals(IReadOnlyList<LocalPlan> locals, Scope scope, Symbol containerSymbol)
+        private void PredeclareLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < locals.Count; i++)
+            for (int i = 0; i < locals.Length; i++)
                 PredeclareLocal(locals[i], scope, containerSymbol);
         }
 
-        private void ResolveLocals(IReadOnlyList<LocalPlan> locals, Scope scope, Symbol containerSymbol)
+        private void ResolveLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < locals.Count; i++)
+            for (int i = 0; i < locals.Length; i++)
                 ResolveLocal(locals[i], scope, containerSymbol);
         }
 
@@ -854,13 +853,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void PredeclareLocalBlock(SyntaxNode boundary, IReadOnlyList<LocalPlan> locals, Scope scope, Symbol containerSymbol)
+        private void PredeclareLocalBlock(SyntaxNode boundary, LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
             Scope blockScope = context.CreateChildScope(boundary, scope);
             PredeclareLocals(locals, blockScope, containerSymbol);
         }
 
-        private void ResolveLocalBlock(SyntaxNode boundary, IReadOnlyList<LocalPlan> locals, Scope scope, Symbol containerSymbol)
+        private void ResolveLocalBlock(SyntaxNode boundary, LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
             if (!context.TryResolveScope(boundary, out Scope? blockScope) || blockScope is null)
             {
@@ -910,10 +909,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// <summary> Original compilation unit the plan was collected from. </summary>
         public CompilationUnit Root { get; }
         /// <summary> Collected plans for every top-level syntax item in source order. </summary>
-        public IReadOnlyList<TopLevelPlan> TopLevels { get; }
+        public TopLevelPlan[] TopLevels { get; }
 
         /// <summary> Creates one unit-level declaration plan. </summary>
-        public UnitPlan(CompilationUnit root, IReadOnlyList<TopLevelPlan> topLevels)
+        public UnitPlan(CompilationUnit root, TopLevelPlan[] topLevels)
         {
             Root = root;
             TopLevels = topLevels;
@@ -1003,13 +1002,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// <summary> Original namespace declaration syntax. </summary>
         public NamespaceDeclaration Declaration { get; }
         /// <summary> Flattened qualified-name parts for the namespace chain. </summary>
-        public IReadOnlyList<NamespacePartPlan> Parts { get; }
+        public NamespacePartPlan[] Parts { get; }
         /// <summary> Nested top-level plans when the namespace uses a block body. </summary>
-        public IReadOnlyList<TopLevelPlan> Members { get; }
+        public TopLevelPlan[] Members { get; }
         /// <summary> True when the namespace uses file-scoped syntax and affects following top-level declarations. </summary>
         public bool IsFileScoped { get; }
 
-        public NamespacePlan(NamespaceDeclaration declaration, IReadOnlyList<NamespacePartPlan> parts, IReadOnlyList<TopLevelPlan> members, bool isFileScoped)
+        public NamespacePlan(NamespaceDeclaration declaration, NamespacePartPlan[] parts, TopLevelPlan[] members, bool isFileScoped)
         {
             Declaration = declaration;
             Parts = parts;
@@ -1043,11 +1042,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// <summary> Generic arity implied by the declaration syntax. </summary>
         public int Arity { get; }
         /// <summary> Collected type-parameter declarations. </summary>
-        public IReadOnlyList<TypeParameterPlan> TypeParameters { get; }
+        public TypeParameterPlan[] TypeParameters { get; }
         /// <summary> Collected member declaration plans. </summary>
-        public IReadOnlyList<MemberPlan> Members { get; }
+        public MemberPlan[] Members { get; }
 
-        public TypeDeclarationPlan(TypeDeclaration declaration, SymbolName name, int arity, IReadOnlyList<TypeParameterPlan> typeParameters, IReadOnlyList<MemberPlan> members)
+        public TypeDeclarationPlan(TypeDeclaration declaration, SymbolName name, int arity, TypeParameterPlan[] typeParameters, MemberPlan[] members)
         {
             Declaration = declaration;
             Name = name;
@@ -1110,16 +1109,16 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         public FunctionDeclaration Declaration { get; }
         public SymbolName Name { get; }
         public int Arity { get; }
-        public IReadOnlyList<TypeParameterPlan> TypeParameters { get; }
-        public IReadOnlyList<ParameterPlan> Parameters { get; }
+        public TypeParameterPlan[] TypeParameters { get; }
+        public ParameterPlan[] Parameters { get; }
         public FunctionBodyPlan Body { get; }
 
         public FunctionDeclarationPlan(
             FunctionDeclaration declaration,
             SymbolName name,
             int arity,
-            IReadOnlyList<TypeParameterPlan> typeParameters,
-            IReadOnlyList<ParameterPlan> parameters,
+            TypeParameterPlan[] typeParameters,
+            ParameterPlan[] parameters,
             FunctionBodyPlan body)
         {
             Declaration = declaration;
@@ -1140,9 +1139,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private sealed class FunctionBlockBodyPlan : FunctionBodyPlan
     {
-        public IReadOnlyList<LocalPlan> Locals { get; }
+        public LocalPlan[] Locals { get; }
 
-        public FunctionBlockBodyPlan(FunctionBlockBody syntax, IReadOnlyList<LocalPlan> locals)
+        public FunctionBlockBodyPlan(FunctionBlockBody syntax, LocalPlan[] locals)
             : base(syntax) => Locals = locals;
     }
 
@@ -1192,9 +1191,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private sealed class VariableDeclarationPlan
     {
         public VariableDeclaration Declaration { get; }
-        public IReadOnlyList<VariableDeclaratorPlan> Declarators { get; }
+        public VariableDeclaratorPlan[] Declarators { get; }
 
-        public VariableDeclarationPlan(VariableDeclaration declaration, IReadOnlyList<VariableDeclaratorPlan> declarators)
+        public VariableDeclarationPlan(VariableDeclaration declaration, VariableDeclaratorPlan[] declarators)
         {
             Declaration = declaration;
             Declarators = declarators;
@@ -1276,9 +1275,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private sealed class TopLevelBlockStatementPlan : TopLevelStatementPlan
     {
-        public IReadOnlyList<LocalPlan> Locals { get; }
+        public LocalPlan[] Locals { get; }
 
-        public TopLevelBlockStatementPlan(TopLevelBlockStatement syntax, IReadOnlyList<LocalPlan> locals)
+        public TopLevelBlockStatementPlan(TopLevelBlockStatement syntax, LocalPlan[] locals)
             : base(syntax) => Locals = locals;
     }
 
@@ -1325,9 +1324,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private sealed class LocalBlockStatementPlan : LocalStatementPlan
     {
-        public IReadOnlyList<LocalPlan> Locals { get; }
+        public LocalPlan[] Locals { get; }
 
-        public LocalBlockStatementPlan(LocalBlockStatement syntax, IReadOnlyList<LocalPlan> locals)
+        public LocalBlockStatementPlan(LocalBlockStatement syntax, LocalPlan[] locals)
             : base(syntax) => Locals = locals;
     }
 
@@ -1388,21 +1387,35 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         _ => 0
     };
 
-    private static IEnumerable<SimpleName> EnumerateSimpleNames(NamedSyntax name)
+    private static int CountSimpleNames(NamedSyntax name) => name switch
+    {
+        SimpleName => 1,
+        QualifiedName qualifiedName => CountQualifiedParts(qualifiedName.Parts),
+        _ => throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.")
+    };
+
+    private static int CountQualifiedParts(SeparatedSyntaxList<NamedSyntax> parts)
+    {
+        int count = 0;
+
+        for (int i = 0; i < parts.Count; i++)
+            count += CountSimpleNames(parts[i]);
+
+        return count;
+    }
+
+    private static void CollectNamespaceParts(NamedSyntax name, NamespacePartPlan[] parts, ref int partIndex)
     {
         switch (name)
         {
             case SimpleName simpleName:
-                yield return simpleName;
-                yield break;
+                parts[partIndex++] = new NamespacePartPlan(simpleName, SymbolName.FromToken(simpleName.Name));
+                return;
 
             case QualifiedName qualifiedName:
-                foreach (NamedSyntax part in qualifiedName.Parts)
-                {
-                    foreach (SimpleName simplePart in EnumerateSimpleNames(part))
-                        yield return simplePart;
-                }
-                yield break;
+                for (int i = 0; i < qualifiedName.Parts.Count; i++)
+                    CollectNamespaceParts(qualifiedName.Parts[i], parts, ref partIndex);
+                return;
 
             default:
                 throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.");

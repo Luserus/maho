@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -17,12 +16,12 @@ internal sealed class ResolutionProject
     /// <summary> Friendly project identity forwarded from the syntax tree. </summary>
     public string Name => SyntaxTree.Name;
     /// <summary> Convenience projection of the compilation units contained in the syntax tree. </summary>
-    public IReadOnlyList<CompilationUnit> Units => SyntaxTree.Roots;
+    public CompilationUnit[] Units => SyntaxTree.Roots;
     /// <summary> Externally resolved project surfaces available to later semantic passes. </summary>
-    public IReadOnlyList<ResolutionProjectReference> References { get; }
+    public ResolutionProjectReference[] References { get; }
 
     /// <summary> Creates one resolution input package for a syntax tree plus optional references. </summary>
-    public ResolutionProject(SyntaxTree syntaxTree, IReadOnlyList<ResolutionProjectReference>? references = null)
+    public ResolutionProject(SyntaxTree syntaxTree, ResolutionProjectReference[]? references = null)
     {
         SyntaxTree = syntaxTree;
         References = references ?? [];

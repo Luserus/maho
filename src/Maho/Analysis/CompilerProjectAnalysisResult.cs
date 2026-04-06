@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Maho;
 
 /// <summary>
@@ -10,14 +8,14 @@ namespace Maho;
 /// <param name="Files">Ordered per-file analysis outcomes.</param>
 public sealed record CompilerProjectAnalysisResult(
     string ProjectName,
-    IReadOnlyList<CompilerBatchFileResult> Files)
+    CompilerBatchFileResult[] Files)
 {
     /// <summary> Indicates whether any file in the batch reported errors or analysis failure. </summary>
     public bool HasErrors
     {
         get
         {
-            for (int i = 0; i < Files.Count; i++)
+            for (int i = 0; i < Files.Length; i++)
             {
                 if (Files[i].HasErrors)
                     return true;

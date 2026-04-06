@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Maho.Syntax;
@@ -46,11 +46,11 @@ internal static class DebugJson
     /// Projects trivia into a serializable form that preserves kind, captured text, and span data
     /// for downstream renderers and snapshot-style tests.
     /// </summary>
-    public static DebugSyntaxTriviaInfo[] CreateTrivia(SourceText text, IReadOnlyList<SyntaxTrivia> trivias)
+    public static DebugSyntaxTriviaInfo[] CreateTrivia(SourceText text, ReadOnlySpan<SyntaxTrivia> trivias)
     {
-        DebugSyntaxTriviaInfo[] triviaItems = new DebugSyntaxTriviaInfo[trivias.Count];
+        DebugSyntaxTriviaInfo[] triviaItems = new DebugSyntaxTriviaInfo[trivias.Length];
 
-        for (int i = 0; i < trivias.Count; i++)
+        for (int i = 0; i < trivias.Length; i++)
         {
             SyntaxTrivia trivia = trivias[i];
             // Capture the original trivia text as well as the kind so downstream tooling can choose
@@ -104,11 +104,11 @@ internal sealed record DebugLexerTokenInfo(
     string DisplayText,
     string? MatchingKind,
     DebugTextSpanInfo Span,
-    IReadOnlyList<DebugSyntaxTriviaInfo> LeadingTrivia,
-    IReadOnlyList<DebugSyntaxTriviaInfo> TrailingTrivia);
+    DebugSyntaxTriviaInfo[] LeadingTrivia,
+    DebugSyntaxTriviaInfo[] TrailingTrivia);
 
 /// <summary> Root payload for serialized lexer debug output. </summary>
-internal sealed record DebugLexerInfo(string Kind, int TokenCount, IReadOnlyList<DebugLexerTokenInfo> Tokens);
+internal sealed record DebugLexerInfo(string Kind, int TokenCount, DebugLexerTokenInfo[] Tokens);
 
 /// <summary> Associates a serialized parser child with the property name it originated from. </summary>
 internal sealed record DebugParserChildInfo(string PropertyName, DebugParserNodeInfo Node);
@@ -121,9 +121,9 @@ internal sealed record DebugParserNodeInfo(
     string? Text,
     string? DisplayText,
     string? MatchingKind,
-    IReadOnlyList<DebugSyntaxTriviaInfo>? LeadingTrivia,
-    IReadOnlyList<DebugSyntaxTriviaInfo>? TrailingTrivia,
-    IReadOnlyList<DebugParserChildInfo> Children);
+    DebugSyntaxTriviaInfo[]? LeadingTrivia,
+    DebugSyntaxTriviaInfo[]? TrailingTrivia,
+    DebugParserChildInfo[] Children);
 
 /// <summary> Root payload for serialized parser debug output. </summary>
 internal sealed record DebugParserInfo(string Kind, DebugParserNodeInfo? Root);

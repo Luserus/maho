@@ -155,14 +155,14 @@ internal static class CommandLine
             return 1;
         }
 
-        if (!TryResolveInputFiles(sourcePath, out List<string> files, out string displayRoot, out string? resolutionError))
+        if (!TryResolveInputFiles(sourcePath, out string[] files, out string displayRoot, out string? resolutionError))
         {
             Console.Error.WriteLine(resolutionError);
             return 1;
         }
 
-        bool multipleFiles = files.Count > 1;
-        AnalysisProgress? progress = options.ShowProgress ? new AnalysisProgress(files.Count) : null;
+        bool multipleFiles = files.Length > 1;
+        AnalysisProgress? progress = options.ShowProgress ? new AnalysisProgress(files.Length) : null;
         CompilerProjectAnalysisResult projectAnalysis = MahoCompiler.AnalyzeFiles(files, options.Output, sourcePath);
         FileResult[] results = CreateFileResults(projectAnalysis, displayRoot, multipleFiles, progress);
 
@@ -172,7 +172,8 @@ internal static class CommandLine
             hasErrors |= results[i].HasErrors;
 
         bool writeFailed = false;
-        List<string> completionMessages = [];
+        string[] completionMessages = new string[2];
+        int completionMessageCount = 0;
 
         if (options.EmitPath is not null)
         {
@@ -185,7 +186,7 @@ internal static class CommandLine
             }
             else
             {
-                completionMessages.Add($"Stored JSON output at {fullOutputPath}.");
+                completionMessages[completionMessageCount++] = $"Stored JSON output at {fullOutputPath}.";
             }
         }
         else
@@ -224,7 +225,7 @@ internal static class CommandLine
             }
             else
             {
-                completionMessages.Add($"Stored diagnostics at {fullDiagnosticsPath}.");
+                completionMessages[completionMessageCount++] = $"Stored diagnostics at {fullDiagnosticsPath}.";
             }
         }
         else if (!string.IsNullOrEmpty(diagnosticsOutput))
@@ -237,7 +238,7 @@ internal static class CommandLine
         {
             WriteStatusSeparatorIfNeeded();
 
-            for (int i = 0; i < completionMessages.Count; i++)
+            for (int i = 0; i < completionMessageCount; i++)
                 WriteStatus(completionMessages[i]);
 
             WriteStatusSeparatorIfNeeded();
@@ -252,9 +253,9 @@ internal static class CommandLine
     /// </summary>
     private static FileResult[] CreateFileResults(CompilerProjectAnalysisResult projectAnalysis, string displayRoot, bool multipleFiles, AnalysisProgress? progress)
     {
-        FileResult[] results = new FileResult[projectAnalysis.Files.Count];
+        FileResult[] results = new FileResult[projectAnalysis.Files.Length];
 
-        for (int i = 0; i < projectAnalysis.Files.Count; i++)
+        for (int i = 0; i < projectAnalysis.Files.Length; i++)
         {
             CompilerBatchFileResult file = projectAnalysis.Files[i];
             string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, file.SourcePath) : file.SourcePath;
@@ -269,11 +270,11 @@ internal static class CommandLine
     /// Creates the top-level JSON document used when the CLI emits debug artifacts to disk,
     /// preserving per-file identity and diagnostics alongside lexer/parser payloads.
     /// </summary>
-    private static string BuildDebugOutput(string inputPath, IReadOnlyList<FileResult> results)
+    private static string BuildDebugOutput(string inputPath, FileResult[] results)
     {
         JsonArray fileArray = [];
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
             JsonObject fileObject = new()
@@ -314,11 +315,11 @@ internal static class CommandLine
     /// Renders a complete human-readable diagnostics report across all analyzed files, including
     /// contextual diagnostics for successful analyses and formatted fallback blocks for failures.
     /// </summary>
-    private static string BuildDiagnosticsTextOutput(IReadOnlyList<FileResult> results, bool useColor)
+    private static string BuildDiagnosticsTextOutput(FileResult[] results, bool useColor)
     {
         StringBuilder sb = new();
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
 
@@ -347,11 +348,11 @@ internal static class CommandLine
     /// Packages diagnostics into a deterministic JSON envelope that mirrors the CLI's multi-file
     /// execution model, even when some files failed before producing structured diagnostics.
     /// </summary>
-    private static string BuildDiagnosticsJsonOutput(string inputPath, IReadOnlyList<FileResult> results)
+    private static string BuildDiagnosticsJsonOutput(string inputPath, FileResult[] results)
     {
         JsonArray fileArray = [];
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
             JsonObject fileObject = new()
@@ -410,7 +411,7 @@ internal static class CommandLine
     /// Expands the user-selected input into the concrete file set the CLI will analyze. Directory
     /// results are sorted ordinally so repeated runs produce stable output ordering.
     /// </summary>
-    private static bool TryResolveInputFiles(string sourcePath, out List<string> files, out string displayRoot, out string? errorMessage)
+    private static bool TryResolveInputFiles(string sourcePath, out string[] files, out string displayRoot, out string? errorMessage)
     {
         files = [];
         displayRoot = sourcePath;
@@ -419,7 +420,7 @@ internal static class CommandLine
         {
             if (File.Exists(sourcePath))
             {
-                files.Add(sourcePath);
+                files = [sourcePath];
                 errorMessage = null;
                 return true;
             }
@@ -429,9 +430,10 @@ internal static class CommandLine
                 displayRoot = sourcePath;
                 // Sort explicitly so recursive directory traversal cannot leak filesystem ordering
                 // differences into CLI output or golden files.
-                files = [.. Directory.GetFiles(sourcePath, "*.mh", SearchOption.AllDirectories).OrderBy(static path => path, StringComparer.Ordinal)];
+                files = Directory.GetFiles(sourcePath, "*.mh", SearchOption.AllDirectories);
+                Array.Sort(files, StringComparer.Ordinal);
 
-                if (files.Count == 0)
+                if (files.Length == 0)
                 {
                     errorMessage = $"No '.mh' files were found in directory: {sourcePath}";
                     return false;

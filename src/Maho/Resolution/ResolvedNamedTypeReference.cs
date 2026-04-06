@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using Maho.Symbols;
 using Maho.Syntax;
 
@@ -19,7 +19,8 @@ internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
     /// <summary> Generic arity implied by the source form. </summary>
     public int Arity { get; }
     /// <summary> Already-resolved type arguments for generic references. </summary>
-    public IReadOnlyList<ResolvedTypeReference> TypeArguments { get; }
+    public ReadOnlySpan<ResolvedTypeReference> TypeArguments => typeArguments;
+    private readonly ResolvedTypeReference[] typeArguments;
     /// <summary> Human-readable display form, including rendered type arguments when present. </summary>
     public override string DisplayName => displayName ??= CreateDisplayName(Name, TypeArguments);
     /// <summary> Stable signature identity used by later semantic passes. </summary>
@@ -30,24 +31,24 @@ internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
         TypeSyntax syntax,
         string name,
         int arity,
-        IReadOnlyList<ResolvedTypeReference> typeArguments,
-        IReadOnlyList<Symbol> candidateSymbols,
+        ResolvedTypeReference[] typeArguments,
+        Symbol[] candidateSymbols,
         string? signatureIdentity = null)
         : base(syntax, candidateSymbols)
     {
         Name = name;
         Arity = arity;
-        TypeArguments = typeArguments;
+        this.typeArguments = typeArguments;
         explicitSignatureKey = signatureIdentity;
     }
 
     /// <summary> Builds the user-facing display form for diagnostics and debug output. </summary>
-    private static string CreateDisplayName(string name, IReadOnlyList<ResolvedTypeReference> typeArguments)
+    private static string CreateDisplayName(string name, ReadOnlySpan<ResolvedTypeReference> typeArguments)
     {
-        if (typeArguments.Count == 0)
+        if (typeArguments.Length == 0)
             return name;
 
-        string[] parts = new string[typeArguments.Count];
+        string[] parts = new string[typeArguments.Length];
 
         for (int i = 0; i < parts.Length; i++)
             parts[i] = typeArguments[i].DisplayName;
@@ -56,12 +57,12 @@ internal sealed class ResolvedNamedTypeReference : ResolvedTypeReference
     }
 
     /// <summary> Builds the normalized signature identity used for semantic comparisons. </summary>
-    private static string CreateSignatureKey(string name, int arity, IReadOnlyList<ResolvedTypeReference> typeArguments)
+    private static string CreateSignatureKey(string name, int arity, ReadOnlySpan<ResolvedTypeReference> typeArguments)
     {
-        if (typeArguments.Count == 0)
+        if (typeArguments.Length == 0)
             return arity == 0 ? name : $"{name}`{arity}";
 
-        string[] parts = new string[typeArguments.Count];
+        string[] parts = new string[typeArguments.Length];
 
         for (int i = 0; i < parts.Length; i++)
             parts[i] = typeArguments[i].SignatureKey;

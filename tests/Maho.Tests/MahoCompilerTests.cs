@@ -78,7 +78,7 @@ public sealed class MahoCompilerTests
                 "batch-tests");
 
             Assert.Equal("batch-tests", result.ProjectName);
-            Assert.Equal(2, result.Files.Count);
+            Assert.Equal(2, result.Files.Length);
             Assert.Contains(result.Files, file => file.SourcePath == Path.GetFullPath(validPath) && file.Analysis is not null && !file.HasErrors);
             Assert.Contains(result.Files, file => file.SourcePath == Path.GetFullPath(invalidPath) && file.Analysis is not null && file.HasErrors);
             Assert.True(result.HasErrors);

@@ -13,9 +13,9 @@ internal sealed class ResolutionProjectResult
     /// <summary> Global lexical scope at the project root. </summary>
     public Scope GlobalScope { get; }
     /// <summary> Frozen per-unit semantic results in syntax-tree order. </summary>
-    public IReadOnlyList<ResolutionResult> Units { get; }
+    public ResolutionResult[] Units { get; }
     /// <summary> Referenced projects that were visible during this resolution run. </summary>
-    public IReadOnlyList<ResolutionProjectReference> References { get; }
+    public ResolutionProjectReference[] References { get; }
     /// <summary> Frozen project-wide symbol -> owned scope map. </summary>
     public IReadOnlyDictionary<Symbol, Scope> SymbolScopes { get; }
 
@@ -24,8 +24,8 @@ internal sealed class ResolutionProjectResult
         string projectName,
         NamespaceSymbol globalNamespace,
         Scope globalScope,
-        IReadOnlyList<ResolutionResult> units,
-        IReadOnlyList<ResolutionProjectReference> references,
+        ResolutionResult[] units,
+        ResolutionProjectReference[] references,
         IReadOnlyDictionary<Symbol, Scope> symbolScopes)
     {
         ProjectName = projectName;

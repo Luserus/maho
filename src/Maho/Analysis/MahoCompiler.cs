@@ -145,26 +145,39 @@ public static class MahoCompiler
                 }
             });
 
-            List<CompilationUnit> roots = [];
+            int rootCount = 0;
 
             for (int i = 0; i < parsedFiles.Length; i++)
             {
                 ParsedFileAnalysis? parsedFile = parsedFiles[i];
 
-                if (parsedFile is null)
-                    continue;
-
-                roots.Add(parsedFile.Root);
+                if (parsedFile is not null)
+                    rootCount++;
             }
 
             Diagnostic[] resolutionDiagnostics = [];
 
-            if (roots.Count > 0)
+            if (rootCount > 0)
             {
+                CompilationUnit[] roots = new CompilationUnit[rootCount];
+                int rootIndex = 0;
+
+                for (int i = 0; i < parsedFiles.Length; i++)
+                {
+                    ParsedFileAnalysis? parsedFile = parsedFiles[i];
+
+                    if (parsedFile is not null)
+                        roots[rootIndex++] = parsedFile.Root;
+                }
+
                 DiagnosticsManager resolutionDiagnosticsManager = new();
                 SyntaxTree syntaxTree = new(projectName, roots);
                 _ = new Resolver(resolutionDiagnosticsManager).Resolve(syntaxTree);
-                resolutionDiagnostics = [.. resolutionDiagnosticsManager.Diagnostics];
+                int resolutionDiagnosticCount = resolutionDiagnosticsManager.Diagnostics.Count;
+                resolutionDiagnostics = new Diagnostic[resolutionDiagnosticCount];
+
+                for (int i = 0; i < resolutionDiagnosticCount; i++)
+                    resolutionDiagnostics[i] = resolutionDiagnosticsManager.Diagnostics[i];
             }
 
             for (int i = 0; i < normalizedPaths.Length; i++)
@@ -235,7 +248,7 @@ public static class MahoCompiler
     /// Finalizes one file result from its syntax-stage artifacts plus any project-wide diagnostics
     /// that were attributed back to the same source buffer during resolution.
     /// </summary>
-    private static CompilerAnalysisResult CreateAnalysisResult(ParsedFileAnalysis parsedFile, IReadOnlyList<Diagnostic>? projectDiagnostics = null)
+    private static CompilerAnalysisResult CreateAnalysisResult(ParsedFileAnalysis parsedFile, Diagnostic[]? projectDiagnostics = null)
     {
         DiagnosticInfo[] diagnostics = CreateDiagnostics(parsedFile.Diagnostics.Diagnostics, parsedFile.Text, projectDiagnostics);
 
@@ -286,23 +299,35 @@ public static class MahoCompiler
     /// Projects internal diagnostics into the public result model, enriching raw spans with
     /// line/column information so consumers do not need the original source buffer.
     /// </summary>
-    private static DiagnosticInfo[] CreateDiagnostics(IReadOnlyList<Diagnostic> fileDiagnostics, SourceText text, IReadOnlyList<Diagnostic>? projectDiagnostics = null)
+    private static DiagnosticInfo[] CreateDiagnostics(IReadOnlyList<Diagnostic> fileDiagnostics, SourceText text, Diagnostic[]? projectDiagnostics = null)
     {
-        List<DiagnosticInfo> diagnostics = new(fileDiagnostics.Count + (projectDiagnostics?.Count ?? 0));
-
-        AppendDiagnostics(diagnostics, fileDiagnostics, text, filterBySource: false);
+        int projectedCount = fileDiagnostics.Count;
 
         if (projectDiagnostics is not null)
-            AppendDiagnostics(diagnostics, projectDiagnostics, text, filterBySource: true);
+        {
+            for (int i = 0; i < projectDiagnostics.Length; i++)
+            {
+                if (ReferenceEquals(projectDiagnostics[i].Source, text))
+                    projectedCount++;
+            }
+        }
 
-        return [.. diagnostics];
+        DiagnosticInfo[] diagnostics = new DiagnosticInfo[projectedCount];
+        int outputIndex = 0;
+
+        AppendDiagnostics(diagnostics, ref outputIndex, fileDiagnostics, text, filterBySource: false);
+
+        if (projectDiagnostics is not null)
+            AppendDiagnostics(diagnostics, ref outputIndex, projectDiagnostics, text, filterBySource: true);
+
+        return diagnostics;
     }
 
     /// <summary>
     /// Appends projected diagnostics to one output buffer. Project-wide diagnostics are filtered by
     /// source identity so each file only receives the diagnostics that actually belong to it.
     /// </summary>
-    private static void AppendDiagnostics(List<DiagnosticInfo> output, IReadOnlyList<Diagnostic> diagnostics, SourceText text, bool filterBySource)
+    private static void AppendDiagnostics(DiagnosticInfo[] output, ref int outputIndex, IReadOnlyList<Diagnostic> diagnostics, SourceText text, bool filterBySource)
     {
         for (int i = 0; i < diagnostics.Count; i++)
         {
@@ -313,12 +338,12 @@ public static class MahoCompiler
 
             // This is the only place internal diagnostics become part of the public API contract, so
             // severity and span projection stay centralized here.
-            output.Add(new DiagnosticInfo(
+            output[outputIndex++] = new DiagnosticInfo(
                 diagnostic.DiagnosticCode,
                 diagnostic.Message,
                 MapSeverity(diagnostic.Kind),
                 CreateSpanInfo(diagnostic.Span, text),
-                diagnostic.ExpectedText));
+                diagnostic.ExpectedText);
         }
     }
 

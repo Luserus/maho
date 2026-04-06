@@ -187,7 +187,7 @@ internal static class SerializedAnalysisRenderer
         sb.AppendLine("Token Stream");
         sb.AppendLine();
 
-        for (int i = 0; i < lexer.Tokens.Count; i++)
+        for (int i = 0; i < lexer.Tokens.Length; i++)
         {
             SerializedLexerTokenInfo token = lexer.Tokens[i];
             string matchingKind = string.IsNullOrEmpty(token.MatchingKind)
@@ -203,7 +203,7 @@ internal static class SerializedAnalysisRenderer
             sb.Append(Colorize("  ", Dim, useColor));
             sb.Append(Colorize(FormatSpan(token.Span), Dim, useColor));
 
-            if (token.LeadingTrivia.Count > 0 || token.TrailingTrivia.Count > 0)
+            if (token.LeadingTrivia.Length > 0 || token.TrailingTrivia.Length > 0)
             {
                 sb.Append(Colorize("  ", Dim, useColor));
                 sb.Append(Colorize(FormatTriviaSummary(token), Cyan, useColor));
@@ -253,10 +253,10 @@ internal static class SerializedAnalysisRenderer
 
         string childIndent = indent + (isLast ? "    " : "│   ");
 
-        for (int i = 0; i < node.Children.Count; i++)
+        for (int i = 0; i < node.Children.Length; i++)
         {
             SerializedParserChildInfo child = node.Children[i];
-            AppendParserNode(sb, child.Node, childIndent, i == node.Children.Count - 1, child.PropertyName, useColor);
+            AppendParserNode(sb, child.Node, childIndent, i == node.Children.Length - 1, child.PropertyName, useColor);
         }
     }
 
@@ -286,16 +286,16 @@ internal static class SerializedAnalysisRenderer
     /// Sorts diagnostics into source order before printing so output stays stable even if earlier
     /// stages reported diagnostics in a different sequence.
     /// </summary>
-    private static void PrintDiagnostics(TextWriter writer, IReadOnlyList<DiagnosticInfo> diagnostics, SourceBuffer buffer, bool useColor)
+    private static void PrintDiagnostics(TextWriter writer, DiagnosticInfo[] diagnostics, SourceBuffer buffer, bool useColor)
     {
-        List<(DiagnosticInfo Diagnostic, int Index)> orderedDiagnostics = [];
+        (DiagnosticInfo Diagnostic, int Index)[] orderedDiagnostics = new (DiagnosticInfo Diagnostic, int Index)[diagnostics.Length];
 
-        for (int i = 0; i < diagnostics.Count; i++)
-            orderedDiagnostics.Add((diagnostics[i], i));
+        for (int i = 0; i < diagnostics.Length; i++)
+            orderedDiagnostics[i] = (diagnostics[i], i);
 
         // Diagnostics are re-sorted here because production order reflects parser recovery paths,
         // while human readers expect source order.
-        orderedDiagnostics.Sort(static (left, right) =>
+        Array.Sort(orderedDiagnostics, static (left, right) =>
         {
             int byLine = left.Diagnostic.Span.StartLocation.Line.CompareTo(right.Diagnostic.Span.StartLocation.Line);
 
@@ -310,7 +310,7 @@ internal static class SerializedAnalysisRenderer
             return left.Index.CompareTo(right.Index);
         });
 
-        for (int i = 0; i < orderedDiagnostics.Count; i++)
+        for (int i = 0; i < orderedDiagnostics.Length; i++)
             PrintDiagnostic(writer, orderedDiagnostics[i].Diagnostic, buffer, useColor);
     }
 
@@ -580,13 +580,13 @@ internal static class SerializedAnalysisRenderer
     {
         StringBuilder sb = new();
 
-        if (token.LeadingTrivia.Count > 0)
+        if (token.LeadingTrivia.Length > 0)
         {
             sb.Append("leading: ");
             sb.Append(FormatTriviaKinds(token.LeadingTrivia));
         }
 
-        if (token.TrailingTrivia.Count > 0)
+        if (token.TrailingTrivia.Length > 0)
         {
             if (sb.Length > 0)
                 sb.Append(' ');
@@ -602,12 +602,12 @@ internal static class SerializedAnalysisRenderer
     /// Formats a trivia collection as a compact bracketed list of kinds, intentionally omitting the
     /// trivia text because the lexer view is optimized for scanability.
     /// </summary>
-    private static string FormatTriviaKinds(IReadOnlyList<SerializedSyntaxTriviaInfo> trivias)
+    private static string FormatTriviaKinds(SerializedSyntaxTriviaInfo[] trivias)
     {
         StringBuilder sb = new();
         sb.Append('[');
 
-        for (int i = 0; i < trivias.Count; i++)
+        for (int i = 0; i < trivias.Length; i++)
         {
             if (i > 0)
                 sb.Append(", ");
@@ -782,9 +782,11 @@ internal static class SerializedAnalysisRenderer
         /// </summary>
         private static SourceLine[] ParseLines(string text)
         {
-            List<SourceLine> parsedLines = [];
+            int lineCount = CountLines(text);
+            SourceLine[] parsedLines = new SourceLine[lineCount];
             int position = 0;
             int lineStart = 0;
+            int lineIndex = 0;
 
             while (position < text.Length)
             {
@@ -796,24 +798,51 @@ internal static class SerializedAnalysisRenderer
                     continue;
                 }
 
-                AddLine(parsedLines, text, lineStart, position);
+                AddLine(parsedLines, ref lineIndex, text, lineStart, position);
                 position += breakWidth;
                 lineStart = position;
             }
 
             if (position >= lineStart)
                 // Keep the final unterminated line visible in diagnostics output.
-                AddLine(parsedLines, text, lineStart, position);
+                AddLine(parsedLines, ref lineIndex, text, lineStart, position);
 
-            return [.. parsedLines];
+            return parsedLines;
         }
 
         /// <summary>
         /// Adds one parsed line using a sliced copy of the source text, which keeps later rendering
         /// logic simple and independent from the original full-text buffer.
         /// </summary>
-        private static void AddLine(List<SourceLine> lines, string text, int start, int end) =>
-            lines.Add(new SourceLine(text.Substring(start, end - start), start, end));
+        private static int CountLines(string text)
+        {
+            int position = 0;
+            int lineStart = 0;
+            int lineCount = 0;
+
+            while (position < text.Length)
+            {
+                int breakWidth = GetLineBreakWidth(text, position);
+
+                if (breakWidth == 0)
+                {
+                    position++;
+                    continue;
+                }
+
+                lineCount++;
+                position += breakWidth;
+                lineStart = position;
+            }
+
+            if (position >= lineStart)
+                lineCount++;
+
+            return lineCount;
+        }
+
+        private static void AddLine(SourceLine[] lines, ref int lineIndex, string text, int start, int end) =>
+            lines[lineIndex++] = new SourceLine(text.Substring(start, end - start), start, end);
 
         /// <summary>
         /// Recognizes the line terminator width at a given position so line parsing can treat CRLF
@@ -872,8 +901,8 @@ internal static class SerializedAnalysisRenderer
         string DisplayText,
         string? MatchingKind,
         SerializedTextSpanInfo Span,
-        IReadOnlyList<SerializedSyntaxTriviaInfo> LeadingTrivia,
-        IReadOnlyList<SerializedSyntaxTriviaInfo> TrailingTrivia);
+        SerializedSyntaxTriviaInfo[] LeadingTrivia,
+        SerializedSyntaxTriviaInfo[] TrailingTrivia);
 
     /// <summary>
     /// Root DTO for serialized lexer output.
@@ -881,7 +910,7 @@ internal static class SerializedAnalysisRenderer
     /// <param name="Kind">Serialized payload kind.</param>
     /// <param name="TokenCount">Number of tokens in the stream.</param>
     /// <param name="Tokens">Token payloads in source order.</param>
-    private sealed record SerializedLexerInfo(string Kind, int TokenCount, IReadOnlyList<SerializedLexerTokenInfo> Tokens);
+    private sealed record SerializedLexerInfo(string Kind, int TokenCount, SerializedLexerTokenInfo[] Tokens);
 
     /// <summary>
     /// Associates a child parser node with the property name it came from so tree rendering can
@@ -910,9 +939,9 @@ internal static class SerializedAnalysisRenderer
         string? Text,
         string? DisplayText,
         string? MatchingKind,
-        IReadOnlyList<SerializedSyntaxTriviaInfo>? LeadingTrivia,
-        IReadOnlyList<SerializedSyntaxTriviaInfo>? TrailingTrivia,
-        IReadOnlyList<SerializedParserChildInfo> Children);
+        SerializedSyntaxTriviaInfo[]? LeadingTrivia,
+        SerializedSyntaxTriviaInfo[]? TrailingTrivia,
+        SerializedParserChildInfo[] Children);
 
     /// <summary>
     /// Root DTO for serialized parser output.

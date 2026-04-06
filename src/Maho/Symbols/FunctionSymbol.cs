@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using Maho.Syntax;
 using Maho.Resolution;
 
@@ -8,9 +8,9 @@ namespace Maho.Symbols;
 internal sealed class FunctionSymbol : DeclaredSymbol
 {
     /// <summary> Generic type parameters declared directly on the function signature. </summary>
-    private IReadOnlyList<TypeParameterSymbol> typeParameters = [];
+    private TypeParameterSymbol[] typeParameters = [];
     /// <summary> Parameters declared by the function signature in source order. </summary>
-    private IReadOnlyList<ParameterSymbol> parameters = [];
+    private ParameterSymbol[] parameters = [];
     /// <summary> Cached metadata name including generic arity suffix when applicable. </summary>
     private string? metadataName;
     /// <summary> Cached normalized parameter signature string built only if a consumer asks for it. </summary>
@@ -28,23 +28,23 @@ internal sealed class FunctionSymbol : DeclaredSymbol
     public FunctionDeclarationKey? DeclarationKey =>
         ReturnType is null ? null : declarationKey ??= new FunctionDeclarationKey(Name, Arity, ParameterSignatureKey);
     /// <summary> Number of declared parameters without forcing signature materialization. </summary>
-    public int ParameterCount => parameters.Count;
+    public int ParameterCount => parameters.Length;
     /// <summary> Normalized parameter signature used by overload/declaration identity logic. </summary>
     public string ParameterSignatureKey => parameterSignatureKey ??= BuildParameterSignatureKey(parameters);
     /// <summary> Declared generic parameters attached to this function. </summary>
-    public IReadOnlyList<TypeParameterSymbol> TypeParameters => typeParameters;
+    public ReadOnlySpan<TypeParameterSymbol> TypeParameters => typeParameters;
     /// <summary> Declared parameters attached to this function. </summary>
-    public IReadOnlyList<ParameterSymbol> Parameters => parameters;
+    public ReadOnlySpan<ParameterSymbol> Parameters => parameters;
 
     /// <summary> Creates one declared function symbol. </summary>
     public FunctionSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int arity)
         : base(SymbolKind.Function, name, parentSymbol, declaration) => Arity = arity;
 
     /// <summary> Records the resolved generic type parameters once symbol discovery has created them. </summary>
-    public void ResolveTypeParameters(IReadOnlyList<TypeParameterSymbol> resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
+    public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
 
     /// <summary> Records the resolved parameters once symbol discovery has created them. </summary>
-    public void ResolveParameters(IReadOnlyList<ParameterSymbol> resolvedParameters) => parameters = resolvedParameters;
+    public void ResolveParameters(ParameterSymbol[] resolvedParameters) => parameters = resolvedParameters;
 
     /// <summary>
     /// Records the resolved return type and clears any cached declaration identity so later
@@ -58,14 +58,14 @@ internal sealed class FunctionSymbol : DeclaredSymbol
     }
 
     /// <summary> Builds the normalized parameter signature string used by declaration identity. </summary>
-    private static string BuildParameterSignatureKey(IReadOnlyList<ParameterSymbol> parameters)
+    private static string BuildParameterSignatureKey(ReadOnlySpan<ParameterSymbol> parameters)
     {
-        if (parameters.Count == 0)
+        if (parameters.Length == 0)
             return "()";
 
-        string[] parts = new string[parameters.Count];
+        string[] parts = new string[parameters.Length];
 
-        for (int i = 0; i < parameters.Count; i++)
+        for (int i = 0; i < parameters.Length; i++)
         {
             ResolvedTypeReference? parameterType = parameters[i].Type;
             parts[i] = parameterType is null ? "?" : parameterType.SignatureKey;

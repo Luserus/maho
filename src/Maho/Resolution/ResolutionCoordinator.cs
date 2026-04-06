@@ -48,24 +48,24 @@ internal sealed class ResolutionCoordinator
         switch (pass.ExecutionMode)
         {
             case ResolutionExecutionMode.Sequential:
-                for (int unitIndex = 0; unitIndex < context.Units.Count; unitIndex++)
+                for (int unitIndex = 0; unitIndex < context.Units.Length; unitIndex++)
                     pass.ExecuteUnit(context.Units[unitIndex]);
                 break;
 
             case ResolutionExecutionMode.ParallelUnitLocal:
                 // Unit contexts are isolated enough for this pass, so the coordinator can fan them
                 // out directly without any merge phase.
-                Parallel.For(0, context.Units.Count, unitIndex => pass.ExecuteUnit(context.Units[unitIndex]));
+                Parallel.For(0, context.Units.Length, unitIndex => pass.ExecuteUnit(context.Units[unitIndex]));
                 break;
 
             case ResolutionExecutionMode.ParallelCollectThenMerge:
             {
                 // Collect first so units never mutate shared project state concurrently. The pass
                 // can then merge those unit-local facts in a deterministic single-threaded phase.
-                ResolutionPassUnitResult?[] results = new ResolutionPassUnitResult?[context.Units.Count];
-                Parallel.For(0, context.Units.Count, unitIndex => results[unitIndex] = pass.CollectUnit(context.Units[unitIndex]));
+                ResolutionPassUnitResult?[] results = new ResolutionPassUnitResult?[context.Units.Length];
+                Parallel.For(0, context.Units.Length, unitIndex => results[unitIndex] = pass.CollectUnit(context.Units[unitIndex]));
 
-                for (int unitIndex = 0; unitIndex < context.Units.Count; unitIndex++)
+                for (int unitIndex = 0; unitIndex < context.Units.Length; unitIndex++)
                     pass.MergeUnit(context, context.Units[unitIndex], results[unitIndex]);
 
                 break;

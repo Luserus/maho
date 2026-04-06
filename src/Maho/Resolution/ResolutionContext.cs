@@ -35,7 +35,7 @@ internal sealed class ResolutionContext
     /// <summary> Convenience projection of the project global lexical scope. </summary>
     public Scope GlobalScope => Project.GlobalScope;
     /// <summary> Convenience projection of referenced project semantic surfaces. </summary>
-    public IReadOnlyList<ResolutionProjectReference> References => Project.References;
+    public ResolutionProjectReference[] References => Project.References;
 
     /// <summary> Creates the unit-local semantic state for one compilation unit. </summary>
     public ResolutionContext(CompilationUnit root, ResolutionCoordinatorContext project)

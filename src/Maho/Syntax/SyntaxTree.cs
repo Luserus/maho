@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Maho.Syntax;
 
 /// <summary>
@@ -10,9 +8,9 @@ namespace Maho.Syntax;
 internal sealed class SyntaxTree : SyntaxNode
 {
     public string Name { get; }
-    public IReadOnlyList<CompilationUnit> Roots { get; }
+    public CompilationUnit[] Roots { get; }
 
-    public SyntaxTree(string name, IReadOnlyList<CompilationUnit> roots)
+    public SyntaxTree(string name, CompilationUnit[] roots)
     {
         Name = name;
         Roots = roots;

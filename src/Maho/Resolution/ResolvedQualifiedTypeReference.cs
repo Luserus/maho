@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using Maho.Symbols;
 using Maho.Syntax;
 
@@ -26,7 +26,7 @@ internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
         QualifiedType syntax,
         ResolvedTypeReference left,
         ResolvedTypeReference right,
-        IReadOnlyList<Symbol> candidateSymbols)
+        Symbol[] candidateSymbols)
         : base(syntax, candidateSymbols)
     {
         Left = left;
@@ -37,9 +37,9 @@ internal sealed class ResolvedQualifiedTypeReference : ResolvedTypeReference
     /// Prefers an actual resolved candidate's fully qualified metadata name when lookup was
     /// unambiguous; otherwise falls back to composing the left/right signature chain.
     /// </summary>
-    private static string BuildSignatureKey(IReadOnlyList<Symbol> candidates, ResolvedTypeReference left, ResolvedTypeReference right)
+    private static string BuildSignatureKey(ReadOnlySpan<Symbol> candidates, ResolvedTypeReference left, ResolvedTypeReference right)
     {
-        if (candidates.Count == 1)
+        if (candidates.Length == 1)
             return candidates[0].QualifiedMetadataName;
 
         return $"{left.SignatureKey}.{right.SignatureKey}";

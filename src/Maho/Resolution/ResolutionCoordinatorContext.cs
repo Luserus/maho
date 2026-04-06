@@ -12,7 +12,7 @@ internal sealed class ResolutionCoordinatorContext
     /// One unit context per compilation unit in the project. These objects hold file-local maps but
     /// all point back to this shared project context.
     /// </summary>
-    private readonly List<ResolutionContext> units = [];
+    private readonly ResolutionContext[] units;
     /// <summary>
     /// Maps symbols that own lexical containers to the scopes they own. This is project-wide
     /// because symbols are project-wide identities even when their syntax came from one file.
@@ -30,9 +30,9 @@ internal sealed class ResolutionCoordinatorContext
     /// <summary> Lexical scope associated with the project root / global namespace. </summary>
     public Scope GlobalScope { get; }
     /// <summary> Semantic surfaces from referenced projects that later passes may consult. </summary>
-    public IReadOnlyList<ResolutionProjectReference> References { get; }
+    public ResolutionProjectReference[] References { get; }
     /// <summary> File-local contexts participating in this coordinated resolution run. </summary>
-    public IReadOnlyList<ResolutionContext> Units => units;
+    public ResolutionContext[] Units => units;
     /// <summary> Read-only view of the project-wide symbol -> owned scope map. </summary>
     public IReadOnlyDictionary<Symbol, Scope> SymbolScopes => symbolScopes;
 
@@ -50,11 +50,12 @@ internal sealed class ResolutionCoordinatorContext
         // itself serves as the shared boundary node for both.
         GlobalNamespace = new NamespaceSymbol(SymbolName.Empty, parentSymbol: null, Root);
         GlobalScope = new Scope(parent: null, boundary: Root, ownerSymbol: GlobalNamespace);
+        units = new ResolutionContext[Root.Roots.Length];
 
         symbolScopes.Add(GlobalNamespace, GlobalScope);
 
-        for (int i = 0; i < Root.Roots.Count; i++)
-            units.Add(new ResolutionContext(Root.Roots[i], this));
+        for (int i = 0; i < Root.Roots.Length; i++)
+            units[i] = new ResolutionContext(Root.Roots[i], this);
     }
 
     /// <summary>
@@ -72,9 +73,9 @@ internal sealed class ResolutionCoordinatorContext
     /// <summary> Freezes the mutable project context into stable result objects once the full pass pipeline has completed. </summary>
     public ResolutionProjectResult ToResult()
     {
-        ResolutionResult[] unitResults = new ResolutionResult[units.Count];
+        ResolutionResult[] unitResults = new ResolutionResult[units.Length];
 
-        for (int i = 0; i < units.Count; i++)
+        for (int i = 0; i < units.Length; i++)
             unitResults[i] = units[i].ToResult();
 
         return new ResolutionProjectResult(ProjectName, GlobalNamespace, GlobalScope, unitResults, References, symbolScopes);
