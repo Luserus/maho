@@ -214,7 +214,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             LocalTypeDeclaration typeDeclaration => new TypeLocalPlan(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type)),
             LocalFunctionDeclaration functionDeclaration => new FunctionLocalPlan(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function)),
-            LocalVariableDeclarationStatement variableDeclaration => new VariableLocalPlan(variableDeclaration, CollectVariableDeclaration(variableDeclaration.Declaration)),
             LocalStatement statement => new StatementLocalPlan(statement, CollectLocalStatement(statement)),
             _ => throw new InvalidOperationException($"Unhandled local syntax '{local.GetType().Name}'.")
         };
@@ -286,9 +285,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
 
-            for (int i = 0; i < members.Length; i++)
+            foreach (TopLevelPlan member in members)
             {
-                TopLevelPlan member = members[i];
                 PredeclareTopLevel(member, currentScope, currentContainerSymbol);
 
                 if (member is NamespaceTopLevelPlan { Namespace.IsFileScoped: true } namespacePlan)
@@ -305,9 +303,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
 
-            for (int i = 0; i < members.Length; i++)
+            foreach (TopLevelPlan member in members)
             {
-                TopLevelPlan member = members[i];
                 ResolveTopLevel(member, currentScope, currentContainerSymbol);
 
                 if (member is NamespaceTopLevelPlan { Namespace.IsFileScoped: true } namespacePlan)
@@ -384,9 +381,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Length; i++)
+            foreach (NamespacePartPlan part in plan.Parts)
             {
-                NamespacePartPlan part = plan.Parts[i];
                 NamespaceSymbol namespaceSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
                 currentScope = context.ResolveSymbolScope(namespaceSymbol, part.Syntax, currentScope);
                 currentSymbol = namespaceSymbol;
@@ -405,9 +401,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Length; i++)
+            foreach (NamespacePartPlan part in plan.Parts)
             {
-                NamespacePartPlan part = plan.Parts[i];
                 currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
                 currentScope = context.ResolveSymbolScope(currentSymbol, part.Syntax, currentScope);
             }
@@ -421,9 +416,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            for (int i = 0; i < plan.Parts.Length; i++)
+            foreach (NamespacePartPlan part in plan.Parts)
             {
-                NamespacePartPlan part = plan.Parts[i];
                 currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
                 currentScope = context.ResolveSymbolScope(currentSymbol, part.Syntax, currentScope);
             }
@@ -478,14 +472,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void PredeclareMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < members.Length; i++)
-                PredeclareMember(members[i], scope, containerSymbol);
+            foreach (MemberPlan member in members)
+                PredeclareMember(member, scope, containerSymbol);
         }
 
         private void ResolveMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < members.Length; i++)
-                ResolveMember(members[i], scope, containerSymbol);
+            foreach (MemberPlan member in members)
+                ResolveMember(member, scope, containerSymbol);
         }
 
         private void PredeclareMember(MemberPlan member, Scope scope, Symbol containerSymbol)
@@ -634,9 +628,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void PredeclareVariableDeclaration(VariableDeclarationPlan plan, Scope scope, Symbol parentSymbol)
         {
-            for (int i = 0; i < plan.Declarators.Length; i++)
+            foreach (VariableDeclaratorPlan declarator in plan.Declarators)
             {
-                VariableDeclaratorPlan declarator = plan.Declarators[i];
                 VariableSymbol symbol = new(declarator.Name, parentSymbol, declarator.Declarator);
                 context.DeclareSymbol(declarator.Declarator, symbol, scope);
             }
@@ -644,10 +637,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void ResolveVariableDeclaration(VariableDeclarationPlan plan)
         {
-            for (int i = 0; i < plan.Declarators.Length; i++)
+            foreach (VariableDeclaratorPlan declarator in plan.Declarators)
             {
-                VariableDeclaratorPlan declarator = plan.Declarators[i];
-
                 if (!context.TryResolveDeclaredSymbol(declarator.Declarator, out Symbol? declared) || declared is not VariableSymbol)
                     Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declarator.Declarator.Identifier), $"variable declaration '{declarator.Name}'", GetNamedSyntaxSource(declarator.Declarator.Identifier));
             }
@@ -655,14 +646,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void PredeclareLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < locals.Length; i++)
-                PredeclareLocal(locals[i], scope, containerSymbol);
+            foreach (LocalPlan local in locals)
+                PredeclareLocal(local, scope, containerSymbol);
         }
 
         private void ResolveLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
-            for (int i = 0; i < locals.Length; i++)
-                ResolveLocal(locals[i], scope, containerSymbol);
+            foreach (LocalPlan local in locals)
+                ResolveLocal(local, scope, containerSymbol);
         }
 
         private void PredeclareLocal(LocalPlan local, Scope scope, Symbol containerSymbol)
@@ -1376,14 +1367,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         SimpleName simpleName => SymbolName.FromToken(simpleName.Name),
         GenericName genericName => SymbolName.FromToken(genericName.Name),
-        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredName(qualifiedName.Parts[qualifiedName.Parts.Count - 1]),
+        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredName(qualifiedName.Parts[^1]),
         _ => throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.")
     };
 
     private static int GetDeclaredArity(NamedSyntax name) => name switch
     {
         GenericName genericName => genericName.TypeParameters.Count,
-        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredArity(qualifiedName.Parts[qualifiedName.Parts.Count - 1]),
+        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredArity(qualifiedName.Parts[^1]),
         _ => 0
     };
 
@@ -1428,7 +1419,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         GenericName genericName => TextSpan.FromBounds(genericName.Name.Span.Start, genericName.GreaterThanToken.Span.End),
         QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => TextSpan.FromBounds(
             GetNamedSyntaxSpan(qualifiedName.Parts[0]).Start,
-            GetNamedSyntaxSpan(qualifiedName.Parts[qualifiedName.Parts.Count - 1]).End),
+            GetNamedSyntaxSpan(qualifiedName.Parts[^1]).End),
         _ => default
     };
 

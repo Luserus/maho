@@ -26,9 +26,8 @@ internal sealed class ResolutionCoordinator
     {
         ResolutionCoordinatorContext context = new(project, diagnostics);
 
-        for (int i = 0; i < passes.Length; i++)
+        foreach (ResolutionPass pass in passes)
         {
-            ResolutionPass pass = passes[i];
             pass.BeforeProject(context);
 
             ExecutePassUnits(pass, context);
