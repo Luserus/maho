@@ -270,11 +270,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         /// Replays the classic two-phase declaration pipeline against the collected plan so same-scope
         /// declarations exist before nested bodies are resolved.
         /// </summary>
-        public void Merge(UnitPlan plan)
-        {
-            PredeclareTopLevels(plan.TopLevels, context.GlobalScope, context.GlobalNamespace);
-            ResolveTopLevels(plan.TopLevels, context.GlobalScope, context.GlobalNamespace);
-        }
+        public void Merge(UnitPlan plan) => PredeclareTopLevels(plan.TopLevels, context.GlobalScope, context.GlobalNamespace);
 
         /// <summary>
         /// First phase for top-level plans. This creates symbols/scopes before nested bodies are
@@ -288,24 +284,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             foreach (TopLevelPlan member in members)
             {
                 PredeclareTopLevel(member, currentScope, currentContainerSymbol);
-
-                if (member is NamespaceTopLevelPlan { Namespace.IsFileScoped: true } namespacePlan)
-                    (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespacePlan.Namespace, currentScope, currentContainerSymbol);
-            }
-        }
-
-        /// <summary>
-        /// Second phase for top-level plans. This resolves bodies and nested declarations against the
-        /// already-created container symbols/scopes from the predeclare phase.
-        /// </summary>
-        private void ResolveTopLevels(TopLevelPlan[] members, Scope scope, Symbol containerSymbol)
-        {
-            Scope currentScope = scope;
-            Symbol currentContainerSymbol = containerSymbol;
-
-            foreach (TopLevelPlan member in members)
-            {
-                ResolveTopLevel(member, currentScope, currentContainerSymbol);
 
                 if (member is NamespaceTopLevelPlan { Namespace.IsFileScoped: true } namespacePlan)
                     (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespacePlan.Namespace, currentScope, currentContainerSymbol);
@@ -347,35 +325,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void ResolveTopLevel(TopLevelPlan topLevel, Scope scope, Symbol containerSymbol)
-        {
-            switch (topLevel)
-            {
-                case NamespaceTopLevelPlan namespacePlan:
-                    ResolveNamespace(namespacePlan.Namespace, scope, containerSymbol);
-                    break;
-
-                case TypeTopLevelPlan typePlan:
-                    ResolveTypeDeclaration(typePlan.Declaration, scope);
-                    break;
-
-                case FunctionTopLevelPlan functionPlan:
-                    ResolveFunctionDeclaration(functionPlan.Declaration, scope);
-                    break;
-
-                case VariableTopLevelPlan variablePlan:
-                    ResolveVariableDeclaration(variablePlan.Declaration);
-                    break;
-
-                case StatementTopLevelPlan statementPlan:
-                    ResolveTopLevelStatement(statementPlan.Statement, scope, containerSymbol);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled top-level plan '{topLevel.GetType().Name}'.");
-            }
-        }
-
         private void PredeclareNamespace(NamespacePlan plan, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
@@ -394,21 +343,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             if (!plan.IsFileScoped)
                 PredeclareTopLevels(plan.Members, currentScope, currentSymbol);
-        }
-
-        private void ResolveNamespace(NamespacePlan plan, Scope scope, Symbol parentSymbol)
-        {
-            Scope currentScope = scope;
-            Symbol currentSymbol = parentSymbol;
-
-            foreach (NamespacePartPlan part in plan.Parts)
-            {
-                currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
-                currentScope = context.ResolveSymbolScope(currentSymbol, part.Syntax, currentScope);
-            }
-
-            if (!plan.IsFileScoped)
-                ResolveTopLevels(plan.Members, currentScope, currentSymbol);
         }
 
         private (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespacePlan plan, Scope scope, Symbol parentSymbol)
@@ -458,28 +392,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return symbol;
         }
 
-        private void ResolveTypeDeclaration(TypeDeclarationPlan plan, Scope scope)
-        {
-            if (!context.TryResolveDeclaredSymbol(plan.Declaration, out Symbol? declared) || declared is not TypeSymbol symbol)
-            {
-                Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(plan.Declaration.Name), $"type declaration '{plan.Name}'", GetNamedSyntaxSource(plan.Declaration.Name));
-                return;
-            }
-
-            Scope typeScope = context.ResolveSymbolScope(symbol, plan.Declaration, scope);
-            ResolveMembers(plan.Members, typeScope, symbol);
-        }
-
         private void PredeclareMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
         {
             foreach (MemberPlan member in members)
                 PredeclareMember(member, scope, containerSymbol);
-        }
-
-        private void ResolveMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
-        {
-            foreach (MemberPlan member in members)
-                ResolveMember(member, scope, containerSymbol);
         }
 
         private void PredeclareMember(MemberPlan member, Scope scope, Symbol containerSymbol)
@@ -502,27 +418,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
                 case VariableMemberPlan variablePlan:
                     PredeclareVariableDeclaration(variablePlan.Declaration, scope, containerSymbol);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled member plan '{member.GetType().Name}'.");
-            }
-        }
-
-        private void ResolveMember(MemberPlan member, Scope scope, Symbol containerSymbol)
-        {
-            switch (member)
-            {
-                case TypeMemberPlan typePlan:
-                    ResolveTypeDeclaration(typePlan.Declaration, scope);
-                    break;
-
-                case FunctionMemberPlan functionPlan:
-                    ResolveFunctionDeclaration(functionPlan.Declaration, scope);
-                    break;
-
-                case VariableMemberPlan variablePlan:
-                    ResolveVariableDeclaration(variablePlan.Declaration);
                     break;
 
                 default:
@@ -566,34 +461,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return symbol;
         }
 
-        private void ResolveFunctionDeclaration(FunctionDeclarationPlan plan, Scope scope)
-        {
-            if (!context.TryResolveDeclaredSymbol(plan.Declaration, out Symbol? declared) || declared is not FunctionSymbol symbol)
-            {
-                Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(plan.Declaration.Signature.Identifier), $"function declaration '{plan.Name}'", GetNamedSyntaxSource(plan.Declaration.Signature.Identifier));
-                return;
-            }
-
-            Scope functionScope = context.ResolveSymbolScope(symbol, plan.Declaration, scope);
-
-            switch (plan.Body)
-            {
-                case FunctionBlockBodyPlan blockBody:
-                    ResolveLocals(blockBody.Locals, functionScope, symbol);
-                    break;
-
-                case FunctionLambdaBodyPlan lambdaBody:
-                    ResolveEmbeddedLocalStatement(lambdaBody.Statement, functionScope, symbol);
-                    break;
-
-                case FunctionEmptyBodyPlan:
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled function body plan '{plan.Body.GetType().Name}'.");
-            }
-        }
-
         private TypeParameterSymbol[] PredeclareTypeParameters(TypeParameterPlan[] typeParameters, Symbol ownerSymbol, Scope ownerScope)
         {
             TypeParameterSymbol[] symbols = new TypeParameterSymbol[typeParameters.Length];
@@ -635,25 +502,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void ResolveVariableDeclaration(VariableDeclarationPlan plan)
-        {
-            foreach (VariableDeclaratorPlan declarator in plan.Declarators)
-            {
-                if (!context.TryResolveDeclaredSymbol(declarator.Declarator, out Symbol? declared) || declared is not VariableSymbol)
-                    Diagnostics.ReportResolutionStateError(GetNamedSyntaxSpan(declarator.Declarator.Identifier), $"variable declaration '{declarator.Name}'", GetNamedSyntaxSource(declarator.Declarator.Identifier));
-            }
-        }
-
         private void PredeclareLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
             foreach (LocalPlan local in locals)
                 PredeclareLocal(local, scope, containerSymbol);
-        }
-
-        private void ResolveLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
-        {
-            foreach (LocalPlan local in locals)
-                ResolveLocal(local, scope, containerSymbol);
         }
 
         private void PredeclareLocal(LocalPlan local, Scope scope, Symbol containerSymbol)
@@ -687,31 +539,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void ResolveLocal(LocalPlan local, Scope scope, Symbol containerSymbol)
-        {
-            switch (local)
-            {
-                case TypeLocalPlan typePlan:
-                    ResolveTypeDeclaration(typePlan.Declaration, scope);
-                    break;
-
-                case FunctionLocalPlan functionPlan:
-                    ResolveFunctionDeclaration(functionPlan.Declaration, scope);
-                    break;
-
-                case VariableLocalPlan variablePlan:
-                    ResolveVariableDeclaration(variablePlan.Declaration);
-                    break;
-
-                case StatementLocalPlan statementPlan:
-                    ResolveLocalStatement(statementPlan.Statement, scope, containerSymbol);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled local plan '{local.GetType().Name}'.");
-            }
-        }
-
         private void PredeclareTopLevelStatement(TopLevelStatementPlan statement, Scope scope, Symbol containerSymbol)
         {
             switch (statement)
@@ -733,37 +560,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
                 case TopLevelElseStatementPlan elseStatement:
                     PredeclareTopLevelStatement(elseStatement.Statement, scope, containerSymbol);
-                    break;
-
-                case SimpleTopLevelStatementPlan:
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled top-level statement plan '{statement.GetType().Name}'.");
-            }
-        }
-
-        private void ResolveTopLevelStatement(TopLevelStatementPlan statement, Scope scope, Symbol containerSymbol)
-        {
-            switch (statement)
-            {
-                case TopLevelBlockStatementPlan blockStatement:
-                    ResolveLocalBlock(blockStatement.Syntax, blockStatement.Locals, scope, containerSymbol);
-                    break;
-
-                case TopLevelIfStatementPlan ifStatement:
-                    ResolveTopLevelStatement(ifStatement.ThenStatement, scope, containerSymbol);
-
-                    if (ifStatement.ElseStatement is not null)
-                        ResolveTopLevelStatement(ifStatement.ElseStatement, scope, containerSymbol);
-                    break;
-
-                case TopLevelWhileStatementPlan whileStatement:
-                    ResolveTopLevelStatement(whileStatement.Statement, scope, containerSymbol);
-                    break;
-
-                case TopLevelElseStatementPlan elseStatement:
-                    ResolveTopLevelStatement(elseStatement.Statement, scope, containerSymbol);
                     break;
 
                 case SimpleTopLevelStatementPlan:
@@ -809,56 +605,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private void ResolveLocalStatement(LocalStatementPlan statement, Scope scope, Symbol containerSymbol)
-        {
-            switch (statement)
-            {
-                case LocalBlockStatementPlan blockStatement:
-                    ResolveLocalBlock(blockStatement.Syntax, blockStatement.Locals, scope, containerSymbol);
-                    break;
-
-                case LocalIfStatementPlan ifStatement:
-                    ResolveEmbeddedLocalStatement(ifStatement.ThenStatement, scope, containerSymbol);
-
-                    if (ifStatement.ElseStatement is not null)
-                        ResolveEmbeddedLocalStatement(ifStatement.ElseStatement, scope, containerSymbol);
-                    break;
-
-                case LocalWhileStatementPlan whileStatement:
-                    ResolveEmbeddedLocalStatement(whileStatement.Statement, scope, containerSymbol);
-                    break;
-
-                case LocalElseStatementPlan elseStatement:
-                    ResolveEmbeddedLocalStatement(elseStatement.Statement, scope, containerSymbol);
-                    break;
-
-                case LocalVariableStatementPlan variableStatement:
-                    ResolveVariableDeclaration(variableStatement.Declaration);
-                    break;
-
-                case SimpleLocalStatementPlan:
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Unhandled local statement plan '{statement.GetType().Name}'.");
-            }
-        }
-
         private void PredeclareLocalBlock(SyntaxNode boundary, LocalPlan[] locals, Scope scope, Symbol containerSymbol)
         {
             Scope blockScope = context.CreateChildScope(boundary, scope);
             PredeclareLocals(locals, blockScope, containerSymbol);
-        }
-
-        private void ResolveLocalBlock(SyntaxNode boundary, LocalPlan[] locals, Scope scope, Symbol containerSymbol)
-        {
-            if (!context.TryResolveScope(boundary, out Scope? blockScope) || blockScope is null)
-            {
-                Diagnostics.ReportResolutionStateError(GetSyntaxSpan(boundary), $"block '{boundary.GetType().Name}'", GetSyntaxSource(boundary));
-                return;
-            }
-
-            ResolveLocals(locals, blockScope, containerSymbol);
         }
 
         private void PredeclareEmbeddedLocalStatement(LocalStatementPlan statement, Scope scope, Symbol containerSymbol)
@@ -871,23 +621,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             Scope statementScope = context.CreateChildScope(statement.Syntax, scope);
             PredeclareLocalStatement(statement, statementScope, containerSymbol);
-        }
-
-        private void ResolveEmbeddedLocalStatement(LocalStatementPlan statement, Scope scope, Symbol containerSymbol)
-        {
-            if (statement is LocalBlockStatementPlan blockStatement)
-            {
-                ResolveLocalStatement(blockStatement, scope, containerSymbol);
-                return;
-            }
-
-            if (!context.TryResolveScope(statement.Syntax, out Scope? statementScope) || statementScope is null)
-            {
-                Diagnostics.ReportResolutionStateError(GetSyntaxSpan(statement.Syntax), $"embedded statement '{statement.Syntax.GetType().Name}'", GetSyntaxSource(statement.Syntax));
-                return;
-            }
-
-            ResolveLocalStatement(statement, statementScope, containerSymbol);
         }
     }
 
