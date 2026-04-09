@@ -255,6 +255,7 @@ internal sealed partial class Lexer
             9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,
             9 when identifier.SequenceEqual("namespace") => MatchingKeywordKind.Namespace,
             9 when identifier.SequenceEqual("interface") => MatchingKeywordKind.Interface,
+            5 when identifier.SequenceEqual("where") => MatchingKeywordKind.Where,
             _ => MatchingKeywordKind.None,
         };
     }

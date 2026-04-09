@@ -106,4 +106,49 @@ public sealed class ResolutionTests
         Assert.Contains(namespaceScope.DeclaredSymbols, symbol => symbol is TypeSymbol type && type.Name.ToString() == "Bar");
         Assert.Equal(2, result.Units.Length);
     }
+
+    [Fact]
+    public void Resolve_SymbolDiscovery_AssociatesBaseClausesAndConstraintClausesWithDeclaredSymbols()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box<T> : Base where T: Constraint
+            {
+                public static TResult Build<TResult>() where TResult: Output;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionResult result = CompilerTestBed.ResolveProject(root).Units[0];
+        TopLevelTypeDeclaration typeWrapper = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(root.Members));
+        TypeDeclaration typeDeclaration = typeWrapper.Type;
+        TypeConstraintClause typeConstraintClause = Assert.Single(typeDeclaration.Constraints);
+        GenericName typeName = Assert.IsType<GenericName>(typeDeclaration.Name);
+
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(typeDeclaration.Body);
+        MemberFunctionDeclaration functionMember = Assert.IsType<MemberFunctionDeclaration>(Assert.Single(typeBody.Members));
+        FunctionDeclaration functionDeclaration = functionMember.Function;
+        TypeConstraintClause functionConstraintClause = Assert.Single(functionDeclaration.Signature.Constraints);
+        GenericName functionName = Assert.IsType<GenericName>(functionDeclaration.Signature.Identifier);
+
+        Assert.True(result.TryResolveDeclaredSymbol(typeDeclaration, out Symbol? typeSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(functionDeclaration, out Symbol? functionSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(typeName.TypeParameters[0], out Symbol? declaredTypeParameterSymbol));
+        Assert.True(result.TryResolveDeclaredSymbol(functionName.TypeParameters[0], out Symbol? declaredFunctionTypeParameterSymbol));
+
+        Assert.True(result.TryResolveDeclaredSymbol(typeDeclaration.Base!, out Symbol? resolvedBaseClauseSymbol));
+        Assert.Same(typeSymbol, resolvedBaseClauseSymbol);
+
+        Assert.True(result.TryResolveDeclaredSymbol(typeConstraintClause, out Symbol? resolvedTypeConstraintSymbol));
+        Assert.Same(typeSymbol, resolvedTypeConstraintSymbol);
+
+        Assert.True(result.TryResolveDeclaredSymbol(typeConstraintClause.TypeParameter, out Symbol? resolvedTypeConstraintTypeParameterSymbol));
+        Assert.Same(declaredTypeParameterSymbol, resolvedTypeConstraintTypeParameterSymbol);
+
+        Assert.True(result.TryResolveDeclaredSymbol(functionConstraintClause, out Symbol? resolvedFunctionConstraintSymbol));
+        Assert.Same(functionSymbol, resolvedFunctionConstraintSymbol);
+
+        Assert.True(result.TryResolveDeclaredSymbol(functionConstraintClause.TypeParameter, out Symbol? resolvedFunctionConstraintTypeParameterSymbol));
+        Assert.Same(declaredFunctionTypeParameterSymbol, resolvedFunctionConstraintTypeParameterSymbol);
+    }
 }

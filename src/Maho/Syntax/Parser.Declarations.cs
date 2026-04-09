@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Maho.Text;
 
 namespace Maho.Syntax;
 
@@ -61,10 +60,19 @@ internal sealed partial class Parser
             MatchingKeywordKind.Interface => TypeKind.Interface,
             MatchingKeywordKind.Enum => TypeKind.Enum,
             MatchingKeywordKind.Union => TypeKind.Union,
-            _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled type declaration keyword.")
+            _ => throw new InvalidOperationException("Unhandeled case")
         };
 
         var name = ParseNamedSyntax();
+        TypeBaseClause? baseClause = null;
+
+        if (CurrentToken.Kind is TokenKind.Colon)
+            baseClause = ParseTypeBaseClause();
+
+        List<TypeConstraintClause> constraints = [];
+
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
 
         TypeBody body;
 
@@ -78,8 +86,79 @@ internal sealed partial class Parser
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
-        return new TypeDeclaration(modifiers, keyword, kind, name, body);
+        return new TypeDeclaration(modifiers, keyword, kind, name, baseClause, constraints, body);
     }
+
+    private TypeBaseClause ParseTypeBaseClause()
+    {
+        var colon = Consume();
+        List<SyntaxNode> nodesAndSeparators = [];
+        bool wasCommaLast = false;
+
+        while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken && CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
+        {
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type");
+                break;
+            }
+
+            TypeSyntax type = ParseTypeSyntax();
+            nodesAndSeparators.Add(type);
+            wasCommaLast = false;
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
+            else
+                break;
+        }
+
+        if (wasCommaLast)
+            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the base type list");
+
+        var baseTypes = new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
+
+        return new TypeBaseClause(colon, baseTypes);
+    }
+
+    private TypeConstraintClause ParseTypeConstraintClause()
+    {
+        var whereKeyword = Consume();
+
+        var typeToken = ExpectIdentifierToken("for constraint type");
+        var type = new SimpleName(typeToken);
+        var colon = ExpectToken(TokenKind.Colon, "':'", "after the type");
+
+        List<SyntaxNode> nodesAndSeparators = [];
+        bool wasCommaLast = false;
+
+        while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken)
+        {
+            var constraint = ParseTypeConstraint();
+            nodesAndSeparators.Add(constraint);
+            wasCommaLast = false;
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
+            else
+                break;
+        }
+
+        if (wasCommaLast)
+            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the constraints list");
+
+        var typeConstraints = new SeparatedSyntaxList<TypeConstraint>(nodesAndSeparators);
+
+        return new TypeConstraintClause(whereKeyword, type, colon, typeConstraints);
+    }
+
+    private TypeConstraint ParseTypeConstraint() => new TypeTypeConstraint(ParseTypeSyntax());
 
     private TypeBlockBody ParseTypeBlockBody()
     {
@@ -331,7 +410,12 @@ internal sealed partial class Parser
         var parameters = ParseParameterList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the parameter list");
 
-        var signature = new FunctionSignature(modifiers, returnType, identifier, openParen, parameters, closeParen);
+        List<TypeConstraintClause> constraints = [];
+
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
+
+        var signature = new FunctionSignature(modifiers, returnType, identifier, openParen, parameters, closeParen, constraints);
 
         var body = ParseFunctionBody();
 
@@ -430,7 +514,7 @@ internal sealed partial class Parser
                 TokenKind.QuestionMark => ParseOptionalTypeModifier(),
                 TokenKind.Asterisk     => ParsePointerTypeModifier(),
                 TokenKind.Ampersand    => ParseReferenceTypeModifier(),
-                _ => throw new System.InvalidOperationException()
+                _ => throw new InvalidOperationException()
             };
 
             type = new ModifiedType(type, modifier);

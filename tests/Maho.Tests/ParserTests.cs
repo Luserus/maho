@@ -105,6 +105,99 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_TypeDeclaration_WithBaseClauseAndConstraints()
+    {
+        TypeDeclaration type = ParseSingleTopLevelType("""
+            public class Box<T> : Base<T>, Outer.Inner
+                where T: FirstConstraint, Second.Constraint;
+            """);
+
+        GenericName name = Assert.IsType<GenericName>(type.Name);
+        Assert.Equal("Box", name.Name.Value);
+        Assert.Single(name.TypeParameters);
+        Assert.Equal("T", name.TypeParameters[0].Name.Value);
+
+        TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
+        Assert.Equal(2, baseClause.BaseTypes.Count);
+
+        GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0]);
+        Assert.Equal("Base", firstBaseType.Name.Value);
+        SimpleType firstBaseArgument = Assert.IsType<SimpleType>(firstBaseType.TypeArguments[0]);
+        Assert.Equal("T", firstBaseArgument.Name.Value);
+
+        QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1]);
+        Assert.Equal("Outer", Assert.IsType<SimpleType>(secondBaseType.Left).Name.Value);
+        Assert.Equal("Inner", Assert.IsType<SimpleType>(secondBaseType.Right).Name.Value);
+
+        TypeConstraintClause constraintClause = Assert.Single(type.Constraints);
+        Assert.Equal("T", constraintClause.TypeParameter.Name.Value);
+        Assert.Equal(2, constraintClause.Constraints.Count);
+
+        TypeTypeConstraint firstConstraint = Assert.IsType<TypeTypeConstraint>(constraintClause.Constraints[0]);
+        Assert.Equal("FirstConstraint", Assert.IsType<SimpleType>(firstConstraint.Type).Name.Value);
+
+        TypeTypeConstraint secondConstraint = Assert.IsType<TypeTypeConstraint>(constraintClause.Constraints[1]);
+        QualifiedType secondConstraintType = Assert.IsType<QualifiedType>(secondConstraint.Type);
+        Assert.Equal("Second", Assert.IsType<SimpleType>(secondConstraintType.Left).Name.Value);
+        Assert.Equal("Constraint", Assert.IsType<SimpleType>(secondConstraintType.Right).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_FunctionDeclaration_WithTypeConstraints()
+    {
+        FunctionDeclaration function = ParseSingleTopLevelFunction("""
+            public static TResult Build<TInput, TResult>(TInput input)
+                where TInput: Source
+                where TResult: Output<TInput>;
+            """);
+
+        GenericName identifier = Assert.IsType<GenericName>(function.Signature.Identifier);
+        Assert.Equal("Build", identifier.Name.Value);
+        Assert.Equal(2, identifier.TypeParameters.Count);
+        Assert.Equal("TInput", identifier.TypeParameters[0].Name.Value);
+        Assert.Equal("TResult", identifier.TypeParameters[1].Name.Value);
+
+        Assert.Equal(2, function.Signature.Constraints.Count);
+
+        TypeConstraintClause inputConstraint = function.Signature.Constraints[0];
+        Assert.Equal("TInput", inputConstraint.TypeParameter.Name.Value);
+        TypeTypeConstraint inputTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(inputConstraint.Constraints));
+        Assert.Equal("Source", Assert.IsType<SimpleType>(inputTypeConstraint.Type).Name.Value);
+
+        TypeConstraintClause resultConstraint = function.Signature.Constraints[1];
+        Assert.Equal("TResult", resultConstraint.TypeParameter.Name.Value);
+        TypeTypeConstraint resultTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(resultConstraint.Constraints));
+        GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
+        Assert.Equal("Output", resultConstraintType.Name.Value);
+        Assert.Equal("TInput", Assert.IsType<SimpleType>(resultConstraintType.TypeArguments[0]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_TypeDeclaration_RecoversFromTrailingCommaBeforeConstraintClause()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box<T> : Base<T>,
+                where T: Constraint
+            {
+                public int Value;
+            }
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+
+        TopLevelTypeDeclaration declaration = Assert.Single(root.Members.OfType<TopLevelTypeDeclaration>());
+        TypeDeclaration type = declaration.Type;
+
+        TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
+        Assert.Single(baseClause.BaseTypes);
+        Assert.Single(type.Constraints);
+
+        TypeBlockBody body = Assert.IsType<TypeBlockBody>(type.Body);
+        Assert.Single(body.Members);
+        Assert.IsType<MemberFieldDeclaration>(body.Members[0]);
+    }
+
+    [Fact]
     public void Parse_SupportedSyntaxSurface_BuildsCurrentNodeSet()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
@@ -117,15 +210,15 @@ public sealed class ParserTests
                 public class Nested;
             }
 
-            public class Box<T>
+            public class Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
             {
                 public T Value;
                 public class Nested;
 
-                public static int Transform(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested)
+                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
-                    public class LocalBox;
-                    public static int LocalFunc<TLocal>(TLocal input)
+                    public class LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
+                    public static int LocalFunc<TLocal>(TLocal input) where TLocal: Extra.Nested
                     {
                         return 0;
                     }
@@ -147,7 +240,7 @@ public sealed class ParserTests
                 }
             }
 
-            public static int identity<T>(T value)
+            public static int identity<T>(T value) where T: Extra.Nested
             {
                 return value;
             }
@@ -216,6 +309,9 @@ public sealed class ParserTests
             typeof(GenericType),
             typeof(QualifiedType),
             typeof(ModifiedType),
+            typeof(TypeBaseClause),
+            typeof(TypeConstraintClause),
+            typeof(TypeTypeConstraint),
             typeof(ArrayTypeModifier),
             typeof(PointerTypeModifier),
             typeof(OptionalTypeModifier),
@@ -304,6 +400,18 @@ public sealed class ParserTests
         Local local = Assert.Single(body.Locals);
         Assert.IsType(expectedType, local);
         return local;
+    }
+
+    private static TypeDeclaration ParseSingleTopLevelType(string source)
+    {
+        TopLevelTypeDeclaration declaration = Assert.IsType<TopLevelTypeDeclaration>(ParseSingleTopLevel(source, typeof(TopLevelTypeDeclaration)));
+        return declaration.Type;
+    }
+
+    private static FunctionDeclaration ParseSingleTopLevelFunction(string source)
+    {
+        TopLevelFunctionDeclaration declaration = Assert.IsType<TopLevelFunctionDeclaration>(ParseSingleTopLevel(source, typeof(TopLevelFunctionDeclaration)));
+        return declaration.Function;
     }
 
     private static HashSet<Type> CollectNodeTypes(SyntaxNode root)
