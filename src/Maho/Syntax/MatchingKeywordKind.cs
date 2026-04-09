@@ -24,5 +24,6 @@ internal enum MatchingKeywordKind : byte
     For,
     New,
     Put,
-    Const
+    Const,
+    Where
 }

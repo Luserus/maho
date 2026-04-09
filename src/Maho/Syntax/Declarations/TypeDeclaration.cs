@@ -14,15 +14,19 @@ internal sealed class TypeDeclaration : SyntaxNode
     /// <summary> Declared name, including any generic parameter list. </summary>
     public NamedSyntax Name { get; }
     /// <summary> Body or terminator for the declaration. </summary>
+    public TypeBaseClause? Base { get; }
+    public IReadOnlyList<TypeConstraintClause> Constraints { get; }
     public TypeBody Body { get; }
 
     /// <summary> Creates one type declaration from its parsed components. </summary>
-    public TypeDeclaration(IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBody body)
+    public TypeDeclaration(IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBaseClause? @base, IReadOnlyList<TypeConstraintClause> constraints, TypeBody body)
     {
         Modifiers = modifiers;
         Keyword = keyword;
         Kind = kind;
         Name = name;
+        Base = @base;
+        Constraints = constraints;
         Body = body;
     }
 }

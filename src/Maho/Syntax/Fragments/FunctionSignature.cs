@@ -17,9 +17,11 @@ internal sealed class FunctionSignature : SyntaxNode
     public SeparatedSyntaxList<Parameter> Parameters { get; }
     /// <summary> Closing parenthesis token. </summary>
     public Token CloseParen { get; }
+    public IReadOnlyList<TypeConstraintClause> Constraints { get; }
 
     /// <summary> Creates one function signature node. </summary>
-    public FunctionSignature(IReadOnlyList<Token> modifiers, TypeSyntax returnType, NamedSyntax identifier, Token openParen, SeparatedSyntaxList<Parameter> parameters, Token closeParen)
+    public FunctionSignature(IReadOnlyList<Token> modifiers, TypeSyntax returnType, NamedSyntax identifier, Token openParen, SeparatedSyntaxList<Parameter> parameters,
+                            Token closeParen, IReadOnlyList<TypeConstraintClause> constraints)
     {
         Modifiers = modifiers;
         ReturnType = returnType;
@@ -27,5 +29,6 @@ internal sealed class FunctionSignature : SyntaxNode
         OpenParen = openParen;
         Parameters = parameters;
         CloseParen = closeParen;
+        Constraints = constraints;
     }
 }
