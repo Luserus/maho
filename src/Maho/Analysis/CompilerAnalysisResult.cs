@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace Maho;
 
 /// <summary>
@@ -15,7 +13,7 @@ public sealed record CompilerAnalysisResult(
     string SourcePath,
     string? LexerJson,
     string? ParserJson,
-    IReadOnlyList<DiagnosticInfo> Diagnostics,
+    DiagnosticInfo[] Diagnostics,
     string DiagnosticsJson)
 {
     /// <summary>
@@ -28,7 +26,7 @@ public sealed record CompilerAnalysisResult(
         {
             // Keep the failure signal derived from the actual diagnostics payload so the result
             // cannot drift out of sync with a separately cached flag.
-            for (int i = 0; i < Diagnostics.Count; i++)
+            for (int i = 0; i < Diagnostics.Length; i++)
             {
                 if (Diagnostics[i].Severity is DiagnosticSeverity.Error)
                     return true;

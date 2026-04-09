@@ -1,98 +1,218 @@
 # Resolution Guide
 
-`src/Maho/Resolution` is the placeholder boundary for future semantic analysis and name/type resolution.
+`src/Maho/Resolution` is the compiler's semantic coordination layer.
 
-Right now this folder is intentionally light in code, but it still deserves deeper documentation because it defines a major architectural boundary: syntax is not meant to silently grow semantic behavior forever.
+It now supports:
 
-In other words, `Resolution` is where "parsed source" is expected to become "understood program".
+- project-level pass coordination,
+- per-unit semantic state,
+- shared project-wide symbol scopes,
+- declaration discovery,
+- and infrastructure for later cross-project lookup.
+
+## Current architecture
+
+The public semantic entrypoint inside the front-end is still `Resolver`, but `Resolver` is now only a facade.
+Like `Lexer` and `Parser`, it is created with a shared `DiagnosticsManager`, then `Resolve(...)`
+runs the actual semantic work.
+
+The actual orchestration happens in `ResolutionCoordinator`.
+
+The model is split into four layers:
+
+- `SyntaxTree`: post-parse syntax root for all compilation units
+- `ResolutionProject`: input model for one project-wide resolution run
+- `ResolutionCoordinatorContext`: mutable shared project state
+- `ResolutionContext`: mutable per-compilation-unit state
+
+That split matters because not every semantic pass wants the same granularity.
+
+Some passes need:
+
+- project-wide setup before touching files,
+- per-file work after a global declaration barrier,
+- or project-wide finalization after every file has contributed state
+
+The pass API is built around that instead of assuming every pass is purely per-file.
 
 ## Files in this folder
 
-- `Resolver.cs`: future semantic driver.
-- `Scope.cs`: current shell for nested scope tracking.
+- `Resolver.cs`: thin facade over the project-level coordinator.
+- `ResolutionCoordinator.cs`: runs passes across the project.
+- `ResolutionCoordinatorContext.cs`: shared mutable state for one project resolution run.
+- `ResolutionProject.cs`: input container for a syntax tree and project references.
+- `ResolutionProjectResult.cs`: stable project-wide semantic result.
+- `ResolutionProjectReference.cs`: external project semantic surface for future cross-project lookup.
+- `ResolutionPass.cs`: base type for semantic passes with project and unit hooks.
+- `ResolutionExecutionMode.cs`: scheduler hint for how a pass wants its unit work to run.
+- `ResolutionContext.cs`: mutable per-unit semantic state and resolution maps.
+- `ResolutionPassUnitResult.cs`: base type for collect-then-merge unit results.
+- `ResolutionResult.cs`: stable per-unit semantic result.
+- `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
+- `SymbolDiscoveryPass.cs`: first pass that predeclares symbols and builds the project-wide declaration graph.
+- `ResolvedTypeReference.cs`: semantic representation reserved for later declaration/type-resolution passes.
 
-## Why this folder matters before it is implemented
+## Pass model
 
-Even in its current skeletal state, this folder answers a useful design question: where should the next layer of compiler intelligence go?
+`ResolutionPass` now exposes three hooks:
 
-The answer is not:
+- `BeforeProject(...)`
+- `ExecuteUnit(...)`
+- `AfterProject(...)`
 
-- inside syntax node types,
-- inside the CLI,
-- inside diagnostics rendering,
-- or scattered across parser recovery code.
+It also exposes an execution mode that tells the coordinator how unit work is scheduled:
 
-The answer is here, alongside symbols and downstream semantic diagnostics.
+- `Sequential`: unit work mutates shared project state directly, so the pass runs one unit at a time.
+- `ParallelUnitLocal`: each unit can run independently because it only reads frozen shared state and writes unit-local state.
+- `ParallelCollectThenMerge`: units first collect local facts in parallel, then the coordinator merges those facts into project state sequentially.
 
-That separation matters because syntax and semantics evolve at different speeds. Syntax cares about source form; resolution will care about meaning, lookup, accessibility, and well-typed relationships.
+That gives later semantic work room to choose the right scheduling shape instead of forcing everything into the first pass or into a purely unit-local traversal.
 
-## Current state
+Examples:
 
-### `Resolver`
+- A declaration-merging pass can collect unit facts in parallel, then merge them in project order.
+- A pure body-checking pass can do all its work in `ExecuteUnit(...)` with `ParallelUnitLocal`.
+- A cross-project validation pass can read project references during `AfterProject(...)`.
 
-`Resolver` exists as an explicit subsystem marker, but it does not implement behavior yet.
+## Project-wide vs unit-local state
 
-That is valuable in itself: the repository already distinguishes syntax construction from later semantic passes, even if the semantic layer is still under construction.
+### Project-wide
 
-When this type starts filling out, it will likely become the pass coordinator that:
+`ResolutionCoordinatorContext` owns:
 
-- walks syntax trees,
-- opens and closes scopes,
-- constructs semantic symbols,
-- performs name lookup,
-- and emits semantic diagnostics.
+- project name
+- shared diagnostics sink
+- syntax-tree root
+- global namespace symbol
+- global scope
+- project references
+- shared symbol-to-scope table
+- all unit contexts participating in the run
 
-### `Scope`
+This is the layer that allows declarations from different files to land in one shared namespace/scope graph after parsing has already finished for the whole syntax tree.
 
-`Scope` currently stores only a `parent` reference supplied through the constructor.
+`SyntaxTree` itself serves as the project-wide syntax boundary. Because it inherits `SyntaxNode`, the global namespace and global scope can anchor directly to the root-of-roots node instead of using a separate synthetic placeholder type.
 
-That means the intended shape is already visible:
+### Unit-local
 
-- scopes are nested,
-- child scopes can walk outward,
-- symbol lookup tables and scope-specific state have not been added yet.
+Each `ResolutionContext` owns:
 
-That makes `Scope` the first concrete hint about intended lookup direction: inner scopes should be able to fail locally and then consult enclosing scopes without the syntax tree itself owning that logic.
+- one `CompilationUnit`
+- syntax node -> declared symbol
+- syntax node -> scope
 
-## Relationship to neighboring folders
+It also projects the shared project-wide state through convenience properties like `GlobalScope`, `GlobalNamespace`, `Diagnostics`, and `References`.
 
-- `Syntax` tells you what appeared in source.
-- `Symbols` tells you the semantic entities the compiler expects to model.
-- `Resolution` is the layer that should connect those two worlds.
-- `Diagnostics` will likely receive additional semantic error production through this stage later.
+So the current design already distinguishes:
 
-So if you think of the front-end as stages, `Resolution` is the missing bridge between parse-time structure and semantic understanding.
+- data that must be shared across the whole project
+- and data that is inherently local to one syntax tree
 
-## What will probably land here later
+## What pass 1 does today
 
-The code is not there yet, but the folder is the natural home for:
+`SymbolDiscoveryPass` is still the first semantic pass, but it runs as a collect-then-merge pass.
 
-- lexical and nested scope construction,
-- symbol declaration/registration passes,
-- type/name lookup,
-- duplicate definition checks,
-- unresolved identifier diagnostics,
-- and eventually type-directed semantic validation.
+Inside merge it still uses two phases:
 
-That is documentation of intent, not a claim that those passes already exist.
+1. predeclare
+2. resolve
 
-## How to use this folder today
+That split allows same-scope declarations to exist before later passes interpret signatures and bodies.
 
-- Treat it as a roadmap boundary, not an implementation hotspot.
-- If you are adding symbols, bindings, or semantic diagnostics later, this is the folder that should start absorbing that work.
-- If you are just tracing today's runtime behavior, you can usually skip this folder.
+The first pass currently:
 
-## Reading order once this grows
+- creates namespace, type, function, type-parameter, parameter, and variable symbols
+- creates scopes for namespaces, types, functions, blocks, and embedded statement bodies
+- records syntax-to-symbol and syntax-to-scope associations
+- resolves generic arity for type and function declarations
+- collects each compilation unit into a unit-local discovery plan first
+- then merges those plans into the shared project-wide scope state
 
-When semantic work starts landing, the likely order to read will be:
+Duplicate declaration diagnostics are intentionally deferred for now. That keeps pass 1 focused on building the declaration graph without prematurely choosing language rules for partial declarations, forward declarations, or future merging behavior.
 
-1. `Scope.cs`
-2. symbol declarations in `Symbols`
-3. `Resolver.cs`
-4. semantic diagnostics paths
+This means the first pass is project-aware, parallel-friendly, and still stays focused on symbol discovery. Later passes can handle type references, `var`, overload signatures, and similar semantic work in one place instead of fragmenting that logic across the early pipeline.
 
-That order reflects the probable dependency direction: lookup/state first, pass orchestration second.
+## Cross-project infrastructure
 
-## Traversal tip
+Cross-project lookup is not implemented yet, but the coordinator now keeps explicit room for it.
 
-Read [`../Symbols/docs/README.md`](../../Symbols/docs/README.md) before implementing anything substantial here. Resolution is where symbol abstractions will eventually become live semantic state.
+`ResolutionProject` accepts `ResolutionProjectReference` items, and those references expose:
+
+- referenced project name
+- referenced global namespace
+- referenced global scope
+
+That is enough for later passes to start consulting external project symbol graphs without redesigning the coordinator.
+
+So the current infrastructure anticipates:
+
+- one project producing symbols
+- another project consuming them as references
+
+even though no pass uses that path yet.
+
+## Scopes
+
+`Scope` stores:
+
+- `Parent`
+- `OwnerSymbol`
+- `Boundary`
+- declared symbols
+- child scopes
+
+Lookup is lexical. `Lookup(name)` searches the current scope first and then walks outward through parent scopes.
+
+The scope table keys declarations by `SymbolName`, which is a source-backed name value rather than an eagerly allocated `string`. That keeps pass-1 declaration storage allocation-free for names.
+
+The scope table intentionally stores same-name symbols together. Distinguishing legal overload sets from duplicates is a semantic-pass concern, not a storage concern.
+
+## Results
+
+There are now two semantic result shapes:
+
+- `ResolutionResult`: one compilation unit
+- `ResolutionProjectResult`: the whole coordinated project run
+
+That split matches the coordinator model:
+
+- unit consumers can stay focused on one tree
+- project-wide consumers can inspect shared scopes and references
+
+## Extension guidance
+
+- If the feature introduces new declaration forms or new symbol-shape metadata, extend `SymbolDiscoveryPass` and the symbol model.
+- If the feature needs project barriers, use `BeforeProject(...)` and `AfterProject(...)`.
+- If the feature is naturally file-local once project declarations exist, implement it in `ExecuteUnit(...)`.
+- If the feature needs external symbols, consume `ResolutionProjectReference` from the unit or project context rather than inventing a second coordination path.
+
+## Deferred work
+
+`ResolvedTypeReference` and the related per-unit type-reference map are still present, but they are intentionally unused by pass 1 now.
+
+That infrastructure is reserved for later passes that resolve:
+
+- declaration-site type references,
+- `var`,
+- overload signatures,
+- and other type-directed semantic behavior
+
+after symbol discovery has already completed across the project.
+
+## Reading order
+
+Recommended order:
+
+1. `ResolutionProject.cs`
+2. `ResolutionCoordinatorContext.cs`
+3. `ResolutionContext.cs`
+4. `Scope.cs`
+5. symbol types in `../Symbols`
+6. `ResolutionPass.cs`
+7. `SymbolDiscoveryPass.cs`
+8. `ResolutionCoordinator.cs`
+9. `Resolver.cs`
+10. `ResolutionResult.cs`
+11. `ResolutionProjectResult.cs`
+
+That order reflects the current dependency direction of the semantic layer.

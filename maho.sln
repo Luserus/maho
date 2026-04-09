@@ -1,0 +1,45 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Maho.Tests", "tests\Maho.Tests\Maho.Tests.csproj", "{76BAD51E-529B-7CEC-B749-8255ADBCDA42}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Maho", "src\Maho\Maho.csproj", "{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Maho.Cli", "src\Maho.Cli\Maho.Cli.csproj", "{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{76BAD51E-529B-7CEC-B749-8255ADBCDA42}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76BAD51E-529B-7CEC-B749-8255ADBCDA42}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76BAD51E-529B-7CEC-B749-8255ADBCDA42}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76BAD51E-529B-7CEC-B749-8255ADBCDA42}.Release|Any CPU.Build.0 = Release|Any CPU
+		{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{76BAD51E-529B-7CEC-B749-8255ADBCDA42} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{43CBD148-5898-4BF2-B8BD-3E97CDA2D3E8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{DC8CFF1D-B8F9-E3D7-D8D5-C896F0EBC845} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {034EBC2F-ED20-4453-BCC6-71FF306D130F}
+	EndGlobalSection
+EndGlobal

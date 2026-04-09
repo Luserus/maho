@@ -2,7 +2,7 @@
 
 This folder is the "where do I go next?" map for the repository.
 
-The root [`README.md`](../README.md) is still the right place for build, run, and CLI basics. This guide is the advanced follow-up: it tells you which subsystem to open depending on the question you are asking.
+The root [`README.md`](../README.md) is still the right place for build, run, and CLI basics. This guide helps you jump to the subsystem that owns the behavior you are looking at.
 
 ## Repository shape
 
@@ -40,12 +40,13 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 At the moment, the codebase is strongest in the front half of the compiler:
 
 1. The CLI resolves input files and options.
-2. `MahoCompiler` loads source text and runs the lexer and parser.
-3. Diagnostics are projected into a public, serializable result model.
-4. Optional debug JSON is produced for lexer and parser state.
-5. The CLI renders either text output or JSON envelopes for both debug data and diagnostics.
+2. `MahoCompiler.AnalyzeFiles(...)` owns batch analysis, while `AnalyzeFile(...)` and `AnalyzeText(...)` handle single inputs.
+3. `MahoCompiler` loads source text, lexes, parses, and starts project-wide resolution.
+4. Diagnostics are projected into a public, serializable result model.
+5. Optional debug JSON is produced for lexer and parser state.
+6. The CLI renders either text output or JSON envelopes for both debug data and diagnostics.
 
-Resolution and symbol work are present mostly as structure and naming boundaries, not as a finished semantic layer yet.
+Resolution and symbol work are present as a real semantic scaffold, but the layer is still evolving.
 
 ## Reading strategy
 

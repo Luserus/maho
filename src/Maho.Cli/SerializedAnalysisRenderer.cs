@@ -13,17 +13,28 @@ namespace Maho.Cli;
 /// </summary>
 internal static class SerializedAnalysisRenderer
 {
+    /// <summary> ANSI reset sequence used after colorized renderer output. </summary>
     private const string Reset = "\u001b[0m";
+    /// <summary> ANSI dim sequence used for low-emphasis structure such as paths and spans. </summary>
     private const string Dim = "\u001b[2m";
+    /// <summary> ANSI bright-white sequence used for strong emphasis such as diagnostic headings. </summary>
     private const string BrightWhite = "\u001b[97m";
+    /// <summary> ANSI red sequence used for error-level text. </summary>
     private const string Red = "\u001b[31m";
+    /// <summary> ANSI yellow sequence used for warning-level text. </summary>
     private const string Yellow = "\u001b[33m";
+    /// <summary> ANSI cyan sequence used for secondary accents and tips. </summary>
     private const string Cyan = "\u001b[36m";
+    /// <summary> ANSI bright-black sequence used for subdued UI chrome. </summary>
     private const string BrightBlack = "\u001b[90m";
+    /// <summary> ANSI green sequence used for syntax node labels. </summary>
     private const string Green = "\u001b[32m";
+    /// <summary> ANSI blue sequence used for token labels. </summary>
     private const string Blue = "\u001b[34m";
+    /// <summary> ANSI magenta sequence used for matching-keyword annotations. </summary>
     private const string Magenta = "\u001b[35m";
 
+    /// <summary> Shared JSON settings for renderer DTO deserialization. </summary>
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -176,7 +187,7 @@ internal static class SerializedAnalysisRenderer
         sb.AppendLine("Token Stream");
         sb.AppendLine();
 
-        for (int i = 0; i < lexer.Tokens.Count; i++)
+        for (int i = 0; i < lexer.Tokens.Length; i++)
         {
             SerializedLexerTokenInfo token = lexer.Tokens[i];
             string matchingKind = string.IsNullOrEmpty(token.MatchingKind)
@@ -192,7 +203,7 @@ internal static class SerializedAnalysisRenderer
             sb.Append(Colorize("  ", Dim, useColor));
             sb.Append(Colorize(FormatSpan(token.Span), Dim, useColor));
 
-            if (token.LeadingTrivia.Count > 0 || token.TrailingTrivia.Count > 0)
+            if (token.LeadingTrivia.Length > 0 || token.TrailingTrivia.Length > 0)
             {
                 sb.Append(Colorize("  ", Dim, useColor));
                 sb.Append(Colorize(FormatTriviaSummary(token), Cyan, useColor));
@@ -242,10 +253,10 @@ internal static class SerializedAnalysisRenderer
 
         string childIndent = indent + (isLast ? "    " : "│   ");
 
-        for (int i = 0; i < node.Children.Count; i++)
+        for (int i = 0; i < node.Children.Length; i++)
         {
             SerializedParserChildInfo child = node.Children[i];
-            AppendParserNode(sb, child.Node, childIndent, i == node.Children.Count - 1, child.PropertyName, useColor);
+            AppendParserNode(sb, child.Node, childIndent, i == node.Children.Length - 1, child.PropertyName, useColor);
         }
     }
 
@@ -275,16 +286,16 @@ internal static class SerializedAnalysisRenderer
     /// Sorts diagnostics into source order before printing so output stays stable even if earlier
     /// stages reported diagnostics in a different sequence.
     /// </summary>
-    private static void PrintDiagnostics(TextWriter writer, IReadOnlyList<DiagnosticInfo> diagnostics, SourceBuffer buffer, bool useColor)
+    private static void PrintDiagnostics(TextWriter writer, DiagnosticInfo[] diagnostics, SourceBuffer buffer, bool useColor)
     {
-        List<(DiagnosticInfo Diagnostic, int Index)> orderedDiagnostics = [];
+        (DiagnosticInfo Diagnostic, int Index)[] orderedDiagnostics = new (DiagnosticInfo Diagnostic, int Index)[diagnostics.Length];
 
-        for (int i = 0; i < diagnostics.Count; i++)
-            orderedDiagnostics.Add((diagnostics[i], i));
+        for (int i = 0; i < diagnostics.Length; i++)
+            orderedDiagnostics[i] = (diagnostics[i], i);
 
         // Diagnostics are re-sorted here because production order reflects parser recovery paths,
         // while human readers expect source order.
-        orderedDiagnostics.Sort(static (left, right) =>
+        Array.Sort(orderedDiagnostics, static (left, right) =>
         {
             int byLine = left.Diagnostic.Span.StartLocation.Line.CompareTo(right.Diagnostic.Span.StartLocation.Line);
 
@@ -299,7 +310,7 @@ internal static class SerializedAnalysisRenderer
             return left.Index.CompareTo(right.Index);
         });
 
-        for (int i = 0; i < orderedDiagnostics.Count; i++)
+        for (int i = 0; i < orderedDiagnostics.Length; i++)
             PrintDiagnostic(writer, orderedDiagnostics[i].Diagnostic, buffer, useColor);
     }
 
@@ -569,13 +580,13 @@ internal static class SerializedAnalysisRenderer
     {
         StringBuilder sb = new();
 
-        if (token.LeadingTrivia.Count > 0)
+        if (token.LeadingTrivia.Length > 0)
         {
             sb.Append("leading: ");
             sb.Append(FormatTriviaKinds(token.LeadingTrivia));
         }
 
-        if (token.TrailingTrivia.Count > 0)
+        if (token.TrailingTrivia.Length > 0)
         {
             if (sb.Length > 0)
                 sb.Append(' ');
@@ -591,12 +602,12 @@ internal static class SerializedAnalysisRenderer
     /// Formats a trivia collection as a compact bracketed list of kinds, intentionally omitting the
     /// trivia text because the lexer view is optimized for scanability.
     /// </summary>
-    private static string FormatTriviaKinds(IReadOnlyList<SerializedSyntaxTriviaInfo> trivias)
+    private static string FormatTriviaKinds(SerializedSyntaxTriviaInfo[] trivias)
     {
         StringBuilder sb = new();
         sb.Append('[');
 
-        for (int i = 0; i < trivias.Count; i++)
+        for (int i = 0; i < trivias.Length; i++)
         {
             if (i > 0)
                 sb.Append(", ");
@@ -657,19 +668,13 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private static T DeserializeJson<T>(string json)
     {
-        T? value = JsonSerializer.Deserialize<T>(json, JsonOptions);
-
         // A null result here means the serialized contract drifted, which is a renderer bug rather
         // than a recoverable formatting oddity.
-        if (value is null)
-            throw new InvalidOperationException($"Failed to deserialize {typeof(T).Name}.");
-
+        T? value = JsonSerializer.Deserialize<T>(json, JsonOptions) ?? throw new InvalidOperationException($"Failed to deserialize {typeof(T).Name}.");
         return value;
     }
 
-    /// <summary>
-    /// Applies ANSI color only when the current rendering mode and output stream can support it.
-    /// </summary>
+    /// <summary> Applies ANSI color only when the current rendering mode and output stream can support it. </summary>
     private static string Colorize(string value, string color, bool useColor)
     {
         if (!useColor || !ShouldUseColor())
@@ -700,8 +705,11 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private readonly struct SourceLine
     {
+        /// <summary> Sliced line text with tabs preserved for renderer-specific expansion. </summary>
         public string Text { get; }
+        /// <summary> Absolute start offset of this line in the original source file. </summary>
         public int Start { get; }
+        /// <summary> Absolute end offset of this line in the original source file. </summary>
         public int End { get; }
 
         /// <summary>
@@ -722,11 +730,10 @@ internal static class SerializedAnalysisRenderer
     /// </summary>
     private sealed class SourceBuffer
     {
+        /// <summary> Parsed source lines used for diagnostics excerpt rendering. </summary>
         private readonly SourceLine[] lines;
 
-        /// <summary>
-        /// Gets the parsed line table used for excerpt rendering and span-to-line translation.
-        /// </summary>
+        /// <summary> Gets the parsed line table used for excerpt rendering and span-to-line translation. </summary>
         public SourceLine[] Lines => lines;
 
         /// <summary>
@@ -744,9 +751,7 @@ internal static class SerializedAnalysisRenderer
         /// </summary>
         public static SourceBuffer Load(string filePath) => new(File.ReadAllText(filePath));
 
-        /// <summary>
-        /// Maps an absolute character offset to its containing line via binary search.
-        /// </summary>
+        /// <summary> Maps an absolute character offset to its containing line via binary search. </summary>
         public int GetLineIndex(int position)
         {
             int lower = 0;
@@ -777,9 +782,11 @@ internal static class SerializedAnalysisRenderer
         /// </summary>
         private static SourceLine[] ParseLines(string text)
         {
-            List<SourceLine> parsedLines = [];
+            int lineCount = CountLines(text);
+            SourceLine[] parsedLines = new SourceLine[lineCount];
             int position = 0;
             int lineStart = 0;
+            int lineIndex = 0;
 
             while (position < text.Length)
             {
@@ -791,24 +798,51 @@ internal static class SerializedAnalysisRenderer
                     continue;
                 }
 
-                AddLine(parsedLines, text, lineStart, position);
+                AddLine(parsedLines, ref lineIndex, text, lineStart, position);
                 position += breakWidth;
                 lineStart = position;
             }
 
             if (position >= lineStart)
                 // Keep the final unterminated line visible in diagnostics output.
-                AddLine(parsedLines, text, lineStart, position);
+                AddLine(parsedLines, ref lineIndex, text, lineStart, position);
 
-            return [.. parsedLines];
+            return parsedLines;
         }
 
         /// <summary>
         /// Adds one parsed line using a sliced copy of the source text, which keeps later rendering
         /// logic simple and independent from the original full-text buffer.
         /// </summary>
-        private static void AddLine(List<SourceLine> lines, string text, int start, int end) =>
-            lines.Add(new SourceLine(text.Substring(start, end - start), start, end));
+        private static int CountLines(string text)
+        {
+            int position = 0;
+            int lineStart = 0;
+            int lineCount = 0;
+
+            while (position < text.Length)
+            {
+                int breakWidth = GetLineBreakWidth(text, position);
+
+                if (breakWidth == 0)
+                {
+                    position++;
+                    continue;
+                }
+
+                lineCount++;
+                position += breakWidth;
+                lineStart = position;
+            }
+
+            if (position >= lineStart)
+                lineCount++;
+
+            return lineCount;
+        }
+
+        private static void AddLine(SourceLine[] lines, ref int lineIndex, string text, int start, int end) =>
+            lines[lineIndex++] = new SourceLine(text.Substring(start, end - start), start, end);
 
         /// <summary>
         /// Recognizes the line terminator width at a given position so line parsing can treat CRLF
@@ -832,16 +866,34 @@ internal static class SerializedAnalysisRenderer
     /// <summary>
     /// DTO used by the renderer when consuming serialized span information from compiler output.
     /// </summary>
+    /// <param name="Start">Absolute start offset.</param>
+    /// <param name="Length">Span length in characters.</param>
+    /// <param name="End">Absolute end offset.</param>
+    /// <param name="StartLine">One-based start line.</param>
+    /// <param name="StartColumn">One-based start column.</param>
+    /// <param name="EndLine">One-based end line.</param>
+    /// <param name="EndColumn">One-based end column.</param>
     private sealed record SerializedTextSpanInfo(int Start, int Length, int End, int StartLine, int StartColumn, int EndLine, int EndColumn);
 
     /// <summary>
     /// DTO used by the renderer when consuming serialized trivia information from compiler output.
     /// </summary>
+    /// <param name="Kind">Serialized trivia kind.</param>
+    /// <param name="Text">Captured trivia text.</param>
+    /// <param name="Span">Span covered by the trivia.</param>
     private sealed record SerializedSyntaxTriviaInfo(string Kind, string Text, SerializedTextSpanInfo Span);
 
     /// <summary>
     /// Renderer-side view of one serialized token in the lexer debug payload.
     /// </summary>
+    /// <param name="Index">Zero-based token index.</param>
+    /// <param name="Kind">Serialized token kind.</param>
+    /// <param name="Text">Original token text.</param>
+    /// <param name="DisplayText">Preformatted display text supplied by the core serializer.</param>
+    /// <param name="MatchingKind">Optional matching keyword kind for identifier tokens.</param>
+    /// <param name="Span">Token span.</param>
+    /// <param name="LeadingTrivia">Trivia that precedes the token.</param>
+    /// <param name="TrailingTrivia">Trivia that follows the token.</param>
     private sealed record SerializedLexerTokenInfo(
         int Index,
         string Kind,
@@ -849,23 +901,37 @@ internal static class SerializedAnalysisRenderer
         string DisplayText,
         string? MatchingKind,
         SerializedTextSpanInfo Span,
-        IReadOnlyList<SerializedSyntaxTriviaInfo> LeadingTrivia,
-        IReadOnlyList<SerializedSyntaxTriviaInfo> TrailingTrivia);
+        SerializedSyntaxTriviaInfo[] LeadingTrivia,
+        SerializedSyntaxTriviaInfo[] TrailingTrivia);
 
     /// <summary>
     /// Root DTO for serialized lexer output.
     /// </summary>
-    private sealed record SerializedLexerInfo(string Kind, int TokenCount, IReadOnlyList<SerializedLexerTokenInfo> Tokens);
+    /// <param name="Kind">Serialized payload kind.</param>
+    /// <param name="TokenCount">Number of tokens in the stream.</param>
+    /// <param name="Tokens">Token payloads in source order.</param>
+    private sealed record SerializedLexerInfo(string Kind, int TokenCount, SerializedLexerTokenInfo[] Tokens);
 
     /// <summary>
     /// Associates a child parser node with the property name it came from so tree rendering can
     /// expose structural intent rather than only raw child order.
     /// </summary>
+    /// <param name="PropertyName">Name of the parent property that produced the child.</param>
+    /// <param name="Node">Child node payload.</param>
     private sealed record SerializedParserChildInfo(string PropertyName, SerializedParserNodeInfo Node);
 
     /// <summary>
     /// Renderer-side view of one serialized parser node.
     /// </summary>
+    /// <param name="NodeType">Serialized syntax node type.</param>
+    /// <param name="Span">Optional node span.</param>
+    /// <param name="TokenKind">Optional token kind for token-shaped nodes.</param>
+    /// <param name="Text">Original token text, when available.</param>
+    /// <param name="DisplayText">Preformatted display text supplied by the core serializer.</param>
+    /// <param name="MatchingKind">Optional matching keyword kind.</param>
+    /// <param name="LeadingTrivia">Leading trivia payload, if present.</param>
+    /// <param name="TrailingTrivia">Trailing trivia payload, if present.</param>
+    /// <param name="Children">Serialized child nodes in structural order.</param>
     private sealed record SerializedParserNodeInfo(
         string NodeType,
         SerializedTextSpanInfo? Span,
@@ -873,12 +939,14 @@ internal static class SerializedAnalysisRenderer
         string? Text,
         string? DisplayText,
         string? MatchingKind,
-        IReadOnlyList<SerializedSyntaxTriviaInfo>? LeadingTrivia,
-        IReadOnlyList<SerializedSyntaxTriviaInfo>? TrailingTrivia,
-        IReadOnlyList<SerializedParserChildInfo> Children);
+        SerializedSyntaxTriviaInfo[]? LeadingTrivia,
+        SerializedSyntaxTriviaInfo[]? TrailingTrivia,
+        SerializedParserChildInfo[] Children);
 
     /// <summary>
     /// Root DTO for serialized parser output.
     /// </summary>
+    /// <param name="Kind">Serialized payload kind.</param>
+    /// <param name="Root">Root parser node, if parsing succeeded.</param>
     private sealed record SerializedParserInfo(string Kind, SerializedParserNodeInfo? Root);
 }

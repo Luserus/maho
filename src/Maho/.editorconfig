@@ -2,3 +2,4 @@ root = true
 
 [*.cs]
 dotnet_style_namespace_match_folder = false
+dotnet_diagnostic.IDE0290.severity = none

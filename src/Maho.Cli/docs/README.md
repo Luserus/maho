@@ -4,14 +4,14 @@
 
 1. parse command-line options,
 2. resolve one file or many files,
-3. call `MahoCompiler`,
+3. call `MahoCompiler.AnalyzeFiles(...)` or the single-file helpers,
 4. render diagnostics and optional debug views to either the terminal or JSON files.
 
 ## Files in this folder
 
 - `Program.cs`: minimal process entrypoint.
 - `CommandLine.cs`: option parsing, file discovery, orchestration, output routing, and status messaging.
-- `SerializedAnalysisRenderer.cs`: turns serialized analysis JSON back into colored, human-readable terminal output.
+- `SerializedAnalysisRenderer.cs`: turns serialized analysis JSON back into colored, human-readable terminal output and reloads source text for diagnostics excerpts.
 - [`json-and-output-pipeline.md`](json-and-output-pipeline.md): detailed explanation of the CLI's `System.Text.Json` usage, renderer DTOs, and the print-vs-write-to-file flow.
 
 ## Entry point
@@ -26,7 +26,7 @@ This is intentionally tiny. All real behavior is delegated to `CommandLine.Run(a
 
 - ANSI color constants: centralized here so every terminal-facing status message uses the same palette.
 - `JsonOptions`: used for CLI-owned JSON envelopes, not for the core compiler's internal debug JSON serializer.
-- `statusLock` and `pendingStatusSeparator`: the important detail in this file. Analysis can run in parallel, but status messages still need predictable spacing and no interleaving on `stderr`.
+- `statusLock` and `pendingStatusSeparator`: the important detail in this file. The compiler now owns batch parallelism, but status messages still need predictable spacing and no interleaving on `stderr`.
 
 ### Nested types
 
@@ -35,7 +35,7 @@ This is intentionally tiny. All real behavior is delegated to `CommandLine.Run(a
 - `FileResult`: per-file execution result. It carries the source identity, the successful analysis payload when available, the caught error text when not, and whether that failure should be shown as a user-facing error or an internal compiler failure.
 - `AnalysisProgress`: tiny helper that owns the progress counter and synchronizes progress updates onto `stderr`.
 
-### `AnalysisProgress.ReportAnalyzing(string displayPath)`
+### `AnalysisProgress.ReportAnalyzed(string displayPath)`
 
 Worth noting because it increments progress under a lock and writes to `stderr`, not `stdout`. That separation lets normal output remain machine-readable when redirected, while progress stays ephemeral.
 
@@ -49,7 +49,7 @@ This is the canonical CLI control flow:
 2. reject incompatible combinations early,
 3. resolve the input path,
 4. expand directories into sorted `*.mh` files,
-5. analyze files in parallel,
+5. ask the compiler library to analyze the batch,
 6. emit debug output,
 7. emit diagnostics,
 8. emit final completion messages,
@@ -57,15 +57,16 @@ This is the canonical CLI control flow:
 
 Important details:
 
-- It keeps analysis parallel but output ordered by storing results first and rendering later.
+- file-level parallelism now lives in `MahoCompiler.AnalyzeFiles(...)`, not in the CLI,
+- output is still rendered in input order even though the compiler library may analyze files in parallel,
 - It explicitly blocks the combination "JSON diagnostics to stdout" plus "debug views to stdout", because both would compete for the same stream.
 - It returns `1` for either compiler errors or output write failures.
 
-### `AnalyzeFile(string filePath, string displayPath, AnalysisOutput output, AnalysisProgress? progress)`
+### `CreateFileResults(CompilerProjectAnalysisResult projectAnalysis, string displayRoot, bool multipleFiles, AnalysisProgress? progress)`
 
-This is the per-file safety boundary. It reports progress, calls `MahoCompiler.AnalyzeFile`, and catches exceptions so a single bad file or filesystem error becomes a `FileResult` instead of crashing the entire batch.
-
-The key distinction here is `IsInternalError`: expected path/IO issues are surfaced as user-facing failures, while unexpected exceptions are tagged as internal failures.
+This converts compiler-owned batch results into CLI-facing `FileResult` values by adding display
+paths and optional progress reporting. The CLI no longer decides how files run in parallel; it only
+adapts the ordered compiler result into renderable terminal output.
 
 ### `BuildDebugOutput(string inputPath, IReadOnlyList<FileResult> results)`
 

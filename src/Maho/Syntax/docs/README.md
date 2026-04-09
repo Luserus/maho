@@ -10,12 +10,13 @@ This is the densest structural part of the repository today. Even if the semanti
 - how parser/lexer state is exposed to debug tooling,
 - and where future semantic work will attach once syntax is no longer the only mature stage.
 
-The docs here go deep on structure and navigation, but intentionally stop short of adding in-code comments to parser/lexer/resolution files until that logic settles.
+The docs here go deep on structure and navigation, and they aim to stay in sync with the parser, lexer, and debug serialization code as it evolves.
 
 ## Top-level files
 
 - `SyntaxNode.cs`: common base type for syntax nodes.
 - `CompilationUnit.cs`: root node.
+- `SyntaxTree.cs`: batch-level parse result that groups all compilation units once parsing is done.
 - `TopLevel.cs`, `Member.cs`, `Local.cs`: category base types used to separate grammar layers.
 - `Token.cs`: syntax token object, including trivia and matching-keyword metadata.
 - `SyntaxTrivia.cs` and `SyntaxTriviaKind.cs`: whitespace/comment side-channel attached to tokens.
@@ -41,9 +42,11 @@ When analysis runs through syntax today, the path is effectively:
 
 1. `SourceText` exposes characters and line boundaries.
 2. `Lexer` consumes that text and produces `Token` objects plus trivia.
-3. `Parser` consumes the token stream and produces a `CompilationUnit`.
-4. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
-5. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
+3. Each `Parser` consumes one token stream and produces one `CompilationUnit`.
+4. Once every file has been parsed, those roots are grouped into a `SyntaxTree`.
+5. Resolution starts only after that project-wide syntax boundary exists.
+6. Diagnostics reported during both stages accumulate in the shared diagnostics manager.
+7. Debug partials project the token stream and syntax tree into serializer-friendly DTOs.
 
 That means syntax is both a computation layer and a long-lived data model.
 
@@ -66,6 +69,19 @@ The root node. It owns:
 
 - `Members`: top-level syntax items
 - `EndToken`: the terminal EOF token
+
+### `SyntaxTree`
+
+The project-level syntax handoff. It owns:
+
+- `Name`: stable identity for the parsed batch
+- `Roots`: all parsed compilation units
+
+This is the intentional barrier between parsing and resolution. Parsers can run independently per
+file, but semantic passes start only after the final `SyntaxTree` has been assembled.
+
+It also inherits `SyntaxNode`, so it acts as the real root-of-roots node for project-wide semantic
+state rather than merely being an external container object.
 
 ### `TopLevel`, `Member`, `Local`
 
@@ -121,7 +137,7 @@ The lexer has a similar split:
 
 These are the syntax-side methods that matter for CLI/debug features.
 
-### `Lexer.ToJson()`
+### `Lexer.ToString()`
 
 Defined in `Lexer.Debug.cs`. It walks `Tokens` and projects each one into `DebugLexerTokenInfo`, including:
 
@@ -133,7 +149,7 @@ Defined in `Lexer.Debug.cs`. It walks `Tokens` and projects each one into `Debug
 
 This is the syntax-side producer for the CLI's token stream view and debug JSON output.
 
-### `Parser.ToJson()`
+### `Parser.ToString()`
 
 Defined in `Parser.Debug.cs`. It serializes the parser root into a tree of `DebugParserNodeInfo`.
 

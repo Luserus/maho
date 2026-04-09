@@ -48,7 +48,7 @@ These are the shared declaration nouns.
 - `LocalTypeDeclaration`
 - `LocalFunctionDeclaration`
 
-The repeated top-level/member/local variants are worth noting. They preserve grammatical context explicitly instead of storing one declaration node plus a context flag.
+The repeated top-level/member/local variants are worth noting. They preserve grammatical context explicitly instead of storing one declaration node plus a context flag, which keeps later semantic work from re-deriving placement rules.
 
 ## How to traverse this folder
 

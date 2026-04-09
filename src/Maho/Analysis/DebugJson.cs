@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Maho.Syntax;
@@ -20,9 +20,7 @@ internal static class DebugJson
         WriteIndented = true
     };
 
-    /// <summary>
-    /// Serializes a debug payload using the compiler's shared JSON conventions for inspection data.
-    /// </summary>
+    /// <summary> Serializes a debug payload using the compiler's shared JSON conventions for inspection data. </summary>
     public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, SerializerOptions);
 
     /// <summary>
@@ -48,11 +46,11 @@ internal static class DebugJson
     /// Projects trivia into a serializable form that preserves kind, captured text, and span data
     /// for downstream renderers and snapshot-style tests.
     /// </summary>
-    public static DebugSyntaxTriviaInfo[] CreateTrivia(SourceText text, IReadOnlyList<SyntaxTrivia> trivias)
+    public static DebugSyntaxTriviaInfo[] CreateTrivia(SourceText text, ReadOnlySpan<SyntaxTrivia> trivias)
     {
-        DebugSyntaxTriviaInfo[] triviaItems = new DebugSyntaxTriviaInfo[trivias.Count];
+        DebugSyntaxTriviaInfo[] triviaItems = new DebugSyntaxTriviaInfo[trivias.Length];
 
-        for (int i = 0; i < trivias.Count; i++)
+        for (int i = 0; i < trivias.Length; i++)
         {
             SyntaxTrivia trivia = trivias[i];
             // Capture the original trivia text as well as the kind so downstream tooling can choose
@@ -85,9 +83,7 @@ internal static class DebugJson
     };
 }
 
-/// <summary>
-/// Serialized representation of a source span used in debug payloads.
-/// </summary>
+/// <summary> Serialized representation of a source span used in debug payloads. </summary>
 internal sealed record DebugTextSpanInfo(
     int Start,
     int Length,
@@ -97,14 +93,10 @@ internal sealed record DebugTextSpanInfo(
     int EndLine,
     int EndColumn);
 
-/// <summary>
-/// Serialized representation of one trivia item attached to a token.
-/// </summary>
+/// <summary> Serialized representation of one trivia item attached to a token. </summary>
 internal sealed record DebugSyntaxTriviaInfo(string Kind, string Text, DebugTextSpanInfo Span);
 
-/// <summary>
-/// Serialized representation of one token in lexer debug output.
-/// </summary>
+/// <summary> Serialized representation of one token in lexer debug output. </summary>
 internal sealed record DebugLexerTokenInfo(
     int Index,
     string Kind,
@@ -112,22 +104,16 @@ internal sealed record DebugLexerTokenInfo(
     string DisplayText,
     string? MatchingKind,
     DebugTextSpanInfo Span,
-    IReadOnlyList<DebugSyntaxTriviaInfo> LeadingTrivia,
-    IReadOnlyList<DebugSyntaxTriviaInfo> TrailingTrivia);
+    DebugSyntaxTriviaInfo[] LeadingTrivia,
+    DebugSyntaxTriviaInfo[] TrailingTrivia);
 
-/// <summary>
-/// Root payload for serialized lexer debug output.
-/// </summary>
-internal sealed record DebugLexerInfo(string Kind, int TokenCount, IReadOnlyList<DebugLexerTokenInfo> Tokens);
+/// <summary> Root payload for serialized lexer debug output. </summary>
+internal sealed record DebugLexerInfo(string Kind, int TokenCount, DebugLexerTokenInfo[] Tokens);
 
-/// <summary>
-/// Associates a serialized parser child with the property name it originated from.
-/// </summary>
+/// <summary> Associates a serialized parser child with the property name it originated from. </summary>
 internal sealed record DebugParserChildInfo(string PropertyName, DebugParserNodeInfo Node);
 
-/// <summary>
-/// Serialized representation of one parser node or token in the debug tree.
-/// </summary>
+/// <summary> Serialized representation of one parser node or token in the debug tree. </summary>
 internal sealed record DebugParserNodeInfo(
     string NodeType,
     DebugTextSpanInfo? Span,
@@ -135,11 +121,9 @@ internal sealed record DebugParserNodeInfo(
     string? Text,
     string? DisplayText,
     string? MatchingKind,
-    IReadOnlyList<DebugSyntaxTriviaInfo>? LeadingTrivia,
-    IReadOnlyList<DebugSyntaxTriviaInfo>? TrailingTrivia,
-    IReadOnlyList<DebugParserChildInfo> Children);
+    DebugSyntaxTriviaInfo[]? LeadingTrivia,
+    DebugSyntaxTriviaInfo[]? TrailingTrivia,
+    DebugParserChildInfo[] Children);
 
-/// <summary>
-/// Root payload for serialized parser debug output.
-/// </summary>
+/// <summary> Root payload for serialized parser debug output. </summary>
 internal sealed record DebugParserInfo(string Kind, DebugParserNodeInfo? Root);

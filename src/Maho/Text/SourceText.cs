@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Text;
@@ -78,24 +77,13 @@ internal sealed class SourceText : IDisposable
         lazyLines = ParseLines();
     }
 
-    /// <summary>
-    /// Returns true if the characters at [position, position + value.Length)
-    /// exactly match value, without allocating a substring.
-    /// </summary>
-    public bool MatchesAt(int position, ReadOnlySpan<char> value)
+    /// <summary> Returns a non-allocating character view over one source span. </summary>
+    public ReadOnlySpan<char> AsSpan(TextSpan span)
     {
-        var text = EnsureText();
+        if (span.Length == 0)
+            return [];
 
-        if (position < 0 || position + value.Length > text.Length)
-            return false;
-
-        for (int i = 0; i < value.Length; i++)
-        {
-            if (text[position + i] != value[i])
-                return false;
-        }
-
-        return true;
+        return EnsureText().AsSpan(span.Start, span.Length);
     }
 
     public override string ToString() => EnsureText();
@@ -137,9 +125,11 @@ internal sealed class SourceText : IDisposable
     private TextLine[] ParseLines()
     {
         var text = EnsureText();
-        var lines = new List<TextLine>();
+        int lineCount = CountLines(text);
+        TextLine[] lines = new TextLine[lineCount];
         int position = 0;
         int lineStart = 0;
+        int lineIndex = 0;
 
         while (position < text.Length)
         {
@@ -151,24 +141,51 @@ internal sealed class SourceText : IDisposable
                 continue;
             }
 
-            AddLine(lines, position, lineStart, breakWidth);
+            AddLine(lines, ref lineIndex, position, lineStart, breakWidth);
             position += breakWidth;
             lineStart = position;
         }
 
         // Keep the trailing unterminated line addressable; diagnostics rely on this behavior.
         if (position >= lineStart)
-            AddLine(lines, position, lineStart, 0);
+            AddLine(lines, ref lineIndex, position, lineStart, 0);
 
-        lazyLines = [.. lines];
+        lazyLines = lines;
         return lazyLines;
     }
 
-    private void AddLine(List<TextLine> lines, int position, int start, int breakWidth)
+    private static int CountLines(string text)
+    {
+        int position = 0;
+        int lineStart = 0;
+        int lineCount = 0;
+
+        while (position < text.Length)
+        {
+            int breakWidth = GetLineBreakWidth(text, position);
+
+            if (breakWidth == 0)
+            {
+                position++;
+                continue;
+            }
+
+            lineCount++;
+            position += breakWidth;
+            lineStart = position;
+        }
+
+        if (position >= lineStart)
+            lineCount++;
+
+        return lineCount;
+    }
+
+    private void AddLine(TextLine[] lines, ref int lineIndex, int position, int start, int breakWidth)
     {
         int length = position - start;
         int lengthIncludingBreak = length + breakWidth;
-        lines.Add(new TextLine(this, start, length, lengthIncludingBreak));
+        lines[lineIndex++] = new TextLine(this, start, length, lengthIncludingBreak);
     }
 
     private static int GetLineBreakWidth(string text, int position)

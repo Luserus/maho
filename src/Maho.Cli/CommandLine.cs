@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading.Tasks;
 
 namespace Maho.Cli;
 
@@ -15,17 +14,24 @@ namespace Maho.Cli;
 /// </summary>
 internal static class CommandLine
 {
+    /// <summary> ANSI reset sequence used after colorized terminal output. </summary>
     private const string Reset = "\u001b[0m";
+    /// <summary> ANSI dim sequence used for low-emphasis status text and file paths. </summary>
     private const string Dim = "\u001b[2m";
+    /// <summary> ANSI cyan sequence used for progress labels and informational accents. </summary>
     private const string Cyan = "\u001b[36m";
+    /// <summary> ANSI bright-black sequence used for subdued status text. </summary>
     private const string BrightBlack = "\u001b[90m";
 
+    /// <summary> Reused JSON settings for CLI-owned envelopes written to disk or stdout. </summary>
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
     };
+    /// <summary> Synchronizes status and progress messages so stderr output stays readable. </summary>
     private static readonly object statusLock = new();
+    /// <summary> Tracks whether the next status message should be preceded by a blank separator line. </summary>
     private static bool pendingStatusSeparator;
 
     /// <summary>
@@ -34,7 +40,9 @@ internal static class CommandLine
     /// </summary>
     private enum DiagnosticOutputFormat : byte
     {
+        /// <summary> Emit a text diagnostics report intended for terminal consumption. </summary>
         Text,
+        /// <summary> Emit diagnostics as a JSON envelope for downstream tooling. </summary>
         Json
     }
 
@@ -82,6 +90,7 @@ internal static class CommandLine
     /// </summary>
     private sealed class AnalysisProgress(int totalFiles)
     {
+        /// <summary> Number of files already reported as analyzed. </summary>
         private int analyzedFiles;
 
         /// <summary>
@@ -146,26 +155,16 @@ internal static class CommandLine
             return 1;
         }
 
-        if (!TryResolveInputFiles(sourcePath, out List<string> files, out string displayRoot, out string? resolutionError))
+        if (!TryResolveInputFiles(sourcePath, out string[] files, out string displayRoot, out string? resolutionError))
         {
             Console.Error.WriteLine(resolutionError);
             return 1;
         }
 
-        bool multipleFiles = files.Count > 1;
-        FileResult[] results = new FileResult[files.Count];
-        AnalysisProgress? progress = options.ShowProgress ? new AnalysisProgress(files.Count) : null;
-
-        // Analysis is embarrassingly parallel at the file level, so we fan out here and delay all
-        // user-visible rendering until the ordered results array has been filled in.
-        Parallel.For(0, files.Count, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, index =>
-        {
-            string filePath = files[index];
-            // Multi-file runs should display paths relative to the input root, while single-file
-            // runs keep the fully resolved path that the user actually invoked.
-            string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, filePath) : filePath;
-            results[index] = AnalyzeFile(filePath, displayPath, options.Output, progress);
-        });
+        bool multipleFiles = files.Length > 1;
+        AnalysisProgress? progress = options.ShowProgress ? new AnalysisProgress(files.Length) : null;
+        CompilerProjectAnalysisResult projectAnalysis = MahoCompiler.AnalyzeFiles(files, options.Output, sourcePath);
+        FileResult[] results = CreateFileResults(projectAnalysis, displayRoot, multipleFiles, progress);
 
         bool hasErrors = false;
 
@@ -173,7 +172,8 @@ internal static class CommandLine
             hasErrors |= results[i].HasErrors;
 
         bool writeFailed = false;
-        List<string> completionMessages = [];
+        string[] completionMessages = new string[2];
+        int completionMessageCount = 0;
 
         if (options.EmitPath is not null)
         {
@@ -186,7 +186,7 @@ internal static class CommandLine
             }
             else
             {
-                completionMessages.Add($"Stored JSON output at {fullOutputPath}.");
+                completionMessages[completionMessageCount++] = $"Stored JSON output at {fullOutputPath}.";
             }
         }
         else
@@ -225,7 +225,7 @@ internal static class CommandLine
             }
             else
             {
-                completionMessages.Add($"Stored diagnostics at {fullDiagnosticsPath}.");
+                completionMessages[completionMessageCount++] = $"Stored diagnostics at {fullDiagnosticsPath}.";
             }
         }
         else if (!string.IsNullOrEmpty(diagnosticsOutput))
@@ -238,7 +238,7 @@ internal static class CommandLine
         {
             WriteStatusSeparatorIfNeeded();
 
-            for (int i = 0; i < completionMessages.Count; i++)
+            for (int i = 0; i < completionMessageCount; i++)
                 WriteStatus(completionMessages[i]);
 
             WriteStatusSeparatorIfNeeded();
@@ -248,34 +248,33 @@ internal static class CommandLine
     }
 
     /// <summary>
-    /// Runs analysis for one file and converts thrown exceptions into a renderable result so a
-    /// directory-wide batch can continue even when one file or path fails.
+    /// Converts compiler-owned batch analysis results into CLI file results, adding display paths
+    /// and optional progress reporting without taking back ownership of parallel execution.
     /// </summary>
-    private static FileResult AnalyzeFile(string filePath, string displayPath, AnalysisOutput output, AnalysisProgress? progress)
+    private static FileResult[] CreateFileResults(CompilerProjectAnalysisResult projectAnalysis, string displayRoot, bool multipleFiles, AnalysisProgress? progress)
     {
-        try
+        FileResult[] results = new FileResult[projectAnalysis.Files.Length];
+
+        for (int i = 0; i < projectAnalysis.Files.Length; i++)
         {
-            CompilerAnalysisResult analysis = MahoCompiler.AnalyzeFile(filePath, output);
+            CompilerBatchFileResult file = projectAnalysis.Files[i];
+            string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, file.SourcePath) : file.SourcePath;
+            results[i] = new FileResult(file.SourcePath, displayPath, file.Analysis, file.AnalysisError, file.IsInternalError, file.HasErrors);
             progress?.ReportAnalyzed(displayPath);
-            return new FileResult(filePath, displayPath, analysis, null, IsInternalError: false, analysis.HasErrors);
         }
-        catch (Exception ex)
-        {
-            // Batch runs should never crash the entire process on one file. We capture the failure
-            // and classify it so the renderer can distinguish user mistakes from compiler faults.
-            return new FileResult(filePath, displayPath, null, FormatAnalysisError(ex, filePath), IsInternalError: !IsUserFacingError(ex), HasErrors: true);
-        }
+
+        return results;
     }
 
     /// <summary>
     /// Creates the top-level JSON document used when the CLI emits debug artifacts to disk,
     /// preserving per-file identity and diagnostics alongside lexer/parser payloads.
     /// </summary>
-    private static string BuildDebugOutput(string inputPath, IReadOnlyList<FileResult> results)
+    private static string BuildDebugOutput(string inputPath, FileResult[] results)
     {
         JsonArray fileArray = [];
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
             JsonObject fileObject = new()
@@ -316,11 +315,11 @@ internal static class CommandLine
     /// Renders a complete human-readable diagnostics report across all analyzed files, including
     /// contextual diagnostics for successful analyses and formatted fallback blocks for failures.
     /// </summary>
-    private static string BuildDiagnosticsTextOutput(IReadOnlyList<FileResult> results, bool useColor)
+    private static string BuildDiagnosticsTextOutput(FileResult[] results, bool useColor)
     {
         StringBuilder sb = new();
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
 
@@ -349,11 +348,11 @@ internal static class CommandLine
     /// Packages diagnostics into a deterministic JSON envelope that mirrors the CLI's multi-file
     /// execution model, even when some files failed before producing structured diagnostics.
     /// </summary>
-    private static string BuildDiagnosticsJsonOutput(string inputPath, IReadOnlyList<FileResult> results)
+    private static string BuildDiagnosticsJsonOutput(string inputPath, FileResult[] results)
     {
         JsonArray fileArray = [];
 
-        for (int i = 0; i < results.Count; i++)
+        for (int i = 0; i < results.Length; i++)
         {
             FileResult result = results[i];
             JsonObject fileObject = new()
@@ -412,7 +411,7 @@ internal static class CommandLine
     /// Expands the user-selected input into the concrete file set the CLI will analyze. Directory
     /// results are sorted ordinally so repeated runs produce stable output ordering.
     /// </summary>
-    private static bool TryResolveInputFiles(string sourcePath, out List<string> files, out string displayRoot, out string? errorMessage)
+    private static bool TryResolveInputFiles(string sourcePath, out string[] files, out string displayRoot, out string? errorMessage)
     {
         files = [];
         displayRoot = sourcePath;
@@ -421,7 +420,7 @@ internal static class CommandLine
         {
             if (File.Exists(sourcePath))
             {
-                files.Add(sourcePath);
+                files = [sourcePath];
                 errorMessage = null;
                 return true;
             }
@@ -431,9 +430,10 @@ internal static class CommandLine
                 displayRoot = sourcePath;
                 // Sort explicitly so recursive directory traversal cannot leak filesystem ordering
                 // differences into CLI output or golden files.
-                files = [.. Directory.GetFiles(sourcePath, "*.mh", SearchOption.AllDirectories).OrderBy(static path => path, StringComparer.Ordinal)];
+                files = Directory.GetFiles(sourcePath, "*.mh", SearchOption.AllDirectories);
+                Array.Sort(files, StringComparer.Ordinal);
 
-                if (files.Count == 0)
+                if (files.Length == 0)
                 {
                     errorMessage = $"No '.mh' files were found in directory: {sourcePath}";
                     return false;

@@ -8,23 +8,35 @@ namespace Maho.Syntax;
 /// <summary> Parses the program tokens into Syntax Tree. </summary>
 internal sealed partial class Parser
 {
+    /// <summary> Trie node used to recognize multi-token operator sequences during Pratt parsing. </summary>
     private sealed class OperatorTrieNode
     {
+        /// <summary> Outgoing operator-sequence edges keyed by the token's source character. </summary>
         public Dictionary<char, OperatorTrieNode> Next { get; } = [];
+        /// <summary> Concrete operator kind represented at this trie node when one sequence ends here. </summary>
         public TokenKind? Kind { get; set; } = null;
     }
 
-     private readonly struct OperatorEntry
+    /// <summary> Binding-power metadata for one operator token inside the Pratt parser table. </summary>
+    private readonly struct OperatorEntry
     {
+        /// <summary> Token kind this table entry describes. </summary>
         public TokenKind Kind { get; }
+        /// <summary> Role flags indicating whether the operator is legal in prefix/infix/postfix positions. </summary>
         public OperatorRole Role { get; }
+        /// <summary> Left binding power used when the operator appears after an already-parsed expression. </summary>
         public int LeftBindingPower { get; }
+        /// <summary> Right binding power used while parsing the operator's operand or right-hand side. </summary>
         public int RightBindingPower { get; }
 
+        /// <summary> Indicates whether the operator can begin a prefix expression. </summary>
         public bool IsPrefix => (Role & OperatorRole.Prefix) != 0;
+        /// <summary> Indicates whether the operator can appear between two expressions. </summary>
         public bool IsInfix => (Role & OperatorRole.Infix) != 0;
+        /// <summary> Indicates whether the operator can trail an already-parsed expression. </summary>
         public bool IsPostfix => (Role & OperatorRole.Postfix) != 0;
 
+        /// <summary> Creates one operator-table entry with its role and binding powers. </summary>
         public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp)
         {
             Kind = kind;
@@ -34,6 +46,7 @@ internal sealed partial class Parser
         }
     }
 
+    /// <summary> Role flags used to describe how one token kind behaves in expression parsing. </summary>
     [System.Flags]
     private enum OperatorRole : byte
     {
@@ -95,28 +108,36 @@ internal sealed partial class Parser
     private int current;
     /// <summary> Current Token being read from the token list. </summary>
     private Token CurrentToken => tokens[current];
+    /// <summary> Most recently consumed token, or the first token before any consumption has happened. </summary>
     private Token PreviousToken => current > 0 ? tokens[current - 1] : tokens[0];
 
+    /// <summary> Parsed root produced by the last successful call to <see cref="Parse"/>. </summary>
     public CompilationUnit Root { get; private set; } = null!;
 
+    /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                             MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const;
+    /// <summary> Indicates whether the current token can begin a type declaration. </summary>
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
+    /// <summary> Controls whether statement parsing should allow a trailing expression result. </summary>
     private enum StatementParseMode : byte
     {
         Normal,
         AllowFinalExpression
     }
 
+    /// <summary> Chooses which source location to use when synthesizing a missing token. </summary>
     private enum MissingTokenAnchor : byte
     {
         BeforeCurrent,
         AfterPrevious
     }
 
+    /// <summary> Builds the shared operator trie once for the parser type. </summary>
     static Parser() => operatorTrie = BuildOperatorTrie();
 
+    /// <summary> Creates a parser over one token stream and shared diagnostics sink. </summary>
     public Parser(SourceText text, DiagnosticsManager diagnostics)
     {
         this.text = text;
@@ -125,15 +146,19 @@ internal sealed partial class Parser
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
-    public void Parse(List<Token> tokens)
+    public CompilationUnit Parse(List<Token> tokens)
     {
         this.tokens = FilterTokens(tokens);
         current = default;
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
+        return compilationUnit;
     }
 
+    /// <summary> Removes bad tokens that the parser should treat only through diagnostics, not syntax structure. </summary>
+    /// <param name="sourceTokens">Raw token stream emitted by the lexer.</param>
+    /// <returns>Filtered token list safe for parser traversal.</returns>
     private static List<Token> FilterTokens(List<Token> sourceTokens)
     {
         List<Token> filtered = new List<Token>(sourceTokens.Count);
@@ -149,11 +174,11 @@ internal sealed partial class Parser
         return filtered;
     }
 
+    /// <summary> Recognizes token kinds that can stand in for literal expressions during parsing. </summary>
     private static bool IsLiteralTokenKind(TokenKind kind) =>
         kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String;
 
-    
-
+    /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()
     {
         var topLevels = new List<TopLevel>();
@@ -171,6 +196,7 @@ internal sealed partial class Parser
         return new CompilationUnit(topLevels, eofToken);
     }
 
+    /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
     private static OperatorTrieNode BuildOperatorTrie()
     {
         var root = new OperatorTrieNode();
@@ -193,6 +219,7 @@ internal sealed partial class Parser
         return root;
     }
 
+    /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
     private TopLevel ParseTopLevel()
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
@@ -203,6 +230,7 @@ internal sealed partial class Parser
         return ParseTopLevelStatement();
     }
 
+    /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember()
     {
         var modifiers = ParseModifiers();
@@ -213,6 +241,7 @@ internal sealed partial class Parser
             return ParseMemberFieldDeclarationOrFunction(modifiers);
     }
 
+    /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
         if (IsCurrentTokenModifier)
@@ -221,6 +250,7 @@ internal sealed partial class Parser
         return ParseLocalStatement(parseMode);
     }
 
+    /// <summary> Parses a comma-separated generic type-argument list up to the closing <c>&gt;</c>. </summary>
     private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
@@ -245,7 +275,8 @@ internal sealed partial class Parser
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
-    
+
+    /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
     private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
     {
         var lessThan = Consume();
@@ -281,6 +312,7 @@ internal sealed partial class Parser
         return (foundKind ?? TokenKind.NullToken, length);
     }
 
+    /// <summary> Consumes one logical operator token, combining adjacent raw tokens when necessary. </summary>
     private Token ConsumeOperator()
     {
         var (kind, length) = GetCombinedOperatorData();
@@ -302,17 +334,6 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
-    }
-
-    private static bool Contains(TokenKind[] kinds, TokenKind kind)
-    {
-        for (int i = 0; i < kinds.Length; i++)
-        {
-            if (kinds[i] == kind)
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>

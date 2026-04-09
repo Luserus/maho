@@ -3,11 +3,15 @@ using Maho.Text;
 
 namespace Maho.Syntax;
 
+/// <summary> Lookahead helpers used by the parser to disambiguate grammar shapes without committing input. </summary>
 internal sealed partial class Parser
 {
+    /// <summary> Independent cursor used while speculative parsing walks ahead of the real parser position. </summary>
     private int lookaheadCurrent;
+    /// <summary> Token currently under the speculative lookahead cursor. </summary>
     private Token LookaheadCurrentToken => tokens[lookaheadCurrent];
 
+    /// <summary> Explains why a speculative parse succeeded or failed while disambiguating grammar. </summary>
     private enum LookaheadResultContext
     {
         Success,
@@ -19,6 +23,7 @@ internal sealed partial class Parser
         IsLeftParen
     }
 
+    /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeGenericArguments(bool fromLookahead = false)
     {
         if (!fromLookahead)
@@ -60,6 +65,7 @@ internal sealed partial class Parser
         return (true, LookaheadResultContext.Success);
     }
 
+    /// <summary> Checks whether the upcoming tokens form a plausible generic type-parameter clause. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeGenericParameters(bool fromLookahead = false)
     {
         if (!fromLookahead)
@@ -101,6 +107,7 @@ internal sealed partial class Parser
         return (true, LookaheadResultContext.Success);
     }
 
+    /// <summary> Checks whether the upcoming tokens look like a cast expression rather than grouping parentheses. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeCastExpression()
     {
         lookaheadCurrent = current;
@@ -126,6 +133,7 @@ internal sealed partial class Parser
         return (true, LookaheadResultContext.Success);
     }
 
+    /// <summary> Checks whether the upcoming tokens look like a variable declaration. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeVariableDeclaration()
     {
         lookaheadCurrent = current;
@@ -146,6 +154,7 @@ internal sealed partial class Parser
         return (false, LookaheadResultContext.MissingDelimeter);
     }
 
+    /// <summary> Consumes the current speculative token and advances the lookahead cursor. </summary>
     private Token LookaheadConsume()
     {
         var currentToken = LookaheadCurrentToken;
@@ -153,8 +162,10 @@ internal sealed partial class Parser
         return currentToken;
     }
 
+    /// <summary> Peeks ahead in the speculative token stream without advancing the cursor. </summary>
     private Token LookaheadPeek(int offset = 1) => lookaheadCurrent + offset < tokens.Count ? tokens[lookaheadCurrent + offset] : tokens[^1];
 
+    /// <summary> Reads the longest combined operator sequence visible from the lookahead cursor. </summary>
     private (TokenKind Kind, int Length) LookaheadGetCombinedOperatorData()
     {
         var node = operatorTrie;
@@ -179,6 +190,7 @@ internal sealed partial class Parser
         return (foundKind ?? TokenKind.NullToken, length);
     }
 
+    /// <summary> Consumes one logical operator token from the speculative stream, combining raw tokens when needed. </summary>
     private Token LookaheadConsumeOperator()
     {
         var (kind, length) = LookaheadGetCombinedOperatorData();
@@ -202,6 +214,7 @@ internal sealed partial class Parser
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
+    /// <summary> Parses a speculative generic type-argument list without mutating real parser state. </summary>
     private (SeparatedSyntaxList<TypeSyntax> TypeArguments, bool Success) LookaheadParseTypeArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
@@ -234,7 +247,8 @@ internal sealed partial class Parser
 
         return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), true);
     }
-    
+
+    /// <summary> Parses one complete speculative generic argument clause, including its angle brackets. </summary>
     private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan, bool Success) LookaheadParseGenerics()
     {
         var lessThan = LookaheadConsume();
@@ -257,6 +271,7 @@ internal sealed partial class Parser
         return (lessThan, typeArguments, greaterThan, true);
     }
 
+    /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParseTypeSyntax()
     {
         var (type, success) = LookaheadParsePrimaryType();
@@ -279,6 +294,7 @@ internal sealed partial class Parser
         return (type, true);
     }
 
+    /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
     {
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
@@ -299,6 +315,7 @@ internal sealed partial class Parser
             return (new SimpleType(identifier), true);
     }
 
+    /// <summary> Speculatively parses a qualified type chain such as <c>A.B</c>. </summary>
     private (QualifiedType Type, bool Success) LookaheadParseQualifiedType(TypeSyntax firstPart)
     {
         var dot = LookaheadConsume();
@@ -310,6 +327,7 @@ internal sealed partial class Parser
         return (new QualifiedType(firstPart, dot, next), true);
     }
 
+    /// <summary> Speculatively parses a generic type name after its identifier has already been consumed. </summary>
     private (GenericType Type, bool Success) LookaheadParseGenericType(Token identifier)
     {
         var (lessThan, typeArguments, GreaterThan, success) = LookaheadParseGenerics();
@@ -320,6 +338,7 @@ internal sealed partial class Parser
         return (new GenericType(identifier, lessThan, typeArguments, GreaterThan), true);
     }
 
+    /// <summary> Speculatively parses zero or more postfix type modifiers such as arrays, pointers, references, or optionals. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParseModifiedType(TypeSyntax baseType)
     {
         TypeSyntax type = baseType;
@@ -344,6 +363,7 @@ internal sealed partial class Parser
         return (type, true);
     }
 
+    /// <summary> Speculatively parses an array type modifier. </summary>
     private (ArrayTypeModifier Type, bool Success) LookaheadParseArrayTypeModifier()
     {
         var openBracket = LookaheadConsume();
@@ -356,18 +376,21 @@ internal sealed partial class Parser
         return (new ArrayTypeModifier(openBracket, null, closeBracket), true);
     }
 
+    /// <summary> Speculatively parses a pointer type modifier. </summary>
     private (PointerTypeModifier Type, bool Success) LookaheadParsePointerTypeModifier()
     {
         var asterisk = LookaheadConsume();
         return (new PointerTypeModifier(asterisk), true);
     }
 
+    /// <summary> Speculatively parses an optional type modifier. </summary>
     private (OptionalTypeModifier Type, bool Success) LookaheadParseOptionalTypeModifier()
     {
         var questionMark = LookaheadConsume();
         return (new OptionalTypeModifier(questionMark), true);
     }
 
+    /// <summary> Speculatively parses a reference type modifier. </summary>
     private (ReferenceTypeModifier Type, bool Success) LookaheadParseReferenceTypeModifier()
     {
         var ampersand = LookaheadConsume();
@@ -401,6 +424,10 @@ internal sealed partial class Parser
         return list;
     }
 
+    /// <summary>
+    /// Speculatively parses name syntax for constructs that need to distinguish simple names from
+    /// generic names before the parser commits to a declaration path.
+    /// </summary>
     // Currently unused. Might be useful in the future so kept.
     private (NamedSyntax Type, bool Success) LookaheadParseNamedSyntax()
     {
@@ -412,6 +439,7 @@ internal sealed partial class Parser
             return (new SimpleName(name), true);
     }
 
+    /// <summary> Speculatively parses a generic name after its identifier has already been consumed. </summary>
     private (GenericName Type, bool Success) LookaheadParseGenericName(Token name)
     {
         var lessThan = LookaheadConsume();
@@ -428,6 +456,7 @@ internal sealed partial class Parser
         return (new GenericName(name, lessThan, typeParameters, greaterThan), true);
     }
 
+    /// <summary> Speculatively parses a generic type-parameter list. </summary>
     private (SeparatedSyntaxList<SimpleName> Type, bool Success) LookaheadParseTypeParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();

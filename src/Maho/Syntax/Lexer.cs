@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -8,12 +9,14 @@ namespace Maho.Syntax;
 /// <summary> Lexes the program string into tokens which is later passed to the Parser for syntactic analysis. </summary>
 internal sealed partial class Lexer
 {
+    /// <summary> Shared sink used to report lexer diagnostics against the current source buffer. </summary>
     private readonly DiagnosticsManager diagnostics;
     /// <summary> Current index of char being read from the program string. </summary>
     private int current;
     /// <summary> The source text of the program. </summary>
     private readonly SourceText text;
 
+    /// <summary> Character currently under the lexer cursor, or <c>'\0'</c> once the cursor moves past the end. </summary>
     private char CurrentChar => current >= text.Length ? '\0' : text[current];
 
     /// <summary> Tokens lexed by the Lexer. </summary>
@@ -21,6 +24,7 @@ internal sealed partial class Lexer
 
     /// <summary> Initializes a new instance of the Lexer class. </summary>
     /// <param name="sourceText"> Source text of the program. </param>
+    /// <param name="diagnosticsManager"> Shared diagnostics sink for invalid tokens and recovery messages. </param>
     public Lexer(SourceText sourceText, DiagnosticsManager diagnosticsManager)
     {
         text = sourceText;
@@ -28,7 +32,7 @@ internal sealed partial class Lexer
     }
 
     /// <summary> Lexes the program string into tokens with trivia. </summary>
-    public void Lex()
+    public List<Token> Lex()
     {
         while (current < text.Length)
         {
@@ -45,6 +49,8 @@ internal sealed partial class Lexer
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
         Tokens.Add(new(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
+
+        return Tokens;
     }
 
     /// <summary> Current token kind. </summary>
@@ -59,7 +65,7 @@ internal sealed partial class Lexer
         if (char.IsLetter(CurrentChar) || CurrentChar == '_')
         {
             kind = TokenKind.Identifier;
-            
+
             while (char.IsLetterOrDigit(Peek(0)) || CurrentChar == '_')
                 current++;
         }
@@ -111,6 +117,14 @@ internal sealed partial class Lexer
         return (span, kind);
     }
 
+    /// <summary>
+    /// Lexes a quoted literal until the matching terminator, tracking character payload length so
+    /// the lexer can diagnose malformed character literals without fully interpreting escapes.
+    /// </summary>
+    /// <param name="start">Source offset where the opening quote was seen.</param>
+    /// <param name="terminator">Expected closing quote character.</param>
+    /// <param name="tokenKind">Token kind to produce for the literal.</param>
+    /// <returns>The captured literal span together with the requested token kind.</returns>
     private (TextSpan Span, TokenKind Kind) LexQuotedLiteral(int start, char terminator, TokenKind tokenKind)
     {
         kind = tokenKind;
@@ -211,73 +225,75 @@ internal sealed partial class Lexer
         return [.. trivias];
     }
 
+    /// <summary> Maps an identifier span to its contextual keyword classification without allocating a managed string. </summary>
+    /// <param name="span">Identifier source span to classify.</param>
+    /// <returns>The matched contextual keyword kind, or <see cref="MatchingKeywordKind.None"/>.</returns>
     private MatchingKeywordKind MatchKeywordKind(TextSpan span)
     {
-        return text.ToString(span) switch
+        ReadOnlySpan<char> identifier = text.AsSpan(span);
+
+        return identifier.Length switch
         {
-            "if" => MatchingKeywordKind.If,
-            "else" => MatchingKeywordKind.Else,
-            "while" => MatchingKeywordKind.While,
-            "return" => MatchingKeywordKind.Return,
-            "public" => MatchingKeywordKind.Public,
-            "private" => MatchingKeywordKind.Private,
-            "internal" => MatchingKeywordKind.Internal,
-            "extern" => MatchingKeywordKind.Extern,
-            "protected" => MatchingKeywordKind.Protected,
-            "sealed" => MatchingKeywordKind.Sealed,
-            "namespace" => MatchingKeywordKind.Namespace,
-            "struct" => MatchingKeywordKind.Struct,
-            "class" => MatchingKeywordKind.Class,
-            "enum" => MatchingKeywordKind.Enum,
-            "union" => MatchingKeywordKind.Union,
-            "interface" => MatchingKeywordKind.Interface,
-            "static" => MatchingKeywordKind.Static,
-            "for" => MatchingKeywordKind.For,
-            "new" => MatchingKeywordKind.New,
-            "put" => MatchingKeywordKind.Put,
-            "const" => MatchingKeywordKind.Const,
+            2 when identifier.SequenceEqual("if") => MatchingKeywordKind.If,
+            3 when identifier.SequenceEqual("for") => MatchingKeywordKind.For,
+            3 when identifier.SequenceEqual("new") => MatchingKeywordKind.New,
+            3 when identifier.SequenceEqual("put") => MatchingKeywordKind.Put,
+            4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
+            4 when identifier.SequenceEqual("enum") => MatchingKeywordKind.Enum,
+            5 when identifier.SequenceEqual("while") => MatchingKeywordKind.While,
+            5 when identifier.SequenceEqual("class") => MatchingKeywordKind.Class,
+            5 when identifier.SequenceEqual("union") => MatchingKeywordKind.Union,
+            5 when identifier.SequenceEqual("const") => MatchingKeywordKind.Const,
+            6 when identifier.SequenceEqual("return") => MatchingKeywordKind.Return,
+            6 when identifier.SequenceEqual("public") => MatchingKeywordKind.Public,
+            6 when identifier.SequenceEqual("extern") => MatchingKeywordKind.Extern,
+            6 when identifier.SequenceEqual("sealed") => MatchingKeywordKind.Sealed,
+            6 when identifier.SequenceEqual("struct") => MatchingKeywordKind.Struct,
+            6 when identifier.SequenceEqual("static") => MatchingKeywordKind.Static,
+            7 when identifier.SequenceEqual("private") => MatchingKeywordKind.Private,
+            8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
+            9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,
+            9 when identifier.SequenceEqual("namespace") => MatchingKeywordKind.Namespace,
+            9 when identifier.SequenceEqual("interface") => MatchingKeywordKind.Interface,
             _ => MatchingKeywordKind.None,
         };
     }
 
     /// <summary> Returns the corresponding enum for the given operator character. Returns NullToken if no operator matches. </summary>
     /// <param name="ch"> The character to check against. </param>
-    private static (bool, TokenKind) IsOperator(char ch)
+    private static (bool, TokenKind) IsOperator(char ch) => ch switch
     {
-        return ch switch
-        {
-            '!' => (true, TokenKind.ExclamationMark),
-            '"' => (true, TokenKind.DoubleQuote),
-            '#' => (true, TokenKind.Octothorpe),
-            '%' => (true, TokenKind.Percentage),
-            '&' => (true, TokenKind.Ampersand),
-            '\'' => (true, TokenKind.SingleQuote),
-            '(' => (true, TokenKind.LeftParen),
-            ')' => (true, TokenKind.RightParen),
-            '*' => (true, TokenKind.Asterisk),
-            '+' => (true, TokenKind.Plus),
-            ',' => (true, TokenKind.Comma),
-            '-' => (true, TokenKind.Minus),
-            '.' => (true, TokenKind.Dot),
-            '/' => (true, TokenKind.ForwardSlash),
-            ':' => (true, TokenKind.Colon),
-            ';' => (true, TokenKind.Semicolon),
-            '<' => (true, TokenKind.LessThanSign),
-            '=' => (true, TokenKind.Equals),
-            '>' => (true, TokenKind.GreaterThanSign),
-            '?' => (true, TokenKind.QuestionMark),
-            '@' => (true, TokenKind.AtSymbol),
-            '[' => (true, TokenKind.LeftBracket),
-            '\\' => (true, TokenKind.BackwardSlash),
-            ']' => (true, TokenKind.RightBracket),
-            '^' => (true, TokenKind.Caret),
-            '`' => (true, TokenKind.Backtick),
-            '{' => (true, TokenKind.LeftBrace),
-            '}' => (true, TokenKind.RightBrace),
-            '~' => (true, TokenKind.Tilde),
-            _ => (false, TokenKind.NullToken)
-        };
-    }
+        '!' => (true, TokenKind.ExclamationMark),
+        '"' => (true, TokenKind.DoubleQuote),
+        '#' => (true, TokenKind.Octothorpe),
+        '%' => (true, TokenKind.Percentage),
+        '&' => (true, TokenKind.Ampersand),
+        '\'' => (true, TokenKind.SingleQuote),
+        '(' => (true, TokenKind.LeftParen),
+        ')' => (true, TokenKind.RightParen),
+        '*' => (true, TokenKind.Asterisk),
+        '+' => (true, TokenKind.Plus),
+        ',' => (true, TokenKind.Comma),
+        '-' => (true, TokenKind.Minus),
+        '.' => (true, TokenKind.Dot),
+        '/' => (true, TokenKind.ForwardSlash),
+        ':' => (true, TokenKind.Colon),
+        ';' => (true, TokenKind.Semicolon),
+        '<' => (true, TokenKind.LessThanSign),
+        '=' => (true, TokenKind.Equals),
+        '>' => (true, TokenKind.GreaterThanSign),
+        '?' => (true, TokenKind.QuestionMark),
+        '@' => (true, TokenKind.AtSymbol),
+        '[' => (true, TokenKind.LeftBracket),
+        '\\' => (true, TokenKind.BackwardSlash),
+        ']' => (true, TokenKind.RightBracket),
+        '^' => (true, TokenKind.Caret),
+        '`' => (true, TokenKind.Backtick),
+        '{' => (true, TokenKind.LeftBrace),
+        '}' => (true, TokenKind.RightBrace),
+        '~' => (true, TokenKind.Tilde),
+        _ => (false, TokenKind.NullToken)
+    };
 
     /// <summary> Peek ahead in the program string by specified offset. </summary>
     /// <param name="offset"> Offset by which to peek ahead. By default, it is 1. </param>

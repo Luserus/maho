@@ -1,5 +1,6 @@
 namespace Maho.Syntax;
 
+/// <summary> Enumerates identifiers that should be treated as contextual keywords by the lexer. </summary>
 internal enum MatchingKeywordKind : byte
 {
     None,
