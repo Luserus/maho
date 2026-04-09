@@ -387,6 +387,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(plan.TypeParameters, symbol, typeScope);
             symbol.ResolveTypeParameters(typeParameters);
+            ResolveTypeDeclarationClauses(plan.Declaration, symbol, typeParameters);
 
             DeclareMembers(plan.Members, typeScope, symbol);
             return symbol;
@@ -437,6 +438,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(plan.TypeParameters, symbol, functionScope);
             symbol.ResolveTypeParameters(typeParameters);
+            ResolveTypeConstraintClauses(plan.Declaration.Signature.Constraints, symbol, typeParameters);
 
             ParameterSymbol[] parameters = DeclareParameters(plan.Parameters, functionScope, symbol);
             symbol.ResolveParameters(parameters);
@@ -459,6 +461,39 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
 
             return symbol;
+        }
+
+        private void ResolveTypeDeclarationClauses(TypeDeclaration declaration, TypeSymbol symbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        {
+            if (declaration.Base is not null)
+                context.ResolveDeclaredSymbol(declaration.Base, symbol);
+
+            ResolveTypeConstraintClauses(declaration.Constraints, symbol, typeParameters);
+        }
+
+        private void ResolveTypeConstraintClauses(IReadOnlyList<TypeConstraintClause> clauses, Symbol ownerSymbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        {
+            foreach (TypeConstraintClause clause in clauses)
+            {
+                context.ResolveDeclaredSymbol(clause, ownerSymbol);
+                ResolveConstraintTypeParameter(clause.TypeParameter, typeParameters);
+            }
+        }
+
+        private void ResolveConstraintTypeParameter(SimpleName syntax, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        {
+            SymbolName name = SymbolName.FromToken(syntax.Name);
+
+            for (int i = 0; i < typeParameters.Length; i++)
+            {
+                TypeParameterSymbol symbol = typeParameters[i];
+
+                if (symbol.Name != name)
+                    continue;
+
+                context.ResolveDeclaredSymbol(syntax, symbol);
+                return;
+            }
         }
 
         private TypeParameterSymbol[] DeclareTypeParameters(TypeParameterPlan[] typeParameters, Symbol ownerSymbol, Scope ownerScope)
