@@ -16,8 +16,9 @@ internal enum ResolutionExecutionMode : byte
     /// </summary>
     ParallelUnitLocal,
     /// <summary>
-    /// Runs a parallel collection phase first, then merges those per-unit facts sequentially into
-    /// shared project state. This is the safest model for declaration-building passes.
+    /// Runs a parallel unit-local build phase first, then attaches those per-unit results
+    /// sequentially into shared project state. This is the safest model for declaration-building
+    /// passes that need real symbols or scopes before merge.
     /// </summary>
     ParallelCollectThenMerge
 }

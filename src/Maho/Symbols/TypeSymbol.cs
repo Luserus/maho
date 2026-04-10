@@ -7,7 +7,7 @@ namespace Maho.Symbols;
 internal sealed class TypeSymbol : DeclaredSymbol
 {
     /// <summary> Generic type parameters declared directly on this type, in source order. </summary>
-    private TypeParameterSymbol[] typeParameters = [];
+    public TypeParameterSymbol[] TypeParameters { get; private set; } = [];
     /// <summary> Cached metadata name including generic arity suffix when applicable. </summary>
     private string? metadataName;
 
@@ -17,8 +17,6 @@ internal sealed class TypeSymbol : DeclaredSymbol
     public override string MetadataName => metadataName ??= CreateMetadataName();
     /// <summary> Stable declaration key used to compare type declarations in one scope. </summary>
     public TypeDeclarationKey DeclarationKey { get; }
-    /// <summary> Declared generic parameters attached to this type. </summary>
-    public ReadOnlySpan<TypeParameterSymbol> TypeParameters => typeParameters;
 
     /// <summary> Creates one declared type symbol and its declaration key. </summary>
     public TypeSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int arity)
@@ -29,7 +27,7 @@ internal sealed class TypeSymbol : DeclaredSymbol
     }
 
     /// <summary> Records the resolved generic type parameters once symbol discovery has created them. </summary>
-    public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
+    public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => TypeParameters = resolvedTypeParameters;
 
     /// <summary> Builds the metadata-visible name lazily so analysis only pays for it on demand. </summary>
     private string CreateMetadataName() => Arity == 0 ? Name.ToString() : $"{Name}`{Arity}";

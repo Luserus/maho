@@ -18,9 +18,9 @@ internal sealed class Scope
     private readonly List<Symbol> declaredSymbols = [];
 
     /// <summary> Lexically enclosing scope, or <see langword="null"/> for the global scope. </summary>
-    public Scope? Parent { get; }
+    public Scope? Parent { get; private set; }
     /// <summary> Symbol that owns this scope when the scope corresponds to a declaration container. </summary>
-    public Symbol? OwnerSymbol { get; }
+    public Symbol? OwnerSymbol { get; private set; }
     /// <summary> Syntax node used as the semantic boundary for this scope. </summary>
     public SyntaxNode Boundary { get; }
     /// <summary> Directly nested child scopes. </summary>
@@ -40,6 +40,23 @@ internal sealed class Scope
     }
 
     /// <summary>
+    /// Reparents this scope under a new lexical container while keeping the child-scope tree in
+    /// sync. Symbol discovery uses this when attaching a unit-local declaration graph to the
+    /// canonical project graph.
+    /// </summary>
+    public void Reparent(Scope? parent, Symbol? ownerSymbol = null)
+    {
+        if (!ReferenceEquals(Parent, parent))
+        {
+            Parent?.children.Remove(this);
+            Parent = parent;
+            parent?.children.Add(this);
+        }
+
+        OwnerSymbol = ownerSymbol;
+    }
+
+    /// <summary>
     /// Registers a symbol in this scope without deciding whether the declaration is semantically
     /// legal. Duplicate and overload analysis happens later.
     /// </summary>
@@ -54,6 +71,23 @@ internal sealed class Scope
         }
 
         symbols.Add(symbol);
+    }
+
+    /// <summary>
+    /// Removes one previously declared symbol from this scope. The caller is responsible for
+    /// reattaching the symbol elsewhere when appropriate.
+    /// </summary>
+    public void Remove(Symbol symbol)
+    {
+        if (!symbolsByName.TryGetValue(symbol.Name, out List<Symbol>? symbols))
+            return;
+
+        symbols.Remove(symbol);
+
+        if (symbols.Count == 0)
+            symbolsByName.Remove(symbol.Name);
+
+        declaredSymbols.Remove(symbol);
     }
 
     /// <summary> Attempts to resolve symbols with the requested name declared directly in this scope. </summary>

@@ -1,466 +1,536 @@
 using System;
 using System.Collections.Generic;
-using Maho.Diagnostics;
 using Maho.Symbols;
 using Maho.Syntax;
-using Maho.Text;
 
 namespace Maho.Resolution;
 
 /// <summary>
-/// First semantic pass. Each compilation unit is collected into a unit-local declaration plan in
-/// parallel, then those plans are merged into the shared project symbol graph.
+/// First semantic pass. Each compilation unit builds a fully declared unit-local symbol/scope graph
+/// in parallel, then merge attaches those graphs into the shared project namespace and scope state.
 /// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
     /// <summary>
-    /// Symbol discovery is intentionally collect-then-merge so units can be scanned in parallel
-    /// without racing on shared project scope dictionaries.
+    /// Symbol discovery builds real per-unit declaration graphs in parallel, then attaches them to
+    /// canonical project-wide namespace and scope state in a deterministic merge phase.
     /// </summary>
     public override ResolutionExecutionMode ExecutionMode => ResolutionExecutionMode.ParallelCollectThenMerge;
 
-    /// <summary>
-    /// Collects a unit-local declaration plan without mutating shared semantic state. The returned
-    /// plan is merged later in a deterministic single-threaded phase.
-    /// </summary>
+    /// <summary> Collects one unit-local declaration graph without mutating shared project state. </summary>
     public override ResolutionPassUnitResult CollectUnit(ResolutionContext context) => new Collector(context.Root).Collect();
 
-    /// <summary>
-    /// Merges one unit's collected declaration plan into the real project scope/symbol graph.
-    /// Merge runs after collection so shared state changes happen in one controlled place.
-    /// </summary>
+    /// <summary> Attaches one unit's collected declaration graph into the real project symbol graph. </summary>
     public override void MergeUnit(ResolutionCoordinatorContext projectContext, ResolutionContext unitContext, ResolutionPassUnitResult? result)
     {
-        if (result is not UnitPlan plan)
+        if (result is not UnitGraph graph)
         {
-            unitContext.Diagnostics.ReportResolutionStateError(default, $"unit plan '{unitContext.Root.GetType().Name}'");
+            unitContext.Diagnostics.ReportResolutionStateError(default, $"unit declaration graph '{unitContext.Root.GetType().Name}'");
             return;
         }
 
-        new Merger(unitContext).Merge(plan);
+        new Merger(unitContext).Merge(graph);
     }
 
     /// <summary>
-    /// Pure syntax walker that converts one compilation unit into an immutable-ish declaration plan.
-    /// No semantic state is mutated here, which is what makes parallel collection safe.
+    /// Builds one compilation unit's declaration graph using a unit-local root namespace/scope. The
+    /// graph contains real symbols and scopes, but they are not attached to shared project state yet.
     /// </summary>
     private sealed class Collector
     {
-        /// <summary> Compilation unit being scanned into a declaration plan. </summary>
         private readonly CompilationUnit root;
+        private readonly NamespaceSymbol unitRootNamespace;
+        private readonly Scope unitRootScope;
+        private readonly Dictionary<Symbol, Scope> ownedScopes = new(ReferenceEqualityComparer.Instance);
 
-        /// <summary> Creates a collector for one compilation unit. </summary>
-        public Collector(CompilationUnit root) => this.root = root;
-
-        /// <summary> Collects the full top-level declaration plan for the unit. </summary>
-        public UnitPlan Collect() => new(root, CollectTopLevels(root.Members));
-
-        /// <summary> Collects plans for every top-level syntax item in source order. </summary>
-        private TopLevelPlan[] CollectTopLevels(IReadOnlyList<TopLevel> members)
+        public Collector(CompilationUnit root)
         {
-            TopLevelPlan[] plans = new TopLevelPlan[members.Count];
-
-            for (int i = 0; i < members.Count; i++)
-                plans[i] = CollectTopLevel(members[i]);
-
-            return plans;
+            this.root = root;
+            unitRootNamespace = new NamespaceSymbol(SymbolName.Empty, parentSymbol: null, root);
+            unitRootScope = new Scope(parent: null, boundary: root, ownerSymbol: unitRootNamespace);
+            ownedScopes.Add(unitRootNamespace, unitRootScope);
         }
 
-        /// <summary> Converts one top-level syntax node into its corresponding plan shape. </summary>
-        private TopLevelPlan CollectTopLevel(TopLevel topLevel) => topLevel switch
+        public UnitGraph Collect() => new(root, CollectTopLevels(root.Members, unitRootScope, unitRootNamespace));
+
+        private TopLevelDeclarationGraph[] CollectTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
         {
-            NamespaceDeclaration namespaceDeclaration => new NamespaceTopLevelPlan(namespaceDeclaration, CollectNamespace(namespaceDeclaration)),
-            TopLevelTypeDeclaration typeDeclaration => new TypeTopLevelPlan(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type)),
-            TopLevelFunctionDeclaration functionDeclaration => new FunctionTopLevelPlan(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function)),
-            TopLevelVariableDeclaration variableDeclaration => new VariableTopLevelPlan(variableDeclaration, CollectVariableDeclaration(variableDeclaration.Declaration)),
-            TopLevelStatement statement => new StatementTopLevelPlan(statement, CollectTopLevelStatement(statement)),
+            TopLevelDeclarationGraph[] graphs = new TopLevelDeclarationGraph[members.Count];
+            Scope currentScope = scope;
+            Symbol currentContainerSymbol = containerSymbol;
+
+            for (int i = 0; i < members.Count; i++)
+            {
+                TopLevelDeclarationGraph graph = CollectTopLevel(members[i], currentScope, currentContainerSymbol);
+                graphs[i] = graph;
+
+                if (graph is NamespaceTopLevelDeclarationGraph { Namespace.IsFileScoped: true } namespaceGraph)
+                    (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespaceGraph.Namespace, currentScope, currentContainerSymbol);
+            }
+
+            return graphs;
+        }
+
+        private TopLevelDeclarationGraph CollectTopLevel(TopLevel topLevel, Scope scope, Symbol containerSymbol) => topLevel switch
+        {
+            NamespaceDeclaration namespaceDeclaration => new NamespaceTopLevelDeclarationGraph(namespaceDeclaration, CollectNamespace(namespaceDeclaration, scope, containerSymbol)),
+            TopLevelTypeDeclaration typeDeclaration => new TypeTopLevelDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
+            TopLevelFunctionDeclaration functionDeclaration => new FunctionTopLevelDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
+            TopLevelVariableDeclaration variableDeclaration => new VariableTopLevelDeclarationGraph(variableDeclaration, CollectVariableDeclaration(variableDeclaration.Declaration, scope, containerSymbol)),
+            TopLevelStatement statement => new StatementTopLevelDeclarationGraph(statement, CollectTopLevelStatement(statement, scope, containerSymbol)),
             _ => throw new InvalidOperationException($"Unhandled top-level syntax '{topLevel.GetType().Name}'.")
         };
 
-        /// <summary>
-        /// Collects namespace structure without creating namespace symbols yet. Qualified namespace
-        /// names are flattened into a list of simple parts so merge can replay them deterministically.
-        /// </summary>
-        private NamespacePlan CollectNamespace(NamespaceDeclaration declaration)
+        private NamespaceDeclarationGraph CollectNamespace(NamespaceDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            NamespacePartPlan[] parts = new NamespacePartPlan[CountSimpleNames(declaration.Name)];
+            NamespacePartGraph[] parts = new NamespacePartGraph[CountSimpleNames(declaration.Name)];
             int partIndex = 0;
-            CollectNamespaceParts(declaration.Name, parts, ref partIndex);
+            Scope currentScope = scope;
+            Symbol currentSymbol = parentSymbol;
+            CollectNamespaceParts(declaration.Name, parts, ref partIndex, ref currentScope, ref currentSymbol);
 
             return declaration.Body switch
             {
-                NamespaceBlockBody blockBody => new NamespacePlan(declaration, parts, CollectTopLevels(blockBody.Members), isFileScoped: false),
-                NamespaceEmptyBody => new NamespacePlan(declaration, parts, [], isFileScoped: true),
+                NamespaceBlockBody blockBody => new NamespaceDeclarationGraph(declaration, parts, CollectTopLevels(blockBody.Members, currentScope, currentSymbol), isFileScoped: false),
+                NamespaceEmptyBody => new NamespaceDeclarationGraph(declaration, parts, [], isFileScoped: true),
                 _ => throw new InvalidOperationException($"Unhandled namespace body '{declaration.Body.GetType().Name}'.")
             };
         }
 
-        /// <summary> Collects the declaration shape for one type, including member plans. </summary>
-        private TypeDeclarationPlan CollectTypeDeclaration(TypeDeclaration declaration)
+        private TypeDeclarationGraph CollectTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            MemberPlan[] members = declaration.Body is TypeBlockBody blockBody
-                ? CollectMembers(blockBody.Members)
+            TypeSymbol symbol = new(GetDeclaredName(declaration.Name), parentSymbol, declaration, GetDeclaredArity(declaration.Name));
+            scope.Declare(symbol);
+
+            Scope typeScope = new(scope, declaration, symbol);
+            ownedScopes.Add(symbol, typeScope);
+
+            TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Name, symbol, typeScope);
+            symbol.ResolveTypeParameters(typeParameters);
+
+            MemberDeclarationGraph[] members = declaration.Body is TypeBlockBody blockBody
+                ? CollectMembers(blockBody.Members, typeScope, symbol)
                 : [];
 
-            return new TypeDeclarationPlan(
-                declaration,
-                GetDeclaredName(declaration.Name),
-                GetDeclaredArity(declaration.Name),
-                CollectTypeParameters(declaration.Name),
-                members);
+            return new TypeDeclarationGraph(declaration, symbol, scope, typeScope, members);
         }
 
-        /// <summary> Collects member declaration plans in source order. </summary>
-        private MemberPlan[] CollectMembers(IReadOnlyList<Member> members)
+        private MemberDeclarationGraph[] CollectMembers(IReadOnlyList<Member> members, Scope scope, Symbol containerSymbol)
         {
-            MemberPlan[] plans = new MemberPlan[members.Count];
+            MemberDeclarationGraph[] graphs = new MemberDeclarationGraph[members.Count];
 
             for (int i = 0; i < members.Count; i++)
-                plans[i] = CollectMember(members[i]);
+                graphs[i] = CollectMember(members[i], scope, containerSymbol);
 
-            return plans;
+            return graphs;
         }
 
-        /// <summary> Converts one member syntax node into its corresponding declaration plan. </summary>
-        private MemberPlan CollectMember(Member member) => member switch
+        private MemberDeclarationGraph CollectMember(Member member, Scope scope, Symbol containerSymbol) => member switch
         {
-            MemberTypeDeclaration typeDeclaration => new TypeMemberPlan(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type)),
-            MemberFunctionDeclaration functionDeclaration => new FunctionMemberPlan(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function)),
-            MemberFieldDeclaration fieldDeclaration => new VariableMemberPlan(fieldDeclaration, CollectVariableDeclaration(fieldDeclaration.Declaration)),
+            MemberTypeDeclaration typeDeclaration => new TypeMemberDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
+            MemberFunctionDeclaration functionDeclaration => new FunctionMemberDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
+            MemberFieldDeclaration fieldDeclaration => new VariableMemberDeclarationGraph(fieldDeclaration, CollectVariableDeclaration(fieldDeclaration.Declaration, scope, containerSymbol)),
             _ => throw new InvalidOperationException($"Unhandled member syntax '{member.GetType().Name}'.")
         };
 
-        /// <summary>
-        /// Collects a function declaration shape, including type parameters, parameters, and a plan
-        /// for whichever body form the function uses.
-        /// </summary>
-        private FunctionDeclarationPlan CollectFunctionDeclaration(FunctionDeclaration declaration)
+        private FunctionDeclarationGraph CollectFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            FunctionBodyPlan body = declaration.Body switch
+            FunctionSymbol symbol = new(GetDeclaredName(declaration.Signature.Identifier), parentSymbol, declaration, GetDeclaredArity(declaration.Signature.Identifier));
+            scope.Declare(symbol);
+
+            Scope functionScope = new(scope, declaration, symbol);
+            ownedScopes.Add(symbol, functionScope);
+
+            TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Signature.Identifier, symbol, functionScope);
+            symbol.ResolveTypeParameters(typeParameters);
+
+            ParameterSymbol[] parameters = DeclareParameters(declaration.Signature.Parameters, functionScope, symbol);
+            symbol.ResolveParameters(parameters);
+
+            FunctionBodyGraph body = declaration.Body switch
             {
-                FunctionBlockBody blockBody => new FunctionBlockBodyPlan(blockBody, CollectLocals(blockBody.Locals)),
-                FunctionLambdaBody lambdaBody => new FunctionLambdaBodyPlan(lambdaBody, CollectLocalStatement(lambdaBody.Statement)),
-                FunctionEmptyBody emptyBody => new FunctionEmptyBodyPlan(emptyBody),
+                FunctionBlockBody blockBody => new FunctionBlockBodyGraph(blockBody, CollectLocals(blockBody.Locals, functionScope, symbol)),
+                FunctionLambdaBody lambdaBody => new FunctionLambdaBodyGraph(lambdaBody, CollectEmbeddedLocalStatement(lambdaBody.Statement, functionScope, symbol)),
+                FunctionEmptyBody emptyBody => new FunctionEmptyBodyGraph(emptyBody),
                 _ => throw new InvalidOperationException($"Unhandled function body '{declaration.Body.GetType().Name}'.")
             };
 
-            return new FunctionDeclarationPlan(
-                declaration,
-                GetDeclaredName(declaration.Signature.Identifier),
-                GetDeclaredArity(declaration.Signature.Identifier),
-                CollectTypeParameters(declaration.Signature.Identifier),
-                CollectParameters(declaration.Signature.Parameters),
-                body);
+            return new FunctionDeclarationGraph(declaration, symbol, scope, functionScope, body);
         }
 
-        /// <summary> Collects generic type-parameter declarations from a name syntax when present. </summary>
-        private static TypeParameterPlan[] CollectTypeParameters(NamedSyntax nameSyntax)
+        private static TypeParameterSymbol[] DeclareTypeParameters(NamedSyntax nameSyntax, Symbol ownerSymbol, Scope ownerScope)
         {
             if (nameSyntax is not GenericName genericName)
                 return [];
 
-            TypeParameterPlan[] plans = new TypeParameterPlan[genericName.TypeParameters.Count];
+            TypeParameterSymbol[] symbols = new TypeParameterSymbol[genericName.TypeParameters.Count];
 
             for (int i = 0; i < genericName.TypeParameters.Count; i++)
             {
                 SimpleName typeParameterName = genericName.TypeParameters[i];
-                plans[i] = new TypeParameterPlan(typeParameterName, SymbolName.FromToken(typeParameterName.Name), i);
+                TypeParameterSymbol symbol = new(SymbolName.FromToken(typeParameterName.Name), ownerSymbol, typeParameterName, i);
+                ownerScope.Declare(symbol);
+                symbols[i] = symbol;
             }
 
-            return plans;
+            return symbols;
         }
 
-        /// <summary> Collects parameter declarations and preserves their source order / ordinals. </summary>
-        private static ParameterPlan[] CollectParameters(SeparatedSyntaxList<Parameter> parameters)
+        private static ParameterSymbol[] DeclareParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, Symbol functionSymbol)
         {
-            ParameterPlan[] plans = new ParameterPlan[parameters.Count];
+            ParameterSymbol[] resolvedParameters = new ParameterSymbol[parameters.Count];
 
             for (int i = 0; i < parameters.Count; i++)
             {
                 Parameter parameter = parameters[i];
-                plans[i] = new ParameterPlan(parameter, parameter.Declarator, GetDeclaredName(parameter.Declarator.Identifier), i);
+                ParameterSymbol symbol = new(GetDeclaredName(parameter.Declarator.Identifier), functionSymbol, parameter, i);
+                scope.Declare(symbol);
+                resolvedParameters[i] = symbol;
             }
 
-            return plans;
+            return resolvedParameters;
         }
 
-        /// <summary> Collects one variable declaration into a plan per declarator. </summary>
-        private static VariableDeclarationPlan CollectVariableDeclaration(VariableDeclaration declaration)
+        private static VariableDeclarationGraph CollectVariableDeclaration(VariableDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            VariableDeclaratorPlan[] declarators = new VariableDeclaratorPlan[declaration.Declarators.Count];
+            VariableDeclaratorGraph[] declarators = new VariableDeclaratorGraph[declaration.Declarators.Count];
 
             for (int i = 0; i < declaration.Declarators.Count; i++)
             {
                 VariableDeclarator declarator = declaration.Declarators[i];
-                declarators[i] = new VariableDeclaratorPlan(declarator, GetDeclaredName(declarator.Identifier));
+                VariableSymbol symbol = new(GetDeclaredName(declarator.Identifier), parentSymbol, declarator);
+                scope.Declare(symbol);
+                declarators[i] = new VariableDeclaratorGraph(declarator, symbol);
             }
 
-            return new VariableDeclarationPlan(declaration, declarators);
+            return new VariableDeclarationGraph(declaration, scope, declarators);
         }
 
-        /// <summary> Collects local declaration plans in source order. </summary>
-        private LocalPlan[] CollectLocals(IReadOnlyList<Local> locals)
+        private LocalDeclarationGraph[] CollectLocals(IReadOnlyList<Local> locals, Scope scope, Symbol containerSymbol)
         {
-            LocalPlan[] plans = new LocalPlan[locals.Count];
+            LocalDeclarationGraph[] graphs = new LocalDeclarationGraph[locals.Count];
 
             for (int i = 0; i < locals.Count; i++)
-                plans[i] = CollectLocal(locals[i]);
+                graphs[i] = CollectLocal(locals[i], scope, containerSymbol);
 
-            return plans;
+            return graphs;
         }
 
-        /// <summary> Converts one local syntax node into its corresponding plan shape. </summary>
-        private LocalPlan CollectLocal(Local local) => local switch
+        private LocalDeclarationGraph CollectLocal(Local local, Scope scope, Symbol containerSymbol) => local switch
         {
-            LocalTypeDeclaration typeDeclaration => new TypeLocalPlan(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type)),
-            LocalFunctionDeclaration functionDeclaration => new FunctionLocalPlan(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function)),
-            LocalStatement statement => new StatementLocalPlan(statement, CollectLocalStatement(statement)),
+            LocalTypeDeclaration typeDeclaration => new TypeLocalDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
+            LocalFunctionDeclaration functionDeclaration => new FunctionLocalDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
+            LocalStatement statement => new StatementLocalDeclarationGraph(statement, CollectLocalStatement(statement, scope, containerSymbol)),
             _ => throw new InvalidOperationException($"Unhandled local syntax '{local.GetType().Name}'.")
         };
 
-        /// <summary> Collects the structural shape of a top-level statement subtree. </summary>
-        private TopLevelStatementPlan CollectTopLevelStatement(TopLevelStatement statement) => statement switch
+        private TopLevelStatementGraph CollectTopLevelStatement(TopLevelStatement statement, Scope scope, Symbol containerSymbol) => statement switch
         {
-            TopLevelBlockStatement blockStatement => new TopLevelBlockStatementPlan(blockStatement, CollectLocals(blockStatement.Locals)),
-            TopLevelIfStatement ifStatement => new TopLevelIfStatementPlan(
+            TopLevelBlockStatement blockStatement => CollectTopLevelBlockStatement(blockStatement, scope, containerSymbol),
+            TopLevelIfStatement ifStatement => new TopLevelIfStatementGraph(
                 ifStatement,
-                CollectTopLevelStatement(ifStatement.ThenStatement),
-                ifStatement.ElseStatement is null ? null : CollectTopLevelStatement(ifStatement.ElseStatement.Statement)),
-            TopLevelWhileStatement whileStatement => new TopLevelWhileStatementPlan(whileStatement, CollectTopLevelStatement(whileStatement.Statement)),
-            TopLevelElseStatement elseStatement => new TopLevelElseStatementPlan(elseStatement, CollectTopLevelStatement(elseStatement.Statement)),
-            TopLevelExpressionStatement expressionStatement => new SimpleTopLevelStatementPlan(expressionStatement),
-            TopLevelReturnStatement returnStatement => new SimpleTopLevelStatementPlan(returnStatement),
-            TopLevelEmptyStatement emptyStatement => new SimpleTopLevelStatementPlan(emptyStatement),
+                CollectTopLevelStatement(ifStatement.ThenStatement, scope, containerSymbol),
+                ifStatement.ElseStatement is null ? null : CollectTopLevelStatement(ifStatement.ElseStatement.Statement, scope, containerSymbol)),
+            TopLevelWhileStatement whileStatement => new TopLevelWhileStatementGraph(whileStatement, CollectTopLevelStatement(whileStatement.Statement, scope, containerSymbol)),
+            TopLevelElseStatement elseStatement => new TopLevelElseStatementGraph(elseStatement, CollectTopLevelStatement(elseStatement.Statement, scope, containerSymbol)),
+            TopLevelExpressionStatement expressionStatement => new SimpleTopLevelStatementGraph(expressionStatement),
+            TopLevelReturnStatement returnStatement => new SimpleTopLevelStatementGraph(returnStatement),
+            TopLevelEmptyStatement emptyStatement => new SimpleTopLevelStatementGraph(emptyStatement),
             _ => throw new InvalidOperationException($"Unhandled top-level statement '{statement.GetType().Name}'.")
         };
 
-        /// <summary> Collects the structural shape of a local statement subtree. </summary>
-        private LocalStatementPlan CollectLocalStatement(LocalStatement statement) => statement switch
+        private LocalStatementGraph CollectEmbeddedLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol)
         {
-            LocalBlockStatement blockStatement => new LocalBlockStatementPlan(blockStatement, CollectLocals(blockStatement.Locals)),
-            LocalIfStatement ifStatement => new LocalIfStatementPlan(
+            if (statement is LocalBlockStatement)
+                return CollectLocalStatement(statement, scope, containerSymbol);
+
+            Scope statementScope = new(scope, statement);
+            return CollectLocalStatement(statement, statementScope, containerSymbol, statementScope);
+        }
+
+        private LocalStatementGraph CollectLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol, Scope? declaredScope = null) => statement switch
+        {
+            LocalBlockStatement blockStatement => CollectLocalBlockStatement(blockStatement, scope, containerSymbol),
+            LocalIfStatement ifStatement => new LocalIfStatementGraph(
                 ifStatement,
-                CollectLocalStatement(ifStatement.ThenStatement),
-                ifStatement.ElseStatement is null ? null : CollectLocalStatement(ifStatement.ElseStatement.Statement)),
-            LocalWhileStatement whileStatement => new LocalWhileStatementPlan(whileStatement, CollectLocalStatement(whileStatement.Body)),
-            LocalElseStatement elseStatement => new LocalElseStatementPlan(elseStatement, CollectLocalStatement(elseStatement.Statement)),
-            LocalVariableDeclarationStatement variableDeclaration => new LocalVariableStatementPlan(variableDeclaration, CollectVariableDeclaration(variableDeclaration.Declaration)),
-            LocalExpressionStatement expressionStatement => new SimpleLocalStatementPlan(expressionStatement),
-            LocalReturnStatement returnStatement => new SimpleLocalStatementPlan(returnStatement),
-            LocalEmptyStatement emptyStatement => new SimpleLocalStatementPlan(emptyStatement),
+                declaredScope,
+                CollectEmbeddedLocalStatement(ifStatement.ThenStatement, scope, containerSymbol),
+                ifStatement.ElseStatement is null ? null : CollectEmbeddedLocalStatement(ifStatement.ElseStatement.Statement, scope, containerSymbol)),
+            LocalWhileStatement whileStatement => new LocalWhileStatementGraph(
+                whileStatement,
+                declaredScope,
+                CollectEmbeddedLocalStatement(whileStatement.Body, scope, containerSymbol)),
+            LocalElseStatement elseStatement => new LocalElseStatementGraph(
+                elseStatement,
+                declaredScope,
+                CollectEmbeddedLocalStatement(elseStatement.Statement, scope, containerSymbol)),
+            LocalVariableDeclarationStatement variableDeclaration => new LocalVariableStatementGraph(
+                variableDeclaration,
+                declaredScope,
+                CollectVariableDeclaration(variableDeclaration.Declaration, scope, containerSymbol)),
+            LocalExpressionStatement expressionStatement => new SimpleLocalStatementGraph(expressionStatement, declaredScope),
+            LocalReturnStatement returnStatement => new SimpleLocalStatementGraph(returnStatement, declaredScope),
+            LocalEmptyStatement emptyStatement => new SimpleLocalStatementGraph(emptyStatement, declaredScope),
             _ => throw new InvalidOperationException($"Unhandled local statement '{statement.GetType().Name}'.")
         };
+
+        private NamespaceSymbol GetOrDeclareLocalNamespace(SimpleName syntax, Scope scope, Symbol parentSymbol)
+        {
+            SymbolName name = SymbolName.FromToken(syntax.Name);
+            IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(name);
+
+            foreach (Symbol symbol in localSymbols)
+            {
+                if (symbol is NamespaceSymbol namespaceSymbol)
+                    return namespaceSymbol;
+            }
+
+            NamespaceSymbol created = new(name, parentSymbol, syntax);
+            scope.Declare(created);
+            ownedScopes.Add(created, new Scope(scope, syntax, created));
+            return created;
+        }
+
+        private TopLevelBlockStatementGraph CollectTopLevelBlockStatement(TopLevelBlockStatement statement, Scope scope, Symbol containerSymbol)
+        {
+            Scope blockScope = new(scope, statement);
+            return new TopLevelBlockStatementGraph(statement, blockScope, CollectLocals(statement.Locals, blockScope, containerSymbol));
+        }
+
+        private LocalBlockStatementGraph CollectLocalBlockStatement(LocalBlockStatement statement, Scope scope, Symbol containerSymbol)
+        {
+            Scope blockScope = new(scope, statement);
+            return new LocalBlockStatementGraph(statement, blockScope, CollectLocals(statement.Locals, blockScope, containerSymbol));
+        }
+
+        private static (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        {
+            Scope currentScope = scope;
+            Symbol currentSymbol = parentSymbol;
+
+            foreach (NamespacePartGraph part in graph.Parts)
+            {
+                currentSymbol = part.Symbol;
+                currentScope = part.Scope;
+            }
+
+            return (currentScope, currentSymbol);
+        }
+
+        private void CollectNamespaceParts(NamedSyntax name, NamespacePartGraph[] parts, ref int partIndex, ref Scope currentScope, ref Symbol currentSymbol)
+        {
+            switch (name)
+            {
+                case SimpleName simpleName:
+                {
+                    NamespaceSymbol namespaceSymbol = GetOrDeclareLocalNamespace(simpleName, currentScope, currentSymbol);
+                    Scope namespaceScope = ownedScopes[namespaceSymbol];
+                    parts[partIndex++] = new NamespacePartGraph(simpleName, SymbolName.FromToken(simpleName.Name), namespaceSymbol, currentScope, namespaceScope);
+                    currentScope = namespaceScope;
+                    currentSymbol = namespaceSymbol;
+                    return;
+                }
+
+                case QualifiedName qualifiedName:
+                    foreach (NamedSyntax nm in qualifiedName.Parts)
+                        CollectNamespaceParts(nm, parts, ref partIndex, ref currentScope, ref currentSymbol);
+                    return;
+
+                default:
+                    throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.");
+            }
+        }
     }
 
     /// <summary>
-    /// Semantic replayer that takes one unit plan and materializes the real symbols, scopes, and
-    /// syntax associations into the mutable resolution context.
+    /// Attaches one unit-local declaration graph to canonical project-wide namespace and scope
+    /// state, reusing existing namespaces when multiple units contribute to the same path.
     /// </summary>
     private sealed class Merger
     {
-        /// <summary> Unit-local semantic state being populated during merge. </summary>
         private readonly ResolutionContext context;
-        /// <summary> Convenience projection of the shared diagnostics sink. </summary>
-        private DiagnosticsManager Diagnostics => context.Diagnostics;
 
-        /// <summary> Creates a merger for one unit context. </summary>
         public Merger(ResolutionContext context) => this.context = context;
 
-        /// <summary>
-        /// Replays the classic two-phase declaration pipeline against the collected plan so same-scope
-        /// declarations exist before nested bodies are resolved.
-        /// </summary>
-        public void Merge(UnitPlan plan) => DeclareTopLevels(plan.TopLevels, context.GlobalScope, context.GlobalNamespace);
+        public void Merge(UnitGraph graph) => AttachTopLevels(graph.TopLevels, context.GlobalScope, context.GlobalNamespace);
 
-        /// <summary>
-        /// First phase for top-level plans. This creates symbols/scopes before nested bodies are
-        /// resolved so later declarations can already see same-scope containers.
-        /// </summary>
-        private void DeclareTopLevels(TopLevelPlan[] members, Scope scope, Symbol containerSymbol)
+        private void AttachTopLevels(TopLevelDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
         {
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
 
-            foreach (TopLevelPlan member in members)
+            foreach (TopLevelDeclarationGraph member in members)
             {
-                DeclareTopLevel(member, currentScope, currentContainerSymbol);
+                AttachTopLevel(member, currentScope, currentContainerSymbol);
 
-                if (member is NamespaceTopLevelPlan { Namespace.IsFileScoped: true } namespacePlan)
-                    (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespacePlan.Namespace, currentScope, currentContainerSymbol);
+                if (member is NamespaceTopLevelDeclarationGraph { Namespace.IsFileScoped: true } namespaceGraph)
+                    (currentScope, currentContainerSymbol) = ResolveNamespaceContinuation(namespaceGraph.Namespace, currentScope, currentContainerSymbol);
             }
         }
 
-        private void DeclareTopLevel(TopLevelPlan topLevel, Scope scope, Symbol containerSymbol)
+        private void AttachTopLevel(TopLevelDeclarationGraph topLevel, Scope scope, Symbol containerSymbol)
         {
             switch (topLevel)
             {
-                case NamespaceTopLevelPlan namespacePlan:
-                    DeclareNamespace(namespacePlan.Namespace, scope, containerSymbol);
+                case NamespaceTopLevelDeclarationGraph namespaceGraph:
+                    AttachNamespace(namespaceGraph.Namespace, scope, containerSymbol);
                     break;
 
-                case TypeTopLevelPlan typePlan:
-                {
-                    TypeSymbol symbol = DeclareTypeDeclaration(typePlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(typePlan.Wrapper, symbol);
-                    break;
-                }
-
-                case FunctionTopLevelPlan functionPlan:
-                {
-                    FunctionSymbol symbol = DeclareFunctionDeclaration(functionPlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(functionPlan.Wrapper, symbol);
-                    break;
-                }
-
-                case VariableTopLevelPlan variablePlan:
-                    DeclareVariableDeclaration(variablePlan.Declaration, scope, containerSymbol);
+                case TypeTopLevelDeclarationGraph typeGraph:
+                    AttachTypeDeclaration(typeGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(typeGraph.Wrapper, typeGraph.Declaration.Symbol);
                     break;
 
-                case StatementTopLevelPlan statementPlan:
-                    DeclareTopLevelStatement(statementPlan.Statement, scope, containerSymbol);
+                case FunctionTopLevelDeclarationGraph functionGraph:
+                    AttachFunctionDeclaration(functionGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(functionGraph.Wrapper, functionGraph.Declaration.Symbol);
+                    break;
+
+                case VariableTopLevelDeclarationGraph variableGraph:
+                    AttachVariableDeclaration(variableGraph.Declaration, scope, containerSymbol);
+                    break;
+
+                case StatementTopLevelDeclarationGraph statementGraph:
+                    AttachTopLevelStatement(statementGraph.Statement, scope, containerSymbol);
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled top-level plan '{topLevel.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled top-level declaration graph '{topLevel.GetType().Name}'.");
             }
         }
 
-        private void DeclareNamespace(NamespacePlan plan, Scope scope, Symbol parentSymbol)
+        private void AttachNamespace(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            foreach (NamespacePartPlan part in plan.Parts)
+            foreach (NamespacePartGraph part in graph.Parts)
             {
-                NamespaceSymbol namespaceSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
+                NamespaceSymbol namespaceSymbol = GetOrAttachNamespace(part, currentScope, currentSymbol);
                 currentScope = context.ResolveSymbolScope(namespaceSymbol, part.Syntax, currentScope);
                 currentSymbol = namespaceSymbol;
             }
 
-            context.ResolveDeclaredSymbol(plan.Declaration, currentSymbol);
-            context.ResolveScope(plan.Declaration, currentScope);
-            context.ResolveScope(plan.Declaration.Body, currentScope);
+            context.ResolveDeclaredSymbol(graph.Declaration, currentSymbol);
+            context.ResolveScope(graph.Declaration, currentScope);
+            context.ResolveScope(graph.Declaration.Body, currentScope);
 
-            if (!plan.IsFileScoped)
-                DeclareTopLevels(plan.Members, currentScope, currentSymbol);
+            if (!graph.IsFileScoped)
+                AttachTopLevels(graph.Members, currentScope, currentSymbol);
         }
 
-        private (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespacePlan plan, Scope scope, Symbol parentSymbol)
+        private (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
 
-            foreach (NamespacePartPlan part in plan.Parts)
+            foreach (NamespacePartGraph part in graph.Parts)
             {
-                currentSymbol = GetOrDeclareNamespace(part, currentScope, currentSymbol);
+                currentSymbol = GetOrAttachNamespace(part, currentScope, currentSymbol);
                 currentScope = context.ResolveSymbolScope(currentSymbol, part.Syntax, currentScope);
             }
 
             return (currentScope, currentSymbol);
         }
 
-        private NamespaceSymbol GetOrDeclareNamespace(NamespacePartPlan part, Scope scope, Symbol parentSymbol)
+        private NamespaceSymbol GetOrAttachNamespace(NamespacePartGraph part, Scope scope, Symbol parentSymbol)
         {
             IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(part.Name);
 
-            for (int i = 0; i < localSymbols.Count; i++)
+            foreach (Symbol symbol in localSymbols)
             {
-                if (localSymbols[i] is not NamespaceSymbol namespaceSymbol)
+                if (symbol is not NamespaceSymbol namespaceSymbol)
                     continue;
 
                 context.ResolveDeclaredSymbol(part.Syntax, namespaceSymbol);
                 return namespaceSymbol;
             }
 
-            NamespaceSymbol created = new(part.Name, parentSymbol, part.Syntax);
-            context.DeclareSymbol(part.Syntax, created, scope);
-            return created;
+            MoveDeclaredSymbol(part.Symbol, part.DeclaringScope, scope);
+            part.Symbol.Reparent(parentSymbol);
+            part.Scope.Reparent(scope, part.Symbol);
+            context.Project.ResolveSymbolScope(part.Symbol, part.Scope);
+            context.ResolveDeclaredSymbol(part.Syntax, part.Symbol);
+            context.ResolveScope(part.Syntax, part.Scope);
+            return part.Symbol;
         }
 
-        private TypeSymbol DeclareTypeDeclaration(TypeDeclarationPlan plan, Scope scope, Symbol parentSymbol)
+        private void AttachTypeDeclaration(TypeDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
-            TypeSymbol symbol = new(plan.Name, parentSymbol, plan.Declaration, plan.Arity);
-            context.DeclareSymbol(plan.Declaration, symbol, scope);
+            MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
+            graph.Symbol.Reparent(parentSymbol);
+            graph.Scope.Reparent(scope, graph.Symbol);
+            context.Project.ResolveSymbolScope(graph.Symbol, graph.Scope);
 
-            Scope typeScope = context.ResolveSymbolScope(symbol, plan.Declaration, scope);
-            context.ResolveScope(plan.Declaration.Body, typeScope);
+            context.ResolveDeclaredSymbol(graph.Declaration, graph.Symbol);
+            context.ResolveScope(graph.Declaration.Body, graph.Scope);
 
-            TypeParameterSymbol[] typeParameters = DeclareTypeParameters(plan.TypeParameters, symbol, typeScope);
-            symbol.ResolveTypeParameters(typeParameters);
-            ResolveTypeDeclarationClauses(plan.Declaration, symbol, typeParameters);
-
-            DeclareMembers(plan.Members, typeScope, symbol);
-            return symbol;
+            BindTypeParameters(graph.Symbol.TypeParameters);
+            ResolveTypeDeclarationClauses(graph.Declaration, graph.Symbol, graph.Symbol.TypeParameters);
+            AttachMembers(graph.Members, graph.Scope, graph.Symbol);
         }
 
-        private void DeclareMembers(MemberPlan[] members, Scope scope, Symbol containerSymbol)
+        private void AttachMembers(MemberDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
         {
-            foreach (MemberPlan member in members)
-                DeclareMember(member, scope, containerSymbol);
+            foreach (MemberDeclarationGraph member in members)
+                AttachMember(member, scope, containerSymbol);
         }
 
-        private void DeclareMember(MemberPlan member, Scope scope, Symbol containerSymbol)
+        private void AttachMember(MemberDeclarationGraph member, Scope scope, Symbol containerSymbol)
         {
             switch (member)
             {
-                case TypeMemberPlan typePlan:
-                {
-                    TypeSymbol symbol = DeclareTypeDeclaration(typePlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(typePlan.Wrapper, symbol);
+                case TypeMemberDeclarationGraph typeGraph:
+                    AttachTypeDeclaration(typeGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(typeGraph.Wrapper, typeGraph.Declaration.Symbol);
                     break;
-                }
 
-                case FunctionMemberPlan functionPlan:
-                {
-                    FunctionSymbol symbol = DeclareFunctionDeclaration(functionPlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(functionPlan.Wrapper, symbol);
+                case FunctionMemberDeclarationGraph functionGraph:
+                    AttachFunctionDeclaration(functionGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(functionGraph.Wrapper, functionGraph.Declaration.Symbol);
                     break;
-                }
 
-                case VariableMemberPlan variablePlan:
-                    DeclareVariableDeclaration(variablePlan.Declaration, scope, containerSymbol);
+                case VariableMemberDeclarationGraph variableGraph:
+                    AttachVariableDeclaration(variableGraph.Declaration, scope, containerSymbol);
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled member plan '{member.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled member declaration graph '{member.GetType().Name}'.");
             }
         }
 
-        private FunctionSymbol DeclareFunctionDeclaration(FunctionDeclarationPlan plan, Scope scope, Symbol parentSymbol)
+        private void AttachFunctionDeclaration(FunctionDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
-            FunctionSymbol symbol = new(plan.Name, parentSymbol, plan.Declaration, plan.Arity);
-            context.DeclareSymbol(plan.Declaration, symbol, scope);
+            MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
+            graph.Symbol.Reparent(parentSymbol);
+            graph.Scope.Reparent(scope, graph.Symbol);
+            context.Project.ResolveSymbolScope(graph.Symbol, graph.Scope);
 
-            Scope functionScope = context.ResolveSymbolScope(symbol, plan.Declaration, scope);
-            context.ResolveDeclaredSymbol(plan.Declaration.Signature, symbol);
-            context.ResolveScope(plan.Declaration.Signature, functionScope);
-            context.ResolveScope(plan.Declaration.Body, functionScope);
+            context.ResolveDeclaredSymbol(graph.Declaration, graph.Symbol);
+            context.ResolveDeclaredSymbol(graph.Declaration.Signature, graph.Symbol);
+            context.ResolveScope(graph.Declaration.Signature, graph.Scope);
+            context.ResolveScope(graph.Declaration.Body, graph.Scope);
 
-            TypeParameterSymbol[] typeParameters = DeclareTypeParameters(plan.TypeParameters, symbol, functionScope);
-            symbol.ResolveTypeParameters(typeParameters);
-            ResolveTypeConstraintClauses(plan.Declaration.Signature.Constraints, symbol, typeParameters);
+            BindTypeParameters(graph.Symbol.TypeParameters);
+            ResolveTypeConstraintClauses(graph.Declaration.Signature.Constraints, graph.Symbol, graph.Symbol.TypeParameters);
+            BindParameters(graph.Symbol.Parameters);
 
-            ParameterSymbol[] parameters = DeclareParameters(plan.Parameters, functionScope, symbol);
-            symbol.ResolveParameters(parameters);
-
-            switch (plan.Body)
+            switch (graph.Body)
             {
-                case FunctionBlockBodyPlan blockBody:
-                    DeclareLocals(blockBody.Locals, functionScope, symbol);
+                case FunctionBlockBodyGraph blockBody:
+                    AttachLocals(blockBody.Locals, graph.Scope, graph.Symbol);
                     break;
 
-                case FunctionLambdaBodyPlan lambdaBody:
-                    DeclareEmbeddedLocalStatement(lambdaBody.Statement, functionScope, symbol);
+                case FunctionLambdaBodyGraph lambdaBody:
+                    AttachEmbeddedLocalStatement(lambdaBody.Statement, graph.Scope, graph.Symbol);
                     break;
 
-                case FunctionEmptyBodyPlan:
+                case FunctionEmptyBodyGraph:
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled function body plan '{plan.Body.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled function body graph '{graph.Body.GetType().Name}'.");
             }
-
-            return symbol;
         }
 
         private void ResolveTypeDeclarationClauses(TypeDeclaration declaration, TypeSymbol symbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
@@ -484,10 +554,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             SymbolName name = SymbolName.FromToken(syntax.Name);
 
-            for (int i = 0; i < typeParameters.Length; i++)
+            foreach (TypeParameterSymbol symbol in typeParameters)
             {
-                TypeParameterSymbol symbol = typeParameters[i];
-
                 if (symbol.Name != name)
                     continue;
 
@@ -496,216 +564,184 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        private TypeParameterSymbol[] DeclareTypeParameters(TypeParameterPlan[] typeParameters, Symbol ownerSymbol, Scope ownerScope)
+        private void BindTypeParameters(ReadOnlySpan<TypeParameterSymbol> typeParameters)
         {
-            TypeParameterSymbol[] symbols = new TypeParameterSymbol[typeParameters.Length];
-
-            for (int i = 0; i < typeParameters.Length; i++)
-            {
-                TypeParameterPlan plan = typeParameters[i];
-                TypeParameterSymbol symbol = new(plan.Name, ownerSymbol, plan.Syntax, plan.Ordinal);
-                context.DeclareSymbol(plan.Syntax, symbol, ownerScope);
-                symbols[i] = symbol;
-            }
-
-            return symbols;
+            foreach (TypeParameterSymbol typeParameter in typeParameters)
+                context.ResolveDeclaredSymbol(typeParameter.Declaration, typeParameter);
         }
 
-        private ParameterSymbol[] DeclareParameters(ParameterPlan[] parameters, Scope scope, Symbol functionSymbol)
+        private void BindParameters(ReadOnlySpan<ParameterSymbol> parameters)
         {
-            ParameterSymbol[] resolvedParameters = new ParameterSymbol[parameters.Length];
-
-            for (int i = 0; i < parameters.Length; i++)
+            foreach (ParameterSymbol param in parameters)
             {
-                ParameterPlan plan = parameters[i];
-                ParameterSymbol symbol = new(plan.Name, functionSymbol, plan.Parameter, plan.Ordinal);
-
-                context.DeclareSymbol(plan.Parameter, symbol, scope);
-                context.ResolveDeclaredSymbol(plan.Declarator, symbol);
-                resolvedParameters[i] = symbol;
-            }
-
-            return resolvedParameters;
-        }
-
-        private void DeclareVariableDeclaration(VariableDeclarationPlan plan, Scope scope, Symbol parentSymbol)
-        {
-            foreach (VariableDeclaratorPlan declarator in plan.Declarators)
-            {
-                VariableSymbol symbol = new(declarator.Name, parentSymbol, declarator.Declarator);
-                context.DeclareSymbol(declarator.Declarator, symbol, scope);
+                Parameter parameter = (Parameter)param.Declaration;
+                context.ResolveDeclaredSymbol(parameter, param);
+                context.ResolveDeclaredSymbol(parameter.Declarator, param);
             }
         }
 
-        private void DeclareLocals(LocalPlan[] locals, Scope scope, Symbol containerSymbol)
+        private void AttachVariableDeclaration(VariableDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
-            foreach (LocalPlan local in locals)
-                DeclareLocal(local, scope, containerSymbol);
+            foreach (VariableDeclaratorGraph declarator in graph.Declarators)
+            {
+                VariableSymbol symbol = declarator.Symbol;
+                MoveDeclaredSymbol(symbol, graph.DeclaringScope, scope);
+                symbol.Reparent(parentSymbol);
+                context.ResolveDeclaredSymbol(symbol.Declaration, symbol);
+            }
         }
 
-        private void DeclareLocal(LocalPlan local, Scope scope, Symbol containerSymbol)
+        private void AttachLocals(LocalDeclarationGraph[] locals, Scope scope, Symbol containerSymbol)
+        {
+            foreach (LocalDeclarationGraph local in locals)
+                AttachLocal(local, scope, containerSymbol);
+        }
+
+        private void AttachLocal(LocalDeclarationGraph local, Scope scope, Symbol containerSymbol)
         {
             switch (local)
             {
-                case TypeLocalPlan typePlan:
-                {
-                    TypeSymbol symbol = DeclareTypeDeclaration(typePlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(typePlan.Wrapper, symbol);
-                    break;
-                }
-
-                case FunctionLocalPlan functionPlan:
-                {
-                    FunctionSymbol symbol = DeclareFunctionDeclaration(functionPlan.Declaration, scope, containerSymbol);
-                    context.ResolveDeclaredSymbol(functionPlan.Wrapper, symbol);
-                    break;
-                }
-
-                case VariableLocalPlan variablePlan:
-                    DeclareVariableDeclaration(variablePlan.Declaration, scope, containerSymbol);
+                case TypeLocalDeclarationGraph typeGraph:
+                    AttachTypeDeclaration(typeGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(typeGraph.Wrapper, typeGraph.Declaration.Symbol);
                     break;
 
-                case StatementLocalPlan statementPlan:
-                    DeclareLocalStatement(statementPlan.Statement, scope, containerSymbol);
+                case FunctionLocalDeclarationGraph functionGraph:
+                    AttachFunctionDeclaration(functionGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(functionGraph.Wrapper, functionGraph.Declaration.Symbol);
+                    break;
+
+                case StatementLocalDeclarationGraph statementGraph:
+                    AttachLocalStatement(statementGraph.Statement, scope, containerSymbol);
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled local plan '{local.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled local declaration graph '{local.GetType().Name}'.");
             }
         }
 
-        private void DeclareTopLevelStatement(TopLevelStatementPlan statement, Scope scope, Symbol containerSymbol)
+        private void AttachTopLevelStatement(TopLevelStatementGraph statement, Scope scope, Symbol containerSymbol)
         {
             switch (statement)
             {
-                case TopLevelBlockStatementPlan blockStatement:
-                    DeclareLocalBlock(blockStatement.Syntax, blockStatement.Locals, scope, containerSymbol);
+                case TopLevelBlockStatementGraph blockStatement:
+                    blockStatement.Scope.Reparent(scope);
+                    context.ResolveScope(blockStatement.Syntax, blockStatement.Scope);
+                    AttachLocals(blockStatement.Locals, blockStatement.Scope, containerSymbol);
                     break;
 
-                case TopLevelIfStatementPlan ifStatement:
-                    DeclareTopLevelStatement(ifStatement.ThenStatement, scope, containerSymbol);
+                case TopLevelIfStatementGraph ifStatement:
+                    AttachTopLevelStatement(ifStatement.ThenStatement, scope, containerSymbol);
 
                     if (ifStatement.ElseStatement is not null)
-                        DeclareTopLevelStatement(ifStatement.ElseStatement, scope, containerSymbol);
+                        AttachTopLevelStatement(ifStatement.ElseStatement, scope, containerSymbol);
                     break;
 
-                case TopLevelWhileStatementPlan whileStatement:
-                    DeclareTopLevelStatement(whileStatement.Statement, scope, containerSymbol);
+                case TopLevelWhileStatementGraph whileStatement:
+                    AttachTopLevelStatement(whileStatement.Statement, scope, containerSymbol);
                     break;
 
-                case TopLevelElseStatementPlan elseStatement:
-                    DeclareTopLevelStatement(elseStatement.Statement, scope, containerSymbol);
+                case TopLevelElseStatementGraph elseStatement:
+                    AttachTopLevelStatement(elseStatement.Statement, scope, containerSymbol);
                     break;
 
-                case SimpleTopLevelStatementPlan:
+                case SimpleTopLevelStatementGraph:
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled top-level statement plan '{statement.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled top-level statement graph '{statement.GetType().Name}'.");
             }
         }
 
-        private void DeclareLocalStatement(LocalStatementPlan statement, Scope scope, Symbol containerSymbol)
+        private void AttachLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol)
         {
+            Scope currentScope = scope;
+
+            if (statement.Scope is not null)
+            {
+                statement.Scope.Reparent(scope);
+                context.ResolveScope(statement.Syntax, statement.Scope);
+                currentScope = statement.Scope;
+            }
+
             switch (statement)
             {
-                case LocalBlockStatementPlan blockStatement:
-                    DeclareLocalBlock(blockStatement.Syntax, blockStatement.Locals, scope, containerSymbol);
+                case LocalBlockStatementGraph blockStatement:
+                    AttachLocals(blockStatement.Locals, blockStatement.Scope, containerSymbol);
                     break;
 
-                case LocalIfStatementPlan ifStatement:
-                    DeclareEmbeddedLocalStatement(ifStatement.ThenStatement, scope, containerSymbol);
+                case LocalIfStatementGraph ifStatement:
+                    AttachEmbeddedLocalStatement(ifStatement.ThenStatement, currentScope, containerSymbol);
 
                     if (ifStatement.ElseStatement is not null)
-                        DeclareEmbeddedLocalStatement(ifStatement.ElseStatement, scope, containerSymbol);
+                        AttachEmbeddedLocalStatement(ifStatement.ElseStatement, currentScope, containerSymbol);
                     break;
 
-                case LocalWhileStatementPlan whileStatement:
-                    DeclareEmbeddedLocalStatement(whileStatement.Statement, scope, containerSymbol);
+                case LocalWhileStatementGraph whileStatement:
+                    AttachEmbeddedLocalStatement(whileStatement.Statement, currentScope, containerSymbol);
                     break;
 
-                case LocalElseStatementPlan elseStatement:
-                    DeclareEmbeddedLocalStatement(elseStatement.Statement, scope, containerSymbol);
+                case LocalElseStatementGraph elseStatement:
+                    AttachEmbeddedLocalStatement(elseStatement.Statement, currentScope, containerSymbol);
                     break;
 
-                case LocalVariableStatementPlan variableStatement:
-                    DeclareVariableDeclaration(variableStatement.Declaration, scope, containerSymbol);
+                case LocalVariableStatementGraph variableStatement:
+                    AttachVariableDeclaration(variableStatement.Declaration, currentScope, containerSymbol);
                     break;
 
-                case SimpleLocalStatementPlan:
+                case SimpleLocalStatementGraph:
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unhandled local statement plan '{statement.GetType().Name}'.");
+                    throw new InvalidOperationException($"Unhandled local statement graph '{statement.GetType().Name}'.");
             }
         }
 
-        private void DeclareLocalBlock(SyntaxNode boundary, LocalPlan[] locals, Scope scope, Symbol containerSymbol)
-        {
-            Scope blockScope = context.CreateChildScope(boundary, scope);
-            DeclareLocals(locals, blockScope, containerSymbol);
-        }
+        private void AttachEmbeddedLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol) => AttachLocalStatement(statement, scope, containerSymbol);
 
-        private void DeclareEmbeddedLocalStatement(LocalStatementPlan statement, Scope scope, Symbol containerSymbol)
+        private static void MoveDeclaredSymbol(Symbol symbol, Scope fromScope, Scope toScope)
         {
-            if (statement is LocalBlockStatementPlan blockStatement)
-            {
-                DeclareLocalStatement(blockStatement, scope, containerSymbol);
+            if (ReferenceEquals(fromScope, toScope))
                 return;
-            }
 
-            Scope statementScope = context.CreateChildScope(statement.Syntax, scope);
-            DeclareLocalStatement(statement, statementScope, containerSymbol);
+            fromScope.Remove(symbol);
+            toScope.Declare(symbol);
         }
     }
 
-    /// <summary>
-    /// Full collected declaration shape for one compilation unit. This is the payload passed from
-    /// the parallel collection phase into the sequential merge phase.
-    /// </summary>
-    private sealed class UnitPlan : ResolutionPassUnitResult
+    private sealed class UnitGraph : ResolutionPassUnitResult
     {
-        /// <summary> Original compilation unit the plan was collected from. </summary>
         public CompilationUnit Root { get; }
-        /// <summary> Collected plans for every top-level syntax item in source order. </summary>
-        public TopLevelPlan[] TopLevels { get; }
+        public TopLevelDeclarationGraph[] TopLevels { get; }
 
-        /// <summary> Creates one unit-level declaration plan. </summary>
-        public UnitPlan(CompilationUnit root, TopLevelPlan[] topLevels)
+        public UnitGraph(CompilationUnit root, TopLevelDeclarationGraph[] topLevels)
         {
             Root = root;
             TopLevels = topLevels;
         }
     }
 
-    /// <summary> Base type for one collected top-level syntax item. </summary>
-    private abstract class TopLevelPlan
+    private abstract class TopLevelDeclarationGraph
     {
-        /// <summary> Original syntax node this plan was collected from. </summary>
         public TopLevel Syntax { get; }
 
-        protected TopLevelPlan(TopLevel syntax) => Syntax = syntax;
+        protected TopLevelDeclarationGraph(TopLevel syntax) => Syntax = syntax;
     }
 
-    /// <summary> Collected plan for a top-level namespace declaration. </summary>
-    private sealed class NamespaceTopLevelPlan : TopLevelPlan
+    private sealed class NamespaceTopLevelDeclarationGraph : TopLevelDeclarationGraph
     {
-        /// <summary> Namespace declaration shape, including its qualified parts and nested members. </summary>
-        public NamespacePlan Namespace { get; }
+        public NamespaceDeclarationGraph Namespace { get; }
 
-        public NamespaceTopLevelPlan(NamespaceDeclaration syntax, NamespacePlan @namespace)
+        public NamespaceTopLevelDeclarationGraph(NamespaceDeclaration syntax, NamespaceDeclarationGraph @namespace)
             : base(syntax) => Namespace = @namespace;
     }
 
-    /// <summary> Collected plan for a top-level type declaration wrapper. </summary>
-    private sealed class TypeTopLevelPlan : TopLevelPlan
+    private sealed class TypeTopLevelDeclarationGraph : TopLevelDeclarationGraph
     {
-        /// <summary> Wrapper node that appeared at top level in the parser tree. </summary>
         public TopLevelTypeDeclaration Wrapper { get; }
-        /// <summary> Inner type declaration shape to materialize during merge. </summary>
-        public TypeDeclarationPlan Declaration { get; }
+        public TypeDeclarationGraph Declaration { get; }
 
-        public TypeTopLevelPlan(TopLevelTypeDeclaration wrapper, TypeDeclarationPlan declaration)
+        public TypeTopLevelDeclarationGraph(TopLevelTypeDeclaration wrapper, TypeDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -713,15 +749,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    /// <summary> Collected plan for a top-level function declaration wrapper. </summary>
-    private sealed class FunctionTopLevelPlan : TopLevelPlan
+    private sealed class FunctionTopLevelDeclarationGraph : TopLevelDeclarationGraph
     {
-        /// <summary> Wrapper node that appeared at top level in the parser tree. </summary>
         public TopLevelFunctionDeclaration Wrapper { get; }
-        /// <summary> Inner function declaration shape to materialize during merge. </summary>
-        public FunctionDeclarationPlan Declaration { get; }
+        public FunctionDeclarationGraph Declaration { get; }
 
-        public FunctionTopLevelPlan(TopLevelFunctionDeclaration wrapper, FunctionDeclarationPlan declaration)
+        public FunctionTopLevelDeclarationGraph(TopLevelFunctionDeclaration wrapper, FunctionDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -729,15 +762,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    /// <summary> Collected plan for a top-level variable declaration wrapper. </summary>
-    private sealed class VariableTopLevelPlan : TopLevelPlan
+    private sealed class VariableTopLevelDeclarationGraph : TopLevelDeclarationGraph
     {
-        /// <summary> Wrapper node that appeared at top level in the parser tree. </summary>
         public TopLevelVariableDeclaration Wrapper { get; }
-        /// <summary> Variable declaration shape to materialize during merge. </summary>
-        public VariableDeclarationPlan Declaration { get; }
+        public VariableDeclarationGraph Declaration { get; }
 
-        public VariableTopLevelPlan(TopLevelVariableDeclaration wrapper, VariableDeclarationPlan declaration)
+        public VariableTopLevelDeclarationGraph(TopLevelVariableDeclaration wrapper, VariableDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -745,29 +775,22 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    /// <summary> Collected plan for a top-level statement subtree. </summary>
-    private sealed class StatementTopLevelPlan : TopLevelPlan
+    private sealed class StatementTopLevelDeclarationGraph : TopLevelDeclarationGraph
     {
-        /// <summary> Structural statement plan to replay during merge. </summary>
-        public TopLevelStatementPlan Statement { get; }
+        public TopLevelStatementGraph Statement { get; }
 
-        public StatementTopLevelPlan(TopLevelStatement syntax, TopLevelStatementPlan statement)
+        public StatementTopLevelDeclarationGraph(TopLevelStatement syntax, TopLevelStatementGraph statement)
             : base(syntax) => Statement = statement;
     }
 
-    /// <summary> Collected namespace declaration shape before any namespace symbols are created. </summary>
-    private sealed class NamespacePlan
+    private sealed class NamespaceDeclarationGraph
     {
-        /// <summary> Original namespace declaration syntax. </summary>
         public NamespaceDeclaration Declaration { get; }
-        /// <summary> Flattened qualified-name parts for the namespace chain. </summary>
-        public NamespacePartPlan[] Parts { get; }
-        /// <summary> Nested top-level plans when the namespace uses a block body. </summary>
-        public TopLevelPlan[] Members { get; }
-        /// <summary> True when the namespace uses file-scoped syntax and affects following top-level declarations. </summary>
+        public NamespacePartGraph[] Parts { get; }
+        public TopLevelDeclarationGraph[] Members { get; }
         public bool IsFileScoped { get; }
 
-        public NamespacePlan(NamespaceDeclaration declaration, NamespacePartPlan[] parts, TopLevelPlan[] members, bool isFileScoped)
+        public NamespaceDeclarationGraph(NamespaceDeclaration declaration, NamespacePartGraph[] parts, TopLevelDeclarationGraph[] members, bool isFileScoped)
         {
             Declaration = declaration;
             Parts = parts;
@@ -776,60 +799,55 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    /// <summary> One simple part of a namespace qualified-name chain. </summary>
-    private sealed class NamespacePartPlan
+    private sealed class NamespacePartGraph
     {
-        /// <summary> Simple-name syntax node for this namespace part. </summary>
         public SimpleName Syntax { get; }
-        /// <summary> Source-backed simple name used for lookup/creation during merge. </summary>
         public SymbolName Name { get; }
+        public NamespaceSymbol Symbol { get; }
+        public Scope DeclaringScope { get; }
+        public Scope Scope { get; }
 
-        public NamespacePartPlan(SimpleName syntax, SymbolName name)
+        public NamespacePartGraph(SimpleName syntax, SymbolName name, NamespaceSymbol symbol, Scope declaringScope, Scope scope)
         {
             Syntax = syntax;
             Name = name;
+            Symbol = symbol;
+            DeclaringScope = declaringScope;
+            Scope = scope;
         }
     }
 
-    /// <summary> Collected declaration shape for one type. </summary>
-    private sealed class TypeDeclarationPlan
+    private sealed class TypeDeclarationGraph
     {
-        /// <summary> Original type declaration syntax. </summary>
         public TypeDeclaration Declaration { get; }
-        /// <summary> Simple declared type name. </summary>
-        public SymbolName Name { get; }
-        /// <summary> Generic arity implied by the declaration syntax. </summary>
-        public int Arity { get; }
-        /// <summary> Collected type-parameter declarations. </summary>
-        public TypeParameterPlan[] TypeParameters { get; }
-        /// <summary> Collected member declaration plans. </summary>
-        public MemberPlan[] Members { get; }
+        public TypeSymbol Symbol { get; }
+        public Scope DeclaringScope { get; }
+        public Scope Scope { get; }
+        public MemberDeclarationGraph[] Members { get; }
 
-        public TypeDeclarationPlan(TypeDeclaration declaration, SymbolName name, int arity, TypeParameterPlan[] typeParameters, MemberPlan[] members)
+        public TypeDeclarationGraph(TypeDeclaration declaration, TypeSymbol symbol, Scope declaringScope, Scope scope, MemberDeclarationGraph[] members)
         {
             Declaration = declaration;
-            Name = name;
-            Arity = arity;
-            TypeParameters = typeParameters;
+            Symbol = symbol;
+            DeclaringScope = declaringScope;
+            Scope = scope;
             Members = members;
         }
     }
 
-    /// <summary> Base type for one collected member declaration plan. </summary>
-    private abstract class MemberPlan
+    private abstract class MemberDeclarationGraph
     {
-        /// <summary> Original member syntax node this plan came from. </summary>
         public Member Syntax { get; }
 
-        protected MemberPlan(Member syntax) => Syntax = syntax;
+        protected MemberDeclarationGraph(Member syntax) => Syntax = syntax;
     }
 
-    private sealed class TypeMemberPlan : MemberPlan
+    private sealed class TypeMemberDeclarationGraph : MemberDeclarationGraph
     {
         public MemberTypeDeclaration Wrapper { get; }
-        public TypeDeclarationPlan Declaration { get; }
+        public TypeDeclarationGraph Declaration { get; }
 
-        public TypeMemberPlan(MemberTypeDeclaration wrapper, TypeDeclarationPlan declaration)
+        public TypeMemberDeclarationGraph(MemberTypeDeclaration wrapper, TypeDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -837,12 +855,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class FunctionMemberPlan : MemberPlan
+    private sealed class FunctionMemberDeclarationGraph : MemberDeclarationGraph
     {
         public MemberFunctionDeclaration Wrapper { get; }
-        public FunctionDeclarationPlan Declaration { get; }
+        public FunctionDeclarationGraph Declaration { get; }
 
-        public FunctionMemberPlan(MemberFunctionDeclaration wrapper, FunctionDeclarationPlan declaration)
+        public FunctionMemberDeclarationGraph(MemberFunctionDeclaration wrapper, FunctionDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -850,12 +868,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class VariableMemberPlan : MemberPlan
+    private sealed class VariableMemberDeclarationGraph : MemberDeclarationGraph
     {
         public MemberFieldDeclaration Wrapper { get; }
-        public VariableDeclarationPlan Declaration { get; }
+        public VariableDeclarationGraph Declaration { get; }
 
-        public VariableMemberPlan(MemberFieldDeclaration wrapper, VariableDeclarationPlan declaration)
+        public VariableMemberDeclarationGraph(MemberFieldDeclaration wrapper, VariableDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -863,127 +881,91 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class FunctionDeclarationPlan
+    private sealed class FunctionDeclarationGraph
     {
         public FunctionDeclaration Declaration { get; }
-        public SymbolName Name { get; }
-        public int Arity { get; }
-        public TypeParameterPlan[] TypeParameters { get; }
-        public ParameterPlan[] Parameters { get; }
-        public FunctionBodyPlan Body { get; }
+        public FunctionSymbol Symbol { get; }
+        public Scope DeclaringScope { get; }
+        public Scope Scope { get; }
+        public FunctionBodyGraph Body { get; }
 
-        public FunctionDeclarationPlan(
-            FunctionDeclaration declaration,
-            SymbolName name,
-            int arity,
-            TypeParameterPlan[] typeParameters,
-            ParameterPlan[] parameters,
-            FunctionBodyPlan body)
+        public FunctionDeclarationGraph(FunctionDeclaration declaration, FunctionSymbol symbol, Scope declaringScope, Scope scope, FunctionBodyGraph body)
         {
             Declaration = declaration;
-            Name = name;
-            Arity = arity;
-            TypeParameters = typeParameters;
-            Parameters = parameters;
+            Symbol = symbol;
+            DeclaringScope = declaringScope;
+            Scope = scope;
             Body = body;
         }
     }
 
-    private abstract class FunctionBodyPlan
+    private abstract class FunctionBodyGraph
     {
         public FunctionBody Syntax { get; }
 
-        protected FunctionBodyPlan(FunctionBody syntax) => Syntax = syntax;
+        protected FunctionBodyGraph(FunctionBody syntax) => Syntax = syntax;
     }
 
-    private sealed class FunctionBlockBodyPlan : FunctionBodyPlan
+    private sealed class FunctionBlockBodyGraph : FunctionBodyGraph
     {
-        public LocalPlan[] Locals { get; }
+        public LocalDeclarationGraph[] Locals { get; }
 
-        public FunctionBlockBodyPlan(FunctionBlockBody syntax, LocalPlan[] locals)
+        public FunctionBlockBodyGraph(FunctionBlockBody syntax, LocalDeclarationGraph[] locals)
             : base(syntax) => Locals = locals;
     }
 
-    private sealed class FunctionLambdaBodyPlan : FunctionBodyPlan
+    private sealed class FunctionLambdaBodyGraph : FunctionBodyGraph
     {
-        public LocalStatementPlan Statement { get; }
+        public LocalStatementGraph Statement { get; }
 
-        public FunctionLambdaBodyPlan(FunctionLambdaBody syntax, LocalStatementPlan statement)
+        public FunctionLambdaBodyGraph(FunctionLambdaBody syntax, LocalStatementGraph statement)
             : base(syntax) => Statement = statement;
     }
 
-    private sealed class FunctionEmptyBodyPlan : FunctionBodyPlan
+    private sealed class FunctionEmptyBodyGraph : FunctionBodyGraph
     {
-        public FunctionEmptyBodyPlan(FunctionEmptyBody syntax) : base(syntax) { }
+        public FunctionEmptyBodyGraph(FunctionEmptyBody syntax) : base(syntax) { }
     }
 
-    private sealed class TypeParameterPlan
-    {
-        public SimpleName Syntax { get; }
-        public SymbolName Name { get; }
-        public int Ordinal { get; }
-
-        public TypeParameterPlan(SimpleName syntax, SymbolName name, int ordinal)
-        {
-            Syntax = syntax;
-            Name = name;
-            Ordinal = ordinal;
-        }
-    }
-
-    private sealed class ParameterPlan
-    {
-        public Parameter Parameter { get; }
-        public ParameterVariableDeclarator Declarator { get; }
-        public SymbolName Name { get; }
-        public int Ordinal { get; }
-
-        public ParameterPlan(Parameter parameter, ParameterVariableDeclarator declarator, SymbolName name, int ordinal)
-        {
-            Parameter = parameter;
-            Declarator = declarator;
-            Name = name;
-            Ordinal = ordinal;
-        }
-    }
-
-    private sealed class VariableDeclarationPlan
+    private sealed class VariableDeclarationGraph
     {
         public VariableDeclaration Declaration { get; }
-        public VariableDeclaratorPlan[] Declarators { get; }
+        public Scope DeclaringScope { get; }
+        public VariableDeclaratorGraph[] Declarators { get; }
 
-        public VariableDeclarationPlan(VariableDeclaration declaration, VariableDeclaratorPlan[] declarators)
+        public VariableDeclarationGraph(VariableDeclaration declaration, Scope declaringScope, VariableDeclaratorGraph[] declarators)
         {
             Declaration = declaration;
+            DeclaringScope = declaringScope;
             Declarators = declarators;
         }
     }
 
-    private sealed class VariableDeclaratorPlan
+    private sealed class VariableDeclaratorGraph
     {
         public VariableDeclarator Declarator { get; }
-        public SymbolName Name { get; }
+        public VariableSymbol Symbol { get; }
 
-        public VariableDeclaratorPlan(VariableDeclarator declarator, SymbolName name)
+        public VariableDeclaratorGraph(VariableDeclarator declarator, VariableSymbol symbol)
         {
             Declarator = declarator;
-            Name = name;
+            Symbol = symbol;
         }
     }
 
-    private abstract class LocalPlan
+    private abstract class LocalDeclarationGraph
     {
         public Local Syntax { get; }
 
-        protected LocalPlan(Local syntax) => Syntax = syntax;
+        protected LocalDeclarationGraph(Local syntax) => Syntax = syntax;
     }
 
-    private sealed class TypeLocalPlan : LocalPlan
+    private sealed class TypeLocalDeclarationGraph : LocalDeclarationGraph
     {
         public LocalTypeDeclaration Wrapper { get; }
-        public TypeDeclarationPlan Declaration { get; }
+        public TypeDeclarationGraph Declaration { get; }
 
-        public TypeLocalPlan(LocalTypeDeclaration wrapper, TypeDeclarationPlan declaration)
+        public TypeLocalDeclarationGraph(LocalTypeDeclaration wrapper, TypeDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -991,12 +973,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class FunctionLocalPlan : LocalPlan
+    private sealed class FunctionLocalDeclarationGraph : LocalDeclarationGraph
     {
         public LocalFunctionDeclaration Wrapper { get; }
-        public FunctionDeclarationPlan Declaration { get; }
+        public FunctionDeclarationGraph Declaration { get; }
 
-        public FunctionLocalPlan(LocalFunctionDeclaration wrapper, FunctionDeclarationPlan declaration)
+        public FunctionLocalDeclarationGraph(LocalFunctionDeclaration wrapper, FunctionDeclarationGraph declaration)
             : base(wrapper)
         {
             Wrapper = wrapper;
@@ -1004,48 +986,40 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class VariableLocalPlan : LocalPlan
+    private sealed class StatementLocalDeclarationGraph : LocalDeclarationGraph
     {
-        public LocalVariableDeclarationStatement Wrapper { get; }
-        public VariableDeclarationPlan Declaration { get; }
+        public LocalStatementGraph Statement { get; }
 
-        public VariableLocalPlan(LocalVariableDeclarationStatement wrapper, VariableDeclarationPlan declaration)
-            : base(wrapper)
-        {
-            Wrapper = wrapper;
-            Declaration = declaration;
-        }
-    }
-
-    private sealed class StatementLocalPlan : LocalPlan
-    {
-        public LocalStatementPlan Statement { get; }
-
-        public StatementLocalPlan(LocalStatement syntax, LocalStatementPlan statement)
+        public StatementLocalDeclarationGraph(LocalStatement syntax, LocalStatementGraph statement)
             : base(syntax) => Statement = statement;
     }
 
-    private abstract class TopLevelStatementPlan
+    private abstract class TopLevelStatementGraph
     {
         public TopLevelStatement Syntax { get; }
 
-        protected TopLevelStatementPlan(TopLevelStatement syntax) => Syntax = syntax;
+        protected TopLevelStatementGraph(TopLevelStatement syntax) => Syntax = syntax;
     }
 
-    private sealed class TopLevelBlockStatementPlan : TopLevelStatementPlan
+    private sealed class TopLevelBlockStatementGraph : TopLevelStatementGraph
     {
-        public LocalPlan[] Locals { get; }
+        public Scope Scope { get; }
+        public LocalDeclarationGraph[] Locals { get; }
 
-        public TopLevelBlockStatementPlan(TopLevelBlockStatement syntax, LocalPlan[] locals)
-            : base(syntax) => Locals = locals;
+        public TopLevelBlockStatementGraph(TopLevelBlockStatement syntax, Scope scope, LocalDeclarationGraph[] locals)
+            : base(syntax)
+        {
+            Scope = scope;
+            Locals = locals;
+        }
     }
 
-    private sealed class TopLevelIfStatementPlan : TopLevelStatementPlan
+    private sealed class TopLevelIfStatementGraph : TopLevelStatementGraph
     {
-        public TopLevelStatementPlan ThenStatement { get; }
-        public TopLevelStatementPlan? ElseStatement { get; }
+        public TopLevelStatementGraph ThenStatement { get; }
+        public TopLevelStatementGraph? ElseStatement { get; }
 
-        public TopLevelIfStatementPlan(TopLevelIfStatement syntax, TopLevelStatementPlan thenStatement, TopLevelStatementPlan? elseStatement)
+        public TopLevelIfStatementGraph(TopLevelIfStatement syntax, TopLevelStatementGraph thenStatement, TopLevelStatementGraph? elseStatement)
             : base(syntax)
         {
             ThenStatement = thenStatement;
@@ -1053,82 +1027,92 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private sealed class TopLevelWhileStatementPlan : TopLevelStatementPlan
+    private sealed class TopLevelWhileStatementGraph : TopLevelStatementGraph
     {
-        public TopLevelStatementPlan Statement { get; }
+        public TopLevelStatementGraph Statement { get; }
 
-        public TopLevelWhileStatementPlan(TopLevelWhileStatement syntax, TopLevelStatementPlan statement)
+        public TopLevelWhileStatementGraph(TopLevelWhileStatement syntax, TopLevelStatementGraph statement)
             : base(syntax) => Statement = statement;
     }
 
-    private sealed class TopLevelElseStatementPlan : TopLevelStatementPlan
+    private sealed class TopLevelElseStatementGraph : TopLevelStatementGraph
     {
-        public TopLevelStatementPlan Statement { get; }
+        public TopLevelStatementGraph Statement { get; }
 
-        public TopLevelElseStatementPlan(TopLevelElseStatement syntax, TopLevelStatementPlan statement)
+        public TopLevelElseStatementGraph(TopLevelElseStatement syntax, TopLevelStatementGraph statement)
             : base(syntax) => Statement = statement;
     }
 
-    private sealed class SimpleTopLevelStatementPlan : TopLevelStatementPlan
+    private sealed class SimpleTopLevelStatementGraph : TopLevelStatementGraph
     {
-        public SimpleTopLevelStatementPlan(TopLevelStatement syntax) : base(syntax) { }
+        public SimpleTopLevelStatementGraph(TopLevelStatement syntax) : base(syntax) { }
     }
 
-    private abstract class LocalStatementPlan
+    private abstract class LocalStatementGraph
     {
         public LocalStatement Syntax { get; }
+        public Scope? Scope { get; }
 
-        protected LocalStatementPlan(LocalStatement syntax) => Syntax = syntax;
+        protected LocalStatementGraph(LocalStatement syntax, Scope? scope = null)
+        {
+            Syntax = syntax;
+            Scope = scope;
+        }
     }
 
-    private sealed class LocalBlockStatementPlan : LocalStatementPlan
+    private sealed class LocalBlockStatementGraph : LocalStatementGraph
     {
-        public LocalPlan[] Locals { get; }
+        public new Scope Scope { get; }
+        public LocalDeclarationGraph[] Locals { get; }
 
-        public LocalBlockStatementPlan(LocalBlockStatement syntax, LocalPlan[] locals)
-            : base(syntax) => Locals = locals;
+        public LocalBlockStatementGraph(LocalBlockStatement syntax, Scope scope, LocalDeclarationGraph[] locals)
+            : base(syntax, scope)
+        {
+            Scope = scope;
+            Locals = locals;
+        }
     }
 
-    private sealed class LocalIfStatementPlan : LocalStatementPlan
+    private sealed class LocalIfStatementGraph : LocalStatementGraph
     {
-        public LocalStatementPlan ThenStatement { get; }
-        public LocalStatementPlan? ElseStatement { get; }
+        public LocalStatementGraph ThenStatement { get; }
+        public LocalStatementGraph? ElseStatement { get; }
 
-        public LocalIfStatementPlan(LocalIfStatement syntax, LocalStatementPlan thenStatement, LocalStatementPlan? elseStatement)
-            : base(syntax)
+        public LocalIfStatementGraph(LocalIfStatement syntax, Scope? scope, LocalStatementGraph thenStatement, LocalStatementGraph? elseStatement)
+            : base(syntax, scope)
         {
             ThenStatement = thenStatement;
             ElseStatement = elseStatement;
         }
     }
 
-    private sealed class LocalWhileStatementPlan : LocalStatementPlan
+    private sealed class LocalWhileStatementGraph : LocalStatementGraph
     {
-        public LocalStatementPlan Statement { get; }
+        public LocalStatementGraph Statement { get; }
 
-        public LocalWhileStatementPlan(LocalWhileStatement syntax, LocalStatementPlan statement)
-            : base(syntax) => Statement = statement;
+        public LocalWhileStatementGraph(LocalWhileStatement syntax, Scope? scope, LocalStatementGraph statement)
+            : base(syntax, scope) => Statement = statement;
     }
 
-    private sealed class LocalElseStatementPlan : LocalStatementPlan
+    private sealed class LocalElseStatementGraph : LocalStatementGraph
     {
-        public LocalStatementPlan Statement { get; }
+        public LocalStatementGraph Statement { get; }
 
-        public LocalElseStatementPlan(LocalElseStatement syntax, LocalStatementPlan statement)
-            : base(syntax) => Statement = statement;
+        public LocalElseStatementGraph(LocalElseStatement syntax, Scope? scope, LocalStatementGraph statement)
+            : base(syntax, scope) => Statement = statement;
     }
 
-    private sealed class LocalVariableStatementPlan : LocalStatementPlan
+    private sealed class LocalVariableStatementGraph : LocalStatementGraph
     {
-        public VariableDeclarationPlan Declaration { get; }
+        public VariableDeclarationGraph Declaration { get; }
 
-        public LocalVariableStatementPlan(LocalVariableDeclarationStatement syntax, VariableDeclarationPlan declaration)
-            : base(syntax) => Declaration = declaration;
+        public LocalVariableStatementGraph(LocalVariableDeclarationStatement syntax, Scope? scope, VariableDeclarationGraph declaration)
+            : base(syntax, scope) => Declaration = declaration;
     }
 
-    private sealed class SimpleLocalStatementPlan : LocalStatementPlan
+    private sealed class SimpleLocalStatementGraph : LocalStatementGraph
     {
-        public SimpleLocalStatementPlan(LocalStatement syntax) : base(syntax) { }
+        public SimpleLocalStatementGraph(LocalStatement syntax, Scope? scope = null) : base(syntax, scope) { }
     }
 
     private static SymbolName GetDeclaredName(NamedSyntax name) => name switch
@@ -1157,127 +1141,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         int count = 0;
 
-        for (int i = 0; i < parts.Count; i++)
-            count += CountSimpleNames(parts[i]);
+        foreach (NamedSyntax name in parts)
+            count += CountSimpleNames(name);
 
         return count;
     }
-
-    private static void CollectNamespaceParts(NamedSyntax name, NamespacePartPlan[] parts, ref int partIndex)
-    {
-        switch (name)
-        {
-            case SimpleName simpleName:
-                parts[partIndex++] = new NamespacePartPlan(simpleName, SymbolName.FromToken(simpleName.Name));
-                return;
-
-            case QualifiedName qualifiedName:
-                for (int i = 0; i < qualifiedName.Parts.Count; i++)
-                    CollectNamespaceParts(qualifiedName.Parts[i], parts, ref partIndex);
-                return;
-
-            default:
-                throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.");
-        }
-    }
-
-    private static TextSpan GetNamedSyntaxSpan(NamedSyntax name) => name switch
-    {
-        SimpleName simpleName => simpleName.Name.Span,
-        GenericName genericName => TextSpan.FromBounds(genericName.Name.Span.Start, genericName.GreaterThanToken.Span.End),
-        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => TextSpan.FromBounds(
-            GetNamedSyntaxSpan(qualifiedName.Parts[0]).Start,
-            GetNamedSyntaxSpan(qualifiedName.Parts[^1]).End),
-        _ => default
-    };
-
-    /// <summary>
-    /// Finds the source buffer backing one name syntax so project-wide diagnostics emitted during
-    /// merge can still be attached to the correct compilation unit.
-    /// </summary>
-    private static SourceText? GetNamedSyntaxSource(NamedSyntax name) => name switch
-    {
-        SimpleName simpleName => simpleName.Name.Source,
-        GenericName genericName => genericName.Name.Source,
-        QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetNamedSyntaxSource(qualifiedName.Parts[0]),
-        _ => null
-    };
-
-    private static TextSpan GetSyntaxSpan(SyntaxNode syntax) => syntax switch
-    {
-        TypeDeclaration typeDeclaration => TextSpan.FromBounds(typeDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(typeDeclaration.Name).End),
-        NamespaceDeclaration namespaceDeclaration => TextSpan.FromBounds(namespaceDeclaration.Keyword.Span.Start, GetNamedSyntaxSpan(namespaceDeclaration.Name).End),
-        FunctionDeclaration functionDeclaration => TextSpan.FromBounds(GetNamedSyntaxSpan(functionDeclaration.Signature.Identifier).Start, functionDeclaration.Signature.CloseParen.Span.End),
-        LocalBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
-        TopLevelBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
-        LocalStatement localStatement => GetLocalStatementSpan(localStatement),
-        TopLevelStatement topLevelStatement => GetTopLevelStatementSpan(topLevelStatement),
-        _ => default
-    };
-
-    /// <summary>
-    /// Finds the source buffer for syntax that may surface structural-resolution diagnostics after
-    /// the project-wide merge phase has already decoupled work from the original file loop.
-    /// </summary>
-    private static SourceText? GetSyntaxSource(SyntaxNode syntax) => syntax switch
-    {
-        TypeDeclaration typeDeclaration => typeDeclaration.Keyword.Source,
-        NamespaceDeclaration namespaceDeclaration => namespaceDeclaration.Keyword.Source,
-        FunctionDeclaration functionDeclaration => GetNamedSyntaxSource(functionDeclaration.Signature.Identifier),
-        LocalBlockStatement blockStatement => blockStatement.OpenBrace.Source,
-        TopLevelBlockStatement blockStatement => blockStatement.OpenBrace.Source,
-        LocalStatement localStatement => GetLocalStatementSource(localStatement),
-        TopLevelStatement topLevelStatement => GetTopLevelStatementSource(topLevelStatement),
-        _ => null
-    };
-
-    private static TextSpan GetLocalStatementSpan(LocalStatement statement) => statement switch
-    {
-        LocalIfStatement ifStatement => TextSpan.FromBounds(ifStatement.Keyword.Span.Start, ifStatement.CloseParen.Span.End),
-        LocalWhileStatement whileStatement => TextSpan.FromBounds(whileStatement.Keyword.Span.Start, whileStatement.CloseParen.Span.End),
-        LocalElseStatement elseStatement => elseStatement.Keyword.Span,
-        LocalVariableDeclarationStatement variableDeclaration => GetNamedSyntaxSpan(variableDeclaration.Declaration.Declarators[0].Identifier),
-        LocalExpressionStatement expressionStatement => expressionStatement.Semicolon.Span,
-        LocalReturnStatement returnStatement => returnStatement.Statement.Keyword.Span,
-        LocalEmptyStatement emptyStatement => emptyStatement.Semicolon.Span,
-        LocalBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
-        _ => default
-    };
-
-    private static TextSpan GetTopLevelStatementSpan(TopLevelStatement statement) => statement switch
-    {
-        TopLevelIfStatement ifStatement => TextSpan.FromBounds(ifStatement.Keyword.Span.Start, ifStatement.CloseParen.Span.End),
-        TopLevelWhileStatement whileStatement => TextSpan.FromBounds(whileStatement.Keyword.Span.Start, whileStatement.CloseParen.Span.End),
-        TopLevelElseStatement elseStatement => elseStatement.Keyword.Span,
-        TopLevelExpressionStatement expressionStatement => expressionStatement.Semicolon.Span,
-        TopLevelReturnStatement returnStatement => returnStatement.Statement.Keyword.Span,
-        TopLevelEmptyStatement emptyStatement => emptyStatement.Semicolon.Span,
-        TopLevelBlockStatement blockStatement => TextSpan.FromBounds(blockStatement.OpenBrace.Span.Start, blockStatement.CloseBrace.Span.End),
-        _ => default
-    };
-
-    private static SourceText? GetLocalStatementSource(LocalStatement statement) => statement switch
-    {
-        LocalIfStatement ifStatement => ifStatement.Keyword.Source,
-        LocalWhileStatement whileStatement => whileStatement.Keyword.Source,
-        LocalElseStatement elseStatement => elseStatement.Keyword.Source,
-        LocalVariableDeclarationStatement variableDeclaration => GetNamedSyntaxSource(variableDeclaration.Declaration.Declarators[0].Identifier),
-        LocalExpressionStatement expressionStatement => expressionStatement.Semicolon.Source,
-        LocalReturnStatement returnStatement => returnStatement.Statement.Keyword.Source,
-        LocalEmptyStatement emptyStatement => emptyStatement.Semicolon.Source,
-        LocalBlockStatement blockStatement => blockStatement.OpenBrace.Source,
-        _ => null
-    };
-
-    private static SourceText? GetTopLevelStatementSource(TopLevelStatement statement) => statement switch
-    {
-        TopLevelIfStatement ifStatement => ifStatement.Keyword.Source,
-        TopLevelWhileStatement whileStatement => whileStatement.Keyword.Source,
-        TopLevelElseStatement elseStatement => elseStatement.Keyword.Source,
-        TopLevelExpressionStatement expressionStatement => expressionStatement.Semicolon.Source,
-        TopLevelReturnStatement returnStatement => returnStatement.Statement.Keyword.Source,
-        TopLevelEmptyStatement emptyStatement => emptyStatement.Semicolon.Source,
-        TopLevelBlockStatement blockStatement => blockStatement.OpenBrace.Source,
-        _ => null
-    };
 }

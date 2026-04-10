@@ -46,10 +46,10 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `ResolutionPass.cs`: base type for semantic passes with project and unit hooks.
 - `ResolutionExecutionMode.cs`: scheduler hint for how a pass wants its unit work to run.
 - `ResolutionContext.cs`: mutable per-unit semantic state and resolution maps.
-- `ResolutionPassUnitResult.cs`: base type for collect-then-merge unit results.
+- `ResolutionPassUnitResult.cs`: base type for attach/merge unit results.
 - `ResolutionResult.cs`: stable per-unit semantic result.
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
-- `SymbolDiscoveryPass.cs`: first pass that predeclares symbols and builds the project-wide declaration graph.
+- `SymbolDiscoveryPass.cs`: first pass that builds unit-local declaration graphs and attaches them into the project-wide declaration graph.
 - `ResolvedTypeReference.cs`: semantic representation reserved for later declaration/type-resolution passes.
 
 ## Pass model
@@ -64,13 +64,13 @@ It also exposes an execution mode that tells the coordinator how unit work is sc
 
 - `Sequential`: unit work mutates shared project state directly, so the pass runs one unit at a time.
 - `ParallelUnitLocal`: each unit can run independently because it only reads frozen shared state and writes unit-local state.
-- `ParallelCollectThenMerge`: units first collect local facts in parallel, then the coordinator merges those facts into project state sequentially.
+- `ParallelCollectThenMerge`: units first build unit-local results in parallel, then the coordinator attaches those results into project state sequentially.
 
 That gives later semantic work room to choose the right scheduling shape instead of forcing everything into the first pass or into a purely unit-local traversal.
 
 Examples:
 
-- A declaration-merging pass can collect unit facts in parallel, then merge them in project order.
+- A declaration-building pass can build unit-local graphs in parallel, then attach them in project order.
 - A pure body-checking pass can do all its work in `ExecuteUnit(...)` with `ParallelUnitLocal`.
 - A cross-project validation pass can read project references during `AfterProject(...)`.
 
@@ -110,27 +110,36 @@ So the current design already distinguishes:
 
 ## What pass 1 does today
 
-`SymbolDiscoveryPass` is still the first semantic pass, but it runs as a collect-then-merge pass.
+`SymbolDiscoveryPass` is the first semantic pass, and it runs as a parallel build plus sequential attach pass.
 
-Inside merge it still uses two phases:
+Each compilation unit first builds a fully declared unit-local graph:
 
-1. predeclare
-2. resolve
+- namespace symbols and scopes
+- type symbols and owned scopes
+- function symbols and owned scopes
+- type parameters
+- parameters
+- variables
+- block scopes
+- embedded statement scopes
 
-That split allows same-scope declarations to exist before later passes interpret signatures and bodies.
+That unit-local graph uses real `Symbol` and `Scope` objects, but it stays isolated from shared
+project state while collection is running.
 
-The first pass currently:
+After every unit has built its local graph, merge attaches those graphs into canonical project-wide
+state:
 
-- creates namespace, type, function, type-parameter, parameter, and variable symbols
-- creates scopes for namespaces, types, functions, blocks, and embedded statement bodies
-- records syntax-to-symbol and syntax-to-scope associations
-- resolves generic arity for type and function declarations
-- collects each compilation unit into a unit-local discovery plan first
-- then merges those plans into the shared project-wide scope state
+- namespace paths are canonicalized so multiple units contribute to the same namespace symbols
+- top-level declarations are reattached under the final global or namespace containers
+- owned scopes are reparented into the canonical lexical tree
+- syntax-to-symbol and syntax-to-scope associations are written into each unit result
 
-Duplicate declaration diagnostics are intentionally deferred for now. That keeps pass 1 focused on building the declaration graph without prematurely choosing language rules for partial declarations, forward declarations, or future merging behavior.
+Duplicate declaration diagnostics are intentionally deferred for now. That keeps pass 1 focused on
+building the declaration graph without prematurely choosing language rules for partial declarations,
+forward declarations, or future merging behavior.
 
-This means the first pass is project-aware, parallel-friendly, and still stays focused on symbol discovery. Later passes can handle type references, `var`, overload signatures, and similar semantic work in one place instead of fragmenting that logic across the early pipeline.
+This keeps the expensive declaration-building work parallel while still producing one deterministic
+project-wide symbol graph for later passes.
 
 ## Cross-project infrastructure
 

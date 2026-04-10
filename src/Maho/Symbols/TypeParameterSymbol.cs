@@ -18,6 +18,12 @@ internal sealed class TypeParameterSymbol : DeclaredSymbol
         : base(SymbolKind.TypeParameter, name, parentSymbol, declaration) => Ordinal = ordinal;
 
     /// <summary>
+    /// Type-parameter identity depends on the owning declaration chain, so a reattach must flush
+    /// the cached signature.
+    /// </summary>
+    protected override void OnParentChanged() => signatureIdentity = null;
+
+    /// <summary>
     /// Builds the normalized type-parameter identity. Function type parameters are scoped only by
     /// ordinal today, while type-owned parameters include the containing metadata name.
     /// </summary>

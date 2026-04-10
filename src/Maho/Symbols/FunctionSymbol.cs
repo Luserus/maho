@@ -8,9 +8,9 @@ namespace Maho.Symbols;
 internal sealed class FunctionSymbol : DeclaredSymbol
 {
     /// <summary> Generic type parameters declared directly on the function signature. </summary>
-    private TypeParameterSymbol[] typeParameters = [];
+    public TypeParameterSymbol[] TypeParameters { get; private set; }= [];
     /// <summary> Parameters declared by the function signature in source order. </summary>
-    private ParameterSymbol[] parameters = [];
+    public ParameterSymbol[] Parameters { get; private set; } = [];
     /// <summary> Cached metadata name including generic arity suffix when applicable. </summary>
     private string? metadataName;
     /// <summary> Cached normalized parameter signature string built only if a consumer asks for it. </summary>
@@ -28,23 +28,19 @@ internal sealed class FunctionSymbol : DeclaredSymbol
     public FunctionDeclarationKey? DeclarationKey =>
         ReturnType is null ? null : declarationKey ??= new FunctionDeclarationKey(Name, Arity, ParameterSignatureKey);
     /// <summary> Number of declared parameters without forcing signature materialization. </summary>
-    public int ParameterCount => parameters.Length;
+    public int ParameterCount => Parameters.Length;
     /// <summary> Normalized parameter signature used by overload/declaration identity logic. </summary>
-    public string ParameterSignatureKey => parameterSignatureKey ??= BuildParameterSignatureKey(parameters);
-    /// <summary> Declared generic parameters attached to this function. </summary>
-    public ReadOnlySpan<TypeParameterSymbol> TypeParameters => typeParameters;
-    /// <summary> Declared parameters attached to this function. </summary>
-    public ReadOnlySpan<ParameterSymbol> Parameters => parameters;
+    public string ParameterSignatureKey => parameterSignatureKey ??= BuildParameterSignatureKey(Parameters);
 
     /// <summary> Creates one declared function symbol. </summary>
     public FunctionSymbol(SymbolName name, Symbol parentSymbol, SyntaxNode declaration, int arity)
         : base(SymbolKind.Function, name, parentSymbol, declaration) => Arity = arity;
 
     /// <summary> Records the resolved generic type parameters once symbol discovery has created them. </summary>
-    public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => typeParameters = resolvedTypeParameters;
+    public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => TypeParameters = resolvedTypeParameters;
 
     /// <summary> Records the resolved parameters once symbol discovery has created them. </summary>
-    public void ResolveParameters(ParameterSymbol[] resolvedParameters) => parameters = resolvedParameters;
+    public void ResolveParameters(ParameterSymbol[] resolvedParameters) => Parameters = resolvedParameters;
 
     /// <summary>
     /// Records the resolved return type and clears any cached declaration identity so later
