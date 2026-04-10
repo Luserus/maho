@@ -99,10 +99,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private TypeDeclarationGraph CollectTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            TypeSymbol symbol = new(GetDeclaredName(declaration.Name), parentSymbol, declaration, GetDeclaredArity(declaration.Name));
+            TypeSymbol symbol = new TypeSymbol(GetDeclaredName(declaration.Name), parentSymbol, declaration, GetDeclaredArity(declaration.Name));
             scope.Declare(symbol);
 
-            Scope typeScope = new(scope, declaration, symbol);
+            Scope typeScope = new Scope(scope, declaration, symbol);
             ownedScopes.Add(symbol, typeScope);
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Name, symbol, typeScope);
@@ -133,10 +133,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private FunctionDeclarationGraph CollectFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            FunctionSymbol symbol = new(GetDeclaredName(declaration.Signature.Identifier), parentSymbol, declaration, GetDeclaredArity(declaration.Signature.Identifier));
+            FunctionSymbol symbol = new FunctionSymbol(GetDeclaredName(declaration.Signature.Identifier), parentSymbol, declaration, GetDeclaredArity(declaration.Signature.Identifier));
             scope.Declare(symbol);
 
-            Scope functionScope = new(scope, declaration, symbol);
+            Scope functionScope = new Scope(scope, declaration, symbol);
             ownedScopes.Add(symbol, functionScope);
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Signature.Identifier, symbol, functionScope);
@@ -165,8 +165,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             for (int i = 0; i < genericName.TypeParameters.Count; i++)
             {
-                SimpleName typeParameterName = genericName.TypeParameters[i];
-                TypeParameterSymbol symbol = new(SymbolName.FromToken(typeParameterName.Name), ownerSymbol, typeParameterName, i);
+                var typeParameterName = genericName.TypeParameters[i];
+                var symbol = new TypeParameterSymbol(SymbolName.FromToken(typeParameterName.Name), ownerSymbol, typeParameterName, i);
                 ownerScope.Declare(symbol);
                 symbols[i] = symbol;
             }
@@ -180,8 +180,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             for (int i = 0; i < parameters.Count; i++)
             {
-                Parameter parameter = parameters[i];
-                ParameterSymbol symbol = new(GetDeclaredName(parameter.Declarator.Identifier), functionSymbol, parameter, i);
+                var parameter = parameters[i];
+                var symbol = new ParameterSymbol(GetDeclaredName(parameter.Declarator.Identifier), functionSymbol, parameter, i);
                 scope.Declare(symbol);
                 resolvedParameters[i] = symbol;
             }
@@ -195,8 +195,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             for (int i = 0; i < declaration.Declarators.Count; i++)
             {
-                VariableDeclarator declarator = declaration.Declarators[i];
-                VariableSymbol symbol = new(GetDeclaredName(declarator.Identifier), parentSymbol, declarator);
+                var declarator = declaration.Declarators[i];
+                var symbol = new VariableSymbol(GetDeclaredName(declarator.Identifier), parentSymbol, declarator);
                 scope.Declare(symbol);
                 declarators[i] = new VariableDeclaratorGraph(declarator, symbol);
             }
