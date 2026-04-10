@@ -66,7 +66,7 @@ public sealed class ResolutionTests
         Assert.IsType<FunctionSymbol>(localFunctionSymbol);
 
         Assert.Equal(1, resolvedType.Arity);
-        Assert.Equal(1, resolvedType.TypeParameters.Length);
+        Assert.Single(resolvedType.TypeParameters);
         Assert.Equal(1, resolvedFunction.ParameterCount);
         Assert.Empty(result.TypeReferences);
 
