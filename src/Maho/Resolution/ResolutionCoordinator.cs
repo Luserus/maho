@@ -59,8 +59,9 @@ internal sealed class ResolutionCoordinator
 
             case ResolutionExecutionMode.ParallelCollectThenMerge:
             {
-                // Collect first so units never mutate shared project state concurrently. The pass
-                // can then merge those unit-local facts in a deterministic single-threaded phase.
+                // Build unit-local results first so units never mutate shared project state
+                // concurrently. The pass can then attach those results in a deterministic
+                // single-threaded phase.
                 ResolutionPassUnitResult?[] results = new ResolutionPassUnitResult?[context.Units.Length];
                 Parallel.For(0, context.Units.Length, unitIndex => results[unitIndex] = pass.CollectUnit(context.Units[unitIndex]));
 

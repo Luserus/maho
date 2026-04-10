@@ -20,7 +20,8 @@ internal sealed class Resolver
     /// sharing mutable pass state across unrelated resolution runs.
     /// </summary>
     private readonly ResolutionPass[] passes = [
-        new SymbolDiscoveryPass()
+        new SymbolDiscoveryPass(),
+        new TypeHierarchyResolutionPass()
     ];
 
     /// <summary> Creates a resolver that will report into the provided diagnostics manager. </summary>

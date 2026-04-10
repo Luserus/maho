@@ -30,8 +30,8 @@ internal abstract class ResolutionPass
     public virtual void ExecuteUnit(ResolutionContext context) { }
 
     /// <summary>
-    /// Collects per-unit facts for collect-then-merge passes. The default implementation forwards
-    /// to <see cref="ExecuteUnit"/> so simple passes only need one override.
+    /// Builds one unit-local result for attach/merge passes. The default implementation forwards to
+    /// <see cref="ExecuteUnit"/> so simple passes only need one override.
     /// </summary>
     public virtual ResolutionPassUnitResult? CollectUnit(ResolutionContext context)
     {
@@ -40,7 +40,7 @@ internal abstract class ResolutionPass
     }
 
     /// <summary>
-    /// Merges one unit's collected facts back into shared project state. This only runs for
+    /// Merges one unit's collected result back into shared project state. This only runs for
     /// <see cref="ResolutionExecutionMode.ParallelCollectThenMerge"/> passes.
     /// </summary>
     public virtual void MergeUnit(ResolutionCoordinatorContext projectContext, ResolutionContext unitContext, ResolutionPassUnitResult? result) { }
