@@ -51,7 +51,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             ownedScopes.Add(unitRootNamespace, unitRootScope);
         }
 
-        public UnitGraph Collect() => new(root, CollectTopLevels(root.Members, unitRootScope, unitRootNamespace));
+        public UnitGraph Collect() => new UnitGraph(root, CollectTopLevels(root.Members, unitRootScope, unitRootNamespace));
 
         private TopLevelDeclarationGraph[] CollectTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
         {
@@ -108,9 +108,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Name, symbol, typeScope);
             symbol.ResolveTypeParameters(typeParameters);
 
-            MemberDeclarationGraph[] members = declaration.Body is TypeBlockBody blockBody
-                ? CollectMembers(blockBody.Members, typeScope, symbol)
-                : [];
+            MemberDeclarationGraph[] members = declaration.Body is TypeBlockBody blockBody ? CollectMembers(blockBody.Members, typeScope, symbol) : [];
 
             return new TypeDeclarationGraph(declaration, symbol, scope, typeScope, members);
         }
@@ -328,13 +326,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                     parts[partIndex++] = new NamespacePartGraph(simpleName, SymbolName.FromToken(simpleName.Name), namespaceSymbol, currentScope, namespaceScope);
                     currentScope = namespaceScope;
                     currentSymbol = namespaceSymbol;
-                    return;
+                    break;
                 }
 
                 case QualifiedName qualifiedName:
-                    foreach (NamedSyntax nm in qualifiedName.Parts)
+                    foreach (var nm in qualifiedName.Parts)
                         CollectNamespaceParts(nm, parts, ref partIndex, ref currentScope, ref currentSymbol);
-                    return;
+                    break;
 
                 default:
                     throw new InvalidOperationException($"Unhandled named syntax '{name.GetType().Name}'.");
@@ -472,7 +470,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void AttachMembers(MemberDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
         {
-            foreach (MemberDeclarationGraph member in members)
+            foreach (var member in members)
                 AttachMember(member, scope, containerSymbol);
         }
 
@@ -554,7 +552,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             SymbolName name = SymbolName.FromToken(syntax.Name);
 
-            foreach (TypeParameterSymbol symbol in typeParameters)
+            foreach (var symbol in typeParameters)
             {
                 if (symbol.Name != name)
                     continue;
@@ -572,7 +570,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void BindParameters(ReadOnlySpan<ParameterSymbol> parameters)
         {
-            foreach (ParameterSymbol param in parameters)
+            foreach (var param in parameters)
             {
                 Parameter parameter = (Parameter)param.Declaration;
                 context.ResolveDeclaredSymbol(parameter, param);
@@ -582,7 +580,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void AttachVariableDeclaration(VariableDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
-            foreach (VariableDeclaratorGraph declarator in graph.Declarators)
+            foreach (var declarator in graph.Declarators)
             {
                 VariableSymbol symbol = declarator.Symbol;
                 MoveDeclaredSymbol(symbol, graph.DeclaringScope, scope);
@@ -593,7 +591,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         private void AttachLocals(LocalDeclarationGraph[] locals, Scope scope, Symbol containerSymbol)
         {
-            foreach (LocalDeclarationGraph local in locals)
+            foreach (var local in locals)
                 AttachLocal(local, scope, containerSymbol);
         }
 

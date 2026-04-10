@@ -109,9 +109,7 @@ internal sealed class Scope
     /// </summary>
     public IReadOnlyList<Symbol> LookupLocal(SymbolName name)
     {
-        return symbolsByName.TryGetValue(name, out List<Symbol>? declared)
-            ? declared
-            : [];
+        return symbolsByName.TryGetValue(name, out List<Symbol>? declared) ? declared : [];
     }
 
     /// <summary>
@@ -127,8 +125,8 @@ internal sealed class Scope
             if (!current.symbolsByName.TryGetValue(name, out List<Symbol>? declared))
                 continue;
 
-            for (int i = 0; i < declared.Count; i++)
-                yield return declared[i];
+            foreach (var dec in declared)
+                yield return dec;
         }
     }
 }
