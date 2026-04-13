@@ -30,16 +30,20 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
     {
         private readonly ResolutionContext context;
 
+        /// <summary> Creates the helper that resolves one compilation unit against shared project state. </summary>
         public UnitResolver(ResolutionContext context) => this.context = context;
 
+        /// <summary> Starts the unit walk from the compilation unit root. </summary>
         public void Execute() => VisitTopLevels(context.Root.Members);
 
+        /// <summary> Visits every top-level item in source order. </summary>
         private void VisitTopLevels(IReadOnlyList<TopLevel> members)
         {
             foreach (TopLevel member in members)
                 VisitTopLevel(member);
         }
 
+        /// <summary> Dispatches one top-level item to the traversal needed for hierarchy resolution. </summary>
         private void VisitTopLevel(TopLevel member)
         {
             switch (member)
@@ -84,6 +88,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Traverses nested top-level statements so local type declarations still participate in hierarchy binding. </summary>
         private void VisitTopLevelStatement(TopLevelStatement statement)
         {
             switch (statement)
@@ -110,6 +115,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Traverses a function body because local declarations can introduce nested types. </summary>
         private void VisitFunctionDeclaration(FunctionDeclaration declaration)
         {
             switch (declaration.Body)
@@ -124,12 +130,14 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Visits all local items inside one lexical container. </summary>
         private void VisitLocals(IReadOnlyList<Local> locals)
         {
             foreach (Local local in locals)
                 VisitLocal(local);
         }
 
+        /// <summary> Dispatches one local declaration or statement to the traversal needed for type discovery. </summary>
         private void VisitLocal(Local local)
         {
             switch (local)
@@ -148,6 +156,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Traverses nested local statements so embedded local types are not skipped. </summary>
         private void VisitLocalStatement(LocalStatement statement)
         {
             switch (statement)
@@ -174,6 +183,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Resolves one declared type's direct base edges, then recurses into nested declarations. </summary>
         private void VisitTypeDeclaration(TypeDeclaration declaration)
         {
             if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol) || declaredSymbol is not TypeSymbol typeSymbol)
@@ -194,6 +204,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
                 VisitMember(member);
         }
 
+        /// <summary> Traverses type members that can themselves contain nested type declarations. </summary>
         private void VisitMember(Member member)
         {
             switch (member)
@@ -208,6 +219,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             }
         }
 
+        /// <summary> Resolves the direct base-type list for one type declaration and stores it on the symbol. </summary>
         private void ResolveDirectBaseTypes(TypeDeclaration declaration, TypeSymbol typeSymbol)
         {
             if (declaration.Base is null)
@@ -240,6 +252,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             typeSymbol.ResolveBaseTypes([.. resolvedBaseTypes]);
         }
 
+        /// <summary> Resolves one type-syntax occurrence and records the semantic result in the unit map. </summary>
         private ResolvedTypeReference ResolveTypeReference(TypeSyntax syntax, Scope scope)
         {
             ResolvedTypeReference resolved = ResolveTypeReferenceCore(syntax, scope, [scope], lexicalLookup: true);
@@ -247,6 +260,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return resolved;
         }
 
+        /// <summary> Resolves any supported type-syntax form under the provided lookup rules. </summary>
         private ResolvedTypeReference ResolveTypeReferenceCore(TypeSyntax syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
         {
             return syntax switch
@@ -259,6 +273,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             };
         }
 
+        /// <summary> Resolves a generic type reference, including all type arguments, under the current scope. </summary>
         private ResolvedNamedTypeReference ResolveGenericType(GenericType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
         {
             ResolvedTypeReference[] typeArguments = new ResolvedTypeReference[syntax.TypeArguments.Count];
@@ -270,6 +285,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return ResolveNamedType(syntax, syntax.Name.Value, syntax.TypeArguments.Count, typeArguments, candidates);
         }
 
+        /// <summary> Resolves a qualified type reference by treating the left side as a container for the right. </summary>
         private ResolvedQualifiedTypeReference ResolveQualifiedType(QualifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
         {
             ResolvedTypeReference left = ResolveTypeReferenceCore(syntax.Left, lexicalScope, scopes, lexicalLookup);
@@ -278,6 +294,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return new ResolvedQualifiedTypeReference(syntax, left, right, [.. right.CandidateSymbols]);
         }
 
+        /// <summary> Resolves the underlying element type, then reapplies any postfix type modifier. </summary>
         private ResolvedTypeReference ResolveModifiedType(ModifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
         {
             ResolvedTypeReference elementType = ResolveTypeReferenceCore(syntax.Type, lexicalScope, scopes, lexicalLookup);
@@ -286,9 +303,11 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
                 : new ResolvedModifiedTypeReference(syntax, elementType, syntax.Modifier);
         }
 
+        /// <summary> Creates the canonical semantic object for one simple or generic named type reference. </summary>
         private static ResolvedNamedTypeReference ResolveNamedType(TypeSyntax syntax, string name, int arity, ResolvedTypeReference[] typeArguments, Symbol[] candidates) =>
             new ResolvedNamedTypeReference(syntax, name, arity, typeArguments, candidates, CreateExplicitSignatureKey(candidates, typeArguments));
 
+        /// <summary> Collects the member scopes owned by the left side of a qualified type reference. </summary>
         private Scope[] CollectCandidateScopes(ResolvedTypeReference left)
         {
             List<Scope> scopes = [];
@@ -305,6 +324,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return [.. scopes];
         }
 
+        /// <summary> Looks up matching candidates in the provided scopes while filtering by symbol kind and arity. </summary>
         private static Symbol[] LookupCandidates(Scope[] scopes, SymbolName name, int arity, bool lexicalLookup, bool allowNamespaces, bool allowTypeParameters)
         {
             List<Symbol> matches = [];
@@ -326,6 +346,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return [.. matches];
         }
 
+        /// <summary> Tests whether one looked-up symbol is a legal candidate for the current type reference shape. </summary>
         private static bool IsCandidateMatch(Symbol symbol, int arity, bool allowNamespaces, bool allowTypeParameters) => symbol switch
         {
             NamespaceSymbol => allowNamespaces && arity == 0,
@@ -334,6 +355,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             _ => false
         };
 
+        /// <summary> Prefers an exact semantic signature when lookup found one unambiguous target symbol. </summary>
         private static string? CreateExplicitSignatureKey(Symbol[] candidates, ReadOnlySpan<ResolvedTypeReference> typeArguments)
         {
             if (candidates.Length != 1)
@@ -348,6 +370,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             };
         }
 
+        /// <summary> Joins already-resolved type-argument signatures into one normalized argument list. </summary>
         private static string JoinSignatureKeys(ReadOnlySpan<ResolvedTypeReference> typeArguments)
         {
             string[] parts = new string[typeArguments.Length];
@@ -358,6 +381,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return string.Join(",", parts);
         }
 
+        /// <summary> Reduces a resolved reference to one unique direct base type while reporting lookup failures. </summary>
         private TypeSymbol? ResolveUniqueBaseType(ResolvedTypeReference resolvedReference)
         {
             TypeSymbol? singleType = null;
@@ -383,12 +407,14 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
             return null;
         }
 
+        /// <summary> Reports that one declared base-type syntax resolved to no concrete type symbol. </summary>
         private void ReportUnresolvedBaseType(ResolvedTypeReference resolvedReference)
         {
             TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
             context.Diagnostics.ReportUnresolvedTypeReference(span, resolvedReference.DisplayName, resolvedReference.Syntax.GetSource());
         }
 
+        /// <summary> Reports that one declared base-type syntax matched more than one concrete type symbol. </summary>
         private void ReportAmbiguousBaseType(ResolvedTypeReference resolvedReference)
         {
             TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
@@ -463,6 +489,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         return types;
     }
 
+    /// <summary> Collects every declared type reachable from one top-level member list. </summary>
     private static void CollectDeclaredTypes(IReadOnlyList<TopLevel> members, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         foreach (TopLevel member in members)
@@ -504,6 +531,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary> Adds one declared type symbol to the cycle-detection worklist and descends into nested declarations. </summary>
     private static void CollectDeclaredType(TypeDeclaration declaration, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? symbol) || symbol is not TypeSymbol typeSymbol || !seen.Add(typeSymbol))
@@ -529,6 +557,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary> Collects type declarations nested anywhere inside one function body. </summary>
     private static void CollectDeclaredTypes(FunctionDeclaration declaration, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         switch (declaration.Body)
@@ -543,6 +572,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary> Collects type declarations introduced by a list of locals. </summary>
     private static void CollectDeclaredTypes(IReadOnlyList<Local> locals, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         foreach (Local local in locals)
@@ -564,6 +594,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary> Collects type declarations nested under a top-level statement subtree. </summary>
     private static void CollectDeclaredTypes(TopLevelStatement statement, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         switch (statement)
@@ -590,6 +621,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary> Collects type declarations nested under a local-statement subtree. </summary>
     private static void CollectDeclaredTypes(LocalStatement statement, ResolutionContext context, List<TypeSymbol> types, HashSet<TypeSymbol> seen)
     {
         switch (statement)
@@ -647,10 +679,14 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         _ => name.GetType().Name
     };
 
+    /// <summary> DFS visitation state used by the project-wide cycle detector. </summary>
     private enum VisitState : byte
     {
+        /// <summary> The type has not been visited yet. </summary>
         NotVisited,
+        /// <summary> The type is on the active DFS stack. </summary>
         Visiting,
+        /// <summary> The type and its reachable base edges have been fully processed. </summary>
         Visited
     }
 }

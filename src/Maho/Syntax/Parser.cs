@@ -116,7 +116,7 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const;
+                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
