@@ -155,6 +155,10 @@ internal sealed class DiagnosticsManager
             span,
             source);
 
+    /// <summary> Reports that a type participates in an inheritance cycle. </summary>
+    public void ReportCyclicTypeHierarchy(TextSpan span, string typeName, SourceText? source = null) =>
+        ReportError("MH1004", $"Type '{typeName}' participates in a cycle in the type hierarchy.", span, source);
+
     /// <summary> Reports that resolution state became inconsistent without crashing the analysis pipeline. </summary>
     public void ReportResolutionStateError(TextSpan span, string subject, SourceText? source = null) =>
         ReportError("MH1099", $"Resolution state became inconsistent while resolving {subject}.", span, source);

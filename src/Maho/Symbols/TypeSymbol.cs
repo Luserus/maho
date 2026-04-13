@@ -1,4 +1,3 @@
-using System;
 using Maho.Syntax;
 
 namespace Maho.Symbols;
@@ -8,6 +7,8 @@ internal sealed class TypeSymbol : DeclaredSymbol
 {
     /// <summary> Generic type parameters declared directly on this type, in source order. </summary>
     public TypeParameterSymbol[] TypeParameters { get; private set; } = [];
+    /// <summary> Directly declared hierarchy edges after type-hierarchy resolution has completed. </summary>
+    public TypeSymbol[] BaseTypes { get; private set; } = [];
     /// <summary> Cached metadata name including generic arity suffix when applicable. </summary>
     private string? metadataName;
 
@@ -28,6 +29,9 @@ internal sealed class TypeSymbol : DeclaredSymbol
 
     /// <summary> Records the resolved generic type parameters once symbol discovery has created them. </summary>
     public void ResolveTypeParameters(TypeParameterSymbol[] resolvedTypeParameters) => TypeParameters = resolvedTypeParameters;
+
+    /// <summary> Records the directly declared hierarchy edges once type-hierarchy resolution has completed. </summary>
+    public void ResolveBaseTypes(TypeSymbol[] resolvedBaseTypes) => BaseTypes = resolvedBaseTypes;
 
     /// <summary> Builds the metadata-visible name lazily so analysis only pays for it on demand. </summary>
     private string CreateMetadataName() => Arity == 0 ? Name.ToString() : $"{Name}`{Arity}";

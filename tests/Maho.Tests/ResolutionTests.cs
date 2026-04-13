@@ -1,3 +1,4 @@
+using Maho.Diagnostics;
 using Maho.Resolution;
 using Maho.Symbols;
 using Maho.Syntax;
@@ -150,5 +151,54 @@ public sealed class ResolutionTests
 
         Assert.True(result.TryResolveDeclaredSymbol(functionConstraintClause.TypeParameter, out Symbol? resolvedFunctionConstraintTypeParameterSymbol));
         Assert.Same(declaredFunctionTypeParameterSymbol, resolvedFunctionConstraintTypeParameterSymbol);
+    }
+
+    [Fact]
+    public void Resolve_TypeHierarchy_ResolvesDirectBaseTypesAcrossUnits()
+    {
+        var (_, diagnostics1, _, root1) = CompilerTestBed.Parse("""
+            namespace Demo;
+            public class Base;
+            """);
+        var (_, diagnostics2, _, root2) = CompilerTestBed.Parse("""
+            namespace Demo;
+            public class Derived : Base;
+            """);
+
+        Assert.Empty(diagnostics1.Diagnostics);
+        Assert.Empty(diagnostics2.Diagnostics);
+
+        ResolutionProjectResult result = CompilerTestBed.ResolveProject(root1, root2);
+        ResolutionResult derivedUnit = result.Units[1];
+        TopLevelTypeDeclaration derivedWrapper = Assert.IsType<TopLevelTypeDeclaration>(root2.Members[1]);
+        TypeDeclaration derivedDeclaration = derivedWrapper.Type;
+
+        Assert.True(derivedUnit.TryResolveDeclaredSymbol(derivedDeclaration, out Symbol? declaredSymbol));
+        TypeSymbol derivedType = Assert.IsType<TypeSymbol>(declaredSymbol);
+        TypeSymbol resolvedBaseType = Assert.IsType<TypeSymbol>(Assert.Single(derivedType.BaseTypes));
+
+        Assert.Equal("Base", resolvedBaseType.Name.ToString());
+        Assert.True(derivedUnit.TryResolveTypeReference(derivedDeclaration.Base!.BaseTypes[0], out ResolvedTypeReference? resolvedReference));
+        Assert.Same(resolvedBaseType, Assert.IsType<TypeSymbol>(Assert.Single([.. resolvedReference!.CandidateSymbols])));
+    }
+
+    [Fact]
+    public void Resolve_TypeHierarchy_ReportsCycleDiagnosticsDuringFinalization()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public class A : B;
+            public class B : A;
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        Resolver resolver = new(diagnostics);
+        _ = resolver.Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        Diagnostic[] cycleDiagnostics = [.. diagnostics.Diagnostics.Where(static diagnostic => diagnostic.DiagnosticCode == "MH1004")];
+        Assert.Equal(2, cycleDiagnostics.Length);
+        Assert.Contains(cycleDiagnostics, diagnostic => diagnostic.Message.Contains("'A'"));
+        Assert.Contains(cycleDiagnostics, diagnostic => diagnostic.Message.Contains("'B'"));
     }
 }

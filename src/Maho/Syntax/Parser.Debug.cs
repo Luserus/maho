@@ -1,7 +1,4 @@
-using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using Maho.Text;
 
 namespace Maho.Syntax;
@@ -12,21 +9,20 @@ internal sealed partial class Parser
     /// <summary> Serializes the parsed syntax tree into the stable debug schema. </summary>
     public override string ToString()
     {
-        Dictionary<SyntaxNode, TextSpan?> spanCache = [];
-        return DebugJson.Serialize(new DebugParserInfo("parser", Root is null ? null : CreateNodeView(Root, spanCache)));
+        return DebugJson.Serialize(new DebugParserInfo("parser", Root is null ? null : CreateNodeView(Root)));
     }
 
     /// <summary> Projects one syntax node into a recursive debug DTO tree. </summary>
-    private DebugParserNodeInfo CreateNodeView(SyntaxNode node, Dictionary<SyntaxNode, TextSpan?> spanCache)
+    private DebugParserNodeInfo CreateNodeView(SyntaxNode node)
     {
-        TextSpan? span = GetSpan(node, spanCache);
-        List<(string Name, SyntaxNode Node)> children = GetChildren(node);
+        TextSpan? span = node.GetSpan();
+        List<(string Name, SyntaxNode Node)> children = SyntaxSpan.GetChildren(node);
         DebugParserChildInfo[] childItems = new DebugParserChildInfo[children.Count];
 
         for (int i = 0; i < children.Count; i++)
         {
             var (name, child) = children[i];
-            childItems[i] = new DebugParserChildInfo(name, CreateNodeView(child, spanCache));
+            childItems[i] = new DebugParserChildInfo(name, CreateNodeView(child));
         }
 
         if (node is Token token)
@@ -53,81 +49,5 @@ internal sealed partial class Parser
             null,
             null,
             childItems);
-    }
-
-    /// <summary>
-    /// Computes a best-effort span for composite nodes by spanning from the first to the last child
-    /// that carries source coordinates.
-    /// </summary>
-    private TextSpan? GetSpan(SyntaxNode node, Dictionary<SyntaxNode, TextSpan?> spanCache)
-    {
-        if (spanCache.TryGetValue(node, out TextSpan? cachedSpan))
-            return cachedSpan;
-
-        TextSpan? span;
-
-        if (node is Token token)
-        {
-            span = token.Span;
-        }
-        else
-        {
-            TextSpan? first = null;
-            TextSpan? last = null;
-
-            foreach (var (_, child) in GetChildren(node))
-            {
-                TextSpan? childSpan = GetSpan(child, spanCache);
-
-                if (childSpan is not TextSpan concreteSpan)
-                    continue;
-
-                first ??= concreteSpan;
-                last = concreteSpan;
-            }
-
-            span = first is TextSpan firstSpan && last is TextSpan lastSpan
-                ? TextSpan.FromBounds(firstSpan.Start, lastSpan.End)
-                : null;
-        }
-
-        spanCache[node] = span;
-        return span;
-    }
-
-    /// <summary> Reflects over public properties to discover syntax children in declaration order. </summary>
-    private static List<(string Name, SyntaxNode Node)> GetChildren(SyntaxNode node)
-    {
-        List<(string Name, SyntaxNode Node)> children = [];
-
-        foreach (PropertyInfo property in node.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).OrderBy(static property => property.MetadataToken))
-        {
-            object? value = property.GetValue(node);
-
-            if (value is null or string)
-                continue;
-
-            if (value is SyntaxNode child)
-            {
-                children.Add((property.Name, child));
-                continue;
-            }
-
-            if (value is IEnumerable sequence)
-            {
-                int index = 0;
-
-                foreach (object? item in sequence)
-                {
-                    if (item is SyntaxNode sequenceChild)
-                    {
-                        children.Add(($"{property.Name}[{index}]", sequenceChild));
-                        index++;
-                    }
-                }
-            }
-        }
-
-        return children;
     }
 }
