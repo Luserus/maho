@@ -8,6 +8,7 @@ It now supports:
 - per-unit semantic state,
 - shared project-wide symbol scopes,
 - declaration discovery,
+- type-hierarchy resolution,
 - and infrastructure for later cross-project lookup.
 
 ## Current architecture
@@ -50,7 +51,8 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `ResolutionResult.cs`: stable per-unit semantic result.
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
 - `SymbolDiscoveryPass.cs`: first pass that builds unit-local declaration graphs and attaches them into the project-wide declaration graph.
-- `ResolvedTypeReference.cs`: semantic representation reserved for later declaration/type-resolution passes.
+- `TypeHierarchyResolutionPass.cs`: second pass that resolves direct type-hierarchy edges and performs project-wide cycle detection.
+- `ResolvedTypeReference.cs`: semantic representation used by declaration-site type-resolution passes.
 
 ## Pass model
 
@@ -100,6 +102,7 @@ Each `ResolutionContext` owns:
 - one `CompilationUnit`
 - syntax node -> declared symbol
 - syntax node -> scope
+- type syntax -> resolved type reference
 
 It also projects the shared project-wide state through convenience properties like `GlobalScope`, `GlobalNamespace`, `Diagnostics`, and `References`.
 
@@ -140,6 +143,22 @@ forward declarations, or future merging behavior.
 
 This keeps the expensive declaration-building work parallel while still producing one deterministic
 project-wide symbol graph for later passes.
+
+## What pass 2 does today
+
+`TypeHierarchyResolutionPass` is the second semantic pass, and it runs as a parallel unit-local
+binding stage followed by sequential project-wide finalization.
+
+Each compilation unit walks every declared type after symbol discovery has already established the
+canonical symbol/scope graph. During that walk the pass:
+
+- resolves every base-type syntax in the declaration's base list,
+- stores the resulting `ResolvedTypeReference` objects in the unit-local type-reference map,
+- stores the canonical direct hierarchy edges on the owning `TypeSymbol`,
+- and keeps the hierarchy model intentionally simple by using one direct `BaseTypes` array instead of hard-coding stronger language categories.
+
+After every unit has finished its local work, `AfterProject(...)` runs one whole-project cycle check
+over the canonical type graph and reports diagnostics for each participating type.
 
 ## Cross-project infrastructure
 
@@ -197,9 +216,10 @@ That split matches the coordinator model:
 
 ## Deferred work
 
-`ResolvedTypeReference` and the related per-unit type-reference map are still present, but they are intentionally unused by pass 1 now.
+`ResolvedTypeReference` and the related per-unit type-reference map now participate in
+`TypeHierarchyResolutionPass`, but they still leave room for later declaration- and type-oriented passes.
 
-That infrastructure is reserved for later passes that resolve:
+That infrastructure can continue to support passes that resolve:
 
 - declaration-site type references,
 - `var`,
@@ -219,9 +239,10 @@ Recommended order:
 5. symbol types in `../Symbols`
 6. `ResolutionPass.cs`
 7. `SymbolDiscoveryPass.cs`
-8. `ResolutionCoordinator.cs`
-9. `Resolver.cs`
-10. `ResolutionResult.cs`
-11. `ResolutionProjectResult.cs`
+8. `TypeHierarchyResolutionPass.cs`
+9. `ResolutionCoordinator.cs`
+10. `Resolver.cs`
+11. `ResolutionResult.cs`
+12. `ResolutionProjectResult.cs`
 
 That order reflects the current dependency direction of the semantic layer.
