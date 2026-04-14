@@ -136,6 +136,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             MemberTypeDeclaration typeDeclaration => new TypeMemberDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
             MemberFunctionDeclaration functionDeclaration => new FunctionMemberDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
             MemberFieldDeclaration fieldDeclaration => new VariableMemberDeclarationGraph(fieldDeclaration, CollectVariableDeclaration(fieldDeclaration.Declaration, scope, containerSymbol)),
+            MemberPropertyDeclaration propertyDeclaration => new PropertyMemberDeclarationGraph(propertyDeclaration),
             _ => throw new InvalidOperationException($"Unhandled member syntax '{member.GetType().Name}'.")
         };
 
@@ -522,6 +523,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
                 case VariableMemberDeclarationGraph variableGraph:
                     AttachVariableDeclaration(variableGraph.Declaration, scope, containerSymbol);
+                    break;
+
+                case PropertyMemberDeclarationGraph:
                     break;
 
                 default:
@@ -982,6 +986,17 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             Wrapper = wrapper;
             Declaration = declaration;
         }
+    }
+
+    /// <summary> Member graph wrapper for a property declaration that is currently syntax-only. </summary>
+    private sealed class PropertyMemberDeclarationGraph : MemberDeclarationGraph
+    {
+        /// <summary> Original wrapper syntax that introduced the property declaration. </summary>
+        public MemberPropertyDeclaration Wrapper { get; }
+
+        /// <summary> Creates one property member graph wrapper. </summary>
+        public PropertyMemberDeclarationGraph(MemberPropertyDeclaration wrapper)
+            : base(wrapper) => Wrapper = wrapper;
     }
 
     /// <summary> Collected graph for one function declaration. </summary>

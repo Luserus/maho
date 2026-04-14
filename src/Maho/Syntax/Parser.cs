@@ -117,8 +117,10 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                             MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial;
+    /// <summary> Indicates whether the current token starts a bracketed attribute list. </summary>
+    private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
-    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
+    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or MatchingKeywordKind.Attribute;
 
     /// <summary> Controls whether statement parsing should allow a trailing expression result. </summary>
     private enum StatementParseMode : byte
@@ -224,7 +226,7 @@ internal sealed partial class Parser
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration();
-        else if (IsCurrentTokenModifier)
+        else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseTopLevelDeclaration();
 
         return ParseTopLevelStatement();
@@ -233,18 +235,19 @@ internal sealed partial class Parser
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember()
     {
+        IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (IsCurrentTokenTypeDeclarationStart)
-            return ParseMemberTypeDeclaration(modifiers);
+            return ParseMemberTypeDeclaration(attributes, modifiers);
         else
-            return ParseMemberFieldDeclarationOrFunction(modifiers);
+            return ParseMemberFieldDeclarationOrFunctionOrProperty(attributes, modifiers);
     }
 
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
-        if (IsCurrentTokenModifier)
+        if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
         
         return ParseLocalStatement(parseMode);

@@ -236,8 +236,10 @@ internal sealed partial class Lexer
         {
             2 when identifier.SequenceEqual("if") => MatchingKeywordKind.If,
             3 when identifier.SequenceEqual("for") => MatchingKeywordKind.For,
+            3 when identifier.SequenceEqual("get") => MatchingKeywordKind.Get,
             3 when identifier.SequenceEqual("new") => MatchingKeywordKind.New,
             3 when identifier.SequenceEqual("put") => MatchingKeywordKind.Put,
+            3 when identifier.SequenceEqual("set") => MatchingKeywordKind.Set,
             3 when identifier.SequenceEqual("var") => MatchingKeywordKind.Var,
             3 when identifier.SequenceEqual("dyn") => MatchingKeywordKind.Dyn,
             4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
@@ -255,6 +257,7 @@ internal sealed partial class Lexer
             6 when identifier.SequenceEqual("static") => MatchingKeywordKind.Static,
             7 when identifier.SequenceEqual("partial") => MatchingKeywordKind.Partial,
             7 when identifier.SequenceEqual("private") => MatchingKeywordKind.Private,
+            9 when identifier.SequenceEqual("attribute") => MatchingKeywordKind.Attribute,
             8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
             9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,
             9 when identifier.SequenceEqual("namespace") => MatchingKeywordKind.Namespace,

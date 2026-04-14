@@ -167,9 +167,9 @@ internal sealed partial class Parser
 
     /// <summary> Parses a local variable declaration statement. </summary>
     /// <returns> The local variable declaration statement node. </returns>
-    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
+    private LocalVariableDeclarationStatement ParseLocalVariableDeclarationStatement(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
     {
-        var variableDeclaration = ParseVariableDeclaration(modifiers, type, firstIdentifier);
+        var variableDeclaration = ParseVariableDeclaration(attributes, modifiers, type, firstIdentifier);
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local variable declaration", MissingTokenAnchor.AfterPrevious);
 
         return new LocalVariableDeclarationStatement(variableDeclaration, semicolon);

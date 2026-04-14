@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using Maho;
 using Maho.Syntax;
 
 namespace Maho.Tests;
@@ -10,6 +11,7 @@ public sealed class ParserTests
     [InlineData("namespace Demo;", typeof(NamespaceDeclaration), typeof(NamespaceEmptyBody))]
     [InlineData("namespace Demo { public class Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
     [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("public attribute Marker;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Main();", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Main() { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
@@ -37,6 +39,7 @@ public sealed class ParserTests
     [InlineData("public struct Nested { public int Value; }", typeof(MemberTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Compute();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Compute() { return 0; }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("public int Value { get; set; }", typeof(MemberPropertyDeclaration), null)]
     [InlineData("public int Value;", typeof(MemberFieldDeclaration), null)]
     public void Parse_MemberDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
@@ -170,6 +173,60 @@ public sealed class ParserTests
         GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
         Assert.Equal("Output", resultConstraintType.Name.Value);
         Assert.Equal("TInput", Assert.IsType<SimpleType>(resultConstraintType.TypeArguments[0]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_DeclarationAttributes_SupportQualifiedNamesAndConstructorArguments()
+    {
+        TypeDeclaration type = ParseSingleTopLevelType("""
+            [Marker]
+            [Standard.IntrinsicType("Int32", 32)]
+            public attribute SignedInt;
+            """);
+
+        Assert.Equal(TypeKind.Attribute, type.Kind);
+        Assert.Equal(2, type.Attributes.Count);
+
+        AttributeApplication simpleAttribute = Assert.Single(type.Attributes[0].Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(simpleAttribute.Name).Name.Value);
+        Assert.Empty(simpleAttribute.Arguments);
+        Assert.Null(simpleAttribute.OpenParen);
+        Assert.Null(simpleAttribute.CloseParen);
+
+        AttributeApplication qualifiedAttribute = Assert.Single(type.Attributes[1].Attributes);
+        QualifiedName qualifiedName = Assert.IsType<QualifiedName>(qualifiedAttribute.Name);
+        Assert.Equal(2, qualifiedName.Parts.Count);
+        Assert.Equal("Standard", Assert.IsType<SimpleName>(qualifiedName.Parts[0]).Name.Value);
+        Assert.Equal("IntrinsicType", Assert.IsType<SimpleName>(qualifiedName.Parts[1]).Name.Value);
+        Assert.Equal(2, qualifiedAttribute.Arguments.Count);
+        Assert.IsType<LiteralExpression>(qualifiedAttribute.Arguments[0]);
+        Assert.IsType<LiteralExpression>(qualifiedAttribute.Arguments[1]);
+    }
+
+    [Fact]
+    public void Parse_PropertyDeclaration_SupportsAccessorModifiersAndBodies()
+    {
+        MemberPropertyDeclaration property = Assert.IsType<MemberPropertyDeclaration>(ParseSingleMember("""
+            [Meta]
+            public int Value
+            {
+                get;
+                private set
+                {
+                    return;
+                }
+            }
+            """, typeof(MemberPropertyDeclaration)));
+
+        Assert.Single(property.Attributes);
+        Assert.Equal("Value", Assert.IsType<SimpleName>(property.Identifier).Name.Value);
+        Assert.Equal(2, property.Body.Accessors.Count);
+        Assert.Equal(PropertyAccessorKind.Get, property.Body.Accessors[0].Kind);
+        Assert.IsType<FunctionEmptyBody>(property.Body.Accessors[0].Body);
+        Assert.Equal(PropertyAccessorKind.Set, property.Body.Accessors[1].Kind);
+        Assert.Single(property.Body.Accessors[1].Modifiers);
+        Assert.Equal(MatchingKeywordKind.Private, property.Body.Accessors[1].Modifiers[0].MatchingKind);
+        Assert.IsType<FunctionBlockBody>(property.Body.Accessors[1].Body);
     }
 
     [Fact]
