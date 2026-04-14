@@ -667,7 +667,7 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
         SimpleName simpleName => simpleName.Name,
         GenericName genericName => genericName.Name,
         QualifiedName qualifiedName when qualifiedName.Parts.Count > 0 => GetDeclaredNameToken(qualifiedName.Parts[^1]),
-        _ => SyntaxSpan.GetFirstToken(name) ?? throw new System.InvalidOperationException($"Unhandled name syntax '{name.GetType().Name}'.")
+        _ => SyntaxSpan.GetFirstToken(name) ?? throw new InvalidOperationException($"Unhandled name syntax '{name.GetType().Name}'.")
     };
 
     /// <summary> Materializes a declared name for diagnostics and state-error reporting. </summary>
