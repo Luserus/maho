@@ -10,7 +10,9 @@ public sealed class MahoCompilerTests
         CompilerAnalysisResult result = MahoCompiler.AnalyzeText("""
             namespace Basic;
 
-            public static int Main()
+            public class Result;
+
+            public static Result Main()
             {
                 return 0;
             }
@@ -60,7 +62,9 @@ public sealed class MahoCompilerTests
             string invalidPath = Path.Combine(tempDirectory, "Invalid.mh");
 
             File.WriteAllText(validPath, """
-                public static int Main()
+                public class Result;
+
+                public static Result Main()
                 {
                     return 0;
                 }

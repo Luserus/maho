@@ -69,7 +69,7 @@ public sealed class ResolutionTests
         Assert.Equal(1, resolvedType.Arity);
         Assert.Single(resolvedType.TypeParameters);
         Assert.Equal(1, resolvedFunction.ParameterCount);
-        Assert.Empty(result.TypeReferences);
+        Assert.Equal(5, result.TypeReferences.Count);
 
         Assert.True(result.TryResolveScope(typeWrapper.Type.Body, out Scope? typeScope));
         Assert.NotNull(typeScope);
@@ -200,5 +200,124 @@ public sealed class ResolutionTests
         Assert.Equal(2, cycleDiagnostics.Length);
         Assert.Contains(cycleDiagnostics, diagnostic => diagnostic.Message.Contains("'A'"));
         Assert.Contains(cycleDiagnostics, diagnostic => diagnostic.Message.Contains("'B'"));
+    }
+
+    [Fact]
+    public void Resolve_FunctionSignature_ResolvesReturnAndParameterTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            namespace Demo;
+
+            public class Input;
+            public class Output;
+            public static Output Make(Input value);
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionResult result = CompilerTestBed.ResolveProject(root).Units[0];
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[3]);
+        FunctionDeclaration declaration = functionWrapper.Function;
+
+        Assert.True(result.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol));
+        FunctionSymbol function = Assert.IsType<FunctionSymbol>(declaredSymbol);
+        Assert.NotNull(function.ReturnType);
+        Assert.Equal("Demo.Output", function.ReturnType!.SignatureKey);
+        Assert.Single(function.Parameters);
+        Assert.NotNull(function.Parameters[0].Type);
+        Assert.Equal("Demo.Input", function.Parameters[0].Type!.SignatureKey);
+
+        Assert.True(result.TryResolveTypeReference(declaration.Signature.ReturnType, out ResolvedTypeReference? resolvedReturnType));
+        Assert.Equal("Demo.Output", resolvedReturnType!.SignatureKey);
+    }
+
+    [Fact]
+    public void Resolve_FunctionSignature_AllowsDeferredVarReturnAndDynParameter()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public static var Make(dyn value);
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionResult result = new Resolver(diagnostics).Resolve(root);
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        FunctionDeclaration declaration = functionWrapper.Function;
+
+        Assert.True(result.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol));
+        FunctionSymbol function = Assert.IsType<FunctionSymbol>(declaredSymbol);
+        Assert.Equal("var", function.ReturnType!.SignatureKey);
+        Assert.Equal("dyn", function.Parameters[0].Type!.SignatureKey);
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Resolve_FunctionSignature_ParameterVarRequiresRealTypeNamedVar()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public static dyn Make(var value);
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionResult result = new Resolver(diagnostics).Resolve(root);
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        FunctionDeclaration declaration = functionWrapper.Function;
+
+        Assert.True(result.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol));
+        FunctionSymbol function = Assert.IsType<FunctionSymbol>(declaredSymbol);
+        Assert.Equal("var", function.Parameters[0].Type!.SignatureKey);
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH1000" && diagnostic.Message.Contains("'var'"));
+    }
+
+    [Fact]
+    public void Resolve_FunctionSignature_PrimitiveLikeNamesStillRequireScopeLookup()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public static int Make(int value);
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionResult result = new Resolver(diagnostics).Resolve(root);
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        FunctionDeclaration declaration = functionWrapper.Function;
+
+        Assert.True(result.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol));
+        FunctionSymbol function = Assert.IsType<FunctionSymbol>(declaredSymbol);
+        Assert.Equal("int", function.ReturnType!.SignatureKey);
+        Assert.Equal("int", function.Parameters[0].Type!.SignatureKey);
+        Assert.Equal(2, diagnostics.Diagnostics.Count(diagnostic => diagnostic.DiagnosticCode == "MH1000"));
+        Assert.All(
+            diagnostics.Diagnostics.Where(diagnostic => diagnostic.DiagnosticCode == "MH1000"),
+            diagnostic => Assert.Contains("'int'", diagnostic.Message));
+    }
+
+    [Fact]
+    public void Resolve_FunctionSignature_QualifiedVarAndDynUseNormalTypeLookup()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            namespace Builtins;
+            public class var;
+            public class dyn;
+
+            public static Builtins.var Make(Builtins.dyn value);
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionResult result = new Resolver(diagnostics).Resolve(root);
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[3]);
+        FunctionDeclaration declaration = functionWrapper.Function;
+
+        Assert.True(result.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol));
+        FunctionSymbol function = Assert.IsType<FunctionSymbol>(declaredSymbol);
+        Assert.Equal("Builtins.var", function.ReturnType!.SignatureKey);
+        Assert.Equal("Builtins.dyn", function.Parameters[0].Type!.SignatureKey);
+        Assert.Empty(diagnostics.Diagnostics);
     }
 }

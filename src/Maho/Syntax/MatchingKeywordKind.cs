@@ -26,5 +26,7 @@ internal enum MatchingKeywordKind : byte
     Put,
     Const,
     Where,
-    Partial
+    Partial,
+    Var,
+    Dyn
 }

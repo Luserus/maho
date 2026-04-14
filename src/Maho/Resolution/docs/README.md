@@ -9,6 +9,7 @@ It now supports:
 - shared project-wide symbol scopes,
 - declaration discovery,
 - type-hierarchy resolution,
+- function-signature resolution,
 - and infrastructure for later cross-project lookup.
 
 ## Current architecture
@@ -52,6 +53,7 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
 - `SymbolDiscoveryPass.cs`: first pass that builds unit-local declaration graphs and attaches them into the project-wide declaration graph.
 - `TypeHierarchyResolutionPass.cs`: second pass that resolves direct type-hierarchy edges and performs project-wide cycle detection.
+- `FunctionSignatureResolutionPass.cs`: third pass that resolves function return types and parameter types in parallel.
 - `ResolvedTypeReference.cs`: semantic representation used by declaration-site type-resolution passes.
 
 ## Pass model
@@ -160,6 +162,28 @@ canonical symbol/scope graph. During that walk the pass:
 After every unit has finished its local work, `AfterProject(...)` runs one whole-project cycle check
 over the canonical type graph and reports diagnostics for each participating type.
 
+## What pass 3 does today
+
+`FunctionSignatureResolutionPass` is the third semantic pass, and it also runs as a parallel
+unit-local stage.
+
+Each compilation unit walks every function declaration after earlier passes have already established
+the canonical symbol/scope graph. During that walk the pass:
+
+- resolves every parameter type and stores it on the corresponding `ParameterSymbol`,
+- resolves every return type and stores it on the owning `FunctionSymbol`,
+- records all of those type-syntax occurrences in the unit-local type-reference map,
+- sends ordinary type names through full scope lookup instead of hard-coding predefined library or backend types,
+- treats unqualified `dyn` as a special signature form,
+- defers unqualified return-type `var`,
+- and leaves unqualified parameter-type `var` to normal scope lookup so it only succeeds when a real type named `var` exists.
+
+That means primitive-looking names such as `int` currently diagnose as unresolved unless some earlier
+pass or referenced library declaration has actually introduced a visible type with that name.
+
+This pass is what makes later duplicate-function analysis possible, because function symbols now have
+their full parameter and return signature data populated before duplicate comparison begins.
+
 ## Cross-project infrastructure
 
 Cross-project lookup is not implemented yet, but the coordinator now keeps explicit room for it.
@@ -240,9 +264,10 @@ Recommended order:
 6. `ResolutionPass.cs`
 7. `SymbolDiscoveryPass.cs`
 8. `TypeHierarchyResolutionPass.cs`
-9. `ResolutionCoordinator.cs`
-10. `Resolver.cs`
-11. `ResolutionResult.cs`
-12. `ResolutionProjectResult.cs`
+9. `FunctionSignatureResolutionPass.cs`
+10. `ResolutionCoordinator.cs`
+11. `Resolver.cs`
+12. `ResolutionResult.cs`
+13. `ResolutionProjectResult.cs`
 
 That order reflects the current dependency direction of the semantic layer.

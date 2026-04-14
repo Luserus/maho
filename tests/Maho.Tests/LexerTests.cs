@@ -7,14 +7,18 @@ public sealed class LexerTests
     [Fact]
     public void Lex_RecognizesKeywordsLiteralsAndEndToken()
     {
-        var (_, diagnostics, lexer) = CompilerTestBed.Lex("public static int Main() { return \"hi\"; }");
+        var (_, diagnostics, lexer) = CompilerTestBed.Lex("public static var Main(dyn value) { return \"hi\"; }");
 
         Token publicToken = Assert.Single(lexer.Tokens, token => token.Value == "public");
         Token staticToken = Assert.Single(lexer.Tokens, token => token.Value == "static");
+        Token varToken = Assert.Single(lexer.Tokens, token => token.Value == "var");
+        Token dynToken = Assert.Single(lexer.Tokens, token => token.Value == "dyn");
         Token stringToken = Assert.Single(lexer.Tokens, token => token.Kind is TokenKind.String);
 
         Assert.Equal(MatchingKeywordKind.Public, publicToken.MatchingKind);
         Assert.Equal(MatchingKeywordKind.Static, staticToken.MatchingKind);
+        Assert.Equal(MatchingKeywordKind.Var, varToken.MatchingKind);
+        Assert.Equal(MatchingKeywordKind.Dyn, dynToken.MatchingKind);
         Assert.Equal("\"hi\"", stringToken.Value);
         Assert.Equal(TokenKind.EndToken, lexer.Tokens[^1].Kind);
         Assert.Empty(diagnostics.Diagnostics);
