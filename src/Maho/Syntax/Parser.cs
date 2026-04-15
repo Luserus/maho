@@ -114,13 +114,45 @@ internal sealed partial class Parser
     /// <summary> Parsed root produced by the last successful call to <see cref="Parse"/>. </summary>
     public CompilationUnit Root { get; private set; } = null!;
 
+    /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
+    private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial;
+    /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
+    private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
-    private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial;
+    private bool IsCurrentTokenModifier => IsCurrentTokenRegularModifier || IsCurrentTokenIntrinsicAttributeModifier;
     /// <summary> Indicates whether the current token starts a bracketed attribute list. </summary>
     private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or MatchingKeywordKind.Attribute;
+
+    /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
+    private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
+    {
+        if (tokenIndex < 0 || tokenIndex >= tokens.Count || tokens[tokenIndex].MatchingKind is not MatchingKeywordKind.Intrinsic)
+            return false;
+
+        int probe = tokenIndex + 1;
+
+        while (probe < tokens.Count)
+        {
+            MatchingKeywordKind kind = tokens[probe].MatchingKind;
+
+            if (kind is MatchingKeywordKind.Attribute)
+                return true;
+
+            if (kind is MatchingKeywordKind.Intrinsic or MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+                MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial)
+            {
+                probe++;
+                continue;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
 
     /// <summary> Controls whether statement parsing should allow a trailing expression result. </summary>
     private enum StatementParseMode : byte

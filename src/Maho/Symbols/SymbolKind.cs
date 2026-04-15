@@ -9,6 +9,8 @@ internal enum SymbolKind
     Type,
     /// <summary> Function declaration symbol. </summary>
     Function,
+    /// <summary> Property declaration symbol. </summary>
+    Property,
     /// <summary> Function parameter symbol. </summary>
     Parameter,
     /// <summary> Generic type-parameter symbol. </summary>

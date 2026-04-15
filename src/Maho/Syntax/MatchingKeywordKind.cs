@@ -30,6 +30,7 @@ internal enum MatchingKeywordKind : byte
     Const,
     Where,
     Partial,
+    Intrinsic,
     Var,
     Dyn
 }

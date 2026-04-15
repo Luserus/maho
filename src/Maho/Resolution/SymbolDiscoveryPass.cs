@@ -136,7 +136,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             MemberTypeDeclaration typeDeclaration => new TypeMemberDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
             MemberFunctionDeclaration functionDeclaration => new FunctionMemberDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
             MemberFieldDeclaration fieldDeclaration => new VariableMemberDeclarationGraph(fieldDeclaration, CollectVariableDeclaration(fieldDeclaration.Declaration, scope, containerSymbol)),
-            MemberPropertyDeclaration propertyDeclaration => new PropertyMemberDeclarationGraph(propertyDeclaration),
+            MemberPropertyDeclaration propertyDeclaration => new PropertyMemberDeclarationGraph(propertyDeclaration, CollectPropertyDeclaration(propertyDeclaration, scope, containerSymbol)),
             _ => throw new InvalidOperationException($"Unhandled member syntax '{member.GetType().Name}'.")
         };
 
@@ -164,6 +164,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             };
 
             return new FunctionDeclarationGraph(declaration, symbol, scope, functionScope, body);
+        }
+
+        /// <summary> Collects one property declaration into a symbol declared directly in the owning type scope. </summary>
+        private static PropertyDeclarationGraph CollectPropertyDeclaration(MemberPropertyDeclaration declaration, Scope scope, Symbol parentSymbol)
+        {
+            PropertySymbol symbol = new PropertySymbol(GetDeclaredName(declaration.Identifier), parentSymbol, declaration);
+            scope.Declare(symbol);
+            return new PropertyDeclarationGraph(declaration, symbol, scope);
         }
 
         /// <summary> Declares generic type parameters directly into the owner scope in source order. </summary>
@@ -525,7 +533,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                     AttachVariableDeclaration(variableGraph.Declaration, scope, containerSymbol);
                     break;
 
-                case PropertyMemberDeclarationGraph:
+                case PropertyMemberDeclarationGraph propertyGraph:
+                    AttachPropertyDeclaration(propertyGraph.Declaration, scope, containerSymbol);
+                    context.ResolveDeclaredSymbol(propertyGraph.Wrapper, propertyGraph.Declaration.Symbol);
                     break;
 
                 default:
@@ -566,6 +576,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 default:
                     throw new InvalidOperationException($"Unhandled function body graph '{graph.Body.GetType().Name}'.");
             }
+        }
+
+        /// <summary> Attaches one collected property declaration under its canonical container. </summary>
+        private void AttachPropertyDeclaration(PropertyDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        {
+            MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
+            graph.Symbol.Reparent(parentSymbol);
+            context.ResolveDeclaredSymbol(graph.Declaration, graph.Symbol);
         }
 
         /// <summary> Associates type-level clauses such as the base list and constraints with the declaring type symbol. </summary>
@@ -988,15 +1006,21 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    /// <summary> Member graph wrapper for a property declaration that is currently syntax-only. </summary>
+    /// <summary> Member graph wrapper for a property declaration. </summary>
     private sealed class PropertyMemberDeclarationGraph : MemberDeclarationGraph
     {
         /// <summary> Original wrapper syntax that introduced the property declaration. </summary>
         public MemberPropertyDeclaration Wrapper { get; }
+        /// <summary> Collected property declaration graph. </summary>
+        public PropertyDeclarationGraph Declaration { get; }
 
         /// <summary> Creates one property member graph wrapper. </summary>
-        public PropertyMemberDeclarationGraph(MemberPropertyDeclaration wrapper)
-            : base(wrapper) => Wrapper = wrapper;
+        public PropertyMemberDeclarationGraph(MemberPropertyDeclaration wrapper, PropertyDeclarationGraph declaration)
+            : base(wrapper)
+        {
+            Wrapper = wrapper;
+            Declaration = declaration;
+        }
     }
 
     /// <summary> Collected graph for one function declaration. </summary>
@@ -1021,6 +1045,25 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             DeclaringScope = declaringScope;
             Scope = scope;
             Body = body;
+        }
+    }
+
+    /// <summary> Collected graph for one property declaration. </summary>
+    private sealed class PropertyDeclarationGraph
+    {
+        /// <summary> Original property declaration syntax. </summary>
+        public MemberPropertyDeclaration Declaration { get; }
+        /// <summary> Property symbol collected for this declaration. </summary>
+        public PropertySymbol Symbol { get; }
+        /// <summary> Scope where the property symbol was first declared during collection. </summary>
+        public Scope DeclaringScope { get; }
+
+        /// <summary> Creates the collected graph for one property declaration. </summary>
+        public PropertyDeclarationGraph(MemberPropertyDeclaration declaration, PropertySymbol symbol, Scope declaringScope)
+        {
+            Declaration = declaration;
+            Symbol = symbol;
+            DeclaringScope = declaringScope;
         }
     }
 

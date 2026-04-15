@@ -159,6 +159,22 @@ internal sealed class DiagnosticsManager
     public void ReportCyclicTypeHierarchy(TextSpan span, string typeName, SourceText? source = null) =>
         ReportError("MH1004", $"Type '{typeName}' participates in a cycle in the type hierarchy.", span, source);
 
+    /// <summary> Reports a duplicate variable declaration in one lexical scope. </summary>
+    public void ReportDuplicateVariableDeclaration(TextSpan span, string variableName, SourceText? source = null) =>
+        ReportError("MH1005", $"Variable '{variableName}' is already declared in this scope.", span, source);
+
+    /// <summary> Reports a duplicate property declaration in one lexical scope. </summary>
+    public void ReportDuplicatePropertyDeclaration(TextSpan span, string propertyName, SourceText? source = null) =>
+        ReportError("MH1006", $"Property '{propertyName}' is already declared in this scope.", span, source);
+
+    /// <summary> Reports an intrinsic attribute declaration whose simple compiler-known name is not recognized. </summary>
+    public void ReportUnrecognizedIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
+        ReportError("MH1007", $"Intrinsic attribute '{attributeName}' is not recognized by the compiler.", span, source);
+
+    /// <summary> Reports that a supported intrinsic attribute declaration was not found anywhere in the project. </summary>
+    public void ReportUndeclaredIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
+        ReportError("MH1008", $"Intrinsic attribute '{attributeName}' was not declared in the project.", span, source);
+
     /// <summary> Reports that resolution state became inconsistent without crashing the analysis pipeline. </summary>
     public void ReportResolutionStateError(TextSpan span, string subject, SourceText? source = null) =>
         ReportError("MH1099", $"Resolution state became inconsistent while resolving {subject}.", span, source);

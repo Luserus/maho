@@ -15,6 +15,8 @@ internal abstract class Symbol
     public SymbolName Name { get; }
     /// <summary> Semantic container that lexically encloses this symbol, when one exists. </summary>
     public Symbol? ParentSymbol { get; private set; }
+    /// <summary> Indicates that this symbol participates in a duplicate-declaration error set. </summary>
+    public bool IsDuplicate { get; private set; }
     /// <summary>
     /// Metadata-oriented name materialized on demand. Most of resolution stays on
     /// <see cref="SymbolName"/> to avoid eager string allocation.
@@ -48,6 +50,9 @@ internal abstract class Symbol
 
     /// <summary> Allows derived symbols to invalidate caches that depend on the parent chain. </summary>
     protected virtual void OnParentChanged() { }
+
+    /// <summary> Marks this symbol as participating in a duplicate declaration set. </summary>
+    internal void MarkDuplicate() => IsDuplicate = true;
 
     /// <summary>
     /// Computes the fully qualified metadata name lazily from the parent symbol chain. This is kept

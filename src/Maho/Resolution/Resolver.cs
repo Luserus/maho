@@ -22,7 +22,9 @@ internal sealed class Resolver
     private readonly ResolutionPass[] passes = [
         new SymbolDiscoveryPass(),
         new TypeHierarchyResolutionPass(),
-        new FunctionSignatureResolutionPass()
+        new FunctionSignatureResolutionPass(),
+        new DuplicateSymbolResolutionPass(),
+        new IntrinsicAttributeDefinitionPass()
     ];
 
     /// <summary> Creates a resolver that will report into the provided diagnostics manager. </summary>

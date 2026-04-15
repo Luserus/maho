@@ -18,6 +18,8 @@ internal sealed class ResolutionProjectResult
     public ResolutionProjectReference[] References { get; }
     /// <summary> Frozen project-wide symbol -> owned scope map. </summary>
     public IReadOnlyDictionary<Symbol, Scope> SymbolScopes { get; }
+    /// <summary> Frozen intrinsic attribute declarations collected across the project by simple compiler-known name. </summary>
+    public IReadOnlyDictionary<string, TypeSymbol[]> IntrinsicAttributeDefinitions { get; }
 
     /// <summary> Creates the final project-wide semantic result object. </summary>
     public ResolutionProjectResult(
@@ -26,7 +28,8 @@ internal sealed class ResolutionProjectResult
         Scope globalScope,
         ResolutionResult[] units,
         ResolutionProjectReference[] references,
-        IReadOnlyDictionary<Symbol, Scope> symbolScopes)
+        IReadOnlyDictionary<Symbol, Scope> symbolScopes,
+        IReadOnlyDictionary<string, TypeSymbol[]> intrinsicAttributeDefinitions)
     {
         ProjectName = projectName;
         GlobalNamespace = globalNamespace;
@@ -34,5 +37,6 @@ internal sealed class ResolutionProjectResult
         Units = units;
         References = references;
         SymbolScopes = symbolScopes;
+        IntrinsicAttributeDefinitions = intrinsicAttributeDefinitions;
     }
 }

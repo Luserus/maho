@@ -70,9 +70,9 @@ public sealed class MahoCompilerTests
                 }
                 """);
             File.WriteAllText(invalidPath, """
-                public static int Main(
+                public static dyn Broken()
                 {
-                    return ;
+                    $;
                 }
                 """);
 

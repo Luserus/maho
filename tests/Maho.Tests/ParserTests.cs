@@ -204,6 +204,25 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_IntrinsicModifier_IsValidOnlyForAttributeDeclarations()
+    {
+        TypeDeclaration intrinsicAttribute = ParseSingleTopLevelType("""
+            public intrinsic attribute Intrinsic;
+            """);
+
+        Assert.Equal(TypeKind.Attribute, intrinsicAttribute.Kind);
+        Assert.Contains(intrinsicAttribute.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
+
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(ParseSingleTopLevel("""
+            public intrinsic value;
+            """, typeof(TopLevelVariableDeclaration)));
+
+        SimpleType variableType = Assert.IsType<SimpleType>(variable.Declaration.Type);
+        Assert.Equal("intrinsic", variableType.Name.Value);
+        Assert.DoesNotContain(variable.Declaration.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
+    }
+
+    [Fact]
     public void Parse_PropertyDeclaration_SupportsAccessorModifiersAndBodies()
     {
         MemberPropertyDeclaration property = Assert.IsType<MemberPropertyDeclaration>(ParseSingleMember("""

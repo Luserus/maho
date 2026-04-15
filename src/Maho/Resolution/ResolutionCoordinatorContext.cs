@@ -18,6 +18,8 @@ internal sealed class ResolutionCoordinatorContext
     /// because symbols are project-wide identities even when their syntax came from one file.
     /// </summary>
     private readonly Dictionary<Symbol, Scope> symbolScopes = new(ReferenceEqualityComparer.Instance);
+    /// <summary> Records intrinsic attribute declaration symbols by their simple compiler-known names. </summary>
+    private readonly Dictionary<string, List<TypeSymbol>> intrinsicAttributeDefinitions = new(System.StringComparer.Ordinal);
 
     /// <summary> Friendly project identity carried through result objects and diagnostics. </summary>
     public string ProjectName { get; }
@@ -35,6 +37,8 @@ internal sealed class ResolutionCoordinatorContext
     public ResolutionContext[] Units => units;
     /// <summary> Read-only view of the project-wide symbol -> owned scope map. </summary>
     public IReadOnlyDictionary<Symbol, Scope> SymbolScopes => symbolScopes;
+    /// <summary> Read-only view of intrinsic attribute declarations collected during semantic analysis. </summary>
+    public IReadOnlyDictionary<string, List<TypeSymbol>> IntrinsicAttributeDefinitions => intrinsicAttributeDefinitions;
 
     /// <summary>
     /// Creates all shared project state and one unit context per compilation unit. The coordinator
@@ -70,14 +74,30 @@ internal sealed class ResolutionCoordinatorContext
     /// </summary>
     public void ResolveSymbolScope(Symbol symbol, Scope scope) => symbolScopes.TryAdd(symbol, scope);
 
+    /// <summary> Records one intrinsic attribute declaration under its compiler-known simple name. </summary>
+    public void RecordIntrinsicAttributeDefinition(string name, TypeSymbol symbol)
+    {
+        if (!intrinsicAttributeDefinitions.TryGetValue(name, out List<TypeSymbol>? symbols))
+        {
+            symbols = [];
+            intrinsicAttributeDefinitions.Add(name, symbols);
+        }
+
+        symbols.Add(symbol);
+    }
+
     /// <summary> Freezes the mutable project context into stable result objects once the full pass pipeline has completed. </summary>
     public ResolutionProjectResult ToResult()
     {
         ResolutionResult[] unitResults = new ResolutionResult[units.Length];
+        Dictionary<string, TypeSymbol[]> frozenIntrinsicAttributes = new(intrinsicAttributeDefinitions.Count, System.StringComparer.Ordinal);
 
         for (int i = 0; i < units.Length; i++)
             unitResults[i] = units[i].ToResult();
 
-        return new ResolutionProjectResult(ProjectName, GlobalNamespace, GlobalScope, unitResults, References, symbolScopes);
+        foreach ((string name, List<TypeSymbol> symbols) in intrinsicAttributeDefinitions)
+            frozenIntrinsicAttributes.Add(name, [.. symbols]);
+
+        return new ResolutionProjectResult(ProjectName, GlobalNamespace, GlobalScope, unitResults, References, symbolScopes, frozenIntrinsicAttributes);
     }
 }

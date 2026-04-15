@@ -320,4 +320,186 @@ public sealed class ResolutionTests
         Assert.Equal("Builtins.dyn", function.Parameters[0].Type!.SignatureKey);
         Assert.Empty(diagnostics.Diagnostics);
     }
+
+    [Fact]
+    public void Resolve_DuplicateSymbols_ReportsNonPartialTypesAndAllowsFullyPartialTypes()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box;
+            public class Box;
+
+            public partial class PartialBox;
+            public partial class PartialBox;
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionProjectResult result = new Resolver(diagnostics).ResolveProject(new ResolutionProject(SyntaxTree.CreateSingleRoot(root)));
+
+        Diagnostic[] duplicateTypeDiagnostics = [.. diagnostics.Diagnostics.Where(static diagnostic => diagnostic.DiagnosticCode == "MH1002")];
+        Assert.Equal(2, duplicateTypeDiagnostics.Length);
+
+        TopLevelTypeDeclaration firstBox = Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]);
+        TopLevelTypeDeclaration secondBox = Assert.IsType<TopLevelTypeDeclaration>(root.Members[1]);
+        TopLevelTypeDeclaration firstPartialBox = Assert.IsType<TopLevelTypeDeclaration>(root.Members[2]);
+        TopLevelTypeDeclaration secondPartialBox = Assert.IsType<TopLevelTypeDeclaration>(root.Members[3]);
+
+        TypeSymbol duplicateBox1 = Assert.IsType<TypeSymbol>(result.Units[0].DeclaredSymbols[firstBox.Type]);
+        TypeSymbol duplicateBox2 = Assert.IsType<TypeSymbol>(result.Units[0].DeclaredSymbols[secondBox.Type]);
+        TypeSymbol partialBox1 = Assert.IsType<TypeSymbol>(result.Units[0].DeclaredSymbols[firstPartialBox.Type]);
+        TypeSymbol partialBox2 = Assert.IsType<TypeSymbol>(result.Units[0].DeclaredSymbols[secondPartialBox.Type]);
+
+        Assert.True(duplicateBox1.IsDuplicate);
+        Assert.True(duplicateBox2.IsDuplicate);
+        Assert.False(partialBox1.IsDuplicate);
+        Assert.False(partialBox2.IsDuplicate);
+    }
+
+    [Fact]
+    public void Resolve_DuplicateSymbols_ReportsInvalidFunctionSetsAndAllowsSinglePartialBody()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Result;
+            public class Input;
+
+            public static Result Make(Input value);
+            public static Result Make(Input value) { }
+
+            public partial static Result Merge(Input value);
+            public partial static Result Merge(Input value) { }
+
+            public partial static Result Build(Input value) { }
+            public partial static Result Build(Input value) { }
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionProjectResult result = new Resolver(diagnostics).ResolveProject(new ResolutionProject(SyntaxTree.CreateSingleRoot(root)));
+
+        Diagnostic[] duplicateFunctionDiagnostics = [.. diagnostics.Diagnostics.Where(static diagnostic => diagnostic.DiagnosticCode == "MH1003")];
+        Assert.Equal(4, duplicateFunctionDiagnostics.Length);
+
+        TopLevelFunctionDeclaration make1 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[2]);
+        TopLevelFunctionDeclaration make2 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[3]);
+        TopLevelFunctionDeclaration merge1 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[4]);
+        TopLevelFunctionDeclaration merge2 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[5]);
+        TopLevelFunctionDeclaration build1 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[6]);
+        TopLevelFunctionDeclaration build2 = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[7]);
+
+        FunctionSymbol duplicateMake1 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[make1.Function]);
+        FunctionSymbol duplicateMake2 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[make2.Function]);
+        FunctionSymbol partialMerge1 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[merge1.Function]);
+        FunctionSymbol partialMerge2 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[merge2.Function]);
+        FunctionSymbol duplicateBuild1 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[build1.Function]);
+        FunctionSymbol duplicateBuild2 = Assert.IsType<FunctionSymbol>(result.Units[0].DeclaredSymbols[build2.Function]);
+
+        Assert.True(duplicateMake1.IsDuplicate);
+        Assert.True(duplicateMake2.IsDuplicate);
+        Assert.False(partialMerge1.IsDuplicate);
+        Assert.False(partialMerge2.IsDuplicate);
+        Assert.True(duplicateBuild1.IsDuplicate);
+        Assert.True(duplicateBuild2.IsDuplicate);
+    }
+
+    [Fact]
+    public void Resolve_DuplicateSymbols_ReportsDuplicateVariablesAndProperties()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box
+            {
+                public dyn Value { get; }
+                public dyn Value { get; }
+            }
+
+            public static dyn Main()
+            {
+                int value;
+                int value;
+            }
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionProjectResult result = new Resolver(diagnostics).ResolveProject(new ResolutionProject(SyntaxTree.CreateSingleRoot(root)));
+
+        Diagnostic[] duplicateVariableDiagnostics = [.. diagnostics.Diagnostics.Where(static diagnostic => diagnostic.DiagnosticCode == "MH1005")];
+        Diagnostic[] duplicatePropertyDiagnostics = [.. diagnostics.Diagnostics.Where(static diagnostic => diagnostic.DiagnosticCode == "MH1006")];
+        Assert.Equal(2, duplicateVariableDiagnostics.Length);
+        Assert.Equal(2, duplicatePropertyDiagnostics.Length);
+
+        TopLevelTypeDeclaration typeWrapper = Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]);
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(typeWrapper.Type.Body);
+        MemberPropertyDeclaration property1 = Assert.IsType<MemberPropertyDeclaration>(typeBody.Members[0]);
+        MemberPropertyDeclaration property2 = Assert.IsType<MemberPropertyDeclaration>(typeBody.Members[1]);
+
+        TopLevelFunctionDeclaration functionWrapper = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[1]);
+        FunctionBlockBody functionBody = Assert.IsType<FunctionBlockBody>(functionWrapper.Function.Body);
+        LocalVariableDeclarationStatement variable1 = Assert.IsType<LocalVariableDeclarationStatement>(functionBody.Locals[0]);
+        LocalVariableDeclarationStatement variable2 = Assert.IsType<LocalVariableDeclarationStatement>(functionBody.Locals[1]);
+
+        PropertySymbol duplicateProperty1 = Assert.IsType<PropertySymbol>(result.Units[0].DeclaredSymbols[property1]);
+        PropertySymbol duplicateProperty2 = Assert.IsType<PropertySymbol>(result.Units[0].DeclaredSymbols[property2]);
+        VariableSymbol duplicateVariable1 = Assert.IsType<VariableSymbol>(result.Units[0].DeclaredSymbols[variable1.Declaration.Declarators[0]]);
+        VariableSymbol duplicateVariable2 = Assert.IsType<VariableSymbol>(result.Units[0].DeclaredSymbols[variable2.Declaration.Declarators[0]]);
+
+        Assert.True(duplicateProperty1.IsDuplicate);
+        Assert.True(duplicateProperty2.IsDuplicate);
+        Assert.True(duplicateVariable1.IsDuplicate);
+        Assert.True(duplicateVariable2.IsDuplicate);
+    }
+
+    [Fact]
+    public void Resolve_IntrinsicAttributes_RecordsRecognizedDefinitionsFromAnyNamespace()
+    {
+        var (_, parseDiagnostics1, _, root1) = CompilerTestBed.Parse("""
+            namespace Outer
+            {
+                public intrinsic attribute Intrinsic;
+            }
+            """);
+        var (_, parseDiagnostics2, _, root2) = CompilerTestBed.Parse("""
+            namespace Other;
+            public intrinsic attribute Intrinsic;
+            """);
+
+        Assert.Empty(parseDiagnostics1.Diagnostics);
+        Assert.Empty(parseDiagnostics2.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionProjectResult result = new Resolver(diagnostics).ResolveProject(new ResolutionProject(new SyntaxTree("test-project", [root1, root2])));
+
+        Assert.True(result.IntrinsicAttributeDefinitions.TryGetValue("Intrinsic", out TypeSymbol[]? intrinsicDefinitions));
+        Assert.Equal(2, intrinsicDefinitions.Length);
+        Assert.All(intrinsicDefinitions, symbol => Assert.Equal(TypeKind.Attribute, Assert.IsType<TypeDeclaration>(symbol.Declaration).Kind));
+        Assert.DoesNotContain(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH1007");
+        Assert.DoesNotContain(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH1008");
+    }
+
+    [Fact]
+    public void Resolve_IntrinsicAttributes_ReportsUnknownAndMissingSymbolsExhaustively()
+    {
+        var (_, parseDiagnostics, _, root) = CompilerTestBed.Parse("""
+            namespace Demo;
+            public intrinsic attribute Unknown;
+            public attribute Intrinsic;
+            """);
+
+        Assert.Empty(parseDiagnostics.Diagnostics);
+
+        DiagnosticsManager diagnostics = new();
+        ResolutionProjectResult result = new Resolver(diagnostics).ResolveProject(new ResolutionProject(SyntaxTree.CreateSingleRoot(root)));
+
+        Assert.True(result.IntrinsicAttributeDefinitions.TryGetValue("Unknown", out TypeSymbol[]? unknownDefinitions));
+        Assert.Single(unknownDefinitions);
+        Assert.False(result.IntrinsicAttributeDefinitions.ContainsKey("Intrinsic"));
+
+        Diagnostic unknownDiagnostic = Assert.Single(diagnostics.Diagnostics, static diagnostic => diagnostic.DiagnosticCode == "MH1007");
+        Assert.Contains("'Unknown'", unknownDiagnostic.Message);
+
+        Diagnostic missingDiagnostic = Assert.Single(diagnostics.Diagnostics, static diagnostic => diagnostic.DiagnosticCode == "MH1008");
+        Assert.Contains("'Intrinsic'", missingDiagnostic.Message);
+    }
 }
