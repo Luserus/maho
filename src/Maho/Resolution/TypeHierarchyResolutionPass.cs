@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Maho.Symbols;
 using Maho.Syntax;
 using Maho.Text;
@@ -15,411 +16,404 @@ internal sealed class TypeHierarchyResolutionPass : ResolutionPass
 {
     /// <summary>
     /// Once symbol discovery has finished, hierarchy lookup only reads shared project state and
-    /// writes to unit-local maps plus each declaration's own type symbol.
+    /// writes to unit-local maps plus each declaration's own type symbol, so unit work can fan out
+    /// in parallel before one project-wide cycle check finalizes the pass.
     /// </summary>
-    public override ResolutionExecutionMode ExecutionMode => ResolutionExecutionMode.ParallelUnitLocal;
+    public override void Execute(ResolutionCoordinatorContext context)
+    {
+        Parallel.For(0, context.Units.Length, unitIndex => ResolveUnit(context.Units[unitIndex]));
+        Finalize(context);
+    }
+
+    /// <summary> Performs the project-wide cycle check after every unit has resolved its direct edges. </summary>
+    private static void Finalize(ResolutionCoordinatorContext context) => DetectCycles(context);
 
     /// <summary> Resolves direct hierarchy edges for every type declared inside one compilation unit. </summary>
-    public override void ExecuteUnit(ResolutionContext context) => new UnitResolver(context).Execute();
+    private void ResolveUnit(ResolutionContext context) => VisitTopLevels(context, context.Root.Members);
 
-    /// <summary> Performs a project-wide cycle check after every unit has resolved its direct edges. </summary>
-    public override void AfterProject(ResolutionCoordinatorContext context) => DetectCycles(context);
-
-    /// <summary> Performs one unit's direct type-hierarchy resolution. </summary>
-    private sealed class UnitResolver
+    /// <summary> Visits every top-level item in source order. </summary>
+    private void VisitTopLevels(ResolutionContext context, IReadOnlyList<TopLevel> members)
     {
-        private readonly ResolutionContext context;
+        foreach (TopLevel member in members)
+            VisitTopLevel(context, member);
+    }
 
-        /// <summary> Creates the helper that resolves one compilation unit against shared project state. </summary>
-        public UnitResolver(ResolutionContext context) => this.context = context;
-
-        /// <summary> Starts the unit walk from the compilation unit root. </summary>
-        public void Execute() => VisitTopLevels(context.Root.Members);
-
-        /// <summary> Visits every top-level item in source order. </summary>
-        private void VisitTopLevels(IReadOnlyList<TopLevel> members)
+    /// <summary> Dispatches one top-level item to the traversal needed for hierarchy resolution. </summary>
+    private void VisitTopLevel(ResolutionContext context, TopLevel member)
+    {
+        switch (member)
         {
-            foreach (TopLevel member in members)
-                VisitTopLevel(member);
+            case NamespaceDeclaration namespaceDeclaration when namespaceDeclaration.Body is NamespaceBlockBody blockBody:
+                VisitTopLevels(context, blockBody.Members);
+                break;
+
+            case TopLevelTypeDeclaration typeDeclaration:
+                VisitTypeDeclaration(context, typeDeclaration.Type);
+                break;
+
+            case TopLevelFunctionDeclaration functionDeclaration:
+                VisitFunctionDeclaration(context, functionDeclaration.Function);
+                break;
+
+            case TopLevelVariableDeclaration:
+            case TopLevelExpressionStatement:
+            case TopLevelReturnStatement:
+            case TopLevelEmptyStatement:
+                break;
+
+            case TopLevelBlockStatement blockStatement:
+                VisitLocals(context, blockStatement.Locals);
+                break;
+
+            case TopLevelIfStatement ifStatement:
+                VisitTopLevelStatement(context, ifStatement.ThenStatement);
+
+                if (ifStatement.ElseStatement is not null)
+                    VisitTopLevelStatement(context, ifStatement.ElseStatement);
+
+                break;
+
+            case TopLevelWhileStatement whileStatement:
+                VisitTopLevelStatement(context, whileStatement.Statement);
+                break;
+
+            case TopLevelElseStatement elseStatement:
+                VisitTopLevelStatement(context, elseStatement.Statement);
+                break;
+        }
+    }
+
+    /// <summary> Traverses nested top-level statements so local type declarations still participate in hierarchy binding. </summary>
+    private void VisitTopLevelStatement(ResolutionContext context, TopLevelStatement statement)
+    {
+        switch (statement)
+        {
+            case TopLevelBlockStatement blockStatement:
+                VisitLocals(context, blockStatement.Locals);
+                break;
+
+            case TopLevelIfStatement ifStatement:
+                VisitTopLevelStatement(context, ifStatement.ThenStatement);
+
+                if (ifStatement.ElseStatement is not null)
+                    VisitTopLevelStatement(context, ifStatement.ElseStatement);
+
+                break;
+
+            case TopLevelWhileStatement whileStatement:
+                VisitTopLevelStatement(context, whileStatement.Statement);
+                break;
+
+            case TopLevelElseStatement elseStatement:
+                VisitTopLevelStatement(context, elseStatement.Statement);
+                break;
+        }
+    }
+
+    /// <summary> Traverses a function body because local declarations can introduce nested types. </summary>
+    private void VisitFunctionDeclaration(ResolutionContext context, FunctionDeclaration declaration)
+    {
+        switch (declaration.Body)
+        {
+            case FunctionBlockBody blockBody:
+                VisitLocals(context, blockBody.Locals);
+                break;
+
+            case FunctionLambdaBody lambdaBody:
+                VisitLocalStatement(context, lambdaBody.Statement);
+                break;
+        }
+    }
+
+    /// <summary> Visits all local items inside one lexical container. </summary>
+    private void VisitLocals(ResolutionContext context, IReadOnlyList<Local> locals)
+    {
+        foreach (Local local in locals)
+            VisitLocal(context, local);
+    }
+
+    /// <summary> Dispatches one local declaration or statement to the traversal needed for type discovery. </summary>
+    private void VisitLocal(ResolutionContext context, Local local)
+    {
+        switch (local)
+        {
+            case LocalTypeDeclaration typeDeclaration:
+                VisitTypeDeclaration(context, typeDeclaration.Type);
+                break;
+
+            case LocalFunctionDeclaration functionDeclaration:
+                VisitFunctionDeclaration(context, functionDeclaration.Function);
+                break;
+
+            case LocalStatement statement:
+                VisitLocalStatement(context, statement);
+                break;
+        }
+    }
+
+    /// <summary> Traverses nested local statements so embedded local types are not skipped. </summary>
+    private void VisitLocalStatement(ResolutionContext context, LocalStatement statement)
+    {
+        switch (statement)
+        {
+            case LocalBlockStatement blockStatement:
+                VisitLocals(context, blockStatement.Locals);
+                break;
+
+            case LocalIfStatement ifStatement:
+                VisitLocalStatement(context, ifStatement.ThenStatement);
+
+                if (ifStatement.ElseStatement is not null)
+                    VisitLocalStatement(context, ifStatement.ElseStatement);
+
+                break;
+
+            case LocalWhileStatement whileStatement:
+                VisitLocalStatement(context, whileStatement.Body);
+                break;
+
+            case LocalElseStatement elseStatement:
+                VisitLocalStatement(context, elseStatement.Statement);
+                break;
+        }
+    }
+
+    /// <summary> Resolves one declared type's direct base edges, then recurses into nested declarations. </summary>
+    private void VisitTypeDeclaration(ResolutionContext context, TypeDeclaration declaration)
+    {
+        if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol) || declaredSymbol is not TypeSymbol typeSymbol)
+        {
+            context.Diagnostics.ReportResolutionStateError(
+                declaration.GetSpan() ?? default,
+                $"type declaration '{GetDeclaredName(declaration.Name)}'",
+                declaration.GetSource());
+            return;
         }
 
-        /// <summary> Dispatches one top-level item to the traversal needed for hierarchy resolution. </summary>
-        private void VisitTopLevel(TopLevel member)
+        ResolveDirectBaseTypes(context, declaration, typeSymbol);
+
+        if (declaration.Body is not TypeBlockBody blockBody)
+            return;
+
+        foreach (Member member in blockBody.Members)
+            VisitMember(context, member);
+    }
+
+    /// <summary> Traverses type members that can themselves contain nested type declarations. </summary>
+    private void VisitMember(ResolutionContext context, Member member)
+    {
+        switch (member)
         {
-            switch (member)
-            {
-                case NamespaceDeclaration namespaceDeclaration when namespaceDeclaration.Body is NamespaceBlockBody blockBody:
-                    VisitTopLevels(blockBody.Members);
-                    break;
+            case MemberTypeDeclaration typeDeclaration:
+                VisitTypeDeclaration(context, typeDeclaration.Type);
+                break;
 
-                case TopLevelTypeDeclaration typeDeclaration:
-                    VisitTypeDeclaration(typeDeclaration.Type);
-                    break;
+            case MemberFunctionDeclaration functionDeclaration:
+                VisitFunctionDeclaration(context, functionDeclaration.Function);
+                break;
+        }
+    }
 
-                case TopLevelFunctionDeclaration functionDeclaration:
-                    VisitFunctionDeclaration(functionDeclaration.Function);
-                    break;
-
-                case TopLevelVariableDeclaration:
-                case TopLevelExpressionStatement:
-                case TopLevelReturnStatement:
-                case TopLevelEmptyStatement:
-                    break;
-
-                case TopLevelBlockStatement blockStatement:
-                    VisitLocals(blockStatement.Locals);
-                    break;
-
-                case TopLevelIfStatement ifStatement:
-                    VisitTopLevelStatement(ifStatement.ThenStatement);
-
-                    if (ifStatement.ElseStatement is not null)
-                        VisitTopLevelStatement(ifStatement.ElseStatement);
-
-                    break;
-
-                case TopLevelWhileStatement whileStatement:
-                    VisitTopLevelStatement(whileStatement.Statement);
-                    break;
-
-                case TopLevelElseStatement elseStatement:
-                    VisitTopLevelStatement(elseStatement.Statement);
-                    break;
-            }
+    /// <summary> Resolves the direct base-type list for one type declaration and stores it on the symbol. </summary>
+    private void ResolveDirectBaseTypes(ResolutionContext context, TypeDeclaration declaration, TypeSymbol typeSymbol)
+    {
+        if (declaration.Base is null)
+        {
+            typeSymbol.ResolveBaseTypes([]);
+            return;
         }
 
-        /// <summary> Traverses nested top-level statements so local type declarations still participate in hierarchy binding. </summary>
-        private void VisitTopLevelStatement(TopLevelStatement statement)
+        if (!context.TryResolveSymbolScope(typeSymbol, out Scope? typeScope) || typeScope is null)
         {
-            switch (statement)
-            {
-                case TopLevelBlockStatement blockStatement:
-                    VisitLocals(blockStatement.Locals);
-                    break;
-
-                case TopLevelIfStatement ifStatement:
-                    VisitTopLevelStatement(ifStatement.ThenStatement);
-
-                    if (ifStatement.ElseStatement is not null)
-                        VisitTopLevelStatement(ifStatement.ElseStatement);
-
-                    break;
-
-                case TopLevelWhileStatement whileStatement:
-                    VisitTopLevelStatement(whileStatement.Statement);
-                    break;
-
-                case TopLevelElseStatement elseStatement:
-                    VisitTopLevelStatement(elseStatement.Statement);
-                    break;
-            }
+            context.Diagnostics.ReportResolutionStateError(
+                declaration.GetSpan() ?? default,
+                $"type scope '{typeSymbol.Name}'",
+                declaration.GetSource());
+            typeSymbol.ResolveBaseTypes([]);
+            return;
         }
 
-        /// <summary> Traverses a function body because local declarations can introduce nested types. </summary>
-        private void VisitFunctionDeclaration(FunctionDeclaration declaration)
-        {
-            switch (declaration.Body)
-            {
-                case FunctionBlockBody blockBody:
-                    VisitLocals(blockBody.Locals);
-                    break;
+        List<TypeSymbol> resolvedBaseTypes = [];
 
-                case FunctionLambdaBody lambdaBody:
-                    VisitLocalStatement(lambdaBody.Statement);
-                    break;
-            }
+        foreach (TypeSyntax baseTypeSyntax in declaration.Base.BaseTypes)
+        {
+            ResolvedTypeReference resolvedReference = ResolveTypeReference(context, baseTypeSyntax, typeScope);
+            TypeSymbol? resolvedBaseType = ResolveUniqueBaseType(context, resolvedReference);
+
+            if (resolvedBaseType is not null)
+                resolvedBaseTypes.Add(resolvedBaseType);
         }
 
-        /// <summary> Visits all local items inside one lexical container. </summary>
-        private void VisitLocals(IReadOnlyList<Local> locals)
+        typeSymbol.ResolveBaseTypes([.. resolvedBaseTypes]);
+    }
+
+    /// <summary> Resolves one type-syntax occurrence and records the semantic result in the unit map. </summary>
+    private ResolvedTypeReference ResolveTypeReference(ResolutionContext context, TypeSyntax syntax, Scope scope)
+    {
+        ResolvedTypeReference resolved = ResolveTypeReferenceCore(context, syntax, scope, [scope], lexicalLookup: true);
+        context.ResolveTypeReference(syntax, resolved);
+        return resolved;
+    }
+
+    /// <summary> Resolves any supported type-syntax form under the provided lookup rules. </summary>
+    private ResolvedTypeReference ResolveTypeReferenceCore(ResolutionContext context, TypeSyntax syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
+    {
+        return syntax switch
         {
-            foreach (Local local in locals)
-                VisitLocal(local);
-        }
-
-        /// <summary> Dispatches one local declaration or statement to the traversal needed for type discovery. </summary>
-        private void VisitLocal(Local local)
-        {
-            switch (local)
-            {
-                case LocalTypeDeclaration typeDeclaration:
-                    VisitTypeDeclaration(typeDeclaration.Type);
-                    break;
-
-                case LocalFunctionDeclaration functionDeclaration:
-                    VisitFunctionDeclaration(functionDeclaration.Function);
-                    break;
-
-                case LocalStatement statement:
-                    VisitLocalStatement(statement);
-                    break;
-            }
-        }
-
-        /// <summary> Traverses nested local statements so embedded local types are not skipped. </summary>
-        private void VisitLocalStatement(LocalStatement statement)
-        {
-            switch (statement)
-            {
-                case LocalBlockStatement blockStatement:
-                    VisitLocals(blockStatement.Locals);
-                    break;
-
-                case LocalIfStatement ifStatement:
-                    VisitLocalStatement(ifStatement.ThenStatement);
-
-                    if (ifStatement.ElseStatement is not null)
-                        VisitLocalStatement(ifStatement.ElseStatement);
-
-                    break;
-
-                case LocalWhileStatement whileStatement:
-                    VisitLocalStatement(whileStatement.Body);
-                    break;
-
-                case LocalElseStatement elseStatement:
-                    VisitLocalStatement(elseStatement.Statement);
-                    break;
-            }
-        }
-
-        /// <summary> Resolves one declared type's direct base edges, then recurses into nested declarations. </summary>
-        private void VisitTypeDeclaration(TypeDeclaration declaration)
-        {
-            if (!context.TryResolveDeclaredSymbol(declaration, out Symbol? declaredSymbol) || declaredSymbol is not TypeSymbol typeSymbol)
-            {
-                context.Diagnostics.ReportResolutionStateError(
-                    declaration.GetSpan() ?? default,
-                    $"type declaration '{GetDeclaredName(declaration.Name)}'",
-                    declaration.GetSource());
-                return;
-            }
-
-            ResolveDirectBaseTypes(declaration, typeSymbol);
-
-            if (declaration.Body is not TypeBlockBody blockBody)
-                return;
-
-            foreach (Member member in blockBody.Members)
-                VisitMember(member);
-        }
-
-        /// <summary> Traverses type members that can themselves contain nested type declarations. </summary>
-        private void VisitMember(Member member)
-        {
-            switch (member)
-            {
-                case MemberTypeDeclaration typeDeclaration:
-                    VisitTypeDeclaration(typeDeclaration.Type);
-                    break;
-
-                case MemberFunctionDeclaration functionDeclaration:
-                    VisitFunctionDeclaration(functionDeclaration.Function);
-                    break;
-            }
-        }
-
-        /// <summary> Resolves the direct base-type list for one type declaration and stores it on the symbol. </summary>
-        private void ResolveDirectBaseTypes(TypeDeclaration declaration, TypeSymbol typeSymbol)
-        {
-            if (declaration.Base is null)
-            {
-                typeSymbol.ResolveBaseTypes([]);
-                return;
-            }
-
-            if (!context.TryResolveSymbolScope(typeSymbol, out Scope? typeScope) || typeScope is null)
-            {
-                context.Diagnostics.ReportResolutionStateError(
-                    declaration.GetSpan() ?? default,
-                    $"type scope '{typeSymbol.Name}'",
-                    declaration.GetSource());
-                typeSymbol.ResolveBaseTypes([]);
-                return;
-            }
-
-            List<TypeSymbol> resolvedBaseTypes = [];
-
-            foreach (var baseTypeSyntax in declaration.Base.BaseTypes)
-            {
-                ResolvedTypeReference resolvedReference = ResolveTypeReference(baseTypeSyntax, typeScope);
-                TypeSymbol? resolvedBaseType = ResolveUniqueBaseType(resolvedReference);
-
-                if (resolvedBaseType is not null)
-                    resolvedBaseTypes.Add(resolvedBaseType);
-            }
-
-            typeSymbol.ResolveBaseTypes([.. resolvedBaseTypes]);
-        }
-
-        /// <summary> Resolves one type-syntax occurrence and records the semantic result in the unit map. </summary>
-        private ResolvedTypeReference ResolveTypeReference(TypeSyntax syntax, Scope scope)
-        {
-            ResolvedTypeReference resolved = ResolveTypeReferenceCore(syntax, scope, [scope], lexicalLookup: true);
-            context.ResolveTypeReference(syntax, resolved);
-            return resolved;
-        }
-
-        /// <summary> Resolves any supported type-syntax form under the provided lookup rules. </summary>
-        private ResolvedTypeReference ResolveTypeReferenceCore(TypeSyntax syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
-        {
-            return syntax switch
-            {
-                SimpleType simpleType => ResolveNamedType(simpleType, simpleType.Name.Value, arity: 0, [], LookupCandidates(scopes, SymbolName.FromToken(simpleType.Name), 0, lexicalLookup, allowNamespaces: true, allowTypeParameters: true)),
-                GenericType genericType => ResolveGenericType(genericType, lexicalScope, scopes, lexicalLookup),
-                QualifiedType qualifiedType => ResolveQualifiedType(qualifiedType, lexicalScope, scopes, lexicalLookup),
-                ModifiedType modifiedType => ResolveModifiedType(modifiedType, lexicalScope, scopes, lexicalLookup),
-                _ => throw new InvalidOperationException($"Unhandled type syntax '{syntax.GetType().Name}'.")
-            };
-        }
-
-        /// <summary> Resolves a generic type reference, including all type arguments, under the current scope. </summary>
-        private ResolvedNamedTypeReference ResolveGenericType(GenericType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
-        {
-            ResolvedTypeReference[] typeArguments = new ResolvedTypeReference[syntax.TypeArguments.Count];
-
-            for (int i = 0; i < syntax.TypeArguments.Count; i++)
-                typeArguments[i] = ResolveTypeReference(syntax.TypeArguments[i], lexicalScope);
-
-            Symbol[] candidates = LookupCandidates(scopes, SymbolName.FromToken(syntax.Name), syntax.TypeArguments.Count, lexicalLookup, allowNamespaces: false, allowTypeParameters: false);
-            return ResolveNamedType(syntax, syntax.Name.Value, syntax.TypeArguments.Count, typeArguments, candidates);
-        }
-
-        /// <summary> Resolves a qualified type reference by treating the left side as a container for the right. </summary>
-        private ResolvedQualifiedTypeReference ResolveQualifiedType(QualifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
-        {
-            ResolvedTypeReference left = ResolveTypeReferenceCore(syntax.Left, lexicalScope, scopes, lexicalLookup);
-            Scope[] candidateScopes = CollectCandidateScopes(left);
-            ResolvedTypeReference right = ResolveTypeReferenceCore(syntax.Right, lexicalScope, candidateScopes, lexicalLookup: false);
-            return new ResolvedQualifiedTypeReference(syntax, left, right, [.. right.CandidateSymbols]);
-        }
-
-        /// <summary> Resolves the underlying element type, then reapplies any postfix type modifier. </summary>
-        private ResolvedTypeReference ResolveModifiedType(ModifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
-        {
-            ResolvedTypeReference elementType = ResolveTypeReferenceCore(syntax.Type, lexicalScope, scopes, lexicalLookup);
-            return syntax.Modifier is null
-                ? elementType
-                : new ResolvedModifiedTypeReference(syntax, elementType, syntax.Modifier);
-        }
-
-        /// <summary> Creates the canonical semantic object for one simple or generic named type reference. </summary>
-        private static ResolvedNamedTypeReference ResolveNamedType(TypeSyntax syntax, string name, int arity, ResolvedTypeReference[] typeArguments, Symbol[] candidates) =>
-            new ResolvedNamedTypeReference(syntax, name, arity, typeArguments, candidates, CreateExplicitSignatureKey(candidates, typeArguments));
-
-        /// <summary> Collects the member scopes owned by the left side of a qualified type reference. </summary>
-        private Scope[] CollectCandidateScopes(ResolvedTypeReference left)
-        {
-            List<Scope> scopes = [];
-            HashSet<Scope> seen = new(ReferenceEqualityComparer.Instance);
-
-            foreach (Symbol candidate in left.CandidateSymbols)
-            {
-                if (!context.TryResolveSymbolScope(candidate, out Scope? scope) || scope is null || !seen.Add(scope))
-                    continue;
-
-                scopes.Add(scope);
-            }
-
-            return [.. scopes];
-        }
-
-        /// <summary> Looks up matching candidates in the provided scopes while filtering by symbol kind and arity. </summary>
-        private static Symbol[] LookupCandidates(Scope[] scopes, SymbolName name, int arity, bool lexicalLookup, bool allowNamespaces, bool allowTypeParameters)
-        {
-            List<Symbol> matches = [];
-            HashSet<Symbol> seen = new(ReferenceEqualityComparer.Instance);
-
-            foreach (Scope scope in scopes)
-            {
-                IEnumerable<Symbol> symbols = lexicalLookup ? scope.Lookup(name) : scope.LookupLocal(name);
-
-                foreach (Symbol symbol in symbols)
-                {
-                    if (!IsCandidateMatch(symbol, arity, allowNamespaces, allowTypeParameters) || !seen.Add(symbol))
-                        continue;
-
-                    matches.Add(symbol);
-                }
-            }
-
-            return [.. matches];
-        }
-
-        /// <summary> Tests whether one looked-up symbol is a legal candidate for the current type reference shape. </summary>
-        private static bool IsCandidateMatch(Symbol symbol, int arity, bool allowNamespaces, bool allowTypeParameters) => symbol switch
-        {
-            NamespaceSymbol => allowNamespaces && arity == 0,
-            TypeParameterSymbol => allowTypeParameters && arity == 0,
-            TypeSymbol typeSymbol => typeSymbol.Arity == arity,
-            _ => false
+            SimpleType simpleType => ResolveNamedType(simpleType, simpleType.Name.Value, arity: 0, [], LookupCandidates(scopes, SymbolName.FromToken(simpleType.Name), 0, lexicalLookup, allowNamespaces: true, allowTypeParameters: true)),
+            GenericType genericType => ResolveGenericType(context, genericType, lexicalScope, scopes, lexicalLookup),
+            QualifiedType qualifiedType => ResolveQualifiedType(context, qualifiedType, lexicalScope, scopes, lexicalLookup),
+            ModifiedType modifiedType => ResolveModifiedType(context, modifiedType, lexicalScope, scopes, lexicalLookup),
+            _ => throw new InvalidOperationException($"Unhandled type syntax '{syntax.GetType().Name}'.")
         };
+    }
 
-        /// <summary> Prefers an exact semantic signature when lookup found one unambiguous target symbol. </summary>
-        private static string? CreateExplicitSignatureKey(Symbol[] candidates, ReadOnlySpan<ResolvedTypeReference> typeArguments)
+    /// <summary> Resolves a generic type reference, including all type arguments, under the current scope. </summary>
+    private ResolvedNamedTypeReference ResolveGenericType(ResolutionContext context, GenericType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
+    {
+        ResolvedTypeReference[] typeArguments = new ResolvedTypeReference[syntax.TypeArguments.Count];
+
+        for (int i = 0; i < syntax.TypeArguments.Count; i++)
+            typeArguments[i] = ResolveTypeReference(context, syntax.TypeArguments[i], lexicalScope);
+
+        Symbol[] candidates = LookupCandidates(scopes, SymbolName.FromToken(syntax.Name), syntax.TypeArguments.Count, lexicalLookup, allowNamespaces: false, allowTypeParameters: false);
+        return ResolveNamedType(syntax, syntax.Name.Value, syntax.TypeArguments.Count, typeArguments, candidates);
+    }
+
+    /// <summary> Resolves a qualified type reference by treating the left side as a container for the right. </summary>
+    private ResolvedQualifiedTypeReference ResolveQualifiedType(ResolutionContext context, QualifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
+    {
+        ResolvedTypeReference left = ResolveTypeReferenceCore(context, syntax.Left, lexicalScope, scopes, lexicalLookup);
+        Scope[] candidateScopes = CollectCandidateScopes(context, left);
+        ResolvedTypeReference right = ResolveTypeReferenceCore(context, syntax.Right, lexicalScope, candidateScopes, lexicalLookup: false);
+        return new ResolvedQualifiedTypeReference(syntax, left, right, [.. right.CandidateSymbols]);
+    }
+
+    /// <summary> Resolves the underlying element type, then reapplies any postfix type modifier. </summary>
+    private ResolvedTypeReference ResolveModifiedType(ResolutionContext context, ModifiedType syntax, Scope lexicalScope, Scope[] scopes, bool lexicalLookup)
+    {
+        ResolvedTypeReference elementType = ResolveTypeReferenceCore(context, syntax.Type, lexicalScope, scopes, lexicalLookup);
+        return syntax.Modifier is null
+            ? elementType
+            : new ResolvedModifiedTypeReference(syntax, elementType, syntax.Modifier);
+    }
+
+    /// <summary> Creates the canonical semantic object for one simple or generic named type reference. </summary>
+    private static ResolvedNamedTypeReference ResolveNamedType(TypeSyntax syntax, string name, int arity, ResolvedTypeReference[] typeArguments, Symbol[] candidates) =>
+        new(syntax, name, arity, typeArguments, candidates, CreateExplicitSignatureKey(candidates, typeArguments));
+
+    /// <summary> Collects the member scopes owned by the left side of a qualified type reference. </summary>
+    private static Scope[] CollectCandidateScopes(ResolutionContext context, ResolvedTypeReference left)
+    {
+        List<Scope> scopes = [];
+        HashSet<Scope> seen = new(ReferenceEqualityComparer.Instance);
+
+        foreach (Symbol candidate in left.CandidateSymbols)
         {
-            if (candidates.Length != 1)
-                return null;
+            if (!context.TryResolveSymbolScope(candidate, out Scope? scope) || scope is null || !seen.Add(scope))
+                continue;
 
-            return candidates[0] switch
-            {
-                TypeParameterSymbol typeParameterSymbol when typeArguments.Length == 0 => typeParameterSymbol.SignatureIdentity,
-                TypeSymbol typeSymbol when typeArguments.Length == 0 => typeSymbol.QualifiedMetadataName,
-                TypeSymbol typeSymbol => $"{typeSymbol.QualifiedMetadataName}<{JoinSignatureKeys(typeArguments)}>",
-                _ => null
-            };
+            scopes.Add(scope);
         }
 
-        /// <summary> Joins already-resolved type-argument signatures into one normalized argument list. </summary>
-        private static string JoinSignatureKeys(ReadOnlySpan<ResolvedTypeReference> typeArguments)
+        return [.. scopes];
+    }
+
+    /// <summary> Looks up matching candidates in the provided scopes while filtering by symbol kind and arity. </summary>
+    private static Symbol[] LookupCandidates(Scope[] scopes, SymbolName name, int arity, bool lexicalLookup, bool allowNamespaces, bool allowTypeParameters)
+    {
+        List<Symbol> matches = [];
+        HashSet<Symbol> seen = new(ReferenceEqualityComparer.Instance);
+
+        foreach (Scope scope in scopes)
         {
-            string[] parts = new string[typeArguments.Length];
+            IEnumerable<Symbol> symbols = lexicalLookup ? scope.Lookup(name) : scope.LookupLocal(name);
 
-            for (int i = 0; i < typeArguments.Length; i++)
-                parts[i] = typeArguments[i].SignatureKey;
-
-            return string.Join(",", parts);
-        }
-
-        /// <summary> Reduces a resolved reference to one unique direct base type while reporting lookup failures. </summary>
-        private TypeSymbol? ResolveUniqueBaseType(ResolvedTypeReference resolvedReference)
-        {
-            TypeSymbol? singleType = null;
-
-            foreach (Symbol candidate in resolvedReference.CandidateSymbols)
+            foreach (Symbol symbol in symbols)
             {
-                if (candidate is not TypeSymbol typeCandidate)
+                if (!IsCandidateMatch(symbol, arity, allowNamespaces, allowTypeParameters) || !seen.Add(symbol))
                     continue;
 
-                if (singleType is not null && !ReferenceEquals(singleType, typeCandidate))
-                {
-                    ReportAmbiguousBaseType(resolvedReference);
-                    return null;
-                }
+                matches.Add(symbol);
+            }
+        }
 
-                singleType = typeCandidate;
+        return [.. matches];
+    }
+
+    /// <summary> Tests whether one looked-up symbol is a legal candidate for the current type reference shape. </summary>
+    private static bool IsCandidateMatch(Symbol symbol, int arity, bool allowNamespaces, bool allowTypeParameters) => symbol switch
+    {
+        NamespaceSymbol => allowNamespaces && arity == 0,
+        TypeParameterSymbol => allowTypeParameters && arity == 0,
+        TypeSymbol typeSymbol => typeSymbol.Arity == arity,
+        _ => false
+    };
+
+    /// <summary> Prefers an exact semantic signature when lookup found one unambiguous target symbol. </summary>
+    private static string? CreateExplicitSignatureKey(Symbol[] candidates, ReadOnlySpan<ResolvedTypeReference> typeArguments)
+    {
+        if (candidates.Length != 1)
+            return null;
+
+        return candidates[0] switch
+        {
+            TypeParameterSymbol typeParameterSymbol when typeArguments.Length == 0 => typeParameterSymbol.SignatureIdentity,
+            TypeSymbol typeSymbol when typeArguments.Length == 0 => typeSymbol.QualifiedMetadataName,
+            TypeSymbol typeSymbol => $"{typeSymbol.QualifiedMetadataName}<{JoinSignatureKeys(typeArguments)}>",
+            _ => null
+        };
+    }
+
+    /// <summary> Joins already-resolved type-argument signatures into one normalized argument list. </summary>
+    private static string JoinSignatureKeys(ReadOnlySpan<ResolvedTypeReference> typeArguments)
+    {
+        string[] parts = new string[typeArguments.Length];
+
+        for (int i = 0; i < typeArguments.Length; i++)
+            parts[i] = typeArguments[i].SignatureKey;
+
+        return string.Join(",", parts);
+    }
+
+    /// <summary> Reduces a resolved reference to one unique direct base type while reporting lookup failures. </summary>
+    private static TypeSymbol? ResolveUniqueBaseType(ResolutionContext context, ResolvedTypeReference resolvedReference)
+    {
+        TypeSymbol? singleType = null;
+
+        foreach (Symbol candidate in resolvedReference.CandidateSymbols)
+        {
+            if (candidate is not TypeSymbol typeCandidate)
+                continue;
+
+            if (singleType is not null && !ReferenceEquals(singleType, typeCandidate))
+            {
+                ReportAmbiguousBaseType(context, resolvedReference);
+                return null;
             }
 
-            if (singleType is not null)
-                return singleType;
-
-            ReportUnresolvedBaseType(resolvedReference);
-            return null;
+            singleType = typeCandidate;
         }
 
-        /// <summary> Reports that one declared base-type syntax resolved to no concrete type symbol. </summary>
-        private void ReportUnresolvedBaseType(ResolvedTypeReference resolvedReference)
-        {
-            TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
-            context.Diagnostics.ReportUnresolvedTypeReference(span, resolvedReference.DisplayName, resolvedReference.Syntax.GetSource());
-        }
+        if (singleType is not null)
+            return singleType;
 
-        /// <summary> Reports that one declared base-type syntax matched more than one concrete type symbol. </summary>
-        private void ReportAmbiguousBaseType(ResolvedTypeReference resolvedReference)
-        {
-            TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
-            context.Diagnostics.ReportAmbiguousTypeReference(span, resolvedReference.DisplayName, resolvedReference.Syntax.GetSource());
-        }
+        ReportUnresolvedBaseType(context, resolvedReference);
+        return null;
+    }
+
+    /// <summary> Reports that one declared base-type syntax resolved to no concrete type symbol. </summary>
+    private static void ReportUnresolvedBaseType(ResolutionContext context, ResolvedTypeReference resolvedReference)
+    {
+        TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
+        context.Diagnostics.ReportUnresolvedTypeReference(span, resolvedReference.DisplayName, resolvedReference.Syntax.GetSource());
+    }
+
+    /// <summary> Reports that one declared base-type syntax matched more than one concrete type symbol. </summary>
+    private static void ReportAmbiguousBaseType(ResolutionContext context, ResolvedTypeReference resolvedReference)
+    {
+        TextSpan span = resolvedReference.Syntax.GetSpan() ?? default;
+        context.Diagnostics.ReportAmbiguousTypeReference(span, resolvedReference.DisplayName, resolvedReference.Syntax.GetSource());
     }
 
     /// <summary> Sequential project-wide cycle detection over the direct hierarchy edges resolved earlier. </summary>

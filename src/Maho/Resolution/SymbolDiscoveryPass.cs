@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Maho.Symbols;
 using Maho.Syntax;
 
@@ -15,48 +16,31 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     /// Symbol discovery builds real per-unit declaration graphs in parallel, then attaches them to
     /// canonical project-wide namespace and scope state in a deterministic merge phase.
     /// </summary>
-    public override ResolutionExecutionMode ExecutionMode => ResolutionExecutionMode.ParallelCollectThenMerge;
-
-    /// <summary> Collects one unit-local declaration graph without mutating shared project state. </summary>
-    public override ResolutionPassUnitResult CollectUnit(ResolutionContext context) => new Collector(context.Root).Collect();
-
-    /// <summary> Attaches one unit's collected declaration graph into the real project symbol graph. </summary>
-    public override void MergeUnit(ResolutionCoordinatorContext projectContext, ResolutionContext unitContext, ResolutionPassUnitResult? result)
+    public override void Execute(ResolutionCoordinatorContext context)
     {
-        if (result is not UnitGraph graph)
-        {
-            unitContext.Diagnostics.ReportResolutionStateError(default, $"unit declaration graph '{unitContext.Root.GetType().Name}'");
-            return;
-        }
+        UnitGraph[] graphs = new UnitGraph[context.Units.Length];
+        Parallel.For(0, context.Units.Length, unitIndex => graphs[unitIndex] = CollectUnitGraph(context.Units[unitIndex].Root));
 
-        new Merger(unitContext).Merge(graph);
+        for (int unitIndex = 0; unitIndex < context.Units.Length; unitIndex++)
+            MergeUnitGraph(context.Units[unitIndex], graphs[unitIndex]);
     }
 
     /// <summary>
     /// Builds one compilation unit's declaration graph using a unit-local root namespace/scope. The
     /// graph contains real symbols and scopes, but they are not attached to shared project state yet.
     /// </summary>
-    private sealed class Collector
+    private static UnitGraph CollectUnitGraph(CompilationUnit root)
     {
-        private readonly CompilationUnit root;
-        private readonly NamespaceSymbol unitRootNamespace;
-        private readonly Scope unitRootScope;
-        private readonly Dictionary<Symbol, Scope> ownedScopes = new(ReferenceEqualityComparer.Instance);
-
-        /// <summary> Creates the unit-local collection root and the synthetic namespace/scope that own it. </summary>
-        public Collector(CompilationUnit root)
+        NamespaceSymbol unitRootNamespace = new(SymbolName.Empty, parentSymbol: null, root);
+        Scope unitRootScope = new(parent: null, boundary: root, ownerSymbol: unitRootNamespace);
+        Dictionary<Symbol, Scope> ownedScopes = new(ReferenceEqualityComparer.Instance)
         {
-            this.root = root;
-            unitRootNamespace = new NamespaceSymbol(SymbolName.Empty, parentSymbol: null, root);
-            unitRootScope = new Scope(parent: null, boundary: root, ownerSymbol: unitRootNamespace);
-            ownedScopes.Add(unitRootNamespace, unitRootScope);
-        }
+            [unitRootNamespace] = unitRootScope
+        };
 
-        /// <summary> Builds the full declaration graph for the compilation unit owned by this collector. </summary>
-        public UnitGraph Collect() => new UnitGraph(root, CollectTopLevels(root.Members, unitRootScope, unitRootNamespace));
+        return new UnitGraph(root, CollectTopLevels(root.Members, unitRootScope, unitRootNamespace));
 
-        /// <summary> Collects top-level declarations while tracking file-scoped namespace continuation. </summary>
-        private TopLevelDeclarationGraph[] CollectTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
+        TopLevelDeclarationGraph[] CollectTopLevels(IReadOnlyList<TopLevel> members, Scope scope, Symbol containerSymbol)
         {
             TopLevelDeclarationGraph[] graphs = new TopLevelDeclarationGraph[members.Count];
             Scope currentScope = scope;
@@ -74,8 +58,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return graphs;
         }
 
-        /// <summary> Dispatches one top-level syntax node to the collector that can model it structurally. </summary>
-        private TopLevelDeclarationGraph CollectTopLevel(TopLevel topLevel, Scope scope, Symbol containerSymbol) => topLevel switch
+        TopLevelDeclarationGraph CollectTopLevel(TopLevel topLevel, Scope scope, Symbol containerSymbol) => topLevel switch
         {
             NamespaceDeclaration namespaceDeclaration => new NamespaceTopLevelDeclarationGraph(namespaceDeclaration, CollectNamespace(namespaceDeclaration, scope, containerSymbol)),
             TopLevelTypeDeclaration typeDeclaration => new TypeTopLevelDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
@@ -85,8 +68,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             _ => throw new InvalidOperationException($"Unhandled top-level syntax '{topLevel.GetType().Name}'.")
         };
 
-        /// <summary> Collects one namespace declaration into its path parts plus any nested members. </summary>
-        private NamespaceDeclarationGraph CollectNamespace(NamespaceDeclaration declaration, Scope scope, Symbol parentSymbol)
+        NamespaceDeclarationGraph CollectNamespace(NamespaceDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
             NamespacePartGraph[] parts = new NamespacePartGraph[CountSimpleNames(declaration.Name)];
             int partIndex = 0;
@@ -102,13 +84,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             };
         }
 
-        /// <summary> Collects one type declaration into a symbol, owned scope, type parameters, and members. </summary>
-        private TypeDeclarationGraph CollectTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
+        TypeDeclarationGraph CollectTypeDeclaration(TypeDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            TypeSymbol symbol = new TypeSymbol(GetDeclaredName(declaration.Name), parentSymbol, declaration, GetDeclaredArity(declaration.Name));
+            TypeSymbol symbol = new(GetDeclaredName(declaration.Name), parentSymbol, declaration, GetDeclaredArity(declaration.Name));
             scope.Declare(symbol);
 
-            Scope typeScope = new Scope(scope, declaration, symbol);
+            Scope typeScope = new(scope, declaration, symbol);
             ownedScopes.Add(symbol, typeScope);
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Name, symbol, typeScope);
@@ -119,8 +100,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return new TypeDeclarationGraph(declaration, symbol, scope, typeScope, members);
         }
 
-        /// <summary> Collects all members declared directly inside one type body. </summary>
-        private MemberDeclarationGraph[] CollectMembers(IReadOnlyList<Member> members, Scope scope, Symbol containerSymbol)
+        MemberDeclarationGraph[] CollectMembers(IReadOnlyList<Member> members, Scope scope, Symbol containerSymbol)
         {
             MemberDeclarationGraph[] graphs = new MemberDeclarationGraph[members.Count];
 
@@ -130,8 +110,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return graphs;
         }
 
-        /// <summary> Dispatches one type member to the collector that matches its declaration shape. </summary>
-        private MemberDeclarationGraph CollectMember(Member member, Scope scope, Symbol containerSymbol) => member switch
+        MemberDeclarationGraph CollectMember(Member member, Scope scope, Symbol containerSymbol) => member switch
         {
             MemberTypeDeclaration typeDeclaration => new TypeMemberDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
             MemberFunctionDeclaration functionDeclaration => new FunctionMemberDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
@@ -140,13 +119,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             _ => throw new InvalidOperationException($"Unhandled member syntax '{member.GetType().Name}'.")
         };
 
-        /// <summary> Collects one function declaration into a symbol, owned scope, parameters, and body graph. </summary>
-        private FunctionDeclarationGraph CollectFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
+        FunctionDeclarationGraph CollectFunctionDeclaration(FunctionDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            FunctionSymbol symbol = new FunctionSymbol(GetDeclaredName(declaration.Signature.Identifier), parentSymbol, declaration, GetDeclaredArity(declaration.Signature.Identifier));
+            FunctionSymbol symbol = new(GetDeclaredName(declaration.Signature.Identifier), parentSymbol, declaration, GetDeclaredArity(declaration.Signature.Identifier));
             scope.Declare(symbol);
 
-            Scope functionScope = new Scope(scope, declaration, symbol);
+            Scope functionScope = new(scope, declaration, symbol);
             ownedScopes.Add(symbol, functionScope);
 
             TypeParameterSymbol[] typeParameters = DeclareTypeParameters(declaration.Signature.Identifier, symbol, functionScope);
@@ -166,16 +144,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return new FunctionDeclarationGraph(declaration, symbol, scope, functionScope, body);
         }
 
-        /// <summary> Collects one property declaration into a symbol declared directly in the owning type scope. </summary>
-        private static PropertyDeclarationGraph CollectPropertyDeclaration(MemberPropertyDeclaration declaration, Scope scope, Symbol parentSymbol)
+        PropertyDeclarationGraph CollectPropertyDeclaration(MemberPropertyDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
-            PropertySymbol symbol = new PropertySymbol(GetDeclaredName(declaration.Identifier), parentSymbol, declaration);
+            PropertySymbol symbol = new(GetDeclaredName(declaration.Identifier), parentSymbol, declaration);
             scope.Declare(symbol);
             return new PropertyDeclarationGraph(declaration, symbol, scope);
         }
 
-        /// <summary> Declares generic type parameters directly into the owner scope in source order. </summary>
-        private static TypeParameterSymbol[] DeclareTypeParameters(NamedSyntax nameSyntax, Symbol ownerSymbol, Scope ownerScope)
+        TypeParameterSymbol[] DeclareTypeParameters(NamedSyntax nameSyntax, Symbol ownerSymbol, Scope ownerScope)
         {
             if (nameSyntax is not GenericName genericName)
                 return [];
@@ -184,8 +160,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             for (int i = 0; i < genericName.TypeParameters.Count; i++)
             {
-                var typeParameterName = genericName.TypeParameters[i];
-                var symbol = new TypeParameterSymbol(SymbolName.FromToken(typeParameterName.Name), ownerSymbol, typeParameterName, i);
+                SimpleName syntax = genericName.TypeParameters[i];
+                TypeParameterSymbol symbol = new(SymbolName.FromToken(syntax.Name), ownerSymbol, syntax, i);
                 ownerScope.Declare(symbol);
                 symbols[i] = symbol;
             }
@@ -193,15 +169,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return symbols;
         }
 
-        /// <summary> Declares function parameters directly into the function scope in source order. </summary>
-        private static ParameterSymbol[] DeclareParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, Symbol functionSymbol)
+        ParameterSymbol[] DeclareParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, Symbol functionSymbol)
         {
             ParameterSymbol[] resolvedParameters = new ParameterSymbol[parameters.Count];
 
             for (int i = 0; i < parameters.Count; i++)
             {
-                var parameter = parameters[i];
-                var symbol = new ParameterSymbol(GetDeclaredName(parameter.Declarator.Identifier), functionSymbol, parameter, i);
+                Parameter parameter = parameters[i];
+                ParameterSymbol symbol = new(GetDeclaredName(parameter.Declarator.Identifier), functionSymbol, parameter, i);
                 scope.Declare(symbol);
                 resolvedParameters[i] = symbol;
             }
@@ -209,15 +184,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return resolvedParameters;
         }
 
-        /// <summary> Collects one variable declaration into the declared variable symbols it introduces. </summary>
-        private static VariableDeclarationGraph CollectVariableDeclaration(VariableDeclaration declaration, Scope scope, Symbol parentSymbol)
+        VariableDeclarationGraph CollectVariableDeclaration(VariableDeclaration declaration, Scope scope, Symbol parentSymbol)
         {
             VariableDeclaratorGraph[] declarators = new VariableDeclaratorGraph[declaration.Declarators.Count];
 
             for (int i = 0; i < declaration.Declarators.Count; i++)
             {
-                var declarator = declaration.Declarators[i];
-                var symbol = new VariableSymbol(GetDeclaredName(declarator.Identifier), parentSymbol, declarator);
+                VariableDeclarator declarator = declaration.Declarators[i];
+                VariableSymbol symbol = new(GetDeclaredName(declarator.Identifier), parentSymbol, declarator);
                 scope.Declare(symbol);
                 declarators[i] = new VariableDeclaratorGraph(declarator, symbol);
             }
@@ -225,8 +199,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return new VariableDeclarationGraph(declaration, scope, declarators);
         }
 
-        /// <summary> Collects all local declarations and statements inside one lexical container. </summary>
-        private LocalDeclarationGraph[] CollectLocals(IReadOnlyList<Local> locals, Scope scope, Symbol containerSymbol)
+        LocalDeclarationGraph[] CollectLocals(IReadOnlyList<Local> locals, Scope scope, Symbol containerSymbol)
         {
             LocalDeclarationGraph[] graphs = new LocalDeclarationGraph[locals.Count];
 
@@ -236,8 +209,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return graphs;
         }
 
-        /// <summary> Dispatches one local item to the collector that matches its declaration shape. </summary>
-        private LocalDeclarationGraph CollectLocal(Local local, Scope scope, Symbol containerSymbol) => local switch
+        LocalDeclarationGraph CollectLocal(Local local, Scope scope, Symbol containerSymbol) => local switch
         {
             LocalTypeDeclaration typeDeclaration => new TypeLocalDeclarationGraph(typeDeclaration, CollectTypeDeclaration(typeDeclaration.Type, scope, containerSymbol)),
             LocalFunctionDeclaration functionDeclaration => new FunctionLocalDeclarationGraph(functionDeclaration, CollectFunctionDeclaration(functionDeclaration.Function, scope, containerSymbol)),
@@ -245,8 +217,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             _ => throw new InvalidOperationException($"Unhandled local syntax '{local.GetType().Name}'.")
         };
 
-        /// <summary> Collects a top-level statement into the structural graph used during merge. </summary>
-        private TopLevelStatementGraph CollectTopLevelStatement(TopLevelStatement statement, Scope scope, Symbol containerSymbol) => statement switch
+        TopLevelStatementGraph CollectTopLevelStatement(TopLevelStatement statement, Scope scope, Symbol containerSymbol) => statement switch
         {
             TopLevelBlockStatement blockStatement => CollectTopLevelBlockStatement(blockStatement, scope, containerSymbol),
             TopLevelIfStatement ifStatement => new TopLevelIfStatementGraph(
@@ -261,8 +232,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             _ => throw new InvalidOperationException($"Unhandled top-level statement '{statement.GetType().Name}'.")
         };
 
-        /// <summary> Creates an implicit statement scope for embedded statements that are not blocks. </summary>
-        private LocalStatementGraph CollectEmbeddedLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol)
+        LocalStatementGraph CollectEmbeddedLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol)
         {
             if (statement is LocalBlockStatement)
                 return CollectLocalStatement(statement, scope, containerSymbol);
@@ -271,8 +241,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return CollectLocalStatement(statement, statementScope, containerSymbol, statementScope);
         }
 
-        /// <summary> Collects a local statement subtree, optionally remembering the scope introduced for the syntax node itself. </summary>
-        private LocalStatementGraph CollectLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol, Scope? declaredScope = null) => statement switch
+        LocalStatementGraph CollectLocalStatement(LocalStatement statement, Scope scope, Symbol containerSymbol, Scope? declaredScope = null) => statement switch
         {
             LocalBlockStatement blockStatement => CollectLocalBlockStatement(blockStatement, scope, containerSymbol),
             LocalIfStatement ifStatement => new LocalIfStatementGraph(
@@ -298,8 +267,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             _ => throw new InvalidOperationException($"Unhandled local statement '{statement.GetType().Name}'.")
         };
 
-        /// <summary> Reuses an already-collected namespace part in the current scope or creates a fresh one. </summary>
-        private NamespaceSymbol GetOrDeclareLocalNamespace(SimpleName syntax, Scope scope, Symbol parentSymbol)
+        NamespaceSymbol GetOrDeclareLocalNamespace(SimpleName syntax, Scope scope, Symbol parentSymbol)
         {
             SymbolName name = SymbolName.FromToken(syntax.Name);
             IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(name);
@@ -316,22 +284,19 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return created;
         }
 
-        /// <summary> Collects one top-level block statement and the locals declared inside it. </summary>
-        private TopLevelBlockStatementGraph CollectTopLevelBlockStatement(TopLevelBlockStatement statement, Scope scope, Symbol containerSymbol)
+        TopLevelBlockStatementGraph CollectTopLevelBlockStatement(TopLevelBlockStatement statement, Scope scope, Symbol containerSymbol)
         {
             Scope blockScope = new(scope, statement);
             return new TopLevelBlockStatementGraph(statement, blockScope, CollectLocals(statement.Locals, blockScope, containerSymbol));
         }
 
-        /// <summary> Collects one local block statement and the locals declared inside it. </summary>
-        private LocalBlockStatementGraph CollectLocalBlockStatement(LocalBlockStatement statement, Scope scope, Symbol containerSymbol)
+        LocalBlockStatementGraph CollectLocalBlockStatement(LocalBlockStatement statement, Scope scope, Symbol containerSymbol)
         {
             Scope blockScope = new(scope, statement);
             return new LocalBlockStatementGraph(statement, blockScope, CollectLocals(statement.Locals, blockScope, containerSymbol));
         }
 
-        /// <summary> Resolves the continuing scope/container after a file-scoped namespace declaration. </summary>
-        private static (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
@@ -345,8 +310,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return (currentScope, currentSymbol);
         }
 
-        /// <summary> Breaks a namespace name into simple path parts while reusing unit-local namespace symbols. </summary>
-        private void CollectNamespaceParts(NamedSyntax name, NamespacePartGraph[] parts, ref int partIndex, ref Scope currentScope, ref Symbol currentSymbol)
+        void CollectNamespaceParts(NamedSyntax name, NamespacePartGraph[] parts, ref int partIndex, ref Scope currentScope, ref Symbol currentSymbol)
         {
             switch (name)
             {
@@ -361,8 +325,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 }
 
                 case QualifiedName qualifiedName:
-                    foreach (var nm in qualifiedName.Parts)
-                        CollectNamespaceParts(nm, parts, ref partIndex, ref currentScope, ref currentSymbol);
+                    foreach (NamedSyntax part in qualifiedName.Parts)
+                        CollectNamespaceParts(part, parts, ref partIndex, ref currentScope, ref currentSymbol);
                     break;
 
                 default:
@@ -375,18 +339,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     /// Attaches one unit-local declaration graph to canonical project-wide namespace and scope
     /// state, reusing existing namespaces when multiple units contribute to the same path.
     /// </summary>
-    private sealed class Merger
+    private static void MergeUnitGraph(ResolutionContext context, UnitGraph graph)
     {
-        private readonly ResolutionContext context;
+        AttachTopLevels(graph.TopLevels, context.GlobalScope, context.GlobalNamespace);
 
-        /// <summary> Creates the helper that attaches one unit-local graph into canonical project state. </summary>
-        public Merger(ResolutionContext context) => this.context = context;
-
-        /// <summary> Attaches the root graph of one compilation unit into the shared project graph. </summary>
-        public void Merge(UnitGraph graph) => AttachTopLevels(graph.TopLevels, context.GlobalScope, context.GlobalNamespace);
-
-        /// <summary> Attaches all top-level declarations, respecting file-scoped namespace continuation. </summary>
-        private void AttachTopLevels(TopLevelDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
+        void AttachTopLevels(TopLevelDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
         {
             Scope currentScope = scope;
             Symbol currentContainerSymbol = containerSymbol;
@@ -400,8 +357,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Dispatches one top-level declaration graph to the attachment logic that matches it. </summary>
-        private void AttachTopLevel(TopLevelDeclarationGraph topLevel, Scope scope, Symbol containerSymbol)
+        void AttachTopLevel(TopLevelDeclarationGraph topLevel, Scope scope, Symbol containerSymbol)
         {
             switch (topLevel)
             {
@@ -432,8 +388,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches a namespace path into canonical namespace symbols and then attaches nested members. </summary>
-        private void AttachNamespace(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        void AttachNamespace(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
@@ -453,8 +408,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 AttachTopLevels(graph.Members, currentScope, currentSymbol);
         }
 
-        /// <summary> Resolves the canonical scope/container that follows a file-scoped namespace declaration. </summary>
-        private (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        (Scope Scope, Symbol ContainerSymbol) ResolveNamespaceContinuation(NamespaceDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             Scope currentScope = scope;
             Symbol currentSymbol = parentSymbol;
@@ -468,8 +422,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return (currentScope, currentSymbol);
         }
 
-        /// <summary> Reuses an existing namespace symbol in the target scope or attaches the collected one there. </summary>
-        private NamespaceSymbol GetOrAttachNamespace(NamespacePartGraph part, Scope scope, Symbol parentSymbol)
+        NamespaceSymbol GetOrAttachNamespace(NamespacePartGraph part, Scope scope, Symbol parentSymbol)
         {
             IReadOnlyList<Symbol> localSymbols = scope.LookupLocal(part.Name);
 
@@ -491,8 +444,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             return part.Symbol;
         }
 
-        /// <summary> Attaches one collected type declaration under its canonical container and binds its nested declarations. </summary>
-        private void AttachTypeDeclaration(TypeDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        void AttachTypeDeclaration(TypeDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
             graph.Symbol.Reparent(parentSymbol);
@@ -507,15 +459,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             AttachMembers(graph.Members, graph.Scope, graph.Symbol);
         }
 
-        /// <summary> Attaches every member declared directly inside one type body. </summary>
-        private void AttachMembers(MemberDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
+        void AttachMembers(MemberDeclarationGraph[] members, Scope scope, Symbol containerSymbol)
         {
             foreach (var member in members)
                 AttachMember(member, scope, containerSymbol);
         }
 
-        /// <summary> Dispatches one collected member graph to the attachment logic that matches it. </summary>
-        private void AttachMember(MemberDeclarationGraph member, Scope scope, Symbol containerSymbol)
+        void AttachMember(MemberDeclarationGraph member, Scope scope, Symbol containerSymbol)
         {
             switch (member)
             {
@@ -543,8 +493,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches one collected function declaration and then binds locals declared inside its body. </summary>
-        private void AttachFunctionDeclaration(FunctionDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        void AttachFunctionDeclaration(FunctionDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
             graph.Symbol.Reparent(parentSymbol);
@@ -578,16 +527,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches one collected property declaration under its canonical container. </summary>
-        private void AttachPropertyDeclaration(PropertyDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        void AttachPropertyDeclaration(PropertyDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             MoveDeclaredSymbol(graph.Symbol, graph.DeclaringScope, scope);
             graph.Symbol.Reparent(parentSymbol);
             context.ResolveDeclaredSymbol(graph.Declaration, graph.Symbol);
         }
 
-        /// <summary> Associates type-level clauses such as the base list and constraints with the declaring type symbol. </summary>
-        private void ResolveTypeDeclarationClauses(TypeDeclaration declaration, TypeSymbol symbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        void ResolveTypeDeclarationClauses(TypeDeclaration declaration, TypeSymbol symbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
         {
             if (declaration.Base is not null)
                 context.ResolveDeclaredSymbol(declaration.Base, symbol);
@@ -595,8 +542,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             ResolveTypeConstraintClauses(declaration.Constraints, symbol, typeParameters);
         }
 
-        /// <summary> Associates each constraint clause with its owner and resolves the constrained type parameter symbol. </summary>
-        private void ResolveTypeConstraintClauses(IReadOnlyList<TypeConstraintClause> clauses, Symbol ownerSymbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        void ResolveTypeConstraintClauses(IReadOnlyList<TypeConstraintClause> clauses, Symbol ownerSymbol, ReadOnlySpan<TypeParameterSymbol> typeParameters)
         {
             foreach (TypeConstraintClause clause in clauses)
             {
@@ -605,8 +551,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Resolves the type-parameter syntax named by one constraint clause back to the declared symbol. </summary>
-        private void ResolveConstraintTypeParameter(SimpleName syntax, ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        void ResolveConstraintTypeParameter(SimpleName syntax, ReadOnlySpan<TypeParameterSymbol> typeParameters)
         {
             SymbolName name = SymbolName.FromToken(syntax.Name);
 
@@ -620,15 +565,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 }
         }
 
-        /// <summary> Records every declared type parameter syntax in the unit's syntax-to-symbol map. </summary>
-        private void BindTypeParameters(ReadOnlySpan<TypeParameterSymbol> typeParameters)
+        void BindTypeParameters(ReadOnlySpan<TypeParameterSymbol> typeParameters)
         {
             foreach (TypeParameterSymbol typeParameter in typeParameters)
                 context.ResolveDeclaredSymbol(typeParameter.Declaration, typeParameter);
         }
 
-        /// <summary> Records every declared parameter syntax and declarator in the unit's syntax-to-symbol map. </summary>
-        private void BindParameters(ReadOnlySpan<ParameterSymbol> parameters)
+        void BindParameters(ReadOnlySpan<ParameterSymbol> parameters)
         {
             foreach (var param in parameters)
             {
@@ -638,8 +581,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches one variable declaration by moving its declared variable symbols into the target scope. </summary>
-        private void AttachVariableDeclaration(VariableDeclarationGraph graph, Scope scope, Symbol parentSymbol)
+        void AttachVariableDeclaration(VariableDeclarationGraph graph, Scope scope, Symbol parentSymbol)
         {
             foreach (var declarator in graph.Declarators)
             {
@@ -650,15 +592,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches every collected local declaration or statement in source order. </summary>
-        private void AttachLocals(LocalDeclarationGraph[] locals, Scope scope, Symbol containerSymbol)
+        void AttachLocals(LocalDeclarationGraph[] locals, Scope scope, Symbol containerSymbol)
         {
             foreach (var local in locals)
                 AttachLocal(local, scope, containerSymbol);
         }
 
-        /// <summary> Dispatches one collected local graph to the attachment logic that matches it. </summary>
-        private void AttachLocal(LocalDeclarationGraph local, Scope scope, Symbol containerSymbol)
+        void AttachLocal(LocalDeclarationGraph local, Scope scope, Symbol containerSymbol)
         {
             switch (local)
             {
@@ -681,8 +621,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches one top-level statement graph, reparenting any collected scopes it owns. </summary>
-        private void AttachTopLevelStatement(TopLevelStatementGraph statement, Scope scope, Symbol containerSymbol)
+        void AttachTopLevelStatement(TopLevelStatementGraph statement, Scope scope, Symbol containerSymbol)
         {
             switch (statement)
             {
@@ -715,8 +654,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches one local statement graph, reparenting any collected scopes it owns. </summary>
-        private void AttachLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol)
+        void AttachLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol)
         {
             Scope currentScope = scope;
 
@@ -760,11 +698,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             }
         }
 
-        /// <summary> Attaches an embedded local statement using the same logic as any other local statement. </summary>
-        private void AttachEmbeddedLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol) => AttachLocalStatement(statement, scope, containerSymbol);
+        void AttachEmbeddedLocalStatement(LocalStatementGraph statement, Scope scope, Symbol containerSymbol) => AttachLocalStatement(statement, scope, containerSymbol);
 
-        /// <summary> Moves one declared symbol from its collection scope into the canonical target scope. </summary>
-        private static void MoveDeclaredSymbol(Symbol symbol, Scope fromScope, Scope toScope)
+        static void MoveDeclaredSymbol(Symbol symbol, Scope fromScope, Scope toScope)
         {
             if (ReferenceEquals(fromScope, toScope))
                 return;
@@ -775,7 +711,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     }
 
     /// <summary> Collected declaration graph for one compilation unit prior to canonical attachment. </summary>
-    private sealed class UnitGraph : ResolutionPassUnitResult
+    private sealed class UnitGraph
     {
         /// <summary> Compilation unit that produced this collected declaration graph. </summary>
         public CompilationUnit Root { get; }

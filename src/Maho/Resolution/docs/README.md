@@ -31,11 +31,11 @@ That split matters because not every semantic pass wants the same granularity.
 
 Some passes need:
 
-- project-wide setup before touching files,
-- per-file work after a global declaration barrier,
-- or project-wide finalization after every file has contributed state
+- a parallel per-unit stage,
+- a sequential merge stage,
+- or a project-wide validation sweep after every file has contributed state.
 
-The pass API is built around that instead of assuming every pass is purely per-file.
+The pass API now keeps that control flow inside each pass instead of baking those stages into the coordinator contract.
 
 ## Files in this folder
 
@@ -45,38 +45,36 @@ The pass API is built around that instead of assuming every pass is purely per-f
 - `ResolutionProject.cs`: input container for a syntax tree and project references.
 - `ResolutionProjectResult.cs`: stable project-wide semantic result.
 - `ResolutionProjectReference.cs`: external project semantic surface for future cross-project lookup.
-- `ResolutionPass.cs`: base type for semantic passes with project and unit hooks.
-- `ResolutionExecutionMode.cs`: scheduler hint for how a pass wants its unit work to run.
+- `ResolutionPass.cs`: base type for semantic passes with one `Execute(...)` entrypoint.
 - `ResolutionContext.cs`: mutable per-unit semantic state and resolution maps.
-- `ResolutionPassUnitResult.cs`: base type for attach/merge unit results.
 - `ResolutionResult.cs`: stable per-unit semantic result.
 - `Scope.cs`: lexical scope model with local declaration storage and outward lookup.
-- `SymbolDiscoveryPass.cs`: first pass that builds unit-local declaration graphs and attaches them into the project-wide declaration graph.
-- `TypeHierarchyResolutionPass.cs`: second pass that resolves direct type-hierarchy edges and performs project-wide cycle detection.
+- `SymbolDiscoveryPass.cs`: first pass that builds unit-local declaration graphs in parallel, then attaches them into the project-wide declaration graph sequentially.
+- `TypeHierarchyResolutionPass.cs`: second pass that resolves direct type-hierarchy edges in parallel and then performs project-wide cycle detection.
 - `FunctionSignatureResolutionPass.cs`: third pass that resolves function return types and parameter types in parallel.
+- `DuplicateSymbolResolutionPass.cs`: fourth pass that validates duplicate declaration sets on the canonical project scope graph.
+- `IntrinsicAttributeDefinitionPass.cs`: fifth pass that records intrinsic-marked attribute declarations and reports unknown or missing intrinsic symbols.
 - `ResolvedTypeReference.cs`: semantic representation used by declaration-site type-resolution passes.
 
 ## Pass model
 
-`ResolutionPass` now exposes three hooks:
+`ResolutionPass` now exposes one entrypoint:
 
-- `BeforeProject(...)`
-- `ExecuteUnit(...)`
-- `AfterProject(...)`
+- `Execute(ResolutionCoordinatorContext context)`
 
-It also exposes an execution mode that tells the coordinator how unit work is scheduled:
+Each pass owns its own scheduling and phase barriers inside that method. Common shapes are:
 
-- `Sequential`: unit work mutates shared project state directly, so the pass runs one unit at a time.
-- `ParallelUnitLocal`: each unit can run independently because it only reads frozen shared state and writes unit-local state.
-- `ParallelCollectThenMerge`: units first build unit-local results in parallel, then the coordinator attaches those results into project state sequentially.
+- parallel unit-local work with `Parallel.For(...)`,
+- parallel collection followed by sequential attach,
+- or a purely sequential project-wide validation sweep.
 
-That gives later semantic work room to choose the right scheduling shape instead of forcing everything into the first pass or into a purely unit-local traversal.
+If a pass has a genuine setup or wrap-up phase, it can express that with private helpers such as `Initialize(...)` or `Finalize(...)`, but those are pass-local conventions rather than framework hooks.
 
 Examples:
 
-- A declaration-building pass can build unit-local graphs in parallel, then attach them in project order.
-- A pure body-checking pass can do all its work in `ExecuteUnit(...)` with `ParallelUnitLocal`.
-- A cross-project validation pass can read project references during `AfterProject(...)`.
+- A declaration-building pass can build unit-local graphs in parallel, then attach them in project order inside `Execute(...)`.
+- A pure body-checking pass can do all its work inside one parallel unit loop.
+- A cross-project validation pass can stay fully sequential and just walk the canonical project graph in `Execute(...)`.
 
 ## Project-wide vs unit-local state
 
@@ -159,7 +157,7 @@ canonical symbol/scope graph. During that walk the pass:
 - stores the canonical direct hierarchy edges on the owning `TypeSymbol`,
 - and keeps the hierarchy model intentionally simple by using one direct `BaseTypes` array instead of hard-coding stronger language categories.
 
-After every unit has finished its local work, `AfterProject(...)` runs one whole-project cycle check
+After every unit has finished its local work, the pass finalizes with one whole-project cycle check
 over the canonical type graph and reports diagnostics for each participating type.
 
 ## What pass 3 does today
@@ -234,8 +232,8 @@ That split matches the coordinator model:
 ## Extension guidance
 
 - If the feature introduces new declaration forms or new symbol-shape metadata, extend `SymbolDiscoveryPass` and the symbol model.
-- If the feature needs project barriers, use `BeforeProject(...)` and `AfterProject(...)`.
-- If the feature is naturally file-local once project declarations exist, implement it in `ExecuteUnit(...)`.
+- If the feature needs project barriers, express them inside `Execute(...)` using pass-local phases.
+- If the feature is naturally file-local once project declarations exist, make `Execute(...)` fan out over units directly.
 - If the feature needs external symbols, consume `ResolutionProjectReference` from the unit or project context rather than inventing a second coordination path.
 
 ## Deferred work
