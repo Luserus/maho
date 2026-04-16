@@ -10,7 +10,7 @@ internal sealed class ArrayTypeModifier : PostfixTypeModifier
     /// <summary> Closing bracket token. </summary>
     public Token RightBracket { get; }
     /// <summary> Modifier kind value. </summary>
-    public PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Array;
+    public static PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Array;
 
     /// <summary> Creates one array modifier node. </summary>
     public ArrayTypeModifier(Token leftBracket, Expression? size, Token rightBracket)
