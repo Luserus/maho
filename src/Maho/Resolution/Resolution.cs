@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using Maho.Syntax;
-using Maho.Symbols;
 
 namespace Maho.Resolution;
 
@@ -49,11 +47,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTopLevel(TopLevel topLevel)
     {
-        switch (topLevel)
-        {
-            case
-
-        }
     }
 }
 
@@ -66,7 +59,7 @@ internal sealed class ResolvedTree
 
 internal sealed class ResolutionMetadata
 {
-    public List<Symbol> Symbols = [];
+    // public List<Symbol> Symbols = [];
 }
 
 internal struct SymbolID
