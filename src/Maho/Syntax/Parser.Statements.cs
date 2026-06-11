@@ -1,12 +1,11 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
-using Maho.Text;
 
 namespace Maho.Syntax;
 
 internal sealed partial class Parser
-{   
+{
     private TopLevelStatement ParseTopLevelStatement()
     {
         switch (CurrentToken.Kind)
@@ -207,7 +206,7 @@ internal sealed partial class Parser
 
         return new LocalWhileStatement(whileKeyword, openParen, condition, closeParen, body);
     }
-  
+
     private LocalBlockStatement ParseLocalBlockStatement()
     {
         var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);

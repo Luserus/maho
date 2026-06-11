@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Maho.Diagnostics;
-using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -172,7 +171,6 @@ public static class MahoCompiler
 
                 DiagnosticsManager resolutionDiagnosticsManager = new();
                 SyntaxTree syntaxTree = new(projectName, roots);
-                _ = new Resolver(resolutionDiagnosticsManager).Resolve(syntaxTree);
                 int resolutionDiagnosticCount = resolutionDiagnosticsManager.Diagnostics.Count;
                 resolutionDiagnostics = new Diagnostic[resolutionDiagnosticCount];
 
@@ -214,7 +212,6 @@ public static class MahoCompiler
     private static CompilerAnalysisResult AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)
     {
         ParsedFileAnalysis parsedFile = ParseCore(text, sourcePath, output);
-        _ = new Resolver(parsedFile.Diagnostics).Resolve(SyntaxTree.CreateSingleRoot(parsedFile.Root, sourcePath));
         return CreateAnalysisResult(parsedFile);
     }
 
