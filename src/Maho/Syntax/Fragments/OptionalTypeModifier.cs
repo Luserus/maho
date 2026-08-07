@@ -5,9 +5,7 @@ internal sealed class OptionalTypeModifier : PostfixTypeModifier
 {
     /// <summary> Question mark token. </summary>
     public Token QuestionMark { get; }
-    /// <summary> Modifier kind value. </summary>
-    public static PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Optional;
 
     /// <summary> Creates one optional modifier node. </summary>
-    public OptionalTypeModifier(Token questionMark) => QuestionMark = questionMark;
+    public OptionalTypeModifier(Token questionMark) : base(PostfixTypeModifierKind.Optional) => QuestionMark = questionMark;
 }

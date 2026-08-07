@@ -1,8 +1,10 @@
+global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
+
 using System;
 
 namespace Maho.Resolution;
 
-internal struct SymbolID
+internal struct SymbolID : IEquatable<SymbolID>
 {
     public int Value;
 
@@ -23,17 +25,16 @@ internal struct SymbolID
 
     public static bool operator !=(int value, SymbolID id) => value != id.Value;
 
-    public static bool operator ==(SymbolID id, SymbolID other) => id.Value == other.Value;
+    public static bool operator ==(SymbolID id, SymbolID other) => id.Equals(other);
 
-    public static bool operator !=(SymbolID id, SymbolID other) => id.Value != other.Value;
+    public static bool operator !=(SymbolID id, SymbolID other) => !id.Equals(other);
 
-    public override bool Equals(object? obj) => obj is not null and SymbolID id ? id.Value == Value : false;
+    public override bool Equals(object? obj) => obj is SymbolID id && Equals(id);
 
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        hash.Add(Value);
-        return hash.ToHashCode();
-    }
+    public override int GetHashCode() => Value;
+
+    public override string ToString() => Value.ToString();
+
+    public bool Equals(SymbolID other) => other.Value == Value;
 }
 

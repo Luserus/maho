@@ -260,6 +260,22 @@ internal sealed partial class Parser
         return new TopLevelVariableDeclaration(declaration, semicolon);
     }
 
+    private TopLevelAmbiguousPointerDeclaration ParseTopLevelAmbiguousPointerDeclaration()
+    {
+        var declaration = ParseAmbiguousPointerDeclaration();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous pointer declaration", MissingTokenAnchor.AfterPrevious);
+
+        return new TopLevelAmbiguousPointerDeclaration(declaration, semicolon);
+    }
+
+    private TopLevelAmbiguousReferenceDeclaration ParseTopLevelAmbiguousReferenceDeclaration()
+    {
+        var declaration = ParseAmbiguousReferenceDeclaration();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous reference declaration", MissingTokenAnchor.AfterPrevious);
+
+        return new TopLevelAmbiguousReferenceDeclaration(declaration, semicolon);
+    }
+
     private TopLevel ParseTopLevelFunctionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var function = ParseFunction(attributes, modifiers, type, identifier);
@@ -359,61 +375,34 @@ internal sealed partial class Parser
         modifiers ??= ParseModifiers();
         type ??= ParseTypeSyntax();
 
-        var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
-        bool parsingFirstDeclarator = firstIdentifier is not null;
+        NamedSyntax identifier = firstIdentifier ?? ParseNamedSyntax();
+        AssignmentClause? initializer = null;
 
-        while (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon)
+        if (CurrentToken.Kind is TokenKind.Equals)
         {
-            NamedSyntax identifier;
+            var assignmentOp = Consume();
+            var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
 
-            if (parsingFirstDeclarator)
-            {
-                identifier = firstIdentifier!;
-                parsingFirstDeclarator = false;
-            }
-            else
-            {
-                if (CurrentToken.Kind is not TokenKind.Identifier)
-                {
-                    diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
-                    break;
-                }
-
-                identifier = ParseNamedSyntax();
-            }
-
-            wasCommaLast = false;
-
-            AssignmentClause? initializer = null;
-
-            if (CurrentToken.Kind is TokenKind.Equals)
-            {
-                var assignmentOp = Consume();
-                var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
-
-                initializer = new AssignmentClause(assignmentOp, initExpr);
-            }
-
-            var declarator = new VariableDeclarator(identifier, initializer);
-
-            nodesAndSeparators.Add(declarator);
-
-            if (CurrentToken.Kind is TokenKind.Comma)
-            {
-                nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
-            }
-            else
-                break;
+            initializer = new AssignmentClause(assignmentOp, initExpr);
         }
 
-        if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the variable declaration");
+        return new VariableDeclaration(attributes, modifiers, type, identifier, initializer);
+    }
 
-        var declarators = new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators);
+    private AmbiguousPointerDeclaration ParseAmbiguousPointerDeclaration()
+    {
+        var type = ParseTypeSyntax();
+        var identifier = ParseNamedSyntax();
 
-        return new VariableDeclaration(attributes, modifiers, type, declarators);
+        return new AmbiguousPointerDeclaration(type, identifier);
+    }
+
+    private AmbiguousReferenceDeclaration ParseAmbiguousReferenceDeclaration()
+    {
+        var type = ParseTypeSyntax();
+        var identifier = ParseNamedSyntax();
+
+        return new AmbiguousReferenceDeclaration(type, identifier);
     }
 
     private SeparatedSyntaxList<Parameter> ParseParameterList()

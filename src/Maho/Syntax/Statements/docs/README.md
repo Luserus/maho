@@ -19,6 +19,8 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 - `TopLevelIfStatement`
 - `TopLevelReturnStatement`
 - `TopLevelVariableDeclarationStatement`
+- `TopLevelAmbiguousPointerDeclaration`
+- `TopLevelAmbiguousReferenceDeclaration`
 - `TopLevelWhileStatement`
 
 ### Local statement forms
@@ -30,6 +32,8 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 - `LocalIfStatement`
 - `LocalReturnStatement`
 - `LocalVariableDeclarationStatement`
+- `LocalAmbiguousPointerDeclarationStatement`
+- `LocalAmbiguousReferenceDeclarationStatement`
 - `LocalWhileStatement`
 
 ## Design note

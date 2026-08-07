@@ -2,7 +2,7 @@ using System;
 
 namespace Maho.Resolution;
 
-internal struct ScopeID
+internal struct ScopeID : IEquatable<ScopeID>
 {
     public int Value;
 
@@ -23,18 +23,17 @@ internal struct ScopeID
 
     public static bool operator !=(int value, ScopeID id) => value != id.Value;
 
-    public static bool operator ==(ScopeID id, ScopeID other) => id.Value == other.Value;
+    public static bool operator ==(ScopeID id, ScopeID other) => id.Equals(other);
 
-    public static bool operator !=(ScopeID id, ScopeID other) => id.Value != other.Value;
+    public static bool operator !=(ScopeID id, ScopeID other) => !id.Equals(other);
 
-    public override bool Equals(object? obj) => obj is not null and ScopeID id ? id.Value == Value : false;
+    public override bool Equals(object? obj) => obj is ScopeID id && Equals(id);
 
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        hash.Add(Value);
-        return hash.ToHashCode();
-    }
+    public override int GetHashCode() => Value;
+
+    public override string ToString() => Value.ToString();
+
+    public bool Equals(ScopeID other) => other.Value == Value;
 }
 
 

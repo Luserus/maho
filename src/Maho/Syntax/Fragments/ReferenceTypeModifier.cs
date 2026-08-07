@@ -5,11 +5,9 @@ internal sealed class ReferenceTypeModifier : PostfixTypeModifier
 {
     /// <summary> Ampersand token. </summary>
     public Token Ampersand { get; }
-    /// <summary> Modifier kind value. </summary>
-    public static PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Reference;
 
     /// <summary> Creates one reference modifier node. </summary>
-    public ReferenceTypeModifier(Token ampersand)
+    public ReferenceTypeModifier(Token ampersand) : base(PostfixTypeModifierKind.Reference)
     {
         Ampersand = ampersand;
     }

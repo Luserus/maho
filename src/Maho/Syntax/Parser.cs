@@ -176,7 +176,7 @@ internal sealed partial class Parser
     {
         this.text = text;
         this.diagnostics = diagnostics;
-    } 
+    }
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
@@ -258,8 +258,20 @@ internal sealed partial class Parser
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration();
-        else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
+        else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelDeclaration();
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return)
+            return ParseTopLevelStatement();
+        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+        {
+            if (result is LookaheadResultContext.AmbiguousPointerDeclaration)
+                return ParseTopLevelAmbiguousPointerDeclaration();
+
+            if (result is LookaheadResultContext.AmbiguousReferenceDeclaration)
+                return ParseTopLevelAmbiguousReferenceDeclaration();
+
+            return ParseTopLevelDeclaration();
+        }
 
         return ParseTopLevelStatement();
     }
@@ -281,7 +293,7 @@ internal sealed partial class Parser
     {
         if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
-        
+
         return ParseLocalStatement(parseMode);
     }
 
@@ -343,7 +355,7 @@ internal sealed partial class Parser
             length = i + 1;
             foundKind = node.Kind;
         }
-                
+
         return (foundKind ?? TokenKind.NullToken, length);
     }
 

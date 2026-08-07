@@ -86,6 +86,7 @@ public sealed class ParserTests
     [InlineData("while (1) ;", typeof(TopLevelWhileStatement))]
     [InlineData("{ int value = 1; }", typeof(TopLevelBlockStatement))]
     [InlineData("return 0;", typeof(TopLevelReturnStatement))]
+    [InlineData("return value;", typeof(TopLevelReturnStatement))]
     [InlineData(";", typeof(TopLevelEmptyStatement))]
     public void Parse_TopLevelStatementKinds(string source, Type expectedType)
     {
@@ -105,6 +106,129 @@ public sealed class ParserTests
     {
         Local statement = ParseSingleLocal(source, expectedType);
         Assert.IsType(expectedType, statement);
+    }
+
+    [Theory]
+    [InlineData("PointerType * value;", typeof(TopLevelAmbiguousPointerDeclaration), typeof(AmbiguousPointerDeclaration))]
+    [InlineData("ReferenceType & value;", typeof(TopLevelAmbiguousReferenceDeclaration), typeof(AmbiguousReferenceDeclaration))]
+    public void Parse_TopLevelAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    {
+        TopLevel topLevel = ParseSingleTopLevel(source, expectedType);
+
+        object declaration = topLevel switch
+        {
+            TopLevelAmbiguousPointerDeclaration pointer => pointer.Declaration,
+            TopLevelAmbiguousReferenceDeclaration reference => reference.Declaration,
+            _ => throw new Xunit.Sdk.XunitException($"Top-level node '{topLevel.GetType().Name}' does not expose an ambiguous declaration.")
+        };
+
+        Assert.IsType(expectedDeclarationType, declaration);
+    }
+
+    [Theory]
+    [InlineData("PointerType * value;", typeof(LocalAmbiguousPointerDeclarationStatement), typeof(AmbiguousPointerDeclaration))]
+    [InlineData("ReferenceType & value;", typeof(LocalAmbiguousReferenceDeclarationStatement), typeof(AmbiguousReferenceDeclaration))]
+    public void Parse_LocalAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    {
+        Local local = ParseSingleLocal(source, expectedType);
+
+        object declaration = local switch
+        {
+            LocalAmbiguousPointerDeclarationStatement pointer => pointer.Declaration,
+            LocalAmbiguousReferenceDeclarationStatement reference => reference.Declaration,
+            _ => throw new Xunit.Sdk.XunitException($"Local node '{local.GetType().Name}' does not expose an ambiguous declaration.")
+        };
+
+        Assert.IsType(expectedDeclarationType, declaration);
+    }
+
+    [Theory]
+    [InlineData("[Marker] PointerType * value;")]
+    [InlineData("public ReferenceType & value;")]
+    public void Parse_TopLevelAttributedOrModifiedPointerReferenceDeclarations_AreUnambiguousDeclarations(string source)
+    {
+        TopLevel topLevel = ParseSingleTopLevel(source, typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
+
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
+
+    [Theory]
+    [InlineData("[Marker] PointerType * value;")]
+    [InlineData("static ReferenceType & value;")]
+    public void Parse_LocalAttributedOrModifiedPointerReferenceDeclarations_AreUnambiguousDeclarations(string source)
+    {
+        Local local = ParseSingleLocal(source, typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
+
+    [Fact]
+    public void Parse_VariableDeclaration_RejectsMultipleDeclarators()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            public int first, second;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_ObjectCreationWithClause_AttachesToConstructorCall()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            SomeType value = new SomeType(ctorValue) with { prop = "val" };
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Initializer?.Initializer);
+        ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(constructor.WithClause);
+        AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
+
+        Assert.Equal("prop", Assert.IsType<IdentifierNameExpression>(assignment.LhsExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_ObjectCreationWithClause_AttachesToArrayCreation()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            int[] arr = put int[10] with { SomeProp = someVal };
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ArrayCreationExpression array = Assert.IsType<ArrayCreationExpression>(local.Declaration.Initializer?.Initializer);
+        ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(array.WithClause);
+        AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
+
+        Assert.Equal("SomeProp", Assert.IsType<IdentifierNameExpression>(assignment.LhsExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_CollectionExpressionModifier_WithConstructorArguments()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return [val1, val2, val3] with(capacity: 10);
+            """, typeof(LocalReturnStatement)));
+
+        CollectionExpression collection = Assert.IsType<CollectionExpression>(local.Statement.Expression);
+        CollectionConstructorModifier modifier = Assert.IsType<CollectionConstructorModifier>(Assert.Single(collection.Modifiers));
+        NamedArgumentExpression argument = Assert.IsType<NamedArgumentExpression>(Assert.Single(modifier.Arguments));
+
+        Assert.Equal("capacity", argument.Name.Value);
+        Assert.IsType<LiteralExpression>(argument.Value);
+    }
+
+    [Fact]
+    public void Parse_NamedArgumentExpression_InCallableArgumentList()
+    {
+        LocalExpressionStatement local = Assert.IsType<LocalExpressionStatement>(ParseSingleLocal("""
+            call(capacity: 10);
+            """, typeof(LocalExpressionStatement)));
+
+        CallExpression call = Assert.IsType<CallExpression>(local.Expression);
+        NamedArgumentExpression argument = Assert.IsType<NamedArgumentExpression>(Assert.Single(call.Arguments));
+
+        Assert.Equal("capacity", argument.Name.Value);
+        Assert.IsType<LiteralExpression>(argument.Value);
     }
 
     [Fact]
@@ -279,14 +403,17 @@ public sealed class ParserTests
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             namespace Outer;
 
-            public int topValue = 1, topOther;
+            public int topValue = 1;
+            public int topOther;
+            PointerCandidate * topPointer;
+            ReferenceCandidate & topReference;
 
             namespace Extra
             {
                 public class Nested;
             }
 
-            public class Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
+            public struct Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
             {
                 public T Value;
                 public class Nested;
@@ -301,13 +428,16 @@ public sealed class ParserTests
 
                     int local = 1;
                     int[] numbers = new int[3] { 1, 2, 3 };
+                    PointerLocal * localPointer;
+                    ReferenceLocal & localReference;
                     local = -(local + 1) + (int)items[0];
                     local = { int last = 2; 3 };
-                    local = [1, 2, 3][0];
-                    local = new Box<int>(local).Value;
+                    local = [1, 2, 3] with(capacity: 10)[0];
+                    local = new Box<int>(local) with { Value = local }.Value;
+                    numbers = put int[3] with { Length = local };
                     local = put Box<int>(local).Value;
                     local = if (local) local else 0;
-                    local = identity<int>(local);
+                    local = identity<int>(value: local);
 
                     if (local) return local; else ;
                     while (local) ;
@@ -348,6 +478,8 @@ public sealed class ParserTests
             typeof(TopLevelTypeDeclaration),
             typeof(TopLevelFunctionDeclaration),
             typeof(TopLevelVariableDeclaration),
+            typeof(TopLevelAmbiguousPointerDeclaration),
+            typeof(TopLevelAmbiguousReferenceDeclaration),
             typeof(TypeDeclaration),
             typeof(TypeBlockBody),
             typeof(TypeEmptyBody),
@@ -360,6 +492,8 @@ public sealed class ParserTests
             typeof(LocalTypeDeclaration),
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),
+            typeof(LocalAmbiguousPointerDeclarationStatement),
+            typeof(LocalAmbiguousReferenceDeclarationStatement),
             typeof(TopLevelExpressionStatement),
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
@@ -375,7 +509,8 @@ public sealed class ParserTests
             typeof(LocalReturnStatement),
             typeof(LocalEmptyStatement),
             typeof(VariableDeclaration),
-            typeof(VariableDeclarator),
+            typeof(AmbiguousPointerDeclaration),
+            typeof(AmbiguousReferenceDeclaration),
             typeof(AssignmentClause),
             typeof(Parameter),
             typeof(ParameterVariableDeclarator),
@@ -405,11 +540,14 @@ public sealed class ParserTests
             typeof(CastExpression),
             typeof(BlockExpression),
             typeof(CollectionExpression),
+            typeof(CollectionConstructorModifier),
             typeof(IfExpression),
             typeof(ElseExpression),
             typeof(ConstructorCallExpression),
             typeof(ArrayCreationExpression),
-            typeof(CollectionInitializer));
+            typeof(ObjectWithClause),
+            typeof(CollectionInitializer),
+            typeof(NamedArgumentExpression));
     }
 
     [Fact]

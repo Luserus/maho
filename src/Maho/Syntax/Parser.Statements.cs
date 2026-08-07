@@ -103,8 +103,13 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
-                        else if (LooksLikeVariableDeclaration().Success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+                        {
+                            if (result is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                return ParseLocalAmbiguousDeclarationStatement(result);
+                            
                             return ParseLocalVariableDeclarationStatement();
+                        }
                         break;
 
                     case TokenKind.Semicolon:
@@ -126,8 +131,13 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
-                        else if (LooksLikeVariableDeclaration().Success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+                        {
+                            if (result is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                return ParseLocalAmbiguousDeclarationStatement(result);
+                            
                             return ParseLocalVariableDeclarationStatement();
+                        }
                         break;
 
                     case TokenKind.Semicolon:
@@ -172,6 +182,30 @@ internal sealed partial class Parser
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local variable declaration", MissingTokenAnchor.AfterPrevious);
 
         return new LocalVariableDeclarationStatement(variableDeclaration, semicolon);
+    }
+
+    private LocalStatement ParseLocalAmbiguousDeclarationStatement(LookaheadResultContext context) =>
+        context switch
+        {
+            LookaheadResultContext.AmbiguousPointerDeclaration => ParseLocalAmbiguousPointerDeclarationStatement(),
+            LookaheadResultContext.AmbiguousReferenceDeclaration => ParseLocalAmbiguousReferenceDeclarationStatement(),
+            _ => throw new ArgumentOutOfRangeException(nameof(context), context, "Unhandled ambiguous declaration context.")
+        };
+
+    private LocalAmbiguousPointerDeclarationStatement ParseLocalAmbiguousPointerDeclarationStatement()
+    {
+        var declaration = ParseAmbiguousPointerDeclaration();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous pointer declaration", MissingTokenAnchor.AfterPrevious);
+
+        return new LocalAmbiguousPointerDeclarationStatement(declaration, semicolon);
+    }
+
+    private LocalAmbiguousReferenceDeclarationStatement ParseLocalAmbiguousReferenceDeclarationStatement()
+    {
+        var declaration = ParseAmbiguousReferenceDeclaration();
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous reference declaration", MissingTokenAnchor.AfterPrevious);
+
+        return new LocalAmbiguousReferenceDeclarationStatement(declaration, semicolon);
     }
 
     private LocalIfStatement ParseLocalIfStatement()

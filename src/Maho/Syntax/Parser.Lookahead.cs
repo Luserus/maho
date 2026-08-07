@@ -12,7 +12,7 @@ internal sealed partial class Parser
     private Token LookaheadCurrentToken => tokens[lookaheadCurrent];
 
     /// <summary> Explains why a speculative parse succeeded or failed while disambiguating grammar. </summary>
-    private enum LookaheadResultContext
+    private enum LookaheadResultContext : byte
     {
         Success,
         MissingDelimeter,
@@ -20,7 +20,9 @@ internal sealed partial class Parser
         FailedParseTypeSyntax,
         FailedParseNamedSyntax,
         IsBinaryOperator,
-        IsLeftParen
+        IsLeftParen,
+        AmbiguousPointerDeclaration,
+        AmbiguousReferenceDeclaration
     }
 
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
@@ -35,7 +37,7 @@ internal sealed partial class Parser
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            var (_, success) = LookaheadParseTypeSyntax();
+            var (_, success, result) = LookaheadParseTypeSyntax();
 
             if (!success)
             {
@@ -113,7 +115,7 @@ internal sealed partial class Parser
         lookaheadCurrent = current;
 
         LookaheadConsume(); // Left paren
-        var (_, success) = LookaheadParseTypeSyntax();
+        var (_, success, result) = LookaheadParseTypeSyntax();
 
         if (!success)
             return (false, LookaheadResultContext.FailedParseTypeSyntax);
@@ -138,7 +140,7 @@ internal sealed partial class Parser
     {
         lookaheadCurrent = current;
 
-        var (_, success) = LookaheadParseTypeSyntax();
+        var (_, success, result) = LookaheadParseTypeSyntax();
 
         if (!success)
             return (false, LookaheadResultContext.FailedParseTypeSyntax);
@@ -148,8 +150,10 @@ internal sealed partial class Parser
         if (!success)
             return (false, LookaheadResultContext.FailedParseNamedSyntax);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Equals or TokenKind.Semicolon)
+        if (LookaheadCurrentToken.Kind is TokenKind.Equals)
             return (true, LookaheadResultContext.Success);
+        else if (LookaheadCurrentToken.Kind is TokenKind.Semicolon)
+            return (true, result);
 
         return (false, LookaheadResultContext.MissingDelimeter);
     }
@@ -225,7 +229,7 @@ internal sealed partial class Parser
             if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
                 return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
 
-            var (type, success) = LookaheadParseTypeSyntax();
+            var (type, success, _) = LookaheadParseTypeSyntax();
 
             if (!success)
                 return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
@@ -272,26 +276,34 @@ internal sealed partial class Parser
     }
 
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
-    private (TypeSyntax Type, bool Success) LookaheadParseTypeSyntax()
+    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseTypeSyntax()
     {
         var (type, success) = LookaheadParsePrimaryType();
 
         if (!success)
-            return (type, false);
+            return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
         if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
             (type, success) = LookaheadParseModifiedType(type);
 
         if (!success)
-            return (type, false);
+            return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
         if (LookaheadCurrentToken.Kind is TokenKind.Dot)
             (type, success) = LookaheadParseQualifiedType(type);
 
         if (!success)
-            return (type, false);
+            return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        return (type, true);
+        if (type is ModifiedType modifiedType)
+        {
+            if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Pointer)
+                return (type, true, LookaheadResultContext.AmbiguousPointerDeclaration);
+            else if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Reference)
+                return (type, true, LookaheadResultContext.AmbiguousReferenceDeclaration);
+        }
+
+        return (type, true, LookaheadResultContext.Success);
     }
 
     /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
@@ -319,7 +331,7 @@ internal sealed partial class Parser
     private (QualifiedType Type, bool Success) LookaheadParseQualifiedType(TypeSyntax firstPart)
     {
         var dot = LookaheadConsume();
-        var (next, success) = LookaheadParseTypeSyntax();
+        var (next, success, _) = LookaheadParseTypeSyntax();
 
         if (!success)
             return (new QualifiedType(firstPart, dot, next), false);
@@ -428,9 +440,11 @@ internal sealed partial class Parser
     /// Speculatively parses name syntax for constructs that need to distinguish simple names from
     /// generic names before the parser commits to a declaration path.
     /// </summary>
-    // Currently unused. Might be useful in the future so kept.
     private (NamedSyntax Type, bool Success) LookaheadParseNamedSyntax()
     {
+        if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+            return (new SimpleName(LookaheadCurrentToken), false);
+
         Token name = LookaheadConsume();
 
         if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters(fromLookahead: true).Success)

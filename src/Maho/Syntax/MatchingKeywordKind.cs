@@ -29,6 +29,7 @@ internal enum MatchingKeywordKind : byte
     Put,
     Const,
     Where,
+    With,
     Partial,
     Intrinsic,
     Var,

@@ -5,9 +5,7 @@ internal sealed class PointerTypeModifier : PostfixTypeModifier
 {
     /// <summary> Asterisk token. </summary>
     public Token Asterisk { get; }
-    /// <summary> Modifier kind value. </summary>
-    public static PostfixTypeModifierKind Kind => PostfixTypeModifierKind.Pointer;
 
     /// <summary> Creates one pointer modifier node. </summary>
-    public PointerTypeModifier(Token asterisk) => Asterisk = asterisk;
+    public PointerTypeModifier(Token asterisk) : base(PostfixTypeModifierKind.Pointer) => Asterisk = asterisk;
 }

@@ -14,7 +14,8 @@ internal sealed class Resolver
 
     public void Resolve(SyntaxTree syntaxTree)
     {
-        var context = new ResolutionContext(syntaxTree, resolvedTree, [NamespaceSymbol.Global], [Scope.GlobalScope], 1, 1);
+        var symbolStore = new SymbolStore([], [], [], [], [], [], [], [], [], [], []);
+        var context = new ResolutionContext(syntaxTree, resolvedTree, new NamespaceTrieNode(), symbolStore, [Scope.GlobalScope]);
 
         foreach (var pass in passes)
             pass.Resolve(context);

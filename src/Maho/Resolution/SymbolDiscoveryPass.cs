@@ -6,7 +6,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
     public override void Resolve(ResolutionContext context)
     {
-        foreach (var root in context.syntaxTree.Roots)
+        foreach (var root in context.SyntaxTree.Roots)
         {
             ResolveCompilationUnit(root);
         }
@@ -18,18 +18,23 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         foreach (var member in unit.Members)
         {
-            ResolveTopLevel(member);
+            ResolveTopLevel(member, scope);
         }
     }
 
-    private void ResolveTopLevel(TopLevel topLevel)
+    private void ResolveTopLevel(TopLevel topLevel, Scope scope)
     {
         switch (topLevel)
         {
             case TopLevelTypeDeclaration type:
-
+                ResolveTypeDeclaration(type.Type, scope);
                 break;
         }
+    }
+
+    private void ResolveTypeDeclaration(TypeDeclaration declaration, Scope scope)
+    {
+
     }
 }
 

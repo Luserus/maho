@@ -1,16 +1,20 @@
+using System.Collections.Generic;
+
 namespace Maho.Resolution;
 
 internal sealed class Scope
 {
-    public ScopeID ID { get; }
     public Scope? Parent { get; }
+    public Dictionary<SymbolHandle, Symbol> Symbols { get; }
 
-    public static Scope GlobalScope { get; } = new Scope(0, null);
+    public List<Scope> ChildScopes { get; }
 
-    public Scope(ScopeID id, Scope? parent)
+    public static Scope GlobalScope { get; } = new Scope(null);
+
+    public Scope(Scope? parent)
     {
-        ID = id;
         Parent = parent;
+        Symbols = [];
+        ChildScopes = [];
     }
 }
-
