@@ -20,7 +20,7 @@ internal sealed partial class Parser
         FailedParseTypeSyntax,
         FailedParseNamedSyntax,
         IsBinaryOperator,
-        IsLeftParen,
+        AmbiguousCastOrParenthesizedExpression,
         AmbiguousPointerDeclaration,
         AmbiguousReferenceDeclaration
     }
@@ -125,14 +125,42 @@ internal sealed partial class Parser
 
         LookaheadConsume(); // Right paren
 
-        var op = LookaheadConsumeOperator();
+        bool castExpressionIsViable = LookaheadCanStartExpression();
+        bool parenthesizedExpressionIsViable = LookaheadCanContinueExpression();
 
-        if (operatorTable.TryGetValue(op.Kind, out var opEntry) && opEntry.Role is OperatorRole.Infix or OperatorRole.Postfix)
+        if (castExpressionIsViable && parenthesizedExpressionIsViable)
+            return (true, LookaheadResultContext.AmbiguousCastOrParenthesizedExpression);
+
+        if (castExpressionIsViable)
+            return (true, LookaheadResultContext.Success);
+
+        if (parenthesizedExpressionIsViable)
             return (false, LookaheadResultContext.IsBinaryOperator);
-        else if (op.Kind is TokenKind.LeftParen)
-            return (true, LookaheadResultContext.IsLeftParen);
 
-        return (true, LookaheadResultContext.Success);
+        return (false, LookaheadResultContext.MissingDelimeter);
+    }
+
+    /// <summary> Checks whether the speculative current token can begin an expression. </summary>
+    private bool LookaheadCanStartExpression()
+    {
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
+            return true;
+
+        if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+            return true;
+
+        var (kind, length) = LookaheadGetCombinedOperatorData();
+        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix;
+    }
+
+    /// <summary> Checks whether the speculative current token can continue an already-parsed expression. </summary>
+    private bool LookaheadCanContinueExpression()
+    {
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Dot)
+            return true;
+
+        var (kind, length) = LookaheadGetCombinedOperatorData();
+        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && (entry.IsInfix || entry.IsPostfix);
     }
 
     /// <summary> Checks whether the upcoming tokens look like a variable declaration. </summary>

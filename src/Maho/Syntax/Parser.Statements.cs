@@ -103,10 +103,10 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
                         {
-                            if (result is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                return ParseLocalAmbiguousDeclarationStatement(result);
+                            if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                return ParseLocalAmbiguousDeclarationStatement(context);
                             
                             return ParseLocalVariableDeclarationStatement();
                         }
@@ -131,10 +131,10 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
                         {
-                            if (result is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                return ParseLocalAmbiguousDeclarationStatement(result);
+                            if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                return ParseLocalAmbiguousDeclarationStatement(context);
                             
                             return ParseLocalVariableDeclarationStatement();
                         }

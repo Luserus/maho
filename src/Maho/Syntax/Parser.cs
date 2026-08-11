@@ -262,12 +262,12 @@ internal sealed partial class Parser
             return ParseTopLevelDeclaration();
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return)
             return ParseTopLevelStatement();
-        else if (LooksLikeVariableDeclaration() is (var success, var result) && success)
+        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
         {
-            if (result is LookaheadResultContext.AmbiguousPointerDeclaration)
+            if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
                 return ParseTopLevelAmbiguousPointerDeclaration();
 
-            if (result is LookaheadResultContext.AmbiguousReferenceDeclaration)
+            if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
                 return ParseTopLevelAmbiguousReferenceDeclaration();
 
             return ParseTopLevelDeclaration();

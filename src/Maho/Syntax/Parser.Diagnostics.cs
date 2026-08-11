@@ -107,4 +107,11 @@ internal sealed partial class Parser
     /// <summary> Parses an expression or synthesizes a missing one when parsing cannot continue. </summary>
     private Expression ParseExpectedExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent) =>
         CanStartExpression() ? ParseExpression() : CreateMissingExpression(context, anchor);
+
+    private static string GetObjectCreationContext(MatchingKeywordKind keywordKind) => keywordKind switch
+    {
+        MatchingKeywordKind.New => "after 'new'",
+        MatchingKeywordKind.Put => "after 'put'",
+        _ => "after the object creation keyword"
+    };
 }

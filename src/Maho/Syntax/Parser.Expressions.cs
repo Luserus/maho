@@ -27,7 +27,12 @@ internal sealed partial class Parser
         else
             left = ParsePrimaryExpression();
 
-        // LED: loop for postfix (prefer) and infix
+        return ParseExpressionContinuation(left, minBindingPower);
+    }
+
+    /// <summary> Continues a parsed expression with postfix and infix operators. </summary>
+    private Expression ParseExpressionContinuation(Expression left, int minBindingPower = 0)
+    {
         while (true)
         {
             if (CurrentToken.Kind is TokenKind.LeftParen)
@@ -56,7 +61,7 @@ internal sealed partial class Parser
                 continue;
             }
 
-            (kind, length) = GetCombinedOperatorData();
+            var (kind, length) = GetCombinedOperatorData();
 
             if (length == 0)
                 break; // no operator here
@@ -142,7 +147,10 @@ internal sealed partial class Parser
 
     private Expression ParseParenthesizedOrCastExpression()
     {
-        var (success, _) = LooksLikeCastExpression();
+        var (success, context) = LooksLikeCastExpression();
+
+        if (success && context is LookaheadResultContext.AmbiguousCastOrParenthesizedExpression)
+            return ParseAmbiguousCastOrParenthesizedExpression();
 
         if (success)
         {
@@ -150,6 +158,21 @@ internal sealed partial class Parser
         }
 
         return ParseParenthesizedExpression();
+    }
+
+    private AmbiguousCastOrParenthesizedExpression ParseAmbiguousCastOrParenthesizedExpression()
+    {
+        var start = current;
+        var castExpression = ParseCastExpression();
+        var castEnd = current;
+
+        current = start;
+        var parenthesizedExpression = ParseParenthesizedExpression();
+        var parenthesizedAlternative = ParseExpressionContinuation(parenthesizedExpression);
+        var parenthesizedEnd = current;
+
+        current = castEnd >= parenthesizedEnd ? castEnd : parenthesizedEnd;
+        return new AmbiguousCastOrParenthesizedExpression(castExpression, parenthesizedAlternative);
     }
 
     private ParenthesizedExpression ParseParenthesizedExpression()
@@ -357,13 +380,6 @@ internal sealed partial class Parser
 
         return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen, objectWithClause);
     }
-
-    private static string GetObjectCreationContext(MatchingKeywordKind keywordKind) => keywordKind switch
-    {
-        MatchingKeywordKind.New => "after 'new'",
-        MatchingKeywordKind.Put => "after 'put'",
-        _ => "after the object creation keyword"
-    };
 
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {

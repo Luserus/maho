@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Maho.Syntax;
 
@@ -19,6 +18,7 @@ internal sealed class ResolutionContext
     public List<FieldSymbol> FieldSymbols { get; }
     public List<ParameterSymbol> ParameterSymbols { get; }
     public List<LocalVariableSymbol> LocalVariableSymbols { get; }
+    public List<PropertySymbol> PropertySymbols { get; }
     public List<TypeParameterSymbol> TypeParameterSymbols {get; }
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
@@ -33,6 +33,7 @@ internal sealed class ResolutionContext
     private int fieldID;
     private int parameterID;
     private int localVariableID;
+    private int propertyID;
     private int typeParameterID;
     private int labelID;
     private int aliasID;
@@ -52,6 +53,7 @@ internal sealed class ResolutionContext
         FieldSymbols = symbols.FieldSymbols;
         ParameterSymbols = symbols.ParameterSymbols;
         LocalVariableSymbols = symbols.LocalVariableSymbols;
+        PropertySymbols = symbols.PropertySymbols;
         TypeParameterSymbols = symbols.TypeParameterSymbols;
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
@@ -66,6 +68,7 @@ internal sealed class ResolutionContext
         fieldID = FieldSymbols.Count;
         parameterID = ParameterSymbols.Count;
         localVariableID = LocalVariableSymbols.Count;
+        propertyID = PropertySymbols.Count;
         typeParameterID = TypeParameterSymbols.Count;
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;

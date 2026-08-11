@@ -231,6 +231,57 @@ public sealed class ParserTests
         Assert.IsType<LiteralExpression>(argument.Value);
     }
 
+    [Theory]
+    [InlineData("return (A) - B;", TokenKind.Minus)]
+    [InlineData("return (A) * B;", TokenKind.Asterisk)]
+    public void Parse_CastFollowedByPrefixInfixOperator_IsAmbiguous(string source, TokenKind expectedOperator)
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal(source, typeof(LocalReturnStatement)));
+
+        AmbiguousCastOrParenthesizedExpression ambiguous = Assert.IsType<AmbiguousCastOrParenthesizedExpression>(local.Statement.Expression);
+        UnaryExpression castOperand = Assert.IsType<UnaryExpression>(ambiguous.CastExpression.Expression);
+        BinaryExpression parenthesizedAlternative = Assert.IsType<BinaryExpression>(ambiguous.ParenthesizedExpression);
+
+        Assert.Equal(expectedOperator, castOperand.OperatorToken.Kind);
+        Assert.Equal(expectedOperator, parenthesizedAlternative.OperatorToken.Kind);
+        Assert.IsType<ParenthesizedExpression>(parenthesizedAlternative.LeftExpression);
+    }
+
+    [Fact]
+    public void Parse_CastFollowedByIdentifier_IsUnambiguousCast()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A)B;
+            """, typeof(LocalReturnStatement)));
+
+        CastExpression cast = Assert.IsType<CastExpression>(local.Statement.Expression);
+        Assert.IsType<IdentifierNameExpression>(cast.Expression);
+    }
+
+    [Fact]
+    public void Parse_ParenthesizedExpressionFollowedByNonPrefixInfixOperator_IsUnambiguousBinary()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A) / B;
+            """, typeof(LocalReturnStatement)));
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(local.Statement.Expression);
+        Assert.Equal(TokenKind.ForwardSlash, binary.OperatorToken.Kind);
+        Assert.IsType<ParenthesizedExpression>(binary.LeftExpression);
+    }
+
+    [Fact]
+    public void Parse_ParenthesizedExpressionFollowedByMemberAccess_IsUnambiguousMemberAccess()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A).B;
+            """, typeof(LocalReturnStatement)));
+
+        MemberAccessExpression memberAccess = Assert.IsType<MemberAccessExpression>(local.Statement.Expression);
+        Assert.IsType<ParenthesizedExpression>(memberAccess.Expression);
+        Assert.Equal("B", memberAccess.Identifier.Value);
+    }
+
     [Fact]
     public void Parse_TypeDeclaration_WithBaseClauseAndConstraints()
     {
@@ -431,6 +482,7 @@ public sealed class ParserTests
                     PointerLocal * localPointer;
                     ReferenceLocal & localReference;
                     local = -(local + 1) + (int)items[0];
+                    local = (local) - local;
                     local = { int last = 2; 3 };
                     local = [1, 2, 3] with(capacity: 10)[0];
                     local = new Box<int>(local) with { Value = local }.Value;
@@ -538,6 +590,7 @@ public sealed class ParserTests
             typeof(AssignmentExpression),
             typeof(ParenthesizedExpression),
             typeof(CastExpression),
+            typeof(AmbiguousCastOrParenthesizedExpression),
             typeof(BlockExpression),
             typeof(CollectionExpression),
             typeof(CollectionConstructorModifier),
