@@ -23,7 +23,7 @@ internal sealed partial class Parser
                 return ParseTopLevelEmptyStatement();
 
             case TokenKind.LeftBrace:
-                return ParseTopLevelBlockStatement();
+                return ParseTopLevelBlockStatement([], []);
         }
 
         return ParseTopLevelExpressionStatement();
@@ -73,11 +73,11 @@ internal sealed partial class Parser
         return new TopLevelWhileStatement(whileKeyword, openParen, condition, closeParen, body);
     }
 
-    private TopLevelBlockStatement ParseTopLevelBlockStatement()
+    private TopLevelBlockStatement ParseTopLevelBlockStatement(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
 
-        return new TopLevelBlockStatement(openBrace, locals, closeBrace);
+        return new TopLevelBlockStatement(attributes, modifiers, openBrace, locals, closeBrace);
     }
 
     private TopLevelReturnStatement ParseTopLevelReturnStatement()
@@ -116,7 +116,7 @@ internal sealed partial class Parser
                         return ParseLocalEmptyStatement();
 
                     case TokenKind.LeftBrace:
-                        return ParseLocalBlockStatement();
+                        return ParseLocalBlockStatement([], []);
                 }
 
                 return ParseLocalExpressionStatement(allowFinalExpression: false);
@@ -241,11 +241,11 @@ internal sealed partial class Parser
         return new LocalWhileStatement(whileKeyword, openParen, condition, closeParen, body);
     }
 
-    private LocalBlockStatement ParseLocalBlockStatement()
+    private LocalBlockStatement ParseLocalBlockStatement(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
 
-        return new LocalBlockStatement(openBrace, locals, closeBrace);
+        return new LocalBlockStatement(attributes, modifiers, openBrace, locals, closeBrace);
     }
 
 

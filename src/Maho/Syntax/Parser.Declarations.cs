@@ -10,7 +10,9 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (IsCurrentTokenTypeDeclarationStart)
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+            return ParseTopLevelBlockStatement(attributes, modifiers);
+        else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else
             return ParseTopLevelVariableDeclarationOrFunction(attributes, modifiers);
@@ -65,7 +67,7 @@ internal sealed partial class Parser
             _ => throw new InvalidOperationException("Unhandeled case")
         };
 
-        var name = ParseNamedSyntax();
+        var name = ParseNamedSyntax(allowQualified: true);
         TypeBaseClause? baseClause = null;
 
         if (CurrentToken.Kind is TokenKind.Colon)
@@ -292,6 +294,25 @@ internal sealed partial class Parser
         return new MemberTypeDeclaration(type);
     }
 
+    private MemberBlockDeclaration ParseMemberBlockDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
+    {
+        attributes ??= ParseAttributeLists();
+        modifiers ??= ParseModifiers();
+        var openBrace = Consume();
+        var members = new List<Member>();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var start = current;
+            var member = ParseMember();
+            members.Add(member);
+            RecoverMemberIfStalled(start);
+        }
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the member block");
+
+        return new MemberBlockDeclaration(attributes, modifiers, openBrace, members, closeBrace);
+    }
+
     private Member ParseMemberFieldDeclarationOrFunctionOrProperty(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
     {
         attributes ??= ParseAttributeLists();
@@ -334,7 +355,9 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (IsCurrentTokenTypeDeclarationStart)
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+            return ParseLocalBlockStatement(attributes, modifiers);
+        else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
         else
             return ParseLocalVariableDeclarationStatementOrFunction(attributes, modifiers);

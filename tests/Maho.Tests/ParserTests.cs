@@ -165,6 +165,80 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
+    {
+        TopLevelBlockStatement block = Assert.IsType<TopLevelBlockStatement>(ParseSingleTopLevel("""
+            [Attribute]
+            unsafe
+            {
+                public struct Example
+                {
+                    unsafe
+                    {
+                        void Func() { }
+                    }
+                }
+            }
+            """, typeof(TopLevelBlockStatement)));
+
+        Assert.Single(block.Attributes);
+        Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+
+        LocalTypeDeclaration localType = Assert.IsType<LocalTypeDeclaration>(Assert.Single(block.Locals));
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(localType.Type.Body);
+        MemberBlockDeclaration memberBlock = Assert.IsType<MemberBlockDeclaration>(Assert.Single(typeBody.Members));
+
+        Assert.Empty(memberBlock.Attributes);
+        Assert.Contains(memberBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        Assert.IsType<MemberFunctionDeclaration>(Assert.Single(memberBlock.Members));
+    }
+
+    [Fact]
+    public void Parse_UnmarkedTypeDeclarationInsideTopLevelBlock()
+    {
+        TopLevelBlockStatement block = Assert.IsType<TopLevelBlockStatement>(ParseSingleTopLevel("""
+            {
+                struct UnmarkedTopLevelBlock;
+            }
+            """, typeof(TopLevelBlockStatement)));
+
+        LocalTypeDeclaration localType = Assert.IsType<LocalTypeDeclaration>(Assert.Single(block.Locals));
+        Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(localType.Type.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_AttributedModifiedBlocks_WorkInNamespaceAndLocalScopes()
+    {
+        NamespaceDeclaration @namespace = Assert.IsType<NamespaceDeclaration>(ParseSingleTopLevel("""
+            namespace Demo
+            {
+                [Attribute]
+                unsafe
+                {
+                    int value;
+                }
+            }
+            """, typeof(NamespaceDeclaration)));
+
+        NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
+        TopLevelBlockStatement topLevelBlock = Assert.IsType<TopLevelBlockStatement>(Assert.Single(namespaceBody.Members));
+
+        Assert.Single(topLevelBlock.Attributes);
+        Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+
+        LocalBlockStatement localBlock = Assert.IsType<LocalBlockStatement>(ParseSingleLocal("""
+            [Attribute]
+            unsafe
+            {
+                int nested;
+            }
+            """, typeof(LocalBlockStatement)));
+
+        Assert.Single(localBlock.Attributes);
+        Assert.Contains(localBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+    }
+
+    [Fact]
     public void Parse_VariableDeclaration_RejectsMultipleDeclarators()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
@@ -496,6 +570,11 @@ public sealed class ParserTests
                     { int scoped = 0; scoped = local; }
                     return local;
                 }
+
+                unsafe
+                {
+                    void UnsafeFunc() { }
+                }
             }
 
             public static int identity<T>(T value) where T: Extra.Nested
@@ -541,6 +620,7 @@ public sealed class ParserTests
             typeof(MemberFieldDeclaration),
             typeof(MemberFunctionDeclaration),
             typeof(MemberTypeDeclaration),
+            typeof(MemberBlockDeclaration),
             typeof(LocalTypeDeclaration),
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),

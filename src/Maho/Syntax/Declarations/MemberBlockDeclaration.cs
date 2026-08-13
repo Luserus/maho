@@ -2,8 +2,8 @@ using System.Collections.Generic;
 
 namespace Maho.Syntax;
 
-/// <summary> Local block statement that groups a sequence of local items. </summary>
-internal sealed class LocalBlockStatement : LocalStatement
+/// <summary> Member block that groups a sequence of type-scope members. </summary>
+internal sealed class MemberBlockDeclaration : Member
 {
     /// <summary> Attributes attached to the block. </summary>
     public IReadOnlyList<AttributeListSyntax> Attributes { get; }
@@ -11,18 +11,18 @@ internal sealed class LocalBlockStatement : LocalStatement
     public IReadOnlyList<Token> Modifiers { get; }
     /// <summary> Opening brace token. </summary>
     public Token OpenBrace { get; }
-    /// <summary> Local items contained in the block. </summary>
-    public IReadOnlyList<Local> Locals { get; }
+    /// <summary> Members contained in the block. </summary>
+    public IReadOnlyList<Member> Members { get; }
     /// <summary> Closing brace token. </summary>
     public Token CloseBrace { get; }
 
-    /// <summary> Creates one local block statement node. </summary>
-    public LocalBlockStatement(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<Local> locals, Token closeBrace)
+    /// <summary> Creates one type-scope member block node. </summary>
+    public MemberBlockDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<Member> members, Token closeBrace)
     {
         Attributes = attributes;
         Modifiers = modifiers;
         OpenBrace = openBrace;
-        Locals = locals;
+        Members = members;
         CloseBrace = closeBrace;
     }
 }

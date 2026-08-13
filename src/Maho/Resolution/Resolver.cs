@@ -10,7 +10,6 @@ internal sealed class Resolver
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();
-    private readonly ResolutionMetadata metadata = new ResolutionMetadata();
 
     public void Resolve(SyntaxTree syntaxTree)
     {

@@ -31,6 +31,7 @@ internal enum MatchingKeywordKind : byte
     Where,
     With,
     Partial,
+    Unsafe,
     Intrinsic,
     Var,
     Dyn

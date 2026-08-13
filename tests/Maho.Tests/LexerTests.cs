@@ -7,7 +7,7 @@ public sealed class LexerTests
     [Fact]
     public void Lex_RecognizesKeywordsLiteralsAndEndToken()
     {
-        var (_, diagnostics, lexer) = CompilerTestBed.Lex("public intrinsic attribute Marker { public dyn Value { get; set; } public static var Main(dyn value) { return \"hi\"; } }");
+        var (_, diagnostics, lexer) = CompilerTestBed.Lex("public intrinsic attribute Marker { public dyn Value { get; set; } public static unsafe var Main(dyn value) { return \"hi\"; } }");
 
         Token publicToken = lexer.Tokens.First(token => token.Value == "public");
         Token intrinsicToken = Assert.Single(lexer.Tokens, token => token.Value == "intrinsic");
@@ -15,6 +15,7 @@ public sealed class LexerTests
         Token getToken = Assert.Single(lexer.Tokens, token => token.Value == "get");
         Token setToken = Assert.Single(lexer.Tokens, token => token.Value == "set");
         Token staticToken = Assert.Single(lexer.Tokens, token => token.Value == "static");
+        Token unsafeToken = Assert.Single(lexer.Tokens, token => token.Value == "unsafe");
         Token varToken = Assert.Single(lexer.Tokens, token => token.Value == "var");
         Token dynToken = lexer.Tokens.First(token => token.Value == "dyn");
         Token stringToken = Assert.Single(lexer.Tokens, token => token.Kind is TokenKind.String);
@@ -25,6 +26,7 @@ public sealed class LexerTests
         Assert.Equal(MatchingKeywordKind.Get, getToken.MatchingKind);
         Assert.Equal(MatchingKeywordKind.Set, setToken.MatchingKind);
         Assert.Equal(MatchingKeywordKind.Static, staticToken.MatchingKind);
+        Assert.Equal(MatchingKeywordKind.Unsafe, unsafeToken.MatchingKind);
         Assert.Equal(MatchingKeywordKind.Var, varToken.MatchingKind);
         Assert.Equal(MatchingKeywordKind.Dyn, dynToken.MatchingKind);
         Assert.Equal("\"hi\"", stringToken.Value);
