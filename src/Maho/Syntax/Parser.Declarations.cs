@@ -11,7 +11,7 @@ internal sealed partial class Parser
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseTopLevelBlockStatement(attributes, modifiers);
+            return ParseTopLevelBlock(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else

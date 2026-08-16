@@ -10,9 +10,9 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 - `TopLevelStatement`
 - `LocalStatement`
 
-### Top-level statement forms
+### Top-level block and statement forms
 
-- `TopLevelBlockStatement`
+- `TopLevelBlock`
 - `TopLevelElseStatement`
 - `TopLevelEmptyStatement`
 - `TopLevelExpressionStatement`

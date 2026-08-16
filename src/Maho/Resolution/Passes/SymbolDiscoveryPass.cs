@@ -34,7 +34,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTypeDeclaration(TypeDeclaration declaration, Scope scope)
     {
-
+        
     }
 }
 

@@ -1,13 +1,20 @@
+using Maho.Syntax;
+
 namespace Maho.Resolution;
 
 internal sealed class LabelSymbol : Symbol
 {
-    public Symbol? Parent { get; }
+    public SymbolName Name { get; }
+    public SymbolHandle? ContainingFunction { get; }
 
-    public LabelSymbol(SymbolID id, Scope enclosingScope, Symbol? parent) : base(id, enclosingScope)
+    public SyntaxNode? Syntax { get; }
+
+    public LabelSymbol(SymbolID id, Scope enclosingScope, SymbolName name, SymbolHandle? containingFunction, SyntaxNode? syntax) : base(id, enclosingScope)
     {
         Kind = SymbolKind.Label;
-        Parent = parent;
+        Name = name;
+        ContainingFunction = containingFunction;
+        Syntax = syntax;
     }
 }
 

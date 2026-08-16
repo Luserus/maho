@@ -15,6 +15,7 @@ internal enum MatchingKeywordKind : byte
     Internal,
     Protected,
     Sealed,
+    Virtual,
     Extern,
     Namespace,
     Attribute,

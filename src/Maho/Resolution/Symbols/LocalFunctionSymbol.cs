@@ -1,9 +1,15 @@
+using System.Collections.Generic;
+using Maho.Syntax;
+
 namespace Maho.Resolution;
 
 internal sealed class LocalFunctionSymbol : MethodSymbol
 {
-    public LocalFunctionSymbol(SymbolID id, Scope enclosingScope, Symbol? parent) : base(id, enclosingScope, parent)
+    public MethodSymbol? Parent { get; }
+
+    public LocalFunctionSymbol(SymbolID id, Scope enclosingScope, MethodSymbol? parent, IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+    : base(id, enclosingScope, typeParameters, syntax)
     {
-        Kind = SymbolKind.Method;
+        Parent = parent;
     }
 }

@@ -2,12 +2,12 @@ namespace Maho.Resolution;
 
 internal sealed class ParameterSymbol : Symbol
 {
-    public Symbol? Parent { get; }
+    public SymbolHandle? ContainingFunction { get; }
 
-    public ParameterSymbol(SymbolID id, Scope enclosingScope, Symbol? parent) : base(id, enclosingScope)
+    public ParameterSymbol(SymbolID id, Scope enclosingScope, SymbolHandle? containingFunction) : base(id, enclosingScope)
     {
         Kind = SymbolKind.Parameter;
-        Parent = parent;
+        ContainingFunction = containingFunction;
     }
 }
 

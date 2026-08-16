@@ -259,6 +259,7 @@ internal sealed partial class Lexer
             6 when identifier.SequenceEqual("unsafe") => MatchingKeywordKind.Unsafe,
             7 when identifier.SequenceEqual("partial") => MatchingKeywordKind.Partial,
             7 when identifier.SequenceEqual("private") => MatchingKeywordKind.Private,
+            7 when identifier.SequenceEqual("virtual") => MatchingKeywordKind.Virtual,
             8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
             9 when identifier.SequenceEqual("intrinsic") => MatchingKeywordKind.Intrinsic,
             9 when identifier.SequenceEqual("attribute") => MatchingKeywordKind.Attribute,

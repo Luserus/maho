@@ -1,12 +1,40 @@
+using System.Collections.Generic;
+using Maho.Syntax;
+
 namespace Maho.Resolution;
 
 internal sealed class TypeSymbol : Symbol
 {
-    public NamespaceTrieNode? Namespace { get; }
+    public SymbolName Name { get; }
+    public TypeKind TypeKind { get; }
+    public TypeFlags Flags { get; internal set; }
+    public NamespaceTrieNode? ContainingNamespace { get; }
 
-    public TypeSymbol(SymbolID id, Scope enclosingScope, NamespaceTrieNode? @namespace) : base(id, enclosingScope)
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; }
+    public List<SymbolHandle> BaseTypes { get; internal set; }
+    public List<SymbolHandle> Attributes { get; internal set; }
+
+    public List<SymbolHandle> Fields { get; internal set; }
+    public List<SymbolHandle> Properties { get; internal set; }
+    public List<SymbolHandle> Methods { get; internal set; }
+    public List<SymbolHandle> NestedTypes { get; internal set; }
+
+    public TypeDeclaration? Syntax { get; }
+
+    public TypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
+                    IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax) : base(id, enclosingScope)
     {
         Kind = SymbolKind.Type;
-        Namespace = @namespace;
+        Name = name;
+        TypeKind = typeKind;
+        ContainingNamespace = containingNamespace;
+        TypeParameters = typeParameters;
+        BaseTypes = [];
+        Attributes = [];
+        Fields = [];
+        Properties = [];
+        Methods = [];
+        NestedTypes = [];
+        Syntax = syntax;
     }
 }

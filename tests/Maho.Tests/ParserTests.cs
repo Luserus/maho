@@ -84,7 +84,6 @@ public sealed class ParserTests
     [InlineData("call();", typeof(TopLevelExpressionStatement))]
     [InlineData("if (1) return; else ;", typeof(TopLevelIfStatement))]
     [InlineData("while (1) ;", typeof(TopLevelWhileStatement))]
-    [InlineData("{ int value = 1; }", typeof(TopLevelBlockStatement))]
     [InlineData("return 0;", typeof(TopLevelReturnStatement))]
     [InlineData("return value;", typeof(TopLevelReturnStatement))]
     [InlineData(";", typeof(TopLevelEmptyStatement))]
@@ -92,6 +91,19 @@ public sealed class ParserTests
     {
         TopLevel statement = ParseSingleTopLevel(source, expectedType);
         Assert.IsType(expectedType, statement);
+    }
+
+    [Fact]
+    public void Parse_TopLevelBlock_IsTopLevelConstruct()
+    {
+        TopLevel topLevel = ParseSingleTopLevel("""
+            {
+                int value = 1;
+            }
+            """, typeof(TopLevelBlock));
+
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(topLevel);
+        Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(block.Members));
     }
 
     [Theory]
@@ -167,7 +179,7 @@ public sealed class ParserTests
     [Fact]
     public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
     {
-        TopLevelBlockStatement block = Assert.IsType<TopLevelBlockStatement>(ParseSingleTopLevel("""
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
             [Attribute]
             unsafe
             {
@@ -179,13 +191,13 @@ public sealed class ParserTests
                     }
                 }
             }
-            """, typeof(TopLevelBlockStatement)));
+            """, typeof(TopLevelBlock)));
 
         Assert.Single(block.Attributes);
         Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
 
-        LocalTypeDeclaration localType = Assert.IsType<LocalTypeDeclaration>(Assert.Single(block.Locals));
-        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(localType.Type.Body);
+        TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(topLevelType.Type.Body);
         MemberBlockDeclaration memberBlock = Assert.IsType<MemberBlockDeclaration>(Assert.Single(typeBody.Members));
 
         Assert.Empty(memberBlock.Attributes);
@@ -196,14 +208,14 @@ public sealed class ParserTests
     [Fact]
     public void Parse_UnmarkedTypeDeclarationInsideTopLevelBlock()
     {
-        TopLevelBlockStatement block = Assert.IsType<TopLevelBlockStatement>(ParseSingleTopLevel("""
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
             {
                 struct UnmarkedTopLevelBlock;
             }
-            """, typeof(TopLevelBlockStatement)));
+            """, typeof(TopLevelBlock)));
 
-        LocalTypeDeclaration localType = Assert.IsType<LocalTypeDeclaration>(Assert.Single(block.Locals));
-        Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(localType.Type.Name).Name.Value);
+        TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
+        Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(topLevelType.Type.Name).Name.Value);
     }
 
     [Fact]
@@ -221,7 +233,7 @@ public sealed class ParserTests
             """, typeof(NamespaceDeclaration)));
 
         NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
-        TopLevelBlockStatement topLevelBlock = Assert.IsType<TopLevelBlockStatement>(Assert.Single(namespaceBody.Members));
+        TopLevelBlock topLevelBlock = Assert.IsType<TopLevelBlock>(Assert.Single(namespaceBody.Members));
 
         Assert.Single(topLevelBlock.Attributes);
         Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
@@ -630,7 +642,7 @@ public sealed class ParserTests
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
-            typeof(TopLevelBlockStatement),
+            typeof(TopLevelBlock),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),

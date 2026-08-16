@@ -22,8 +22,6 @@ internal sealed partial class Parser
             case TokenKind.Semicolon:
                 return ParseTopLevelEmptyStatement();
 
-            case TokenKind.LeftBrace:
-                return ParseTopLevelBlockStatement([], []);
         }
 
         return ParseTopLevelExpressionStatement();
@@ -71,13 +69,6 @@ internal sealed partial class Parser
         var body = ParseTopLevelStatement();
 
         return new TopLevelWhileStatement(whileKeyword, openParen, condition, closeParen, body);
-    }
-
-    private TopLevelBlockStatement ParseTopLevelBlockStatement(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
-    {
-        var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
-
-        return new TopLevelBlockStatement(attributes, modifiers, openBrace, locals, closeBrace);
     }
 
     private TopLevelReturnStatement ParseTopLevelReturnStatement()
