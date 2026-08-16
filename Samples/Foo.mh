@@ -1,0 +1,9 @@
+namespace Sample;
+
+public class Foo
+{
+    public static int GetValue()
+    {
+        return 42;
+    }
+}

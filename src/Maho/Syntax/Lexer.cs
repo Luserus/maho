@@ -244,6 +244,7 @@ internal sealed partial class Lexer
             3 when identifier.SequenceEqual("dyn") => MatchingKeywordKind.Dyn,
             4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
             4 when identifier.SequenceEqual("enum") => MatchingKeywordKind.Enum,
+            6 when identifier.SequenceEqual("global") => MatchingKeywordKind.Global,
             4 when identifier.SequenceEqual("with") => MatchingKeywordKind.With,
             5 when identifier.SequenceEqual("while") => MatchingKeywordKind.While,
             5 when identifier.SequenceEqual("class") => MatchingKeywordKind.Class,

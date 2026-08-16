@@ -24,6 +24,7 @@ internal sealed class ResolutionContext
     public List<AliasSymbol> AliasSymbols { get; }
 
     public List<Scope> Scopes { get; }
+    public Scope GlobalScope => Scopes[0];
 
     private int typeID;
     private int nestedTypeID;
@@ -76,8 +77,145 @@ internal sealed class ResolutionContext
 
     public Scope CreateScope(Scope? parent)
     {
-        return new Scope(parent);
+        var scope = new Scope(parent);
+        parent?.ChildScopes.Add(scope);
+        Scopes.Add(scope);
+        return scope;
     }
+
+    public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
+                                       IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+    {
+        var symbol = new TypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, typeParameters, syntax);
+        TypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, SymbolHandle? parent,
+                                                                IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+    {
+        var symbol = new MemberNestedTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, typeParameters, syntax);
+        NestedTypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, MethodSymbol? parent,
+                                                  IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+    {
+        var symbol = new LocalTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, typeParameters, syntax);
+        NestedTypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
+                                               IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+    {
+        var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, typeParameters, syntax);
+        FunctionSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolHandle? parent,
+                                                        IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+    {
+        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, parent, typeParameters, syntax);
+        MethodSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, MethodSymbol? parent,
+                                                          IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+    {
+        var symbol = new LocalFunctionSymbol(methodID++, enclosingScope, parent, typeParameters, syntax);
+        MethodSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
+                                                            IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+    {
+        var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, typeParameters, syntax);
+        GlobalVariableSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
+                                         IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+    {
+        var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, typeParameters, syntax);
+        FieldSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolHandle? containingFunction)
+    {
+        var symbol = new ParameterSymbol(parameterID++, enclosingScope, containingFunction);
+        ParameterSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
+                                                          IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+    {
+        var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, typeParameters, syntax);
+        LocalVariableSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolName name, bool hasBacking,
+                                                IReadOnlyList<SymbolHandle> typeParameters, MemberPropertyDeclaration? syntax)
+    {
+        var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, typeParameters, syntax);
+        PropertySymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolName name, Symbol genericSymbol)
+    {
+        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol);
+        TypeParameterSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LabelSymbol CreateLabelSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? containingFunction, SyntaxNode? syntax)
+    {
+        var symbol = new LabelSymbol(labelID++, enclosingScope, name, containingFunction, syntax);
+        LabelSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? containingSymbol, SyntaxNode? syntax)
+    {
+        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingSymbol, syntax);
+        AliasSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax)
+    {
+        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
+        AliasSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
+
+    private static void Register(Scope scope, Symbol symbol) => scope.Symbols.Add(GetHandle(symbol), symbol);
 
     public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolName ns)
     {

@@ -47,6 +47,10 @@ That makes the syntax tree more explicit, even if it produces more files.
 
 The payoff is that parser and later semantic code can tell whether a statement appeared in top-level or local scope without reconstructing that context from parent chains.
 
+Top-level statement nodes require file-level opt-in through `#pragma toplevel enable`. During
+resolution, variables in an opted-in compilation unit are treated as locals of that file's
+implicit `Main` function.
+
 ## How to traverse this folder
 
 - Start with `TopLevelStatement` or `LocalStatement` depending on the scope you are tracing.

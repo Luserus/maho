@@ -6,6 +6,7 @@ internal enum MatchingKeywordKind : byte
     None,
     Get,
     Set,
+    Global,
     If,
     Else,
     While,

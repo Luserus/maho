@@ -89,8 +89,59 @@ public sealed class ParserTests
     [InlineData(";", typeof(TopLevelEmptyStatement))]
     public void Parse_TopLevelStatementKinds(string source, Type expectedType)
     {
-        TopLevel statement = ParseSingleTopLevel(source, expectedType);
+        TopLevel statement = ParseSingleTopLevel($"#pragma toplevel enable\n{source}", expectedType);
         Assert.IsType(expectedType, statement);
+    }
+
+    [Fact]
+    public void Parse_TopLevelPragma_EnablesStatementsForItsCompilationUnit()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            int value = 1;
+            call();
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.True(PragmaDirective.EnablesTopLevelStatements(root.Pragmas));
+
+        PragmaDirective pragma = Assert.Single(root.Pragmas);
+        Assert.Equal("pragma", pragma.PragmaKeyword.Value);
+        Assert.Equal("toplevel", pragma.Name.Value);
+        Assert.Equal("enable", pragma.Value.Value);
+        Assert.IsType<TopLevelVariableDeclaration>(root.Members[0]);
+        Assert.IsType<TopLevelExpressionStatement>(root.Members[1]);
+    }
+
+    [Fact]
+    public void Parse_TopLevelGlobalBlock_PreservesItsDeclarations()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            global
+            {
+                int globalValue = 1;
+                class GlobalType;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TopLevelGlobalBlock block = Assert.IsType<TopLevelGlobalBlock>(Assert.Single(root.Members));
+        Assert.IsType<TopLevelVariableDeclaration>(block.Members[0]);
+        Assert.IsType<TopLevelTypeDeclaration>(block.Members[1]);
+    }
+
+    [Fact]
+    public void Parse_TopLevelStatementWithoutPragma_ReportsAnError()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            call();
+            """);
+
+        Assert.False(PragmaDirective.EnablesTopLevelStatements(root.Pragmas));
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0011");
+        Assert.IsType<TopLevelExpressionStatement>(Assert.Single(root.Members));
     }
 
     [Fact]
@@ -407,6 +458,24 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_QualifiedDeclarationNamesAllowGenericsOnlyOnTheFinalTypeName()
+    {
+        var (_, validDiagnostics, _, _) = CompilerTestBed.Parse("""
+            struct A.B<T>;
+            """);
+        var (_, invalidTypeDiagnostics, _, _) = CompilerTestBed.Parse("""
+            struct A.B<T>.C;
+            """);
+        var (_, invalidNamespaceDiagnostics, _, _) = CompilerTestBed.Parse("""
+            namespace A<T>;
+            """);
+
+        Assert.Empty(validDiagnostics.Diagnostics);
+        Assert.NotEmpty(invalidTypeDiagnostics.Diagnostics);
+        Assert.NotEmpty(invalidNamespaceDiagnostics.Diagnostics);
+    }
+
+    [Fact]
     public void Parse_FunctionDeclaration_WithTypeConstraints()
     {
         FunctionDeclaration function = ParseSingleTopLevelFunction("""
@@ -538,6 +607,7 @@ public sealed class ParserTests
     public void Parse_SupportedSyntaxSurface_BuildsCurrentNodeSet()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
             namespace Outer;
 
             public int topValue = 1;
@@ -601,6 +671,7 @@ public sealed class ParserTests
 
             public static void Forward();
 
+            global { int globalBlockValue = 0; }
             call();
             if (1) return; else ;
             while (1) ;
@@ -615,6 +686,7 @@ public sealed class ParserTests
 
         AssertIncludesNodeTypes(
             nodeTypes,
+            typeof(PragmaDirective),
             typeof(NamespaceDeclaration),
             typeof(NamespaceEmptyBody),
             typeof(NamespaceBlockBody),
@@ -643,6 +715,7 @@ public sealed class ParserTests
             typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
             typeof(TopLevelBlock),
+            typeof(TopLevelGlobalBlock),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),

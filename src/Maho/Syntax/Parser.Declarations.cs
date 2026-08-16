@@ -5,37 +5,37 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    private TopLevel ParseTopLevelDeclaration()
+    private TopLevel ParseTopLevelDeclaration(bool topLevelStatementsEnabled)
     {
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseTopLevelBlock(attributes, modifiers);
+            return ParseTopLevelBlock(attributes, modifiers, topLevelStatementsEnabled);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else
             return ParseTopLevelVariableDeclarationOrFunction(attributes, modifiers);
     }
 
-    private NamespaceDeclaration ParseNamespaceDeclaration()
+    private NamespaceDeclaration ParseNamespaceDeclaration(bool topLevelStatementsEnabled)
     {
         var keyword = Consume();
-        var name = ParseNamedSyntax();
-        var body = ParseNamespaceBody();
+        var name = ParseNamedSyntax(allowQualified: true, allowGenericName: false);
+        var body = ParseNamespaceBody(topLevelStatementsEnabled);
 
         return new NamespaceDeclaration(keyword, name, body);
     }
 
-    private NamespaceBody ParseNamespaceBody()
+    private NamespaceBody ParseNamespaceBody(bool topLevelStatementsEnabled)
     {
         if (CurrentToken.Kind is TokenKind.Semicolon)
             return new NamespaceEmptyBody(Consume());
         else
-            return ParseNamespaceBlockBody();
+            return ParseNamespaceBlockBody(topLevelStatementsEnabled);
     }
 
-    private NamespaceBlockBody ParseNamespaceBlockBody()
+    private NamespaceBlockBody ParseNamespaceBlockBody(bool topLevelStatementsEnabled)
     {
         var members = new List<TopLevel>();
         var openBrace = Consume();
@@ -43,7 +43,7 @@ internal sealed partial class Parser
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var start = current;
-            var member = ParseTopLevel();
+            var member = ParseTopLevel(topLevelStatementsEnabled);
             members.Add(member);
             RecoverTopLevelIfStalled(start);
         }
@@ -67,7 +67,7 @@ internal sealed partial class Parser
             _ => throw new InvalidOperationException("Unhandeled case")
         };
 
-        var name = ParseNamedSyntax(allowQualified: true);
+        var name = ParseNamedSyntax(allowQualified: true, allowGenericQualifiedParts: false);
         TypeBaseClause? baseClause = null;
 
         if (CurrentToken.Kind is TokenKind.Colon)
@@ -691,22 +691,36 @@ internal sealed partial class Parser
         return list;
     }
 
-    private NamedSyntax ParseNamedSyntax(bool allowQualified = false)
+    private NamedSyntax ParseNamedSyntax(bool allowQualified = false, bool allowGenericName = true, bool allowGenericQualifiedParts = true)
     {
         NamedSyntax name = ParseNamedSyntaxPart();
 
         if (!allowQualified || CurrentToken.Kind is not TokenKind.Dot)
+        {
+            ReportInvalidGenericNameSegment(name, allowGenericName, isQualifiedPart: false);
             return name;
+        }
 
         List<SyntaxNode> nodesAndSeparators = [name];
+        ReportInvalidGenericNameSegment(name, allowGenericName, isQualifiedPart: true);
 
         while (CurrentToken.Kind is TokenKind.Dot)
         {
             nodesAndSeparators.Add(Consume());
-            nodesAndSeparators.Add(ParseNamedSyntaxPart());
+            NamedSyntax part = ParseNamedSyntaxPart();
+            nodesAndSeparators.Add(part);
+            ReportInvalidGenericNameSegment(part, allowGenericName, isQualifiedPart: CurrentToken.Kind is TokenKind.Dot && !allowGenericQualifiedParts);
         }
 
         return new QualifiedName(new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators));
+    }
+
+    private void ReportInvalidGenericNameSegment(NamedSyntax name, bool allowGenericName, bool isQualifiedPart)
+    {
+        if (name is not GenericName genericName || (allowGenericName && !isQualifiedPart))
+            return;
+
+        diagnostics.ReportExpectedToken(genericName.LessThanToken.Span, "a non-generic name", GetTokenDisplay(genericName.LessThanToken), "in this qualified name");
     }
 
     /// <summary> Parses one simple or generic name segment. </summary>

@@ -53,26 +53,23 @@ The wrapper script forwards arguments to `dotnet run --project src/Maho.Cli/Maho
 Examples:
 
 ```bash
-./maho --all Samples/Valid/Test1.mh
-./maho --lex --output output/test-lex.json Samples/Valid/Test1.mh
-./maho --all --progress Samples
-cd Samples/Valid && ../../maho --all
+./maho Samples/Test.mhpr
+./maho --debug --lex --output output/test-lex.json Samples/Program.mh
+./maho --debug --lex --parse --output - --diagnostics --json --output - Samples/Test.mhpr
+cd Samples && ../maho Test.mhpr
 ```
 
 Supported flags:
 
-- `-l`, `--lex`: print the lexer token stream.
-- `-p`, `--parse`: print the parser syntax tree.
-- `-a`, `--all`: print both debug views.
-- `--progress`: show per-file analysis progress on `stderr`.
-- `-o`, `--output <path>`: write the requested debug views as JSON to a file.
-- `--diagnostics-output`: Write the final diagnostic report to the specified file.
-- `--diagnostics-format`: Use `text` (default) or `json` for diagnostics output.
+- `--debug (--lex|--parse)+ --output <path|->`: emit selected debug payloads to a file or `stdout`.
+- `--diagnostics [--text|--json] --output <path|->`: emit diagnostics to a file or `stderr`.
 - `-h`, `--help`: print usage information.
 
 When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.
 
-Human-readable debug output is written to `stdout` when `--output` is not provided. When `--output` is present, the requested JSON is written to the file, and diagnostics, progress, and completion status messages remain on `stderr`.
+Normal invocations proceed into the compiler pipeline. The current lowering/code-generation boundary is
+deliberately unimplemented, so syntactically valid programs stop there with a compiler error. Debug
+output is therefore an explicit inspection channel rather than the compiler's final product.
 
 ## Library
 
@@ -80,10 +77,12 @@ The core library exposes `MahoCompiler.AnalyzeFile(...)` and `MahoCompiler.Analy
 
 It also exposes `MahoCompiler.AnalyzeFiles(...)` for batch analysis, which keeps file-level parallelism inside the library instead of making the CLI manage it directly.
 
-Both APIs return:
+The analysis APIs return:
 
-- requested human-readable lexer output,
-- requested human-readable parser output,
 - requested lexer JSON,
 - requested parser JSON,
 - structured diagnostics with file offsets and line/column locations.
+
+`CompileFiles(...)` and `CompileProjectFile(...)` continue beyond front-end analysis. They currently
+raise `CompilerPipelineNotImplementedException` at the lowering/code-generation boundary after a
+successful front end.

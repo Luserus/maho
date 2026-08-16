@@ -216,19 +216,20 @@ internal sealed partial class Parser
     /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()
     {
+        IReadOnlyList<PragmaDirective> pragmas = ParsePragmaDirectives(out bool topLevelStatementsEnabled);
         var topLevels = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
             var start = current;
-            var topLevel = ParseTopLevel();
+            var topLevel = ParseTopLevel(topLevelStatementsEnabled);
             topLevels.Add(topLevel);
             RecoverTopLevelIfStalled(start);
         }
 
         var eofToken = Consume();
 
-        return new CompilationUnit(topLevels, eofToken);
+        return new CompilationUnit(pragmas, topLevels, eofToken);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -255,16 +256,18 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
-    private TopLevel ParseTopLevel()
+    private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
-            return ParseNamespaceDeclaration();
+            return ParseNamespaceDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Global)
+            return ParseTopLevelGlobalBlock(topLevelStatementsEnabled);
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseTopLevelBlock([], []);
+            return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
-            return ParseTopLevelDeclaration();
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return)
-            return ParseTopLevelStatement();
+            return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
         {
             if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
@@ -273,10 +276,10 @@ internal sealed partial class Parser
             if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
                 return ParseTopLevelAmbiguousReferenceDeclaration();
 
-            return ParseTopLevelDeclaration();
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         }
 
-        return ParseTopLevelStatement();
+        return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
     }
 
     /// <summary> Parses the next member declaration inside a type body. </summary>
@@ -388,7 +391,7 @@ internal sealed partial class Parser
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
-    private TopLevelBlock ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    private TopLevelBlock ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, bool topLevelStatementsEnabled)
     {
         var openBrace = Consume();
         var members = new List<TopLevel>();
@@ -396,13 +399,38 @@ internal sealed partial class Parser
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var start = current;
-            var member = ParseTopLevel();
+            var member = ParseTopLevel(topLevelStatementsEnabled);
             members.Add(member);
             RecoverTopLevelIfStalled(start);
         }
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
 
         return new TopLevelBlock(attributes, modifiers, openBrace, members, closeBrace);
+    }
+
+    private TopLevelGlobalBlock ParseTopLevelGlobalBlock(bool topLevelStatementsEnabled)
+    {
+        Token globalKeyword = Consume();
+        Token openBrace = ExpectToken(TokenKind.LeftBrace, "'{'", "after 'global'");
+        List<TopLevel> members = [];
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            int start = current;
+            members.Add(ParseTopLevel(topLevelStatementsEnabled));
+            RecoverTopLevelIfStalled(start);
+        }
+
+        Token closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the global block");
+        return new TopLevelGlobalBlock(globalKeyword, openBrace, members, closeBrace);
+    }
+
+    private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
+    {
+        if (!topLevelStatementsEnabled)
+            diagnostics.ReportError("MH0011", "Top-level statements require '#pragma toplevel enable' in this file.", CurrentToken.Span);
+
+        return ParseTopLevelStatement();
     }
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>
