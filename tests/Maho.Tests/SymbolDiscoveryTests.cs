@@ -145,12 +145,9 @@ public sealed class SymbolDiscoveryTests
         Assert.Single(context.PropertySymbols);
         Assert.Single(context.ParameterSymbols);
         Assert.Single(context.LocalVariableSymbols);
-        Assert.Equal(7, context.TypeParameterSymbols.Count);
 
         TypeSymbol outer = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Outer");
-        FunctionSymbol function = Assert.Single(context.FunctionSymbols);
-        Assert.Single(outer.TypeParameters);
-        Assert.Single(function.TypeParameters);
+        FunctionSymbol function = Assert.Single(context.FunctionSymbols);;
         Assert.All(context.TypeParameterSymbols, parameter => Assert.NotNull(parameter.GenericSymbol));
 
         Assert.True(context.GlobalNamespace.Next.ContainsKey(new SymbolName("Example")));

@@ -9,20 +9,20 @@ internal sealed class GlobalVariableSymbol : Symbol
     public VariableFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace;
     
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; }
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
     public SymbolHandle Type { get; internal set; }
 
     public VariableDeclaration? Syntax { get; }
 
-    public GlobalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace, IReadOnlyList<SymbolHandle> typeParameters,
+    public GlobalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
                                 VariableDeclaration? syntax) : base(id, enclosingScope)
     {
         Kind = SymbolKind.GlobalVariable;
         Name = name;
         ContainingNamespace = containingNamespace;
-        TypeParameters = typeParameters;
+        TypeParameters = [];
         Attributes = [];
         Syntax = syntax;
     }

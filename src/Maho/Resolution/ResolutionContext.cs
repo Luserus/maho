@@ -84,72 +84,72 @@ internal sealed class ResolutionContext
     }
 
     public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
-                                       IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+                                       TypeDeclaration? syntax)
     {
-        var symbol = new TypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, typeParameters, syntax);
+        var symbol = new TypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
         TypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, SymbolHandle? parent,
-                                                                IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+                                                                TypeDeclaration? syntax)
     {
-        var symbol = new MemberNestedTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, typeParameters, syntax);
+        var symbol = new MemberNestedTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, MethodSymbol? parent,
-                                                  IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax)
+                                                TypeDeclaration? syntax)
     {
-        var symbol = new LocalTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, typeParameters, syntax);
+        var symbol = new LocalTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                                               IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+                                               FunctionDeclaration? syntax)
     {
-        var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, typeParameters, syntax);
+        var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
         FunctionSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolHandle? parent,
-                                                        IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+                                                        FunctionDeclaration? syntax)
     {
-        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, parent, typeParameters, syntax);
+        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, MethodSymbol? parent,
-                                                          IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
+                                                          FunctionDeclaration? syntax)
     {
-        var symbol = new LocalFunctionSymbol(methodID++, enclosingScope, parent, typeParameters, syntax);
+        var symbol = new LocalFunctionSymbol(methodID++, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                                                            IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+                                                            VariableDeclaration? syntax)
     {
-        var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, typeParameters, syntax);
+        var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
         GlobalVariableSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
-                                         IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+                                        VariableDeclaration? syntax)
     {
-        var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, typeParameters, syntax);
+        var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, syntax);
         FieldSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -164,18 +164,18 @@ internal sealed class ResolutionContext
     }
 
     public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
-                                                          IReadOnlyList<SymbolHandle> typeParameters, VariableDeclaration? syntax)
+                                                          VariableDeclaration? syntax)
     {
-        var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, typeParameters, syntax);
+        var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, syntax);
         LocalVariableSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolName name, bool hasBacking,
-                                                IReadOnlyList<SymbolHandle> typeParameters, MemberPropertyDeclaration? syntax)
+                                                MemberPropertyDeclaration? syntax)
     {
-        var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, typeParameters, syntax);
+        var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, syntax);
         PropertySymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;

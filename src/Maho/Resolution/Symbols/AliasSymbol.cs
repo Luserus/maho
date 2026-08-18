@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -9,6 +10,7 @@ internal sealed class AliasSymbol : Symbol
     public NamespaceTrieNode? ContainingNamespace { get; }
     public ulong Flags { get; internal set; }
 
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public SymbolHandle Target { get; internal set; }
 
     public SyntaxNode? Syntax { get; }
@@ -18,6 +20,7 @@ internal sealed class AliasSymbol : Symbol
         Name = name;
         Kind = SymbolKind.Alias;
         ContainingSymbol = containingSymbol;
+        TypeParameters = [];
         Syntax = syntax;
     }
 
@@ -26,6 +29,7 @@ internal sealed class AliasSymbol : Symbol
         Name = name;
         Kind = SymbolKind.Alias;
         ContainingNamespace = containingNamespace;
+        TypeParameters = [];
         Syntax = syntax;
     }
 }

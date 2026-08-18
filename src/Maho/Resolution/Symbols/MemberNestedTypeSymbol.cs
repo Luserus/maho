@@ -8,7 +8,7 @@ internal sealed class MemberNestedTypeSymbol : NestedTypeSymbol
     public SymbolHandle? Parent { get; }
 
     public MemberNestedTypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind, SymbolHandle? parent,
-                                IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax) : base(id, enclosingScope, name, typeKind, typeParameters, syntax)
+                                TypeDeclaration? syntax) : base(id, enclosingScope, name, typeKind, syntax)
     {
         Parent = parent;
     }

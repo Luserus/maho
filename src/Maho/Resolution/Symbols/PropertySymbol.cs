@@ -10,7 +10,7 @@ internal sealed class PropertySymbol : Symbol
     public FunctionFlags GetterFlags { get; internal set; }
     public FunctionFlags SetterFlags { get; internal set; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; }
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
     public List<SymbolHandle> GetterAttributes { get; internal set; }
     public List<SymbolHandle> SetterAttributes { get; internal set; }
@@ -25,12 +25,12 @@ internal sealed class PropertySymbol : Symbol
 
     public MemberPropertyDeclaration? Syntax { get; }
 
-    public PropertySymbol(SymbolID id, Scope enclosingScope, SymbolName name, bool hasBacking, IReadOnlyList<SymbolHandle> typeParameters,
+    public PropertySymbol(SymbolID id, Scope enclosingScope, SymbolName name, bool hasBacking,
                         MemberPropertyDeclaration? syntax) : base(id, enclosingScope)
     {
         Name = name;
         HasBacking = hasBacking;
-        TypeParameters = typeParameters;
+        TypeParameters = [];
         Attributes = [];
         GetterAttributes = [];
         SetterAttributes = [];

@@ -7,8 +7,8 @@ internal sealed class MemberMethodSymbol : MethodSymbol
 {
     public SymbolHandle? Parent { get; }
 
-    public MemberMethodSymbol(SymbolID id, Scope enclosingScope, SymbolHandle? parent, IReadOnlyList<SymbolHandle> typeParameters, FunctionDeclaration? syntax)
-    : base(id, enclosingScope, typeParameters, syntax)
+    public MemberMethodSymbol(SymbolID id, Scope enclosingScope, SymbolHandle? parent, FunctionDeclaration? syntax)
+    : base(id, enclosingScope, syntax)
     {
         Parent = parent;
     }

@@ -8,7 +8,7 @@ internal sealed class LocalTypeSymbol : NestedTypeSymbol
     public MethodSymbol? Parent { get; }
 
     public LocalTypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind, MethodSymbol? parent,
-                        IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax) : base(id, enclosingScope, name, typeKind, typeParameters, syntax)
+                        TypeDeclaration? syntax) : base(id, enclosingScope, name, typeKind, syntax)
     {
         Parent = parent;
     }

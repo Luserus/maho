@@ -10,7 +10,7 @@ internal sealed class TypeSymbol : Symbol
     public TypeFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace { get; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; }
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> BaseTypes { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
@@ -22,13 +22,13 @@ internal sealed class TypeSymbol : Symbol
     public TypeDeclaration? Syntax { get; }
 
     public TypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
-                    IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax) : base(id, enclosingScope)
+                    TypeDeclaration? syntax) : base(id, enclosingScope)
     {
         Kind = SymbolKind.Type;
         Name = name;
         TypeKind = typeKind;
         ContainingNamespace = containingNamespace;
-        TypeParameters = typeParameters;
+        TypeParameters = [];
         BaseTypes = [];
         Attributes = [];
         Fields = [];

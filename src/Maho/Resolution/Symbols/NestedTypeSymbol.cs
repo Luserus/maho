@@ -10,7 +10,7 @@ internal abstract class NestedTypeSymbol : Symbol
     public TypeFlags Flags { get; internal set; }
     
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; }
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> BaseTypes { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
@@ -22,12 +22,12 @@ internal abstract class NestedTypeSymbol : Symbol
     public TypeDeclaration? Syntax { get; }
 
     protected NestedTypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind,
-                            IReadOnlyList<SymbolHandle> typeParameters, TypeDeclaration? syntax) : base(id, enclosingScope)
+                            TypeDeclaration? syntax) : base(id, enclosingScope)
     {
         Kind = SymbolKind.NestedType;
         Name = name;
         TypeKind = typeKind;
-        TypeParameters = typeParameters;
+        TypeParameters = [];
         BaseTypes = [];
         Attributes = [];
         Fields = [];
