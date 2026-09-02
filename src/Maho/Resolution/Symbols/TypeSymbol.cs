@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class TypeSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public TypeKind TypeKind { get; }
     public TypeFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace { get; }
@@ -21,11 +20,10 @@ internal sealed class TypeSymbol : Symbol
 
     public TypeDeclaration? Syntax { get; }
 
-    public TypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
-                    TypeDeclaration? syntax) : base(id, enclosingScope)
+    public TypeSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
+                    TypeDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Type;
-        Name = name;
         TypeKind = typeKind;
         ContainingNamespace = containingNamespace;
         TypeParameters = [];

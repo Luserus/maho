@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class PropertySymbol : Symbol
 {
-    public SymbolName Name { get; }
     public bool HasBacking { get; }
     public FunctionFlags GetterFlags { get; internal set; }
     public FunctionFlags SetterFlags { get; internal set; }
@@ -25,10 +24,9 @@ internal sealed class PropertySymbol : Symbol
 
     public MemberPropertyDeclaration? Syntax { get; }
 
-    public PropertySymbol(SymbolID id, Scope enclosingScope, SymbolName name, bool hasBacking,
-                        MemberPropertyDeclaration? syntax) : base(id, enclosingScope)
+    public PropertySymbol(SymbolID id, Scope enclosingScope, SymbolPart name, bool hasBacking,
+                        MemberPropertyDeclaration? syntax) : base(id, name, enclosingScope)
     {
-        Name = name;
         HasBacking = hasBacking;
         TypeParameters = [];
         Attributes = [];

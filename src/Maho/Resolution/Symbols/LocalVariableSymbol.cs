@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class LocalVariableSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public VariableFlags Flags { get; internal set; }
     public SymbolHandle? Parent { get; }
 
@@ -16,11 +15,10 @@ internal sealed class LocalVariableSymbol : Symbol
 
     public VariableDeclaration? Syntax { get; }
 
-    public LocalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolName name, SymbolHandle? parent,
-                                VariableDeclaration? syntax) : base(id, enclosingScope)
+    public LocalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? parent,
+                                VariableDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Variable;
-        Name = name;
         Parent = parent;
         TypeParameters = [];
         Attributes = [];

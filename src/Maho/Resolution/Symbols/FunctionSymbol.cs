@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class FunctionSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public FunctionFlags Flags { get; internal set; }
 
     public NamespaceTrieNode? ContainingNamespace { get; }
@@ -21,11 +20,10 @@ internal sealed class FunctionSymbol : Symbol
 
     public FunctionDeclaration? Syntax { get; }
 
-    public FunctionSymbol(SymbolID id, Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                        FunctionDeclaration? syntax) : base(id, enclosingScope)
+    public FunctionSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace,
+                        FunctionDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Function;
-        Name = name;
         ContainingNamespace = containingNamespace;
         TypeParameters = [];
         Attributes = [];

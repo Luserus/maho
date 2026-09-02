@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -78,13 +79,15 @@ internal sealed class ResolutionContext
     public Scope CreateScope(Scope? parent)
     {
         var scope = new Scope(parent);
-        parent?.ChildScopes.Add(scope);
+
+        foreach (var symbol in scope.Symbols.Values)
+            parent?.ChildScopes.Add((symbol.Kind, symbol.ID), scope);
+
         Scopes.Add(scope);
         return scope;
     }
 
-    public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, NamespaceTrieNode? containingNamespace,
-                                       TypeDeclaration? syntax)
+    public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, NamespaceTrieNode? containingNamespace, TypeDeclaration? syntax)
     {
         var symbol = new TypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
         TypeSymbols.Add(symbol);
@@ -92,8 +95,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, SymbolHandle? parent,
-                                                                TypeDeclaration? syntax)
+    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
         var symbol = new MemberNestedTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         NestedTypeSymbols.Add(symbol);
@@ -101,8 +103,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolName name, TypeKind typeKind, MethodSymbol? parent,
-                                                TypeDeclaration? syntax)
+    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, MethodSymbol? parent, TypeDeclaration? syntax)
     {
         var symbol = new LocalTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         NestedTypeSymbols.Add(symbol);
@@ -110,8 +111,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                                               FunctionDeclaration? syntax)
+    public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, FunctionDeclaration? syntax)
     {
         var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
         FunctionSymbols.Add(symbol);
@@ -119,26 +119,35 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolHandle? parent,
-                                                        FunctionDeclaration? syntax)
+    public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
     {
-        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, parent, syntax);
+        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, name, parent, syntax);
         MethodSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
-    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, MethodSymbol? parent,
-                                                          FunctionDeclaration? syntax)
+    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, MethodSymbol? parent, FunctionDeclaration? syntax)
     {
-        var symbol = new LocalFunctionSymbol(methodID++, enclosingScope, parent, syntax);
+        var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+
+        var parameters = new List<TypeSyntax>(syntax?.Signature.Parameters.Count ?? 0);
+
+        if (syntax is not null)
+            foreach (var p in syntax.Signature.Parameters)
+            {
+                var type = p.Declarator.Type;
+                parameters.Add(type);
+            }
+
+        var functionParams = new Parameters(parameters);
+
+        Register(enclosingScope, symbol, functionParams);
         return symbol;
     }
 
-    public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                                                            VariableDeclaration? syntax)
+    public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, VariableDeclaration? syntax)
     {
         var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
         GlobalVariableSymbols.Add(symbol);
@@ -146,8 +155,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
-                                        VariableDeclaration? syntax)
+    public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
     {
         var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, syntax);
         FieldSymbols.Add(symbol);
@@ -155,16 +163,15 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolHandle? containingFunction)
+    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction)
     {
-        var symbol = new ParameterSymbol(parameterID++, enclosingScope, containingFunction);
+        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingFunction);
         ParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
 
-    public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? parent,
-                                                          VariableDeclaration? syntax)
+    public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
     {
         var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, syntax);
         LocalVariableSymbols.Add(symbol);
@@ -172,8 +179,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolName name, bool hasBacking,
-                                                MemberPropertyDeclaration? syntax)
+    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)
     {
         var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, syntax);
         PropertySymbols.Add(symbol);
@@ -181,7 +187,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolName name, Symbol genericSymbol)
+    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol)
     {
         var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol);
         TypeParameterSymbols.Add(symbol);
@@ -189,7 +195,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LabelSymbol CreateLabelSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? containingFunction, SyntaxNode? syntax)
+    public LabelSymbol CreateLabelSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction, SyntaxNode? syntax)
     {
         var symbol = new LabelSymbol(labelID++, enclosingScope, name, containingFunction, syntax);
         LabelSymbols.Add(symbol);
@@ -197,7 +203,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolName name, SymbolHandle? containingSymbol, SyntaxNode? syntax)
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, SyntaxNode? syntax)
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingSymbol, syntax);
         AliasSymbols.Add(symbol);
@@ -205,7 +211,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax)
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax)
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
         AliasSymbols.Add(symbol);
@@ -215,9 +221,19 @@ internal sealed class ResolutionContext
 
     public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
 
-    private static void Register(Scope scope, Symbol symbol) => scope.Symbols.Add(GetHandle(symbol), symbol);
+    private static void Register(Scope scope, Symbol symbol, Parameters? parameters = null)
+    {
+        scope.Symbols.Add(GetHandle(symbol), symbol);
 
-    public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolName ns)
+
+
+        ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+
+        symbols ??= [];
+        symbols.Add(symbol);
+    }
+
+    public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolPart ns)
     {
         var node = trieNode.Next.GetValueOrDefault(ns);
 
@@ -229,5 +245,63 @@ internal sealed class ResolutionContext
         }
 
         return node;
+    }
+
+    public static SymbolName GetSymbolName(TypeSyntax typeSyntax)
+    {
+        var listOfParts = new List<SymbolPart>();
+
+        AddTypeNameParts(typeSyntax, listOfParts);
+        
+        SymbolPart[] parts = [.. listOfParts];
+
+        return new SymbolName(parts);
+    }
+
+    public static SymbolName GetSymbolName(NamedSyntax name) => name switch
+    {
+        SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name)),
+        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.TypeParameters.Count)),
+        QualifiedName qualifiedName => GetQualifiedName(qualifiedName),
+        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+    };
+
+    private static SymbolPart GetSymbolPart(NamedSyntax name) => name switch
+    {
+        SimpleName simpleName => new SymbolPart(simpleName.Name),
+        GenericName genericName => new SymbolPart(genericName.Name, genericName.TypeParameters.Count),
+        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+    };
+
+    private static SymbolName GetQualifiedName(QualifiedName qualifiedName)
+    {
+        var parts = new SymbolPart[qualifiedName.Parts.Count];
+
+        for (int i = 0; i < parts.Length; i++)
+            parts[i] = GetSymbolPart(qualifiedName.Parts[i]);
+
+        return new SymbolName(parts);
+    }
+
+    private static void AddTypeNameParts(TypeSyntax type, List<SymbolPart> parts)
+    {
+        switch (type)
+        {
+            case SimpleType simple:
+                parts.Add(new SymbolPart(simple.Name));
+                break;
+
+            case GenericType generic:
+                parts.Add(new SymbolPart(generic.Name, generic.TypeArguments.Count));
+                break;
+
+            case QualifiedType qualified:
+                AddTypeNameParts(qualified.Left, parts);
+                AddTypeNameParts(qualified.Right, parts);
+                break;
+
+            default:
+                throw new System.ArgumentOutOfRangeException(nameof(type));
+        }
     }
 }

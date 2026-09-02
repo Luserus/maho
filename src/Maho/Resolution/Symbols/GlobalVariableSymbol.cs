@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class GlobalVariableSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public VariableFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace;
     
@@ -16,11 +15,10 @@ internal sealed class GlobalVariableSymbol : Symbol
 
     public VariableDeclaration? Syntax { get; }
 
-    public GlobalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace,
-                                VariableDeclaration? syntax) : base(id, enclosingScope)
+    public GlobalVariableSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace,
+                                VariableDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.GlobalVariable;
-        Name = name;
         ContainingNamespace = containingNamespace;
         TypeParameters = [];
         Attributes = [];

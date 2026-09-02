@@ -348,12 +348,6 @@ internal static class CommandLine
                     diagnosticsRequested = true;
                     break;
 
-                case "--lex":
-                case "--parse":
-                    options = default;
-                    errorMessage = $"The '{argument}' selector must follow --debug.";
-                    return false;
-
                 default:
                     if (argument.Length > 0 && argument[0] == '-')
                     {
@@ -388,8 +382,8 @@ internal static class CommandLine
         {
             AnalysisOutput selector = args[index] switch
             {
-                "--lex" => AnalysisOutput.Lexer,
-                "--parse" => AnalysisOutput.Parser,
+                "lex" => AnalysisOutput.Lexer,
+                "parse" => AnalysisOutput.Parser,
                 _ => AnalysisOutput.None
             };
 
@@ -404,7 +398,7 @@ internal static class CommandLine
 
         if (output is AnalysisOutput.None)
         {
-            errorMessage = "The --debug option requires one or more of --lex and --parse.";
+            errorMessage = "The --debug option requires one or more of lex and parse.";
             return false;
         }
 
@@ -434,10 +428,10 @@ internal static class CommandLine
         {
             switch (args[index])
             {
-                case "--text":
+                case "text":
                     format = DiagnosticsFormat.Text;
                     break;
-                case "--json":
+                case "json":
                     format = DiagnosticsFormat.Json;
                     break;
                 default:
@@ -494,9 +488,9 @@ internal static class CommandLine
         writer.WriteLine("Usage: maho [options] [source-path]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --debug (--lex|--parse)+ --output <file|->");
+        writer.WriteLine("  --debug (lex|parse)+ --output <file|->");
         writer.WriteLine("                                 Write selected debug JSON to a file or stdout.");
-        writer.WriteLine("  --diagnostics [--text|--json] --output <file|->");
+        writer.WriteLine("  --diagnostics [text|json] --output <file|->");
         writer.WriteLine("                                 Write diagnostics to a file or stderr.");
         writer.WriteLine("  -h, --help                     Show this help text.");
         writer.WriteLine();

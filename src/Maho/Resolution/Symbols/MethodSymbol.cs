@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal abstract class MethodSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public FunctionFlags Flags { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
@@ -17,7 +16,7 @@ internal abstract class MethodSymbol : Symbol
 
     public FunctionDeclaration? Syntax { get; }
 
-    protected MethodSymbol(SymbolID id, Scope enclosingScope, FunctionDeclaration? syntax) : base(id, enclosingScope)
+    protected MethodSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, FunctionDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Method;
         TypeParameters = [];

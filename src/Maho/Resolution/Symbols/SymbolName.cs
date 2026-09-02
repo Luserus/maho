@@ -1,49 +1,20 @@
-using System;
-using Maho.Syntax;
-using Maho.Text;
-
 namespace Maho.Resolution;
 
-internal readonly struct SymbolName : IEquatable<SymbolName>
+internal readonly struct SymbolName
 {
-    private readonly SourceText? source;
-    private readonly TextSpan span;
-    private readonly string? literal;
+    private readonly SymbolPart[] parts;
 
-    public int Length => literal?.Length ?? span.Length;
+    public int Count => parts.Length;
 
-    private SymbolName(SourceText? source, TextSpan span, string? literal)
-    {
-        this.source = source;
-        this.span = span;
-        this.literal = literal;
-    }
+    public bool IsQualified => Count > 1;
 
-    public SymbolName(Token token) : this(token.Source, token.Span, null) { }
+    public SymbolPart this[int index] => parts[index];
 
-    public SymbolName(string literal) : this(null, default, literal) { }
+    public SymbolPart First => parts[0];
 
-    public ReadOnlySpan<char> AsSpan() => literal is not null ? literal.AsSpan() : source!.AsSpan(span);
+    public SymbolPart Last => parts[^1];
 
-    public bool Equals(SymbolName other) => AsSpan().SequenceEqual(other.AsSpan());
+    public SymbolName(SymbolPart[] parts) => this.parts = parts;
 
-    public override bool Equals(object? obj) => obj is SymbolName other && Equals(other);
-
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        var value = AsSpan();
-
-        foreach (char ch in value)
-            hash.Add(ch);
-
-        return hash.ToHashCode();
-    }
-
-    public override string ToString() => literal ?? source!.ToString(span);
-
-    public static bool operator ==(SymbolName syname, SymbolName other) => syname.Equals(other);
-
-    public static bool operator !=(SymbolName syname, SymbolName other) => !syname.Equals(other);
+    public SymbolName(SymbolPart part) : this([part]) { }
 }
-

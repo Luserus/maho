@@ -5,10 +5,11 @@ internal enum VariableFlags : ulong
 {
     None        = 0,
     Public      = 1UL << 0,
-    Private     = 1UL << 1,
-    Protected   = 1UL << 2,
-    Internal    = 1UL << 3,
+    Protected   = 1UL << 1,
+    Internal    = 1UL << 2,
 
-    Static      = 1UL << 4,
-    Readonly    = 1UL << 5,
+    Static      = 1UL << 3,
+    Readonly    = 1UL << 4,
+    Const       = 1UL << 5,
+    Immut       = 1UL << 6
 }

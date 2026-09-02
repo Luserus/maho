@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal sealed class AliasSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public SymbolHandle? ContainingSymbol { get; }
     public NamespaceTrieNode? ContainingNamespace { get; }
     public ulong Flags { get; internal set; }
@@ -15,18 +14,17 @@ internal sealed class AliasSymbol : Symbol
 
     public SyntaxNode? Syntax { get; }
 
-    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolName name, SymbolHandle? containingSymbol, SyntaxNode? syntax) : base(id, enclosingScope)
+    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, SyntaxNode? syntax) : base(id, name, enclosingScope)
     {
-        Name = name;
         Kind = SymbolKind.Alias;
         ContainingSymbol = containingSymbol;
         TypeParameters = [];
         Syntax = syntax;
     }
 
-    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolName name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax) : base(id, enclosingScope)
+    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax) : base(id, name, enclosingScope)
     {
-        Name = name;
+
         Kind = SymbolKind.Alias;
         ContainingNamespace = containingNamespace;
         TypeParameters = [];

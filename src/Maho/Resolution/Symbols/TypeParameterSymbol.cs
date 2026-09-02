@@ -4,15 +4,13 @@ namespace Maho.Resolution;
 
 internal sealed class TypeParameterSymbol : Symbol
 {
-    public SymbolName Name { get; }
-    public Symbol? GenericSymbol { get; }
+    public Symbol GenericSymbol { get; }
     
     public List<SymbolHandle> Constraints { get; internal set; }
 
-    public TypeParameterSymbol(SymbolID id, Scope enclosingScope, SymbolName name, Symbol? genericSymbol) : base(id, enclosingScope)
+    public TypeParameterSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, Symbol genericSymbol) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.TypeParameter;
-        Name = name;
         GenericSymbol = genericSymbol;
         Constraints = [];
     }

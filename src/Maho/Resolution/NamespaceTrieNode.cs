@@ -4,6 +4,6 @@ namespace Maho.Resolution;
 
 internal sealed class NamespaceTrieNode
 {
-    public Dictionary<SymbolName, NamespaceTrieNode> Next { get; } = [];
+    public Dictionary<SymbolPart, NamespaceTrieNode> Next { get; } = [];
 }
 

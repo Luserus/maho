@@ -5,7 +5,6 @@ namespace Maho.Resolution;
 
 internal abstract class NestedTypeSymbol : Symbol
 {
-    public SymbolName Name { get; }
     public TypeKind TypeKind { get; }
     public TypeFlags Flags { get; internal set; }
     
@@ -21,11 +20,10 @@ internal abstract class NestedTypeSymbol : Symbol
 
     public TypeDeclaration? Syntax { get; }
 
-    protected NestedTypeSymbol(SymbolID id, Scope enclosingScope, SymbolName name, TypeKind typeKind,
-                            TypeDeclaration? syntax) : base(id, enclosingScope)
+    protected NestedTypeSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, TypeKind typeKind,
+                            TypeDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.NestedType;
-        Name = name;
         TypeKind = typeKind;
         TypeParameters = [];
         BaseTypes = [];
