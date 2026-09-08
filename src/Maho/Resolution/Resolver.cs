@@ -4,9 +4,10 @@ namespace Maho.Resolution;
 
 internal sealed class Resolver
 {
-    private ResolutionPass[] passes =
+    private readonly ResolutionPass[] passes =
     [
-        new SymbolDiscoveryPass()
+        new SymbolDiscoveryPass(),
+        new DeclarationResolutionPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();

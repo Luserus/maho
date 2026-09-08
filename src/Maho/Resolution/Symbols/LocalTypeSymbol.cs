@@ -2,7 +2,7 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-internal sealed class LocalTypeSymbol : NestedTypeSymbol
+internal abstract class LocalTypeSymbol : NestedTypeSymbol
 {
     public MethodSymbol? Parent { get; }
 

@@ -3,20 +3,16 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-internal sealed class TypeSymbol : Symbol
+internal abstract class TypeSymbol : Symbol
 {
     public TypeKind TypeKind { get; }
     public TypeFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace { get; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> BaseTypes { get; internal set; }
-    public List<SymbolHandle> Attributes { get; internal set; }
 
-    public List<SymbolHandle> Fields { get; internal set; }
-    public List<SymbolHandle> Properties { get; internal set; }
-    public List<SymbolHandle> Methods { get; internal set; }
-    public List<SymbolHandle> NestedTypes { get; internal set; }
+    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public List<SymbolHandle> Attributes { get; internal set; }
 
     public TypeDeclaration? Syntax { get; }
 
@@ -29,10 +25,7 @@ internal sealed class TypeSymbol : Symbol
         TypeParameters = [];
         BaseTypes = [];
         Attributes = [];
-        Fields = [];
-        Properties = [];
-        Methods = [];
-        NestedTypes = [];
+        
         Syntax = syntax;
     }
 }

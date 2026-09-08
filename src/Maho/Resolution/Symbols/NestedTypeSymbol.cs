@@ -13,10 +13,7 @@ internal abstract class NestedTypeSymbol : Symbol
     public List<SymbolHandle> BaseTypes { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
-    public List<SymbolHandle> Fields { get; internal set; }
-    public List<SymbolHandle> Properties { get; internal set; }
-    public List<SymbolHandle> Methods { get; internal set; }
-    public List<SymbolHandle> NestedTypes { get; internal set; }
+    
 
     public TypeDeclaration? Syntax { get; }
 
@@ -28,10 +25,6 @@ internal abstract class NestedTypeSymbol : Symbol
         TypeParameters = [];
         BaseTypes = [];
         Attributes = [];
-        Fields = [];
-        Properties = [];
-        Methods = [];
-        NestedTypes = [];
         Syntax = syntax;
     }
 }

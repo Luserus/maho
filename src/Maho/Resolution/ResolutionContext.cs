@@ -89,7 +89,15 @@ internal sealed class ResolutionContext
 
     public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, NamespaceTrieNode? containingNamespace, TypeDeclaration? syntax)
     {
-        var symbol = new TypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+        TypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        {
+            symbol = new ProductTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+        }
+        else
+            symbol = new SumTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+
         TypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -97,7 +105,15 @@ internal sealed class ResolutionContext
 
     public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
-        var symbol = new MemberNestedTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+        MemberNestedTypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        {
+            symbol = new MemberProductTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+        }
+        else
+            symbol = new MemberSumTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -105,7 +121,15 @@ internal sealed class ResolutionContext
 
     public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, MethodSymbol? parent, TypeDeclaration? syntax)
     {
-        var symbol = new LocalTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+        LocalTypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        {
+            symbol = new LocalProductTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+        }
+        else
+            symbol = new LocalSumTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
