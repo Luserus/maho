@@ -21,12 +21,14 @@ internal sealed class PropertySymbol : Symbol
     public List<SymbolHandle> SetterLocalVariables { get; internal set; }
     public List<SymbolHandle> SetterLocalFunctions { get; internal set; }
     public List<SymbolHandle> SetterLocalTypes { get; internal set; }
+    public SymbolHandle? Type { get; internal set; }
 
     public MemberPropertyDeclaration? Syntax { get; }
 
     public PropertySymbol(SymbolID id, Scope enclosingScope, SymbolPart name, bool hasBacking,
                         MemberPropertyDeclaration? syntax) : base(id, name, enclosingScope)
     {
+        Kind = SymbolKind.Property;
         HasBacking = hasBacking;
         TypeParameters = [];
         Attributes = [];

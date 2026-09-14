@@ -398,18 +398,61 @@ internal sealed partial class Parser
         modifiers ??= ParseModifiers();
         type ??= ParseTypeSyntax();
 
-        NamedSyntax identifier = firstIdentifier ?? ParseNamedSyntax();
-        AssignmentClause? initializer = null;
+        var nodesAndSeparators = new List<SyntaxNode>();
+        bool wasCommaLast = false;
+        bool parsingFirstDeclarator = firstIdentifier is not null;
 
-        if (CurrentToken.Kind is TokenKind.Equals)
+        while (parsingFirstDeclarator || (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon))
         {
-            var assignmentOp = Consume();
-            var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
+            NamedSyntax identifier;
 
-            initializer = new AssignmentClause(assignmentOp, initExpr);
+            if (parsingFirstDeclarator)
+            {
+                identifier = firstIdentifier!;
+                parsingFirstDeclarator = false;
+            }
+            else
+            {
+                if (CurrentToken.Kind is not TokenKind.Identifier)
+                {
+                    diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
+                    break;
+                }
+
+                identifier = ParseNamedSyntax();
+            }
+
+            wasCommaLast = false;
+
+            AssignmentClause? initializer = null;
+
+            if (CurrentToken.Kind is TokenKind.Equals)
+            {
+                var assignmentOp = Consume();
+                var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
+
+                initializer = new AssignmentClause(assignmentOp, initExpr);
+            }
+
+            var declarator = new VariableDeclarator(identifier, initializer);
+
+            nodesAndSeparators.Add(declarator);
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+                wasCommaLast = true;
+            }
+            else
+                break;
         }
 
-        return new VariableDeclaration(attributes, modifiers, type, identifier, initializer);
+        if (wasCommaLast)
+            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the variable declaration");
+
+        var declarators = new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators);
+
+        return new VariableDeclaration(attributes, modifiers, type, declarators);
     }
 
     private AmbiguousPointerDeclaration ParseAmbiguousPointerDeclaration()

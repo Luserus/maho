@@ -12,17 +12,14 @@ internal sealed class VariableDeclaration : SyntaxNode
     /// <summary> The type of the variable. </summary>
     public TypeSyntax Type { get; }
     /// <summary> Declared variable name. </summary>
-    public NamedSyntax Identifier { get; }
-    /// <summary> Optional initializer for the variable. </summary>
-    public AssignmentClause? Initializer { get; }
+    public SeparatedSyntaxList<VariableDeclarator> Declarators { get; }
 
     /// <summary> Creates one variable declaration. </summary>
-    public VariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier, AssignmentClause? initializer)
+    public VariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, SeparatedSyntaxList<VariableDeclarator> declarators)
     {
         Attributes = attributes;
         Modifiers = modifiers;
         Type = type;
-        Identifier = identifier;
-        Initializer = initializer;
+        Declarators = declarators;
     }
 }

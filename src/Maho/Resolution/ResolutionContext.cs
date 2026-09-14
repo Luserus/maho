@@ -26,6 +26,7 @@ internal sealed class ResolutionContext
 
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
+    private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
 
     private int typeID;
     private int nestedTypeID;
@@ -79,10 +80,6 @@ internal sealed class ResolutionContext
     public Scope CreateScope(Scope? parent)
     {
         var scope = new Scope(parent);
-
-        foreach (var symbol in scope.Symbols.Values)
-            parent?.ChildScopes.Add((symbol.Kind, symbol.ID), scope);
-
         Scopes.Add(scope);
         return scope;
     }
@@ -109,10 +106,10 @@ internal sealed class ResolutionContext
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            symbol = new MemberProductTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new MemberProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         }
         else
-            symbol = new MemberSumTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new MemberSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
 
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
@@ -125,10 +122,10 @@ internal sealed class ResolutionContext
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            symbol = new LocalProductTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new LocalProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
         }
         else
-            symbol = new LocalSumTypeSymbol(typeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new LocalSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
 
         NestedTypeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
@@ -155,19 +152,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);
-
-        var parameters = new List<TypeSyntax>(syntax?.Signature.Parameters.Count ?? 0);
-
-        if (syntax is not null)
-            foreach (var p in syntax.Signature.Parameters)
-            {
-                var type = p.Declarator.Type;
-                parameters.Add(type);
-            }
-
-        var functionParams = new Parameters(parameters);
-
-        Register(enclosingScope, symbol, functionParams);
+        Register(enclosingScope, symbol);
         return symbol;
     }
 
@@ -245,12 +230,15 @@ internal sealed class ResolutionContext
 
     public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
 
-    private static void Register(Scope scope, Symbol symbol, Parameters? parameters = null)
+    public static void BindChildScope(Scope parent, Symbol owner, Scope child) => parent.ChildScopes[GetHandle(owner)] = child;
+
+    public void RegisterSyntaxScope(SyntaxNode syntax, Scope scope) => SyntaxScopes[syntax] = scope;
+
+    public Scope GetSyntaxScope(SyntaxNode syntax, Scope fallback) => SyntaxScopes.TryGetValue(syntax, out var scope) ? scope : fallback;
+
+    private static void Register(Scope scope, Symbol symbol)
     {
         scope.Symbols.Add(GetHandle(symbol), symbol);
-
-
-
         ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
 
         symbols ??= [];
@@ -322,6 +310,10 @@ internal sealed class ResolutionContext
             case QualifiedType qualified:
                 AddTypeNameParts(qualified.Left, parts);
                 AddTypeNameParts(qualified.Right, parts);
+                break;
+
+            case ModifiedType modified:
+                AddTypeNameParts(modified.Type, parts);
                 break;
 
             default:

@@ -11,7 +11,7 @@ internal sealed class FieldSymbol : Symbol
     public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
-    public SymbolHandle Type { get; internal set; }
+    public SymbolHandle? Type { get; internal set; }
 
     public VariableDeclaration? Syntax { get; }
 
@@ -25,4 +25,3 @@ internal sealed class FieldSymbol : Symbol
         Syntax = syntax;
     }
 }
-

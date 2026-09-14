@@ -17,6 +17,10 @@ internal sealed partial class Parser
                     return ParseTopLevelWhileStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseTopLevelReturnStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
+                    return ParseTopLevelGotoStatement();
+                else if (Peek().Kind is TokenKind.Colon)
+                    return ParseTopLevelLabelStatement();
                 break;
 
             case TokenKind.Semicolon:
@@ -78,6 +82,16 @@ internal sealed partial class Parser
         return new TopLevelReturnStatement(statement);
     }
 
+    private TopLevelLabelStatement ParseTopLevelLabelStatement() => new(Consume(), Consume());
+
+    private TopLevelGotoStatement ParseTopLevelGotoStatement()
+    {
+        var keyword = Consume();
+        var identifier = ExpectIdentifierToken("after 'goto'");
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the goto target", MissingTokenAnchor.AfterPrevious);
+        return new TopLevelGotoStatement(keyword, identifier, semicolon);
+    }
+
     /// <summary> Parses a local statement. </summary>
     /// <returns> The statement node. </returns>
     private LocalStatement ParseLocalStatement(StatementParseMode parseMode = StatementParseMode.Normal)
@@ -94,6 +108,10 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
+                            return ParseLocalGotoStatement();
+                        else if (Peek().Kind is TokenKind.Colon)
+                            return ParseLocalLabelStatement();
                         else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
                         {
                             if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
@@ -122,6 +140,10 @@ internal sealed partial class Parser
                             return ParseLocalWhileStatement();
                         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                             return ParseLocalReturnStatement();
+                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
+                            return ParseLocalGotoStatement();
+                        else if (Peek().Kind is TokenKind.Colon)
+                            return ParseLocalLabelStatement();
                         else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
                         {
                             if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
@@ -245,6 +267,16 @@ internal sealed partial class Parser
         var statement = ParseReturnStatement();
 
         return new LocalReturnStatement(statement);
+    }
+
+    private LocalLabelStatement ParseLocalLabelStatement() => new(Consume(), Consume());
+
+    private LocalGotoStatement ParseLocalGotoStatement()
+    {
+        var keyword = Consume();
+        var identifier = ExpectIdentifierToken("after 'goto'");
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the goto target", MissingTokenAnchor.AfterPrevious);
+        return new LocalGotoStatement(keyword, identifier, semicolon);
     }
 
     private ReturnStatement ParseReturnStatement()

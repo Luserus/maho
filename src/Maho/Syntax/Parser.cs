@@ -266,7 +266,8 @@ internal sealed partial class Parser
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-        else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return)
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
+                 CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
         {

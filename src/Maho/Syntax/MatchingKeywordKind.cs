@@ -10,6 +10,7 @@ internal enum MatchingKeywordKind : byte
     If,
     Else,
     While,
+    Goto,
     Return,
     Public,
     Private,

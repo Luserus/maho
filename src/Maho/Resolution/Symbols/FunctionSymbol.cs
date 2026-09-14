@@ -16,7 +16,7 @@ internal sealed class FunctionSymbol : Symbol
     public List<SymbolHandle> LocalFunctions { get; internal set; }
     public List<SymbolHandle> LocalTypes { get; internal set; }
 
-    public SymbolHandle ReturnType { get; internal set; }
+    public SymbolHandle? ReturnType { get; internal set; }
 
     public FunctionDeclaration? Syntax { get; }
 

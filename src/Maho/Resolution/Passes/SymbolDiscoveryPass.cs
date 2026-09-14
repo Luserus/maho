@@ -25,6 +25,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             topLevelMainScope = context.CreateScope(context.GlobalScope);
             topLevelMain = context.CreateFunctionSymbol(context.GlobalScope, new SymbolPart("Main"), context.GlobalNamespace, syntax: null);
+            ResolutionContext.BindChildScope(context.GlobalScope, topLevelMain, topLevelMainScope);
+            context.RegisterSyntaxScope(unit, topLevelMainScope);
         }
 
         ResolveTopLevelScope(unit.Members, context.GlobalScope, context.GlobalNamespace, topLevelMain, topLevelMainScope);
@@ -63,8 +65,29 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case TopLevelVariableDeclaration declaration:
                 ResolveTopLevelVariableDeclaration(declaration.Declaration, scope, containingNamespace, topLevelMain, topLevelMainScope);
                 return containingNamespace;
+            case TopLevelStatement statement when topLevelMain is not null:
+                DiscoverTopLevelLabels(statement, topLevelMainScope, ResolutionContext.GetHandle(topLevelMain));
+                return containingNamespace;
             default:
                 return containingNamespace;
+        }
+    }
+
+    private void DiscoverTopLevelLabels(TopLevelStatement statement, Scope scope, SymbolHandle containingFunction)
+    {
+        switch (statement)
+        {
+            case TopLevelLabelStatement label:
+                context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingFunction, label);
+                break;
+            case TopLevelIfStatement conditional:
+                DiscoverTopLevelLabels(conditional.ThenStatement, scope, containingFunction);
+                if (conditional.ElseStatement is not null)
+                    DiscoverTopLevelLabels(conditional.ElseStatement.Statement, scope, containingFunction);
+                break;
+            case TopLevelWhileStatement loop:
+                DiscoverTopLevelLabels(loop.Statement, scope, containingFunction);
+                break;
         }
     }
 
@@ -84,28 +107,40 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private void ResolveTopLevelVariableDeclaration(VariableDeclaration declaration, Scope scope, NamespaceTrieNode containingNamespace,
                                                     FunctionSymbol? topLevelMain, Scope topLevelMainScope)
     {
-        if (topLevelMain is null)
-        {
-            context.CreateGlobalVariableSymbol(scope, ResolutionContext.GetSymbolName(declaration.Identifier)[^1], containingNamespace, declaration);
-            return;
-        }
-
-        LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, ResolutionContext.GetSymbolName(declaration.Identifier)[^1],
-                                                                         ResolutionContext.GetHandle(topLevelMain), declaration);
+        VariableFlags flags = VariableFlags.None;
 
         foreach (var mod in declaration.Modifiers)
         {
             if (mod.MatchingKind is MatchingKeywordKind.Public)
-                symbol.Flags |= VariableFlags.Public;
+                flags |= VariableFlags.Public;
             else if (mod.MatchingKind is MatchingKeywordKind.Internal)
-                symbol.Flags |= VariableFlags.Internal;
+                flags |= VariableFlags.Internal;
             else if (mod.MatchingKind is MatchingKeywordKind.Static)
-                symbol.Flags |= VariableFlags.Static;
+                flags |= VariableFlags.Static;
             else if (mod.MatchingKind is MatchingKeywordKind.Const)
-                symbol.Flags |= VariableFlags.Const;
+                flags |= VariableFlags.Const;
         }
 
-        topLevelMain.LocalVariables.Add(ResolutionContext.GetHandle(symbol));
+        if (topLevelMain is null)
+        {
+            foreach (var declarator in declaration.Declarators)
+            {
+                var symbol = context.CreateGlobalVariableSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier)[^1], containingNamespace, declaration);
+                symbol.Flags = flags;
+            }
+
+            return;
+        }
+
+        foreach (var declarator in declaration.Declarators)
+        {
+            LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, ResolutionContext.GetSymbolName(declarator.Identifier)[^1],
+                                                                         ResolutionContext.GetHandle(topLevelMain), declaration);
+
+            symbol.Flags = flags;
+
+            topLevelMain.LocalVariables.Add(ResolutionContext.GetHandle(symbol));
+        }
     }
 
     private void ResolveTopLevelTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
@@ -114,6 +149,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         NamespaceTrieNode declaredNamespace = GetDeclaredTypeNamespace(declaration.Name, containingNamespace);
         TypeSymbol symbol = context.CreateTypeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name)[^1], ToResolutionTypeKind(declaration.Kind),
                                                       declaredNamespace, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
+        context.RegisterSyntaxScope(declaration.Body, typeScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
 
@@ -125,19 +162,24 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         Scope typeScope = context.CreateScope(enclosingScope);
         MemberNestedTypeSymbol symbol = context.CreateMemberNestedTypeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name)[^1], ToResolutionTypeKind(declaration.Kind),
                                                                                containingType, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
+        context.RegisterSyntaxScope(declaration.Body, typeScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
     }
 
-    private void ResolveLocalTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, MethodSymbol? containingMethod)
+    private LocalTypeSymbol ResolveLocalTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, MethodSymbol? containingMethod)
     {
         Scope typeScope = context.CreateScope(enclosingScope);
         LocalTypeSymbol symbol = context.CreateLocalTypeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name)[^1], ToResolutionTypeKind(declaration.Kind),
                                                                 containingMethod, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
+        context.RegisterSyntaxScope(declaration.Body, typeScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
+        return symbol;
     }
 
     private void ResolveTypeBody(TypeBody body, Scope scope, SymbolHandle containingType)
@@ -164,7 +206,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 ResolveMemberFunctionDeclaration(declaration.Function, scope, containingType);
                 break;
             case MemberFieldDeclaration declaration:
-                context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(declaration.Declaration.Identifier)[^1], containingType, declaration.Declaration);
+                ResolveFieldDeclaration(declaration.Declaration, scope, containingType);
                 break;
             case MemberPropertyDeclaration declaration:
                 ResolvePropertyDeclaration(declaration, scope);
@@ -177,6 +219,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         Scope functionScope = context.CreateScope(enclosingScope);
         FunctionSymbol symbol = context.CreateFunctionSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier)[^1], containingNamespace,
                                                               declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
+        context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
@@ -187,20 +231,25 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         Scope functionScope = context.CreateScope(enclosingScope);
         MemberMethodSymbol symbol = context.CreateMemberMethodSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier)[^1], containingType, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
+        context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), symbol);
     }
 
-    private void ResolveLocalFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, MethodSymbol? containingMethod)
+    private LocalFunctionSymbol ResolveLocalFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, MethodSymbol? containingMethod)
     {
         Scope functionScope = context.CreateScope(enclosingScope);
         LocalFunctionSymbol symbol = context.CreateLocalFunctionSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier)[^1], containingMethod, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
+        context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), symbol);
+        return symbol;
     }
 
     private void ResolvePropertyDeclaration(MemberPropertyDeclaration declaration, Scope enclosingScope)
@@ -208,7 +257,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         PropertySymbol symbol = context.CreatePropertySymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Identifier)[^1], hasBacking: false, declaration);
 
         foreach (var accessor in declaration.Body.Accessors)
-            ResolveFunctionBody(accessor.Body, context.CreateScope(enclosingScope), ResolutionContext.GetHandle(symbol), containingMethod: null);
+        {
+            Scope accessorScope = context.CreateScope(enclosingScope);
+            context.RegisterSyntaxScope(accessor.Body, accessorScope);
+            ResolveFunctionBody(accessor.Body, accessorScope, ResolutionContext.GetHandle(symbol), containingMethod: null);
+        }
     }
 
     private void DiscoverParameters(FunctionSignature signature, Scope scope, SymbolHandle containingFunction)
@@ -226,6 +279,55 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             ResolveLocal(local, scope, containingSymbol, containingMethod);
     }
 
+    private void ResolveFieldDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingType)
+    {
+        VariableFlags flags = VariableFlags.None;
+
+        foreach (var mod in declaration.Modifiers)
+        {
+            if (mod.MatchingKind is MatchingKeywordKind.Public)
+                flags |= VariableFlags.Public;
+            else if (mod.MatchingKind is MatchingKeywordKind.Internal)
+                flags |= VariableFlags.Internal;
+            else if (mod.MatchingKind is MatchingKeywordKind.Static)
+                flags |= VariableFlags.Static;
+            else if (mod.MatchingKind is MatchingKeywordKind.Const)
+                flags |= VariableFlags.Const;
+        }
+
+        foreach (var declarator in declaration.Declarators)
+        {
+            var symbol = context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier)[^1], containingType, declaration);
+            symbol.Flags = flags;
+        }
+    }
+
+    private List<LocalVariableSymbol> ResolveLocalVariableDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingSymbol)
+    {
+        VariableFlags flags = VariableFlags.None;
+
+        foreach (var mod in declaration.Modifiers)
+        {
+            if (mod.MatchingKind is MatchingKeywordKind.Public)
+                flags |= VariableFlags.Public;
+            else if (mod.MatchingKind is MatchingKeywordKind.Internal)
+                flags |= VariableFlags.Internal;
+            else if (mod.MatchingKind is MatchingKeywordKind.Static)
+                flags |= VariableFlags.Static;
+            else if (mod.MatchingKind is MatchingKeywordKind.Const)
+                flags |= VariableFlags.Const;
+        }
+
+        var symbols = new List<LocalVariableSymbol>(declaration.Declarators.Count);
+        foreach (var declarator in declaration.Declarators)
+        {
+            var symbol = context.CreateLocalVariableSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier)[^1], containingSymbol, declaration);
+            symbol.Flags = flags;
+            symbols.Add(symbol);
+        }
+        return symbols;
+    }
+
     private void ResolveLocal(Local local, Scope scope, SymbolHandle containingSymbol, MethodSymbol? containingMethod)
     {
         switch (local)
@@ -233,21 +335,50 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case LocalBlockStatement block:
             {
                 Scope blockScope = context.CreateScope(scope);
+                context.RegisterSyntaxScope(block, blockScope);
 
                 foreach (var child in block.Locals)
                     ResolveLocal(child, blockScope, containingSymbol, containingMethod);
                 break;
             }
+            case LocalLabelStatement label:
+                context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingSymbol, label);
+                break;
             case LocalTypeDeclaration declaration:
-                ResolveLocalTypeDeclaration(declaration.Type, scope, containingMethod);
+                RegisterLocalType(containingSymbol, ResolveLocalTypeDeclaration(declaration.Type, scope, containingMethod));
                 break;
             case LocalFunctionDeclaration declaration:
-                ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod);
+                RegisterLocalFunction(containingSymbol, ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod));
                 break;
             case LocalVariableDeclarationStatement declaration:
-                context.CreateLocalVariableSymbol(scope, ResolutionContext.GetSymbolName(declaration.Declaration.Identifier)[^1], containingSymbol, declaration.Declaration);
+                foreach (var variable in ResolveLocalVariableDeclaration(declaration.Declaration, scope, containingSymbol))
+                    RegisterLocalVariable(containingSymbol, variable);
                 break;
         }
+    }
+
+    private void RegisterLocalVariable(SymbolHandle owner, LocalVariableSymbol local)
+    {
+        if (owner.Kind is SymbolKind.Function)
+            context.FunctionSymbols[owner.ID].LocalVariables.Add(ResolutionContext.GetHandle(local));
+        else if (owner.Kind is SymbolKind.Method)
+            context.MethodSymbols[owner.ID].LocalVariables.Add(ResolutionContext.GetHandle(local));
+    }
+
+    private void RegisterLocalFunction(SymbolHandle owner, LocalFunctionSymbol local)
+    {
+        if (owner.Kind is SymbolKind.Function)
+            context.FunctionSymbols[owner.ID].LocalFunctions.Add(ResolutionContext.GetHandle(local));
+        else if (owner.Kind is SymbolKind.Method)
+            context.MethodSymbols[owner.ID].LocalFunctions.Add(ResolutionContext.GetHandle(local));
+    }
+
+    private void RegisterLocalType(SymbolHandle owner, LocalTypeSymbol local)
+    {
+        if (owner.Kind is SymbolKind.Function)
+            context.FunctionSymbols[owner.ID].LocalTypes.Add(ResolutionContext.GetHandle(local));
+        else if (owner.Kind is SymbolKind.Method)
+            context.MethodSymbols[owner.ID].LocalTypes.Add(ResolutionContext.GetHandle(local));
     }
 
     private List<SymbolHandle> ResolveTypeParameters(NamedSyntax name, Scope scope, Symbol genericSymbol)

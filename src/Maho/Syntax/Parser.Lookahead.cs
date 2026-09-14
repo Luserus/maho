@@ -180,7 +180,7 @@ internal sealed partial class Parser
 
         if (LookaheadCurrentToken.Kind is TokenKind.Equals)
             return (true, LookaheadResultContext.Success);
-        else if (LookaheadCurrentToken.Kind is TokenKind.Semicolon)
+        else if (LookaheadCurrentToken.Kind is TokenKind.Semicolon or TokenKind.Comma)
             return (true, result);
 
         return (false, LookaheadResultContext.MissingDelimeter);

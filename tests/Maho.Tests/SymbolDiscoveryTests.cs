@@ -125,6 +125,8 @@ public sealed class SymbolDiscoveryTests
                 }
             }
 
+            public int g2;
+
             {
                 public int global;
                 public static int Function<Y>() { return 0; }
@@ -140,7 +142,7 @@ public sealed class SymbolDiscoveryTests
         Assert.Equal(2, context.NestedTypeSymbols.Count);
         Assert.Single(context.FunctionSymbols);
         Assert.Equal(2, context.MethodSymbols.Count);
-        Assert.Single(context.GlobalVariableSymbols);
+        Assert.Equal(2, context.GlobalVariableSymbols.Count);
         Assert.Single(context.FieldSymbols);
         Assert.Single(context.PropertySymbols);
         Assert.Single(context.ParameterSymbols);
@@ -150,7 +152,95 @@ public sealed class SymbolDiscoveryTests
         FunctionSymbol function = Assert.Single(context.FunctionSymbols);;
         Assert.All(context.TypeParameterSymbols, parameter => Assert.NotNull(parameter.GenericSymbol));
 
-        Assert.True(context.GlobalNamespace.Next.ContainsKey(new SymbolName("Example")));
+        Assert.True(context.GlobalNamespace.Next.ContainsKey(new SymbolPart("Example")));
         Assert.True(context.Scopes.Count > 1);
+    }
+
+    [Fact]
+    public void Resolve_ResolvesDeclarationTypesAndNestedMembers()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Value;
+            public struct Container : Value
+            {
+                public Value field;
+                public Value Property { get; }
+                public Value Method(Value parameter)
+                {
+                    Value local = parameter;
+                    return local;
+                }
+            }
+            public Value Function(Value parameter) { return parameter; }
+            public Value global;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        TypeSymbol value = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Value");
+        var valueHandle = ResolutionContext.GetHandle(value);
+        ProductTypeSymbol container = Assert.IsType<ProductTypeSymbol>(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Container"));
+
+        Assert.Equal(valueHandle, Assert.Single(container.BaseTypes));
+        Assert.Equal(valueHandle, Assert.Single(context.FieldSymbols).Type);
+        Assert.Equal(valueHandle, Assert.Single(context.PropertySymbols).Type);
+        Assert.Equal(valueHandle, Assert.Single(context.MethodSymbols).ReturnType);
+        Assert.Equal(valueHandle, Assert.Single(context.FunctionSymbols).ReturnType);
+        Assert.Equal(valueHandle, Assert.Single(context.GlobalVariableSymbols).Type);
+        Assert.All(context.ParameterSymbols, parameter => Assert.Equal(valueHandle, parameter.Type));
+        Assert.Equal(valueHandle, Assert.Single(context.LocalVariableSymbols).Type);
+        Assert.Single(container.Fields);
+        Assert.Single(container.Properties);
+        Assert.Single(container.Methods);
+    }
+
+    [Fact]
+    public void Resolve_LabelsAndGotoBindWithinTheirFunction()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static int Loop()
+            {
+            again:
+                goto again;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        LabelSymbol label = Assert.Single(context.LabelSymbols);
+        TopLevelFunctionDeclaration declaration = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        FunctionBlockBody body = Assert.IsType<FunctionBlockBody>(declaration.Function.Body);
+        LocalGotoStatement branch = Assert.IsType<LocalGotoStatement>(body.Locals[1]);
+
+        Assert.True(context.ResolvedTree.TryGetReference(branch, out var target));
+        Assert.Equal(ResolutionContext.GetHandle(label), target);
+    }
+
+    [Fact]
+    public void Resolve_DiscoversEveryVariableDeclaratorInEachScope()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Value
+            {
+                public Value firstField, secondField;
+                public Value Method()
+                {
+                    Value firstLocal, secondLocal;
+                    return firstLocal;
+                }
+            }
+            public Value firstGlobal, secondGlobal;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        Assert.Equal(["firstGlobal", "secondGlobal"], context.GlobalVariableSymbols.Select(symbol => symbol.Name.ToString()).Order());
+        Assert.Equal(["firstField", "secondField"], context.FieldSymbols.Select(symbol => symbol.Name.ToString()).Order());
+        Assert.Equal(["firstLocal", "secondLocal"], context.LocalVariableSymbols.Select(symbol => symbol.Name.ToString()).Order());
+        Assert.Equal(2, Assert.Single(context.MethodSymbols).LocalVariables.Count);
     }
 }
