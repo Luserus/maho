@@ -135,8 +135,8 @@ public sealed class ParserTests
         Assert.Equal("T", Assert.Single(genericName.TypeParameters).Identifier.Value);
         Assert.Single(generic.Alias.Constraints);
         GenericType genericTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(generic.Alias.Target).Right);
-        Assert.Equal("T", Assert.IsType<SimpleType>(genericTarget.TypeArguments[0]).Name.Value);
-        Assert.Equal("Int32", Assert.IsType<SimpleType>(genericTarget.TypeArguments[1]).Name.Value);
+        Assert.Equal("T", Assert.IsType<NamedExpressionTypeArgument>(genericTarget.TypeArguments[0]).Expression.Identifier.Value);
+        Assert.Equal("Int32", Assert.IsType<NamedExpressionTypeArgument>(genericTarget.TypeArguments[1]).Expression.Identifier.Value);
     }
 
     [Fact]
@@ -487,8 +487,8 @@ public sealed class ParserTests
 
         GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0]);
         Assert.Equal("Base", firstBaseType.Name.Value);
-        SimpleType firstBaseArgument = Assert.IsType<SimpleType>(firstBaseType.TypeArguments[0]);
-        Assert.Equal("T", firstBaseArgument.Name.Value);
+        NamedExpressionTypeArgument firstBaseArgument = Assert.IsType<NamedExpressionTypeArgument>(firstBaseType.TypeArguments[0]);
+        Assert.Equal("T", firstBaseArgument.Expression.Identifier.Value);
 
         QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1]);
         Assert.Equal("Outer", Assert.IsType<SimpleType>(secondBaseType.Left).Name.Value);
@@ -552,7 +552,7 @@ public sealed class ParserTests
         TypeTypeConstraint resultTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(resultConstraint.Constraints));
         GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
         Assert.Equal("Output", resultConstraintType.Name.Value);
-        Assert.Equal("TInput", Assert.IsType<SimpleType>(resultConstraintType.TypeArguments[0]).Name.Value);
+        Assert.Equal("TInput", Assert.IsType<NamedExpressionTypeArgument>(resultConstraintType.TypeArguments[0]).Expression.Identifier.Value);
     }
 
     [Fact]

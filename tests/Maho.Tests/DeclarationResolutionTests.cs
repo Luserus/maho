@@ -127,13 +127,13 @@ public sealed class DeclarationResolutionTests
         AssertReference(context, specializedTarget, ResolutionContext.GetHandle(generic));
         AssertReference(context, Assert.Single(specializedTarget.TypeArguments), ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
         GenericType projectedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(projectedSyntax.Alias.Target).Right);
-        AssertReference(context, Assert.Single(projectedTarget.TypeArguments), ResolutionContext.GetHandle(projectedParameter));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(Assert.Single(projectedTarget.TypeArguments)).Expression, ResolutionContext.GetHandle(projectedParameter));
 
         TopLevelAliasDeclaration mixedSyntax = Assert.IsType<TopLevelAliasDeclaration>(root.Members[5]);
         GenericType mixedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(mixedSyntax.Alias.Target).Right);
         AssertReference(context, mixedTarget, ResolutionContext.GetHandle(type));
-        AssertReference(context, mixedTarget.TypeArguments[0], ResolutionContext.GetHandle(context.TypeParameterSymbols[mixed.TypeParameters[0].ID]));
-        AssertReference(context, mixedTarget.TypeArguments[1], ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(mixedTarget.TypeArguments[0]).Expression, ResolutionContext.GetHandle(context.TypeParameterSymbols[mixed.TypeParameters[0].ID]));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(mixedTarget.TypeArguments[1]).Expression, ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
     }
 
     [Fact]
@@ -219,7 +219,9 @@ public sealed class DeclarationResolutionTests
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Int32;
             public struct MyType<T, N: int>;
+            public Int32 count;
             public MyType<Int32, 100> value;
+            public MyType<Int32, count> namedValue;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -227,16 +229,24 @@ public sealed class DeclarationResolutionTests
         ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
         TypeSymbol int32 = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32");
         TypeSymbol myType = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "MyType");
-        GlobalVariableSymbol value = Assert.Single(context.GlobalVariableSymbols);
-        TopLevelVariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(root.Members[2]);
+        GlobalVariableSymbol value = Assert.Single(context.GlobalVariableSymbols, symbol => symbol.Name.ToString() == "value");
+        GlobalVariableSymbol count = Assert.Single(context.GlobalVariableSymbols, symbol => symbol.Name.ToString() == "count");
+        GlobalVariableSymbol namedValue = Assert.Single(context.GlobalVariableSymbols, symbol => symbol.Name.ToString() == "namedValue");
+        TopLevelVariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(root.Members[3]);
+        TopLevelVariableDeclaration namedDeclaration = Assert.IsType<TopLevelVariableDeclaration>(root.Members[4]);
         GenericType type = Assert.IsType<GenericType>(declaration.Declaration.Type);
+        GenericType namedType = Assert.IsType<GenericType>(namedDeclaration.Declaration.Type);
 
         Assert.Equal(ResolutionContext.GetHandle(myType), value.Type);
         AssertReference(context, type, ResolutionContext.GetHandle(myType));
-        AssertReference(context, Assert.IsType<SimpleType>(type.TypeArguments[0]), ResolutionContext.GetHandle(int32));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(type.TypeArguments[0]).Expression, ResolutionContext.GetHandle(int32));
         LiteralTypeArgument literal = Assert.IsType<LiteralTypeArgument>(type.TypeArguments[1]);
         Assert.Equal("100", literal.Literal.Value);
         Assert.False(context.ResolvedTree.TryGetReference(literal, out _));
+        Assert.Equal(ResolutionContext.GetHandle(myType), namedValue.Type);
+        AssertReference(context, namedType, ResolutionContext.GetHandle(myType));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(namedType.TypeArguments[0]).Expression, ResolutionContext.GetHandle(int32));
+        AssertReference(context, Assert.IsType<NamedExpressionTypeArgument>(namedType.TypeArguments[1]).Expression, ResolutionContext.GetHandle(count));
     }
 
     [Fact]

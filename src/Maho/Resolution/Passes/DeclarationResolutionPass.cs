@@ -146,7 +146,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 return false;
 
             TypeParameterSymbol parameter = context.TypeParameterSymbols[targetParameters[index].ID];
-            SymbolHandle? argument = ResolveType(targetArguments[index], scope);
+
+            if (parameter.ParameterKind is not GenericParameterKind.Type || targetArguments[index] is LiteralTypeArgument)
+                continue;
+
+            SymbolHandle? argument = ResolveGenericArgumentAsType(targetArguments[index], scope);
 
             if (argument is null || !SatisfiesAllConstraints(argument.Value, parameter.Constraints))
                 return false;
@@ -453,7 +457,19 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private SymbolHandle? ResolveType(TypeSyntax syntax, Scope scope)
     {
+        if (syntax is GenericType generic)
+        {
+            SymbolHandle? genericTarget = ResolveTypeName(generic, scope);
+            ResolveGenericTypeArguments(generic, genericTarget, scope);
+            return genericTarget;
+        }
+
         ResolveTypeChildren(syntax, scope);
+        return ResolveTypeName(syntax, scope);
+    }
+
+    private SymbolHandle? ResolveTypeName(TypeSyntax syntax, Scope scope)
+    {
         if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is not { } symbol)
             return null;
 
@@ -462,14 +478,55 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return handle;
     }
 
+    private void ResolveGenericTypeArguments(GenericType generic, SymbolHandle? target, Scope scope)
+    {
+        IReadOnlyList<SymbolHandle> parameters = target is { } handle ? GetTypeParameters(handle) : [];
+
+        for (int index = 0; index < generic.TypeArguments.Count; index++)
+        {
+            TypeSyntax argument = generic.TypeArguments[index];
+            TypeParameterSymbol? parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.TypeParameter
+                ? context.TypeParameterSymbols[parameters[index].ID]
+                : null;
+
+            switch (argument)
+            {
+                case LiteralTypeArgument:
+                    break;
+                case NamedExpressionTypeArgument named when parameter?.ParameterKind is GenericParameterKind.Type:
+                    ResolveNamedArgumentAsType(named.Expression, scope);
+                    break;
+                case NamedExpressionTypeArgument named:
+                    ResolveExpression(named.Expression, scope, default);
+                    break;
+                default:
+                    ResolveType(argument, scope);
+                    break;
+            }
+        }
+    }
+
+    private SymbolHandle? ResolveGenericArgumentAsType(TypeSyntax argument, Scope scope) => argument switch
+    {
+        NamedExpressionTypeArgument named => ResolveNamedArgumentAsType(named.Expression, scope),
+        _ => ResolveType(argument, scope)
+    };
+
+    private SymbolHandle? ResolveNamedArgumentAsType(IdentifierNameExpression expression, Scope scope)
+    {
+        if (ResolveSingle(scope, new SymbolName(new SymbolPart(expression.Identifier))) is not { } symbol)
+            return null;
+
+        SymbolHandle handle = ResolutionContext.GetHandle(symbol);
+        context.ResolvedTree.AddReference(expression, handle);
+        return handle;
+    }
+
     private void ResolveTypeChildren(TypeSyntax syntax, Scope scope)
     {
         switch (syntax)
         {
             case GenericType generic:
-                foreach (var argument in generic.TypeArguments)
-                    if (argument is not LiteralTypeArgument)
-                        ResolveType(argument, scope);
                 break;
             case QualifiedType qualified:
                 ResolveType(qualified.Left, scope);

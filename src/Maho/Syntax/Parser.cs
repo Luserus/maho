@@ -333,9 +333,16 @@ internal sealed partial class Parser
     }
 
     /// <summary>Parses either a type argument or a literal compile-time argument.</summary>
-    private TypeSyntax ParseTypeArgument() => IsLiteralTokenKind(CurrentToken.Kind)
-        ? new LiteralTypeArgument(Consume())
-        : ParseTypeSyntax();
+    private TypeSyntax ParseTypeArgument()
+    {
+        if (IsLiteralTokenKind(CurrentToken.Kind))
+            return new LiteralTypeArgument(new LiteralExpression(Consume()));
+
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
+            return new NamedExpressionTypeArgument(new IdentifierNameExpression(Consume()));
+
+        return ParseTypeSyntax();
+    }
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
     private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()

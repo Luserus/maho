@@ -288,7 +288,9 @@ internal sealed partial class Parser
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
-                nodesAndSeparators.Add(new LiteralTypeArgument(LookaheadConsume()));
+                nodesAndSeparators.Add(new LiteralTypeArgument(new LiteralExpression(LookaheadConsume())));
+            else if (LookaheadCurrentToken.Kind is TokenKind.Identifier && LookaheadPeek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
+                nodesAndSeparators.Add(new NamedExpressionTypeArgument(new IdentifierNameExpression(LookaheadConsume())));
             else
             {
                 if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
