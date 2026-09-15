@@ -681,9 +681,9 @@ internal sealed partial class Parser
 
     private GenericType ParseGenericType(Token identifier)
     {
-        var (lessThan, typeArguments, GreaterThan) = ParseGenerics();
+        var (lessThan, genericArguments, GreaterThan) = ParseGenerics();
 
-        return new GenericType(identifier, lessThan, typeArguments, GreaterThan);
+        return new GenericType(identifier, lessThan, genericArguments, GreaterThan);
     }
 
     private TypeSyntax ParseModifiedType(TypeSyntax baseType)

@@ -306,15 +306,15 @@ internal sealed partial class Parser
         return ParseLocalStatement(parseMode);
     }
 
-    /// <summary> Parses a comma-separated generic type-argument list up to the closing <c>&gt;</c>. </summary>
-    private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()
+    /// <summary> Parses a comma-separated generic-argument list up to the closing <c>&gt;</c>. </summary>
+    private SeparatedSyntaxList<TypeSyntax> ParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseTypeArgument());
+            nodesAndSeparators.Add(ParseGenericArgument());
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -327,13 +327,13 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type argument list");
+            diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the generic argument list");
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
 
-    /// <summary>Parses either a type argument or a literal compile-time argument.</summary>
-    private TypeSyntax ParseTypeArgument()
+    /// <summary>Parses either a type argument or a compile-time expression argument.</summary>
+    private TypeSyntax ParseGenericArgument()
     {
         if (IsLiteralTokenKind(CurrentToken.Kind))
             return new LiteralGenericArgument(new LiteralExpression(Consume()));
@@ -345,13 +345,13 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
-    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> GenericArguments, Token GreaterThan) ParseGenerics()
     {
         var lessThan = Consume();
-        var typeArguments = ParseTypeArgumentList();
+        var genericArguments = ParseGenericArgumentList();
         var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic argument list");
 
-        return (lessThan, typeArguments, greaterThan);
+        return (lessThan, genericArguments, greaterThan);
     }
 
     /// <summary> Returns the length and combined form of combined operator token types. </summary>

@@ -304,7 +304,7 @@ internal sealed class ResolutionContext
                 break;
 
             case GenericType generic:
-                parts.Add(new SymbolPart(generic.Name, generic.TypeArguments.Count));
+                parts.Add(new SymbolPart(generic.Name, generic.GenericArguments.Count));
                 break;
 
             case QualifiedType qualified:

@@ -125,15 +125,15 @@ public sealed class DeclarationResolutionTests
         AssertReference(context, directSyntax.Alias.Target, ResolutionContext.GetHandle(plain));
         GenericType specializedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(specializedSyntax.Alias.Target).Right);
         AssertReference(context, specializedTarget, ResolutionContext.GetHandle(generic));
-        AssertReference(context, Assert.Single(specializedTarget.TypeArguments), ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
+        AssertReference(context, Assert.Single(specializedTarget.GenericArguments), ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
         GenericType projectedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(projectedSyntax.Alias.Target).Right);
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(Assert.Single(projectedTarget.TypeArguments)).Expression, ResolutionContext.GetHandle(projectedParameter));
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(Assert.Single(projectedTarget.GenericArguments)).Expression, ResolutionContext.GetHandle(projectedParameter));
 
         TopLevelAliasDeclaration mixedSyntax = Assert.IsType<TopLevelAliasDeclaration>(root.Members[5]);
         GenericType mixedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(mixedSyntax.Alias.Target).Right);
         AssertReference(context, mixedTarget, ResolutionContext.GetHandle(type));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.TypeArguments[0]).Expression, ResolutionContext.GetHandle(context.GenericParameterSymbols[mixed.GenericParameters[0].ID]));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.TypeArguments[1]).Expression, ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.GenericArguments[0]).Expression, ResolutionContext.GetHandle(context.GenericParameterSymbols[mixed.GenericParameters[0].ID]));
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.GenericArguments[1]).Expression, ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
     }
 
     [Fact]
@@ -239,14 +239,14 @@ public sealed class DeclarationResolutionTests
 
         Assert.Equal(ResolutionContext.GetHandle(myType), value.Type);
         AssertReference(context, type, ResolutionContext.GetHandle(myType));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(type.TypeArguments[0]).Expression, ResolutionContext.GetHandle(int32));
-        LiteralGenericArgument literal = Assert.IsType<LiteralGenericArgument>(type.TypeArguments[1]);
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(type.GenericArguments[0]).Expression, ResolutionContext.GetHandle(int32));
+        LiteralGenericArgument literal = Assert.IsType<LiteralGenericArgument>(type.GenericArguments[1]);
         Assert.Equal("100", literal.Literal.Value);
         Assert.False(context.ResolvedTree.TryGetReference(literal, out _));
         Assert.Equal(ResolutionContext.GetHandle(myType), namedValue.Type);
         AssertReference(context, namedType, ResolutionContext.GetHandle(myType));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(namedType.TypeArguments[0]).Expression, ResolutionContext.GetHandle(int32));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(namedType.TypeArguments[1]).Expression, ResolutionContext.GetHandle(count));
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(namedType.GenericArguments[0]).Expression, ResolutionContext.GetHandle(int32));
+        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(namedType.GenericArguments[1]).Expression, ResolutionContext.GetHandle(count));
     }
 
     [Fact]

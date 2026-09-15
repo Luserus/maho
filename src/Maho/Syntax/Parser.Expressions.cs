@@ -138,8 +138,8 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
         {
-            var (lessThan, typeArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, lessThan, typeArguments, greaterThan);
+            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
+            return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);
         }
 
         return new IdentifierNameExpression(identifier);

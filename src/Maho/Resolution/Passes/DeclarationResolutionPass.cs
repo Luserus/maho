@@ -133,7 +133,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private bool AliasConstraintsAreCompatible(SymbolHandle target, TypeSyntax targetSyntax, Scope scope)
     {
         IReadOnlyList<SymbolHandle> targetParameters = GetGenericParameters(target);
-        IReadOnlyList<TypeSyntax> targetArguments = GetTypeArguments(targetSyntax);
+        IReadOnlyList<TypeSyntax> targetArguments = GetGenericArguments(targetSyntax);
 
         if (targetParameters.Count == 0)
             return true;
@@ -167,21 +167,21 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         _ => []
     };
 
-    private static IReadOnlyList<TypeSyntax> GetTypeArguments(TypeSyntax syntax)
+    private static IReadOnlyList<TypeSyntax> GetGenericArguments(TypeSyntax syntax)
     {
         switch (syntax)
         {
             case GenericType generic:
             {
-                var arguments = new List<TypeSyntax>(generic.TypeArguments.Count);
-                foreach (var argument in generic.TypeArguments)
+                var arguments = new List<TypeSyntax>(generic.GenericArguments.Count);
+                foreach (var argument in generic.GenericArguments)
                     arguments.Add(argument);
                 return arguments;
             }
             case QualifiedType qualified:
-                return GetTypeArguments(qualified.Right);
+                return GetGenericArguments(qualified.Right);
             case ModifiedType modified:
-                return GetTypeArguments(modified.Type);
+                return GetGenericArguments(modified.Type);
             default:
                 return [];
         }
@@ -460,7 +460,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax is GenericType generic)
         {
             SymbolHandle? genericTarget = ResolveTypeName(generic, scope);
-            ResolveGenericTypeArguments(generic, genericTarget, scope);
+            ResolveGenericArguments(generic, genericTarget, scope);
             return genericTarget;
         }
 
@@ -478,13 +478,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return handle;
     }
 
-    private void ResolveGenericTypeArguments(GenericType generic, SymbolHandle? target, Scope scope)
+    private void ResolveGenericArguments(GenericType generic, SymbolHandle? target, Scope scope)
     {
         IReadOnlyList<SymbolHandle> parameters = target is { } handle ? GetGenericParameters(handle) : [];
 
-        for (int index = 0; index < generic.TypeArguments.Count; index++)
+        for (int index = 0; index < generic.GenericArguments.Count; index++)
         {
-            TypeSyntax argument = generic.TypeArguments[index];
+            TypeSyntax argument = generic.GenericArguments[index];
             GenericParameterSymbol? parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
                 ? context.GenericParameterSymbols[parameters[index].ID]
                 : null;
@@ -627,12 +627,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private void ResolveNamedExpression(NamedExpression syntax, Scope scope)
     {
         SymbolPart name = syntax is GenericNameExpression generic
-            ? new SymbolPart(generic.Identifier, generic.TypeArguments.Count)
+            ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count)
             : new SymbolPart(syntax.Identifier);
         if (ResolveSingle(scope, new SymbolName(name)) is { } symbol)
             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(symbol));
         if (syntax is GenericNameExpression genericName)
-            foreach (var argument in genericName.TypeArguments)
+            foreach (var argument in genericName.GenericArguments)
                 ResolveType(argument, scope);
     }
 

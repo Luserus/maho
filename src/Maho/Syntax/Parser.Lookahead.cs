@@ -280,7 +280,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses a speculative generic type-argument list without mutating real parser state. </summary>
-    private (SeparatedSyntaxList<TypeSyntax> TypeArguments, bool Success) LookaheadParseTypeArgumentList()
+    private (SeparatedSyntaxList<TypeSyntax> GenericArguments, bool Success) LookaheadParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
@@ -321,26 +321,26 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses one complete speculative generic argument clause, including its angle brackets. </summary>
-    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan, bool Success) LookaheadParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> GenericArguments, Token GreaterThan, bool Success) LookaheadParseGenerics()
     {
         var lessThan = LookaheadConsume();
-        var (typeArguments, success) = LookaheadParseTypeArgumentList();
+        var (genericArguments, success) = LookaheadParseGenericArgumentList();
 
         if (!success)
         {
-            return (lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
+            return (lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
         }
 
         Token greaterThan;
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
         {
-            return (lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
+            return (lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
         }
         else
             greaterThan = LookaheadConsume();
 
-        return (lessThan, typeArguments, greaterThan, true);
+        return (lessThan, genericArguments, greaterThan, true);
     }
 
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
@@ -410,12 +410,12 @@ internal sealed partial class Parser
     /// <summary> Speculatively parses a generic type name after its identifier has already been consumed. </summary>
     private (GenericType Type, bool Success) LookaheadParseGenericType(Token identifier)
     {
-        var (lessThan, typeArguments, GreaterThan, success) = LookaheadParseGenerics();
+        var (lessThan, genericArguments, GreaterThan, success) = LookaheadParseGenerics();
 
         if (!success)
-            return (new GenericType(identifier, lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            return (new GenericType(identifier, lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
-        return (new GenericType(identifier, lessThan, typeArguments, GreaterThan), true);
+        return (new GenericType(identifier, lessThan, genericArguments, GreaterThan), true);
     }
 
     /// <summary> Speculatively parses zero or more postfix type modifiers such as arrays, pointers, references, or optionals. </summary>
