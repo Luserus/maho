@@ -38,5 +38,5 @@ These files are intentionally declarative: they define the tree that the parser 
 
 If you are trying to understand how an expression attaches to surrounding statements or declarations, pair this folder with:
 
-- [`../Statements/docs/README.md`](../../Statements/docs/README.md)
-- [`../Declarations/docs/README.md`](../../Declarations/docs/README.md)
+- [`syntax-statements.md`](syntax-statements.md)
+- [`syntax-declarations.md`](syntax-declarations.md)

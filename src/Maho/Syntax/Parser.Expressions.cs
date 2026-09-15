@@ -274,7 +274,6 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Expression> ParseExpressionList(TokenKind delimiter)
     {
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind != delimiter && CurrentToken.Kind is not TokenKind.EndToken)
         {
@@ -282,19 +281,14 @@ internal sealed partial class Parser
                 break;
                 
             nodesAndSeparators.Add(ParseExpectedExpression("after ',' in the expression list", MissingTokenAnchor.AfterPrevious));
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the collection expression");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
@@ -384,7 +378,6 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
@@ -393,19 +386,13 @@ internal sealed partial class Parser
 
             nodesAndSeparators.Add(ParseArgumentExpression());
 
-            wasCommaLast = false;
-
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the argument list");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }

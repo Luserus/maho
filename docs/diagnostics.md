@@ -104,5 +104,5 @@ That small normalization step is why the same diagnostic helper can produce read
 1. `DiagnosticKind.cs`
 2. `Diagnostic.cs`
 3. `DiagnosticsManager.cs`
-4. [`../../Analysis/docs/README.md`](../../Analysis/docs/README.md)
-5. [`../../../Maho.Cli/docs/README.md`](../../../Maho.Cli/docs/README.md)
+4. [`analysis.md`](analysis.md)
+5. [`cli.md`](cli.md)

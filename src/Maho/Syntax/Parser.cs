@@ -310,24 +310,18 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<TypeSyntax> ParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             nodesAndSeparators.Add(ParseGenericArgument());
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the generic argument list");
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }

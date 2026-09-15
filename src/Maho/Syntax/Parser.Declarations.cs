@@ -124,24 +124,18 @@ internal sealed partial class Parser
     {
         Token openBracket = Consume();
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.RightBracket and not TokenKind.EndToken)
         {
             nodesAndSeparators.Add(ParseAttributeApplication());
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the attribute list");
 
         Token closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the attribute list");
         return new AttributeListSyntax(openBracket, new SeparatedSyntaxList<AttributeApplication>(nodesAndSeparators), closeBracket);
@@ -165,7 +159,6 @@ internal sealed partial class Parser
     {
         var colon = Consume();
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken && CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
         {
@@ -177,19 +170,14 @@ internal sealed partial class Parser
 
             TypeSyntax type = ParseTypeSyntax();
             nodesAndSeparators.Add(type);
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the base type list");
 
         var baseTypes = new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
 
@@ -205,26 +193,20 @@ internal sealed partial class Parser
         var colon = ExpectToken(TokenKind.Colon, "':'", "after the type");
 
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.Equals and not TokenKind.EndToken &&
                CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
         {
             var constraint = ParseTypeConstraint();
             nodesAndSeparators.Add(constraint);
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the constraints list");
 
         var typeConstraints = new SeparatedSyntaxList<TypeConstraint>(nodesAndSeparators);
 
@@ -490,7 +472,6 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Parameter> ParseParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
@@ -523,19 +504,14 @@ internal sealed partial class Parser
             var variableDecl = new Parameter(declarator, initializer);
 
             nodesAndSeparators.Add(variableDecl);
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the parameter list");
 
         return new SeparatedSyntaxList<Parameter>(nodesAndSeparators);
     }
@@ -805,7 +781,6 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<GenericParameterSyntax> ParseGenericParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -843,19 +818,14 @@ internal sealed partial class Parser
             }
 
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedGenericParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the generic parameter list");
 
         return new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators);
     }

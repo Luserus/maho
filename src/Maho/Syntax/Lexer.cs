@@ -284,6 +284,7 @@ internal sealed partial class Lexer
         '#' => (true, TokenKind.Octothorpe),
         '%' => (true, TokenKind.Percentage),
         '&' => (true, TokenKind.Ampersand),
+        '|' => (true, TokenKind.VerticalBar),
         '\'' => (true, TokenKind.SingleQuote),
         '(' => (true, TokenKind.LeftParen),
         ')' => (true, TokenKind.RightParen),

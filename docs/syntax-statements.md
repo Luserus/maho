@@ -55,4 +55,4 @@ implicit `Main` function.
 
 - Start with `TopLevelStatement` or `LocalStatement` depending on the scope you are tracing.
 - Read the matching `If`, `While`, `Block`, or declaration statement type next.
-- Pair this folder with [`../Expressions/docs/README.md`](../../Expressions/docs/README.md) when a statement wraps an expression.
+- Pair this guide with [`syntax-expressions.md`](syntax-expressions.md) when a statement wraps an expression.

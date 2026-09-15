@@ -283,7 +283,6 @@ internal sealed partial class Parser
     private (SeparatedSyntaxList<TypeSyntax> GenericArguments, bool Success) LookaheadParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -303,19 +302,13 @@ internal sealed partial class Parser
 
                 nodesAndSeparators.Add(type);
             }
-            wasCommaLast = false;
-
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(LookaheadConsume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
 
         return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), true);
     }
@@ -543,7 +536,6 @@ internal sealed partial class Parser
     private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseGenericParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -584,19 +576,14 @@ internal sealed partial class Parser
             }
 
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
-            wasCommaLast = false;
 
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(LookaheadConsume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
 
         return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), true);
     }

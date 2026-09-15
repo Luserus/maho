@@ -53,10 +53,10 @@ That means syntax is both a computation layer and a long-lived data model.
 
 ## Folder map
 
-- [`Declarations/docs/README.md`](../Declarations/docs/README.md): names, types, and declaration nodes.
-- [`Expressions/docs/README.md`](../Expressions/docs/README.md): expression node families.
-- [`Fragments/docs/README.md`](../Fragments/docs/README.md): reusable pieces that sit between declarations/statements and full grammar constructs.
-- [`Statements/docs/README.md`](../Statements/docs/README.md): statement node families.
+- [`syntax-declarations.md`](syntax-declarations.md): names, types, and declaration nodes.
+- [`syntax-expressions.md`](syntax-expressions.md): expression node families.
+- [`syntax-fragments.md`](syntax-fragments.md): reusable pieces that sit between declarations/statements and full grammar constructs.
+- [`syntax-statements.md`](syntax-statements.md): statement node families.
 
 ## Types worth knowing at the syntax-model level
 

@@ -56,4 +56,4 @@ The repeated top-level/member/local variants are worth noting. They preserve gra
 
 - Start with `NamedSyntax` and `TypeSyntax` if you want the shared abstractions.
 - Read the context-specific wrappers if you are trying to understand where a declaration can legally appear.
-- Jump to [`../Fragments/docs/README.md`](../../Fragments/docs/README.md) when the declaration points at bodies, modifiers, or declarator pieces.
+- Jump to [`syntax-fragments.md`](syntax-fragments.md) when the declaration points at bodies, modifiers, or declarator pieces.

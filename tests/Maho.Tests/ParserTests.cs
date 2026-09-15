@@ -556,6 +556,57 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_TrailingCommas_AreAllowedOutsideVariableDeclarators()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            [First, Second,]
+            public class Box<T, N: int,> : Base<T,>, Other,
+                where T : Constraint, OtherConstraint,
+            {
+                public void Function(Int32 a, Int32 b,)
+                {
+                    Call(a, b,);
+                    new Int32[] { a, b, };
+                }
+            }
+
+            public Box<Int32, 100,> value;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TypeDeclaration box = Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]).Type;
+        GenericName name = Assert.IsType<GenericName>(box.Name);
+        TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(box.Base);
+        TypeConstraintClause constraint = Assert.Single(box.Constraints);
+        FunctionDeclaration function = Assert.IsType<MemberFunctionDeclaration>(Assert.IsType<TypeBlockBody>(box.Body).Members[0]).Function;
+        FunctionBlockBody body = Assert.IsType<FunctionBlockBody>(function.Body);
+        GenericType variableType = Assert.IsType<GenericType>(Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]).Declaration.Type);
+
+        AssertTrailingComma(box.Attributes[0].Attributes);
+        AssertTrailingComma(name.GenericParameters);
+        AssertTrailingComma(baseClause.BaseTypes);
+        AssertTrailingComma(Assert.IsType<GenericType>(baseClause.BaseTypes[0]).GenericArguments);
+        AssertTrailingComma(constraint.Constraints);
+        AssertTrailingComma(function.Signature.Parameters);
+        AssertTrailingComma(Assert.IsType<CallExpression>(Assert.IsType<LocalExpressionStatement>(body.Locals[0]).Expression).Arguments);
+        AssertTrailingComma(Assert.IsType<ArrayCreationExpression>(Assert.IsType<LocalExpressionStatement>(body.Locals[1]).Expression).Initializer!.Expressions);
+        AssertTrailingComma(variableType.GenericArguments);
+    }
+
+    [Fact]
+    public void Parse_VariableDeclarators_RejectTrailingComma()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("Int32 first, second,;");
+
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0006");
+
+        VariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members)).Declaration;
+        Assert.Equal(2, declaration.Declarators.Count);
+        AssertTrailingComma(declaration.Declarators);
+    }
+
+    [Fact]
     public void Parse_GenericDeclaration_SupportsCompileTimeAndVariadicParameters()
     {
         TypeDeclaration declaration = ParseSingleTopLevelType("""
@@ -650,7 +701,7 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_TypeDeclaration_RecoversFromTrailingCommaBeforeConstraintClause()
+    public void Parse_TypeDeclaration_AllowsTrailingCommaBeforeConstraintClause()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public class Box<T> : Base<T>,
@@ -660,13 +711,14 @@ public sealed class ParserTests
             }
             """);
 
-        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Empty(diagnostics.Diagnostics);
 
         TopLevelTypeDeclaration declaration = Assert.Single(root.Members.OfType<TopLevelTypeDeclaration>());
         TypeDeclaration type = declaration.Type;
 
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Single(baseClause.BaseTypes);
+        AssertTrailingComma(baseClause.BaseTypes);
         Assert.Single(type.Constraints);
 
         TypeBlockBody body = Assert.IsType<TypeBlockBody>(type.Body);
@@ -955,5 +1007,11 @@ public sealed class ParserTests
     {
         foreach (Type expectedType in expectedTypes)
             Assert.Contains(expectedType, actualTypes);
+    }
+
+    private static void AssertTrailingComma<T>(SeparatedSyntaxList<T> list) where T : SyntaxNode
+    {
+        Assert.NotEqual(0, list.Count);
+        Assert.Equal(TokenKind.Comma, Assert.IsType<Token>(list.GetSeparator(list.Count - 1)).Kind);
     }
 }

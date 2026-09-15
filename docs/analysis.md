@@ -234,5 +234,5 @@ These are not compiler-domain nodes. They are transport types designed for inspe
 
 - Start with `MahoCompiler.cs` if you want the public API.
 - Start with `DebugJson.cs` if you are changing emitted lexer/parser JSON.
-- Jump to [`../Text/docs/README.md`](../../Text/docs/README.md) if span math or line/column projection looks wrong.
-- Jump to [`../Diagnostics/docs/README.md`](../../Diagnostics/docs/README.md) if the payload content is wrong before serialization even happens.
+- Jump to [`source-text.md`](source-text.md) if span math or line/column projection looks wrong.
+- Jump to [`diagnostics.md`](diagnostics.md) if the payload content is wrong before serialization even happens.

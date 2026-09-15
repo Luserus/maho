@@ -20,6 +20,10 @@ Today the core can:
 
 The semantic layer is still growing, and code generation is not implemented yet.
 
+## Documentation
+
+Detailed subsystem guides are collected in [`docs/repository-guide.md`](docs/repository-guide.md).
+
 ## Build
 
 This project uses the .NET SDK and targets `net10.0`.
