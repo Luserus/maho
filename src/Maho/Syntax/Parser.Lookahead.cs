@@ -288,9 +288,9 @@ internal sealed partial class Parser
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
-                nodesAndSeparators.Add(new LiteralTypeArgument(new LiteralExpression(LookaheadConsume())));
+                nodesAndSeparators.Add(new LiteralGenericArgument(new LiteralExpression(LookaheadConsume())));
             else if (LookaheadCurrentToken.Kind is TokenKind.Identifier && LookaheadPeek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
-                nodesAndSeparators.Add(new NamedExpressionTypeArgument(new IdentifierNameExpression(LookaheadConsume())));
+                nodesAndSeparators.Add(new NamedExpressionGenericArgument(new IdentifierNameExpression(LookaheadConsume())));
             else
             {
                 if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
@@ -526,21 +526,21 @@ internal sealed partial class Parser
     private (GenericName Type, bool Success) LookaheadParseGenericName(Token name)
     {
         var lessThan = LookaheadConsume();
-        var (typeParameters, success) = LookaheadParseTypeParameterList();
+        var (genericParameters, success) = LookaheadParseGenericParameterList();
 
         if (!success)
             return (new GenericName(name, lessThan, new SeparatedSyntaxList<GenericParameterSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
-            return (new GenericName(name, lessThan, typeParameters, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            return (new GenericName(name, lessThan, genericParameters, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
         var greaterThan = LookaheadConsume();
 
-        return (new GenericName(name, lessThan, typeParameters, greaterThan), true);
+        return (new GenericName(name, lessThan, genericParameters, greaterThan), true);
     }
 
-    /// <summary> Speculatively parses a generic type-parameter list. </summary>
-    private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseTypeParameterList()
+    /// <summary> Speculatively parses a generic-parameter list. </summary>
+    private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseGenericParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;

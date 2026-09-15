@@ -110,9 +110,9 @@ internal sealed class DiagnosticsManager
     public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
         ReportExpected("MH0009", "a parameter", found, span, context, source);
 
-    /// <summary> Reports a parser recovery site where a type parameter syntax was required. </summary>
-    public void ReportExpectedTypeParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0010", "a type parameter", found, span, context, source);
+    /// <summary> Reports a parser recovery site where generic parameter syntax was required. </summary>
+    public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
+        ReportExpected("MH0010", "a generic parameter", found, span, context, source);
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
     public void ReportUnexpectedToken(TextSpan span, DiagnosticText found, SourceText? source = null) =>

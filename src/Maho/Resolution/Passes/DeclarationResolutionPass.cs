@@ -97,8 +97,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         Scope scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
-        ResolveTypeConstraints(syntax.Constraints, symbol.TypeParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.TypeParameters);
+        ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
         PopulateProductMembers(symbol);
     }
 
@@ -110,8 +110,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         Scope scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
-        ResolveTypeConstraints(syntax.Constraints, symbol.TypeParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.TypeParameters);
+        ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
         PopulateProductMembers(symbol);
     }
 
@@ -121,8 +121,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         Scope scope = GetOwnedScope(symbol);
-        ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.TypeParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.TypeParameters);
+        ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.GenericParameters, scope);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
         SymbolHandle? target = ResolveType(symbol.Syntax.Target, scope);
 
         symbol.HasCompatibleConstraints = target is { } handle &&
@@ -132,7 +132,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private bool AliasConstraintsAreCompatible(SymbolHandle target, TypeSyntax targetSyntax, Scope scope)
     {
-        IReadOnlyList<SymbolHandle> targetParameters = GetTypeParameters(target);
+        IReadOnlyList<SymbolHandle> targetParameters = GetGenericParameters(target);
         IReadOnlyList<TypeSyntax> targetArguments = GetTypeArguments(targetSyntax);
 
         if (targetParameters.Count == 0)
@@ -142,12 +142,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         for (int index = 0; index < targetParameters.Count; index++)
         {
-            if (targetParameters[index].Kind is not SymbolKind.TypeParameter)
+            if (targetParameters[index].Kind is not SymbolKind.GenericParameter)
                 return false;
 
-            TypeParameterSymbol parameter = context.TypeParameterSymbols[targetParameters[index].ID];
+            GenericParameterSymbol parameter = context.GenericParameterSymbols[targetParameters[index].ID];
 
-            if (parameter.ParameterKind is not GenericParameterKind.Type || targetArguments[index] is LiteralTypeArgument)
+            if (parameter.ParameterKind is not GenericParameterKind.Type || targetArguments[index] is LiteralGenericArgument)
                 continue;
 
             SymbolHandle? argument = ResolveGenericArgumentAsType(targetArguments[index], scope);
@@ -159,11 +159,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return true;
     }
 
-    private IReadOnlyList<SymbolHandle> GetTypeParameters(SymbolHandle handle) => handle.Kind switch
+    private IReadOnlyList<SymbolHandle> GetGenericParameters(SymbolHandle handle) => handle.Kind switch
     {
-        SymbolKind.Type => context.TypeSymbols[handle.ID].TypeParameters,
-        SymbolKind.NestedType => context.NestedTypeSymbols[handle.ID].TypeParameters,
-        SymbolKind.Alias => context.AliasSymbols[handle.ID].TypeParameters,
+        SymbolKind.Type => context.TypeSymbols[handle.ID].GenericParameters,
+        SymbolKind.NestedType => context.NestedTypeSymbols[handle.ID].GenericParameters,
+        SymbolKind.Alias => context.AliasSymbols[handle.ID].GenericParameters,
         _ => []
     };
 
@@ -204,8 +204,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         switch (candidate.Kind)
         {
-            case SymbolKind.TypeParameter:
-                foreach (var constraint in context.TypeParameterSymbols[candidate.ID].Constraints)
+            case SymbolKind.GenericParameter:
+                foreach (var constraint in context.GenericParameterSymbols[candidate.ID].Constraints)
                     if (SatisfiesConstraint(constraint, required, visited))
                         return true;
                 break;
@@ -234,8 +234,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         Scope scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
-        ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.TypeParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.TypeParameters);
+        ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -247,8 +247,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         Scope scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
-        ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.TypeParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.TypeParameters);
+        ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -392,27 +392,27 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private void ResolveTypeConstraints(IReadOnlyList<TypeConstraintClause> clauses, IReadOnlyList<SymbolHandle> parameters, Scope scope)
     {
         foreach (var handle in parameters)
-            if (handle.Kind is SymbolKind.TypeParameter)
-                context.TypeParameterSymbols[handle.ID].Constraints = [];
+            if (handle.Kind is SymbolKind.GenericParameter)
+                context.GenericParameterSymbols[handle.ID].Constraints = [];
 
         foreach (var clause in clauses)
         {
-            TypeParameterSymbol? parameter = FindTypeParameter(parameters, ResolutionContext.GetSymbolName(clause.TypeParameter).Last);
+            GenericParameterSymbol? parameter = FindGenericParameter(parameters, ResolutionContext.GetSymbolName(clause.GenericParameter).Last);
             if (parameter is null)
                 continue;
 
-            context.ResolvedTree.AddReference(clause.TypeParameter, ResolutionContext.GetHandle(parameter));
+            context.ResolvedTree.AddReference(clause.GenericParameter, ResolutionContext.GetHandle(parameter));
             foreach (var constraint in clause.Constraints)
                 if (constraint is TypeTypeConstraint typeConstraint && ResolveType(typeConstraint.Type, scope) is { } resolved)
                     parameter.Constraints.Add(resolved);
         }
     }
 
-    private TypeParameterSymbol? FindTypeParameter(IReadOnlyList<SymbolHandle> handles, SymbolPart name)
+    private GenericParameterSymbol? FindGenericParameter(IReadOnlyList<SymbolHandle> handles, SymbolPart name)
     {
         foreach (var handle in handles)
-            if (handle.Kind is SymbolKind.TypeParameter && context.TypeParameterSymbols[handle.ID].Name == name)
-                return context.TypeParameterSymbols[handle.ID];
+            if (handle.Kind is SymbolKind.GenericParameter && context.GenericParameterSymbols[handle.ID].Name == name)
+                return context.GenericParameterSymbols[handle.ID];
         return null;
     }
 
@@ -427,8 +427,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (genericName is null)
             return;
 
-        for (int index = 0; index < genericName.TypeParameters.Count && index < parameters.Count; index++)
-            context.ResolvedTree.AddReference(genericName.TypeParameters[index], parameters[index]);
+        for (int index = 0; index < genericName.GenericParameters.Count && index < parameters.Count; index++)
+            context.ResolvedTree.AddReference(genericName.GenericParameters[index], parameters[index]);
     }
 
     private List<SymbolHandle> ResolveAttributes(IReadOnlyList<AttributeListSyntax> attributes, Scope scope)
@@ -480,23 +480,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveGenericTypeArguments(GenericType generic, SymbolHandle? target, Scope scope)
     {
-        IReadOnlyList<SymbolHandle> parameters = target is { } handle ? GetTypeParameters(handle) : [];
+        IReadOnlyList<SymbolHandle> parameters = target is { } handle ? GetGenericParameters(handle) : [];
 
         for (int index = 0; index < generic.TypeArguments.Count; index++)
         {
             TypeSyntax argument = generic.TypeArguments[index];
-            TypeParameterSymbol? parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.TypeParameter
-                ? context.TypeParameterSymbols[parameters[index].ID]
+            GenericParameterSymbol? parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
+                ? context.GenericParameterSymbols[parameters[index].ID]
                 : null;
 
             switch (argument)
             {
-                case LiteralTypeArgument:
+                case LiteralGenericArgument:
                     break;
-                case NamedExpressionTypeArgument named when parameter?.ParameterKind is GenericParameterKind.Type:
+                case NamedExpressionGenericArgument named when parameter?.ParameterKind is GenericParameterKind.Type:
                     ResolveNamedArgumentAsType(named.Expression, scope);
                     break;
-                case NamedExpressionTypeArgument named:
+                case NamedExpressionGenericArgument named:
                     ResolveExpression(named.Expression, scope, default);
                     break;
                 default:
@@ -508,7 +508,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private SymbolHandle? ResolveGenericArgumentAsType(TypeSyntax argument, Scope scope) => argument switch
     {
-        NamedExpressionTypeArgument named => ResolveNamedArgumentAsType(named.Expression, scope),
+        NamedExpressionGenericArgument named => ResolveNamedArgumentAsType(named.Expression, scope),
         _ => ResolveType(argument, scope)
     };
 

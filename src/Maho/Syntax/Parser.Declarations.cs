@@ -796,13 +796,13 @@ internal sealed partial class Parser
     private GenericName ParseGenericName(Token name)
     {
         var lessThan = Consume();
-        var typeParameters = ParseTypeParameterList();
+        var genericParameters = ParseGenericParameterList();
         var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list");
 
-        return new GenericName(name, lessThan, typeParameters, greaterThan);
+        return new GenericName(name, lessThan, genericParameters, greaterThan);
     }
 
-    private SeparatedSyntaxList<GenericParameterSyntax> ParseTypeParameterList()
+    private SeparatedSyntaxList<GenericParameterSyntax> ParseGenericParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
@@ -811,7 +811,7 @@ internal sealed partial class Parser
         {
             if (CurrentToken.Kind is not TokenKind.Identifier)
             {
-                diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type parameter name");
+                diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the generic parameter name");
                 break;
             }
 
@@ -855,7 +855,7 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            diagnostics.ReportExpectedTypeParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type parameter list");
+            diagnostics.ReportExpectedGenericParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the generic parameter list");
 
         return new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators);
     }

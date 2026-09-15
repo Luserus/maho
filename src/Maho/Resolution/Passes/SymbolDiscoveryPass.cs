@@ -161,7 +161,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         AliasSymbol symbol = context.CreateAliasSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingNamespace, declaration);
         ResolutionContext.BindChildScope(enclosingScope, symbol, aliasScope);
         context.RegisterSyntaxScope(declaration, aliasScope);
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Name, aliasScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
     }
 
     private void ResolveTopLevelTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
@@ -173,7 +173,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, typeScope, symbol);
 
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
     }
@@ -186,7 +186,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, typeScope, symbol);
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -198,7 +198,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Name, typeScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, typeScope, symbol);
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
         return symbol;
     }
@@ -243,7 +243,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), containingMethod: null);
     }
@@ -255,7 +255,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), symbol);
     }
@@ -267,7 +267,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
-        symbol.TypeParameters = ResolveTypeParameters(declaration.Signature.Identifier, functionScope, symbol);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), symbol);
         return symbol;
@@ -402,22 +402,22 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             context.MethodSymbols[owner.ID].LocalTypes.Add(ResolutionContext.GetHandle(local));
     }
 
-    private List<SymbolHandle> ResolveTypeParameters(NamedSyntax name, Scope scope, Symbol genericSymbol)
+    private List<SymbolHandle> ResolveGenericParameters(NamedSyntax name, Scope scope, Symbol genericSymbol)
     {
         GenericName? genericName = GetGenericName(name);
 
         if (genericName is null)
             return [];
 
-        var typeParameters = new List<SymbolHandle>(genericName.TypeParameters.Count);
+        var genericParameters = new List<SymbolHandle>(genericName.GenericParameters.Count);
 
-        foreach (var typeParameter in genericName.TypeParameters)
+        foreach (var genericParameter in genericName.GenericParameters)
         {
-            var symbol = context.CreateTypeParameterSymbol(scope, new SymbolPart(typeParameter.Identifier), genericSymbol, typeParameter.Kind, typeParameter.IsVariadic);
-            typeParameters.Add((symbol.Kind, symbol.ID));
+            var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic);
+            genericParameters.Add((symbol.Kind, symbol.ID));
         }
 
-        return typeParameters;
+        return genericParameters;
     }
 
     private static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode containingNamespace, NamedSyntax name)

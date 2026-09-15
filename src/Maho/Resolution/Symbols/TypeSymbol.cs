@@ -11,7 +11,7 @@ internal abstract class TypeSymbol : Symbol
 
     public List<SymbolHandle> BaseTypes { get; internal set; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
     public TypeDeclaration? Syntax { get; }
@@ -22,7 +22,7 @@ internal abstract class TypeSymbol : Symbol
         Kind = SymbolKind.Type;
         TypeKind = typeKind;
         ContainingNamespace = containingNamespace;
-        TypeParameters = [];
+        GenericParameters = [];
         BaseTypes = [];
         Attributes = [];
         

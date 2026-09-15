@@ -20,7 +20,7 @@ internal sealed class ResolutionContext
     public List<ParameterSymbol> ParameterSymbols { get; }
     public List<LocalVariableSymbol> LocalVariableSymbols { get; }
     public List<PropertySymbol> PropertySymbols { get; }
-    public List<TypeParameterSymbol> TypeParameterSymbols {get; }
+    public List<GenericParameterSymbol> GenericParameterSymbols {get; }
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
 
@@ -37,7 +37,7 @@ internal sealed class ResolutionContext
     private int parameterID;
     private int localVariableID;
     private int propertyID;
-    private int typeParameterID;
+    private int genericParameterID;
     private int labelID;
     private int aliasID;
 
@@ -57,7 +57,7 @@ internal sealed class ResolutionContext
         ParameterSymbols = symbols.ParameterSymbols;
         LocalVariableSymbols = symbols.LocalVariableSymbols;
         PropertySymbols = symbols.PropertySymbols;
-        TypeParameterSymbols = symbols.TypeParameterSymbols;
+        GenericParameterSymbols = symbols.GenericParameterSymbols;
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
 
@@ -72,7 +72,7 @@ internal sealed class ResolutionContext
         parameterID = ParameterSymbols.Count;
         localVariableID = LocalVariableSymbols.Count;
         propertyID = PropertySymbols.Count;
-        typeParameterID = TypeParameterSymbols.Count;
+        genericParameterID = GenericParameterSymbols.Count;
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
     }
@@ -196,10 +196,10 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
+    public GenericParameterSymbol CreateGenericParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
     {
-        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
-        TypeParameterSymbols.Add(symbol);
+        var symbol = new GenericParameterSymbol(genericParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
+        GenericParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
@@ -273,7 +273,7 @@ internal sealed class ResolutionContext
     public static SymbolName GetSymbolName(NamedSyntax name) => name switch
     {
         SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name)),
-        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.TypeParameters.Count)),
+        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count)),
         QualifiedName qualifiedName => GetQualifiedName(qualifiedName),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
@@ -281,7 +281,7 @@ internal sealed class ResolutionContext
     private static SymbolPart GetSymbolPart(NamedSyntax name) => name switch
     {
         SimpleName simpleName => new SymbolPart(simpleName.Name),
-        GenericName genericName => new SymbolPart(genericName.Name, genericName.TypeParameters.Count),
+        GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 

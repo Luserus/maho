@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
 /// <summary>A literal expression supplied as a compile-time generic argument.</summary>
-internal sealed class LiteralTypeArgument : TypeSyntax
+internal sealed class LiteralGenericArgument : TypeSyntax
 {
     /// <summary>The literal expression representing the compile-time value.</summary>
     public LiteralExpression Expression { get; }
@@ -10,5 +10,5 @@ internal sealed class LiteralTypeArgument : TypeSyntax
     public Token Literal => Expression.Literal;
 
     /// <summary>Creates one literal-expression generic argument.</summary>
-    public LiteralTypeArgument(LiteralExpression expression) => Expression = expression;
+    public LiteralGenericArgument(LiteralExpression expression) => Expression = expression;
 }

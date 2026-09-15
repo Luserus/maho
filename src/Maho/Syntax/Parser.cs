@@ -336,10 +336,10 @@ internal sealed partial class Parser
     private TypeSyntax ParseTypeArgument()
     {
         if (IsLiteralTokenKind(CurrentToken.Kind))
-            return new LiteralTypeArgument(new LiteralExpression(Consume()));
+            return new LiteralGenericArgument(new LiteralExpression(Consume()));
 
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
-            return new NamedExpressionTypeArgument(new IdentifierNameExpression(Consume()));
+            return new NamedExpressionGenericArgument(new IdentifierNameExpression(Consume()));
 
         return ParseTypeSyntax();
     }

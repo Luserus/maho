@@ -16,8 +16,8 @@ internal enum SymbolKind
     Property,
     /// <summary> Function parameter symbol. </summary>
     Parameter,
-    /// <summary> Generic type-parameter symbol. </summary>
-    TypeParameter,
+    /// <summary> Generic parameter symbol. </summary>
+    GenericParameter,
     /// <summary> Variable or field declaration symbol. </summary>
     Variable,
     /// <summary> Future label symbol category for statement-level control flow. </summary>
@@ -25,4 +25,3 @@ internal enum SymbolKind
     GlobalVariable,
     Label
 }
-

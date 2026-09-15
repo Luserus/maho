@@ -7,7 +7,7 @@ internal abstract class MethodSymbol : Symbol
 {
     public FunctionFlags Flags { get; internal set; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
     public List<SymbolHandle> LocalVariables { get; internal set; }
@@ -20,7 +20,7 @@ internal abstract class MethodSymbol : Symbol
     protected MethodSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, FunctionDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Method;
-        TypeParameters = [];
+        GenericParameters = [];
         Attributes = [];
         LocalVariables = [];
         LocalFunctions = [];

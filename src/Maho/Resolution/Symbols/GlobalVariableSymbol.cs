@@ -8,7 +8,7 @@ internal sealed class GlobalVariableSymbol : Symbol
     public VariableFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace;
     
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
     public SymbolHandle? Type { get; internal set; }
@@ -20,7 +20,7 @@ internal sealed class GlobalVariableSymbol : Symbol
     {
         Kind = SymbolKind.GlobalVariable;
         ContainingNamespace = containingNamespace;
-        TypeParameters = [];
+        GenericParameters = [];
         Attributes = [];
         Syntax = syntax;
     }

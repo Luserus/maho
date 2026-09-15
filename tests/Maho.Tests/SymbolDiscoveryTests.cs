@@ -145,7 +145,7 @@ public sealed class SymbolDiscoveryTests
         Assert.Single(context.PropertySymbols);
         Assert.Single(context.ParameterSymbols);
         Assert.Single(context.LocalVariableSymbols);
-        Assert.All(context.TypeParameterSymbols, parameter => Assert.NotNull(parameter.GenericSymbol));
+        Assert.All(context.GenericParameterSymbols, parameter => Assert.NotNull(parameter.GenericSymbol));
         Assert.True(context.GlobalNamespace.Next.ContainsKey(new SymbolPart("Example")));
     }
 }

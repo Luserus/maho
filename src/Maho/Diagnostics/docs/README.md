@@ -68,7 +68,7 @@ These methods matter because they define stable diagnostic codes and text for le
 - `ReportExpectedType(...)`
 - `ReportExpectedBody(...)`
 - `ReportExpectedParameter(...)`
-- `ReportExpectedTypeParameter(...)`
+- `ReportExpectedGenericParameter(...)`
 - `ReportUnexpectedToken(...)`
 - `ReportMissingToken(...)`
 

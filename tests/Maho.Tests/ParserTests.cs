@@ -132,11 +132,11 @@ public sealed class ParserTests
         Assert.IsType<QualifiedType>(simple.Alias.Target);
         Assert.IsType<QualifiedType>(specialized.Alias.Target);
         GenericName genericName = Assert.IsType<GenericName>(generic.Alias.Name);
-        Assert.Equal("T", Assert.Single(genericName.TypeParameters).Identifier.Value);
+        Assert.Equal("T", Assert.Single(genericName.GenericParameters).Identifier.Value);
         Assert.Single(generic.Alias.Constraints);
         GenericType genericTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(generic.Alias.Target).Right);
-        Assert.Equal("T", Assert.IsType<NamedExpressionTypeArgument>(genericTarget.TypeArguments[0]).Expression.Identifier.Value);
-        Assert.Equal("Int32", Assert.IsType<NamedExpressionTypeArgument>(genericTarget.TypeArguments[1]).Expression.Identifier.Value);
+        Assert.Equal("T", Assert.IsType<NamedExpressionGenericArgument>(genericTarget.TypeArguments[0]).Expression.Identifier.Value);
+        Assert.Equal("Int32", Assert.IsType<NamedExpressionGenericArgument>(genericTarget.TypeArguments[1]).Expression.Identifier.Value);
     }
 
     [Fact]
@@ -479,15 +479,15 @@ public sealed class ParserTests
 
         GenericName name = Assert.IsType<GenericName>(type.Name);
         Assert.Equal("Box", name.Name.Value);
-        Assert.Single(name.TypeParameters);
-        Assert.Equal("T", name.TypeParameters[0].Identifier.Value);
+        Assert.Single(name.GenericParameters);
+        Assert.Equal("T", name.GenericParameters[0].Identifier.Value);
 
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Equal(2, baseClause.BaseTypes.Count);
 
         GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0]);
         Assert.Equal("Base", firstBaseType.Name.Value);
-        NamedExpressionTypeArgument firstBaseArgument = Assert.IsType<NamedExpressionTypeArgument>(firstBaseType.TypeArguments[0]);
+        NamedExpressionGenericArgument firstBaseArgument = Assert.IsType<NamedExpressionGenericArgument>(firstBaseType.TypeArguments[0]);
         Assert.Equal("T", firstBaseArgument.Expression.Identifier.Value);
 
         QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1]);
@@ -495,7 +495,7 @@ public sealed class ParserTests
         Assert.Equal("Inner", Assert.IsType<SimpleType>(secondBaseType.Right).Name.Value);
 
         TypeConstraintClause constraintClause = Assert.Single(type.Constraints);
-        Assert.Equal("T", constraintClause.TypeParameter.Name.Value);
+        Assert.Equal("T", constraintClause.GenericParameter.Name.Value);
         Assert.Equal(2, constraintClause.Constraints.Count);
 
         TypeTypeConstraint firstConstraint = Assert.IsType<TypeTypeConstraint>(constraintClause.Constraints[0]);
@@ -536,23 +536,23 @@ public sealed class ParserTests
 
         GenericName identifier = Assert.IsType<GenericName>(function.Signature.Identifier);
         Assert.Equal("Build", identifier.Name.Value);
-        Assert.Equal(2, identifier.TypeParameters.Count);
-        Assert.Equal("TInput", identifier.TypeParameters[0].Identifier.Value);
-        Assert.Equal("TResult", identifier.TypeParameters[1].Identifier.Value);
+        Assert.Equal(2, identifier.GenericParameters.Count);
+        Assert.Equal("TInput", identifier.GenericParameters[0].Identifier.Value);
+        Assert.Equal("TResult", identifier.GenericParameters[1].Identifier.Value);
 
         Assert.Equal(2, function.Signature.Constraints.Count);
 
         TypeConstraintClause inputConstraint = function.Signature.Constraints[0];
-        Assert.Equal("TInput", inputConstraint.TypeParameter.Name.Value);
+        Assert.Equal("TInput", inputConstraint.GenericParameter.Name.Value);
         TypeTypeConstraint inputTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(inputConstraint.Constraints));
         Assert.Equal("Source", Assert.IsType<SimpleType>(inputTypeConstraint.Type).Name.Value);
 
         TypeConstraintClause resultConstraint = function.Signature.Constraints[1];
-        Assert.Equal("TResult", resultConstraint.TypeParameter.Name.Value);
+        Assert.Equal("TResult", resultConstraint.GenericParameter.Name.Value);
         TypeTypeConstraint resultTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(resultConstraint.Constraints));
         GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
         Assert.Equal("Output", resultConstraintType.Name.Value);
-        Assert.Equal("TInput", Assert.IsType<NamedExpressionTypeArgument>(resultConstraintType.TypeArguments[0]).Expression.Identifier.Value);
+        Assert.Equal("TInput", Assert.IsType<NamedExpressionGenericArgument>(resultConstraintType.TypeArguments[0]).Expression.Identifier.Value);
     }
 
     [Fact]
@@ -563,16 +563,16 @@ public sealed class ParserTests
             """);
 
         GenericName name = Assert.IsType<GenericName>(declaration.Name);
-        Assert.Equal(5, name.TypeParameters.Count);
-        Assert.Equal(GenericParameterKind.Type, name.TypeParameters[0].Kind);
-        Assert.Equal(GenericParameterKind.Integer, name.TypeParameters[1].Kind);
-        Assert.Equal(GenericParameterKind.Float, name.TypeParameters[2].Kind);
-        Assert.Equal(GenericParameterKind.Constant, name.TypeParameters[3].Kind);
-        Assert.True(name.TypeParameters[4].IsVariadic);
-        Assert.Equal(3, name.TypeParameters[4].Ellipsis.Count);
+        Assert.Equal(5, name.GenericParameters.Count);
+        Assert.Equal(GenericParameterKind.Type, name.GenericParameters[0].Kind);
+        Assert.Equal(GenericParameterKind.Integer, name.GenericParameters[1].Kind);
+        Assert.Equal(GenericParameterKind.Float, name.GenericParameters[2].Kind);
+        Assert.Equal(GenericParameterKind.Constant, name.GenericParameters[3].Kind);
+        Assert.True(name.GenericParameters[4].IsVariadic);
+        Assert.Equal(3, name.GenericParameters[4].Ellipsis.Count);
 
         TypeConstraintClause constraint = Assert.Single(declaration.Constraints);
-        Assert.Equal("N", constraint.TypeParameter.Name.Value);
+        Assert.Equal("N", constraint.GenericParameter.Name.Value);
         Assert.IsType<QualifiedType>(Assert.IsType<TypeTypeConstraint>(Assert.Single(constraint.Constraints)).Type);
     }
 
