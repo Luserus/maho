@@ -51,13 +51,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case NamespaceDeclaration declaration:
                 return ResolveNamespaceDeclaration(declaration, scope, containingNamespace, topLevelMain, topLevelMainScope);
             case TopLevelBlock block:
-                ResolveTopLevelScope(block.Members, scope, containingNamespace, topLevelMain, topLevelMainScope);
-                return containingNamespace;
-            case TopLevelGlobalBlock block:
-                ResolveTopLevelScope(block.Members, scope, containingNamespace, topLevelMain: null, topLevelMainScope);
+                ResolveTopLevelScope(block.Members, scope, containingNamespace,
+                                     HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
                 return containingNamespace;
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
+                return containingNamespace;
+            case TopLevelAliasDeclaration declaration:
+                ResolveTopLevelAliasDeclaration(declaration.Alias, scope, containingNamespace);
                 return containingNamespace;
             case TopLevelFunctionDeclaration declaration:
                 ResolveTopLevelFunctionDeclaration(declaration.Function, scope, containingNamespace);
@@ -71,6 +72,17 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             default:
                 return containingNamespace;
         }
+    }
+
+    private static bool HasGlobalModifier(TopLevelBlock block)
+    {
+        foreach (Token modifier in block.Modifiers)
+        {
+            if (modifier.MatchingKind is MatchingKeywordKind.Global)
+                return true;
+        }
+
+        return false;
     }
 
     private void DiscoverTopLevelLabels(TopLevelStatement statement, Scope scope, SymbolHandle containingFunction)
@@ -141,6 +153,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
             topLevelMain.LocalVariables.Add(ResolutionContext.GetHandle(symbol));
         }
+    }
+
+    private void ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    {
+        Scope aliasScope = context.CreateScope(enclosingScope);
+        AliasSymbol symbol = context.CreateAliasSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingNamespace, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, aliasScope);
+        context.RegisterSyntaxScope(declaration, aliasScope);
+        symbol.TypeParameters = ResolveTypeParameters(declaration.Name, aliasScope, symbol);
     }
 
     private void ResolveTopLevelTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
@@ -392,7 +413,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         foreach (var typeParameter in genericName.TypeParameters)
         {
-            var symbol = context.CreateTypeParameterSymbol(scope, new SymbolPart(typeParameter.Name), genericSymbol);
+            var symbol = context.CreateTypeParameterSymbol(scope, new SymbolPart(typeParameter.Identifier), genericSymbol, typeParameter.Kind, typeParameter.IsVariadic);
             typeParameters.Add((symbol.Kind, symbol.ID));
         }
 

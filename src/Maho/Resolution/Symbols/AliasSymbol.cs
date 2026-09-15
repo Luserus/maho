@@ -10,11 +10,12 @@ internal sealed class AliasSymbol : Symbol
     public ulong Flags { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
-    public SymbolHandle Target { get; internal set; }
+    public SymbolHandle? Target { get; internal set; }
+    public bool HasCompatibleConstraints { get; internal set; } = true;
 
-    public SyntaxNode? Syntax { get; }
+    public AliasDeclaration? Syntax { get; }
 
-    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, SyntaxNode? syntax) : base(id, name, enclosingScope)
+    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, AliasDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Alias;
         ContainingSymbol = containingSymbol;
@@ -22,7 +23,7 @@ internal sealed class AliasSymbol : Symbol
         Syntax = syntax;
     }
 
-    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax) : base(id, name, enclosingScope)
+    public AliasSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AliasDeclaration? syntax) : base(id, name, enclosingScope)
     {
 
         Kind = SymbolKind.Alias;
@@ -31,4 +32,3 @@ internal sealed class AliasSymbol : Symbol
         Syntax = syntax;
     }
 }
-

@@ -196,9 +196,9 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol)
+    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
     {
-        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol);
+        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
         TypeParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -212,7 +212,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, SyntaxNode? syntax)
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, AliasDeclaration? syntax)
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingSymbol, syntax);
         AliasSymbols.Add(symbol);
@@ -220,7 +220,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, SyntaxNode? syntax)
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AliasDeclaration? syntax)
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
         AliasSymbols.Add(symbol);

@@ -343,8 +343,6 @@ public static class MahoCompiler
                     return true;
                 case TopLevelBlock block when ContainsTopLevelStatement(block.Members):
                     return true;
-                case TopLevelGlobalBlock block when ContainsTopLevelStatement(block.Members):
-                    return true;
                 case NamespaceDeclaration { Body: NamespaceBlockBody body } when ContainsTopLevelStatement(body.Members):
                     return true;
             }

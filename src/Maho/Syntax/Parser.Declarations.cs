@@ -27,6 +27,21 @@ internal sealed partial class Parser
         return new NamespaceDeclaration(keyword, name, body);
     }
 
+    private TopLevelAliasDeclaration ParseTopLevelAliasDeclaration()
+    {
+        Token keyword = Consume();
+        NamedSyntax name = ParseNamedSyntax();
+        List<TypeConstraintClause> constraints = [];
+
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
+
+        Token equals = ExpectToken(TokenKind.Equals, "'='", "after the alias name or constraints");
+        TypeSyntax target = ParseTypeSyntax();
+        Token semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the alias target", MissingTokenAnchor.AfterPrevious);
+        return new TopLevelAliasDeclaration(new AliasDeclaration(keyword, name, constraints, equals, target, semicolon));
+    }
+
     private NamespaceBody ParseNamespaceBody(bool topLevelStatementsEnabled)
     {
         if (CurrentToken.Kind is TokenKind.Semicolon)
@@ -192,7 +207,8 @@ internal sealed partial class Parser
         List<SyntaxNode> nodesAndSeparators = [];
         bool wasCommaLast = false;
 
-        while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken)
+        while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.Equals and not TokenKind.EndToken &&
+               CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
         {
             var constraint = ParseTypeConstraint();
             nodesAndSeparators.Add(constraint);
@@ -786,7 +802,7 @@ internal sealed partial class Parser
         return new GenericName(name, lessThan, typeParameters, greaterThan);
     }
 
-    private SeparatedSyntaxList<SimpleName> ParseTypeParameterList()
+    private SeparatedSyntaxList<GenericParameterSyntax> ParseTypeParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
@@ -799,7 +815,34 @@ internal sealed partial class Parser
                 break;
             }
 
-            nodesAndSeparators.Add(new SimpleName(Consume()));
+            Token identifier = Consume();
+            List<Token> ellipsis = [];
+
+            if (CurrentToken.Kind is TokenKind.Dot)
+            {
+                ellipsis.Add(Consume());
+                ellipsis.Add(ExpectToken(TokenKind.Dot, "'.'", "in the variadic marker"));
+                ellipsis.Add(ExpectToken(TokenKind.Dot, "'.'", "in the variadic marker"));
+            }
+
+            Token? colon = null;
+            Token? valueKindToken = null;
+            GenericParameterKind kind = GenericParameterKind.Type;
+
+            if (CurrentToken.Kind is TokenKind.Colon)
+            {
+                colon = Consume();
+                valueKindToken = ExpectIdentifierToken("for the compile-time parameter kind");
+                kind = valueKindToken.MatchingKind switch
+                {
+                    MatchingKeywordKind.Int => GenericParameterKind.Integer,
+                    MatchingKeywordKind.Float => GenericParameterKind.Float,
+                    MatchingKeywordKind.Const => GenericParameterKind.Constant,
+                    _ => GenericParameterKind.Type
+                };
+            }
+
+            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -814,6 +857,6 @@ internal sealed partial class Parser
         if (wasCommaLast)
             diagnostics.ReportExpectedTypeParameter(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type parameter list");
 
-        return new SeparatedSyntaxList<SimpleName>(nodesAndSeparators);
+        return new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators);
     }
 }

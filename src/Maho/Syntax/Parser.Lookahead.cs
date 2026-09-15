@@ -37,12 +37,17 @@ internal sealed partial class Parser
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            var (_, success, result) = LookaheadParseTypeSyntax();
-
-            if (!success)
+            if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                LookaheadConsume();
+            else
             {
-                lookaheadCurrent = saved;
-                return (false, LookaheadResultContext.FailedParseTypeSyntax);
+                var (_, success, _) = LookaheadParseTypeSyntax();
+
+                if (!success)
+                {
+                    lookaheadCurrent = saved;
+                    return (false, LookaheadResultContext.FailedParseTypeSyntax);
+                }
             }
 
             if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
@@ -86,6 +91,34 @@ internal sealed partial class Parser
             }
             
             LookaheadConsume(); // identifier
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Dot)
+            {
+                LookaheadConsume();
+                if (LookaheadCurrentToken.Kind is not TokenKind.Dot)
+                {
+                    lookaheadCurrent = saved;
+                    return (false, LookaheadResultContext.MissingDelimeter);
+                }
+                LookaheadConsume();
+                if (LookaheadCurrentToken.Kind is not TokenKind.Dot)
+                {
+                    lookaheadCurrent = saved;
+                    return (false, LookaheadResultContext.MissingDelimeter);
+                }
+                LookaheadConsume();
+            }
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Colon)
+            {
+                LookaheadConsume();
+                if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+                {
+                    lookaheadCurrent = saved;
+                    return (false, LookaheadResultContext.FailedParseTypeSyntax);
+                }
+                LookaheadConsume();
+            }
 
             if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
                 break;
@@ -254,15 +287,20 @@ internal sealed partial class Parser
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
-                return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
+            if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                nodesAndSeparators.Add(new LiteralTypeArgument(LookaheadConsume()));
+            else
+            {
+                if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+                    return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
 
-            var (type, success, _) = LookaheadParseTypeSyntax();
+                var (type, success, _) = LookaheadParseTypeSyntax();
 
-            if (!success)
-                return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
+                if (!success)
+                    return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
 
-            nodesAndSeparators.Add(type);
+                nodesAndSeparators.Add(type);
+            }
             wasCommaLast = false;
 
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
@@ -489,7 +527,7 @@ internal sealed partial class Parser
         var (typeParameters, success) = LookaheadParseTypeParameterList();
 
         if (!success)
-            return (new GenericName(name, lessThan, new SeparatedSyntaxList<SimpleName>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            return (new GenericName(name, lessThan, new SeparatedSyntaxList<GenericParameterSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
             return (new GenericName(name, lessThan, typeParameters, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
@@ -500,7 +538,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Speculatively parses a generic type-parameter list. </summary>
-    private (SeparatedSyntaxList<SimpleName> Type, bool Success) LookaheadParseTypeParameterList()
+    private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseTypeParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
         bool wasCommaLast = false;
@@ -508,9 +546,42 @@ internal sealed partial class Parser
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
-                return (new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), false);
+                return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
 
-            nodesAndSeparators.Add(new SimpleName(LookaheadConsume()));
+            Token identifier = LookaheadConsume();
+            List<Token> ellipsis = [];
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Dot)
+            {
+                ellipsis.Add(LookaheadConsume());
+                if (LookaheadCurrentToken.Kind is not TokenKind.Dot)
+                    return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
+                ellipsis.Add(LookaheadConsume());
+                if (LookaheadCurrentToken.Kind is not TokenKind.Dot)
+                    return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
+                ellipsis.Add(LookaheadConsume());
+            }
+
+            Token? colon = null;
+            Token? valueKindToken = null;
+            GenericParameterKind kind = GenericParameterKind.Type;
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Colon)
+            {
+                colon = LookaheadConsume();
+                if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+                    return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
+                valueKindToken = LookaheadConsume();
+                kind = valueKindToken.MatchingKind switch
+                {
+                    MatchingKeywordKind.Int => GenericParameterKind.Integer,
+                    MatchingKeywordKind.Float => GenericParameterKind.Float,
+                    MatchingKeywordKind.Const => GenericParameterKind.Constant,
+                    _ => GenericParameterKind.Type
+                };
+            }
+
+            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
             wasCommaLast = false;
 
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
@@ -523,8 +594,8 @@ internal sealed partial class Parser
         }
 
         if (wasCommaLast)
-            return (new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), false);
+            return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
 
-        return (new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), true);
+        return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), true);
     }
 }

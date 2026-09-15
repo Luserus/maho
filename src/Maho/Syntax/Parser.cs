@@ -117,7 +117,7 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                                    MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe;
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global;
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
@@ -258,10 +258,10 @@ internal sealed partial class Parser
     /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
     private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+            return ParseTopLevelAliasDeclaration();
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration(topLevelStatementsEnabled);
-        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Global)
-            return ParseTopLevelGlobalBlock(topLevelStatementsEnabled);
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
@@ -314,7 +314,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseTypeSyntax());
+            nodesAndSeparators.Add(ParseTypeArgument());
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -331,6 +331,11 @@ internal sealed partial class Parser
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
+
+    /// <summary>Parses either a type argument or a literal compile-time argument.</summary>
+    private TypeSyntax ParseTypeArgument() => IsLiteralTokenKind(CurrentToken.Kind)
+        ? new LiteralTypeArgument(Consume())
+        : ParseTypeSyntax();
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
     private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
@@ -407,23 +412,6 @@ internal sealed partial class Parser
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
 
         return new TopLevelBlock(attributes, modifiers, openBrace, members, closeBrace);
-    }
-
-    private TopLevelGlobalBlock ParseTopLevelGlobalBlock(bool topLevelStatementsEnabled)
-    {
-        Token globalKeyword = Consume();
-        Token openBrace = ExpectToken(TokenKind.LeftBrace, "'{'", "after 'global'");
-        List<TopLevel> members = [];
-
-        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
-        {
-            int start = current;
-            members.Add(ParseTopLevel(topLevelStatementsEnabled));
-            RecoverTopLevelIfStalled(start);
-        }
-
-        Token closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the global block");
-        return new TopLevelGlobalBlock(globalKeyword, openBrace, members, closeBrace);
     }
 
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
