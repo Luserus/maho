@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using Maho;
 using Maho.Syntax;
 
 namespace Maho.Tests;
@@ -10,6 +11,7 @@ public sealed class ParserTests
     [InlineData("namespace Demo;", typeof(NamespaceDeclaration), typeof(NamespaceEmptyBody))]
     [InlineData("namespace Demo { public class Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
     [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("public attribute Marker;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Main();", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Main() { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
@@ -37,6 +39,7 @@ public sealed class ParserTests
     [InlineData("public struct Nested { public int Value; }", typeof(MemberTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Compute();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Compute() { return 0; }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("public int Value { get; set; }", typeof(MemberPropertyDeclaration), null)]
     [InlineData("public int Value;", typeof(MemberFieldDeclaration), null)]
     public void Parse_MemberDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
@@ -81,13 +84,104 @@ public sealed class ParserTests
     [InlineData("call();", typeof(TopLevelExpressionStatement))]
     [InlineData("if (1) return; else ;", typeof(TopLevelIfStatement))]
     [InlineData("while (1) ;", typeof(TopLevelWhileStatement))]
-    [InlineData("{ int value = 1; }", typeof(TopLevelBlockStatement))]
     [InlineData("return 0;", typeof(TopLevelReturnStatement))]
+    [InlineData("return value;", typeof(TopLevelReturnStatement))]
     [InlineData(";", typeof(TopLevelEmptyStatement))]
     public void Parse_TopLevelStatementKinds(string source, Type expectedType)
     {
-        TopLevel statement = ParseSingleTopLevel(source, expectedType);
+        TopLevel statement = ParseSingleTopLevel($"#pragma toplevel enable\n{source}", expectedType);
         Assert.IsType(expectedType, statement);
+    }
+
+    [Fact]
+    public void Parse_TopLevelPragma_EnablesStatementsForItsCompilationUnit()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            int value = 1;
+            call();
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.True(PragmaDirective.EnablesTopLevelStatements(root.Pragmas));
+
+        PragmaDirective pragma = Assert.Single(root.Pragmas);
+        Assert.Equal("pragma", pragma.PragmaKeyword.Value);
+        Assert.Equal("toplevel", pragma.Name.Value);
+        Assert.Equal("enable", pragma.Value.Value);
+        Assert.IsType<TopLevelVariableDeclaration>(root.Members[0]);
+        Assert.IsType<TopLevelExpressionStatement>(root.Members[1]);
+    }
+
+    [Fact]
+    public void Parse_AliasDeclarations_PreserveTargetSpecializationAndConstraints()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Simple = Namespace.Type;
+            using Specialized = Namespace.Type<Int32>;
+            using Generic<T> where T : Constraint = Namespace.Type<T, Int32>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TopLevelAliasDeclaration simple = Assert.IsType<TopLevelAliasDeclaration>(root.Members[0]);
+        TopLevelAliasDeclaration specialized = Assert.IsType<TopLevelAliasDeclaration>(root.Members[1]);
+        TopLevelAliasDeclaration generic = Assert.IsType<TopLevelAliasDeclaration>(root.Members[2]);
+
+        Assert.IsType<SimpleName>(simple.Alias.Name);
+        Assert.IsType<QualifiedType>(simple.Alias.Target);
+        Assert.IsType<QualifiedType>(specialized.Alias.Target);
+        GenericName genericName = Assert.IsType<GenericName>(generic.Alias.Name);
+        Assert.Equal("T", Assert.Single(genericName.TypeParameters).Identifier.Value);
+        Assert.Single(generic.Alias.Constraints);
+        GenericType genericTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(generic.Alias.Target).Right);
+        Assert.Equal("T", Assert.IsType<SimpleType>(genericTarget.TypeArguments[0]).Name.Value);
+        Assert.Equal("Int32", Assert.IsType<SimpleType>(genericTarget.TypeArguments[1]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_GlobalModifiedTopLevelBlock_PreservesItsDeclarations()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            global
+            {
+                int globalValue = 1;
+                class GlobalType;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(Assert.Single(root.Members));
+        Assert.Collection(block.Modifiers, modifier => Assert.Equal(MatchingKeywordKind.Global, modifier.MatchingKind));
+        Assert.IsType<TopLevelVariableDeclaration>(block.Members[0]);
+        Assert.IsType<TopLevelTypeDeclaration>(block.Members[1]);
+    }
+
+    [Fact]
+    public void Parse_TopLevelStatementWithoutPragma_ReportsAnError()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            call();
+            """);
+
+        Assert.False(PragmaDirective.EnablesTopLevelStatements(root.Pragmas));
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0011");
+        Assert.IsType<TopLevelExpressionStatement>(Assert.Single(root.Members));
+    }
+
+    [Fact]
+    public void Parse_TopLevelBlock_IsTopLevelConstruct()
+    {
+        TopLevel topLevel = ParseSingleTopLevel("""
+            {
+                int value = 1;
+            }
+            """, typeof(TopLevelBlock));
+
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(topLevel);
+        Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(block.Members));
     }
 
     [Theory]
@@ -104,6 +198,277 @@ public sealed class ParserTests
         Assert.IsType(expectedType, statement);
     }
 
+    [Theory]
+    [InlineData("PointerType * value;", typeof(TopLevelAmbiguousPointerDeclaration), typeof(AmbiguousPointerDeclaration))]
+    [InlineData("ReferenceType & value;", typeof(TopLevelAmbiguousReferenceDeclaration), typeof(AmbiguousReferenceDeclaration))]
+    public void Parse_TopLevelAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    {
+        TopLevel topLevel = ParseSingleTopLevel(source, expectedType);
+
+        object declaration = topLevel switch
+        {
+            TopLevelAmbiguousPointerDeclaration pointer => pointer.Declaration,
+            TopLevelAmbiguousReferenceDeclaration reference => reference.Declaration,
+            _ => throw new Xunit.Sdk.XunitException($"Top-level node '{topLevel.GetType().Name}' does not expose an ambiguous declaration.")
+        };
+
+        Assert.IsType(expectedDeclarationType, declaration);
+    }
+
+    [Theory]
+    [InlineData("PointerType * value;", typeof(LocalAmbiguousPointerDeclarationStatement), typeof(AmbiguousPointerDeclaration))]
+    [InlineData("ReferenceType & value;", typeof(LocalAmbiguousReferenceDeclarationStatement), typeof(AmbiguousReferenceDeclaration))]
+    public void Parse_LocalAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    {
+        Local local = ParseSingleLocal(source, expectedType);
+
+        object declaration = local switch
+        {
+            LocalAmbiguousPointerDeclarationStatement pointer => pointer.Declaration,
+            LocalAmbiguousReferenceDeclarationStatement reference => reference.Declaration,
+            _ => throw new Xunit.Sdk.XunitException($"Local node '{local.GetType().Name}' does not expose an ambiguous declaration.")
+        };
+
+        Assert.IsType(expectedDeclarationType, declaration);
+    }
+
+    [Theory]
+    [InlineData("[Marker] PointerType * value;")]
+    [InlineData("public ReferenceType & value;")]
+    public void Parse_TopLevelAttributedOrModifiedPointerReferenceDeclarations_AreUnambiguousDeclarations(string source)
+    {
+        TopLevel topLevel = ParseSingleTopLevel(source, typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
+
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
+
+    [Theory]
+    [InlineData("[Marker] PointerType * value;")]
+    [InlineData("static ReferenceType & value;")]
+    public void Parse_LocalAttributedOrModifiedPointerReferenceDeclarations_AreUnambiguousDeclarations(string source)
+    {
+        Local local = ParseSingleLocal(source, typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
+
+    [Fact]
+    public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
+    {
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+            [Attribute]
+            unsafe
+            {
+                public struct Example
+                {
+                    unsafe
+                    {
+                        void Func() { }
+                    }
+                }
+            }
+            """, typeof(TopLevelBlock)));
+
+        Assert.Single(block.Attributes);
+        Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+
+        TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
+        TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(topLevelType.Type.Body);
+        MemberBlockDeclaration memberBlock = Assert.IsType<MemberBlockDeclaration>(Assert.Single(typeBody.Members));
+
+        Assert.Empty(memberBlock.Attributes);
+        Assert.Contains(memberBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        Assert.IsType<MemberFunctionDeclaration>(Assert.Single(memberBlock.Members));
+    }
+
+    [Fact]
+    public void Parse_UnmarkedTypeDeclarationInsideTopLevelBlock()
+    {
+        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+            {
+                struct UnmarkedTopLevelBlock;
+            }
+            """, typeof(TopLevelBlock)));
+
+        TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
+        Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(topLevelType.Type.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_AttributedModifiedBlocks_WorkInNamespaceAndLocalScopes()
+    {
+        NamespaceDeclaration @namespace = Assert.IsType<NamespaceDeclaration>(ParseSingleTopLevel("""
+            namespace Demo
+            {
+                [Attribute]
+                unsafe
+                {
+                    int value;
+                }
+            }
+            """, typeof(NamespaceDeclaration)));
+
+        NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
+        TopLevelBlock topLevelBlock = Assert.IsType<TopLevelBlock>(Assert.Single(namespaceBody.Members));
+
+        Assert.Single(topLevelBlock.Attributes);
+        Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+
+        LocalBlockStatement localBlock = Assert.IsType<LocalBlockStatement>(ParseSingleLocal("""
+            [Attribute]
+            unsafe
+            {
+                int nested;
+            }
+            """, typeof(LocalBlockStatement)));
+
+        Assert.Single(localBlock.Attributes);
+        Assert.Contains(localBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+    }
+
+    [Fact]
+    public void Parse_VariableDeclaration_PreservesMultipleDeclaratorsAndInitializers()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public int first = 1, second = first;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TopLevelVariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members));
+        Assert.Equal(2, declaration.Declaration.Declarators.Count);
+        Assert.Equal("first", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.IsType<LiteralExpression>(declaration.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal("second", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[1].Identifier).Name.Value);
+        Assert.IsType<IdentifierNameExpression>(declaration.Declaration.Declarators[1].Initializer?.Initializer);
+    }
+
+    [Fact]
+    public void Parse_LocalVariableDeclaration_PreservesMultipleDeclarators()
+    {
+        LocalVariableDeclarationStatement declaration = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            Value first = new Value(), second = first;
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        Assert.Equal(2, declaration.Declaration.Declarators.Count);
+        Assert.Equal("first", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("second", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[1].Identifier).Name.Value);
+        Assert.IsType<ConstructorCallExpression>(declaration.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.IsType<IdentifierNameExpression>(declaration.Declaration.Declarators[1].Initializer?.Initializer);
+    }
+
+    [Fact]
+    public void Parse_ObjectCreationWithClause_AttachesToConstructorCall()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            SomeType value = new SomeType(ctorValue) with { prop = "val" };
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        Assert.Single(local.Declaration.Declarators);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(constructor.WithClause);
+        AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
+
+        Assert.Equal("prop", Assert.IsType<IdentifierNameExpression>(assignment.LhsExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_ObjectCreationWithClause_AttachesToArrayCreation()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            int[] arr = put int[10] with { SomeProp = someVal };
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        Assert.Single(local.Declaration.Declarators);
+        ArrayCreationExpression array = Assert.IsType<ArrayCreationExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(array.WithClause);
+        AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
+
+        Assert.Equal("SomeProp", Assert.IsType<IdentifierNameExpression>(assignment.LhsExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_CollectionExpressionModifier_WithConstructorArguments()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return [val1, val2, val3] with(capacity: 10);
+            """, typeof(LocalReturnStatement)));
+
+        CollectionExpression collection = Assert.IsType<CollectionExpression>(local.Statement.Expression);
+        CollectionConstructorModifier modifier = Assert.IsType<CollectionConstructorModifier>(Assert.Single(collection.Modifiers));
+        NamedArgumentExpression argument = Assert.IsType<NamedArgumentExpression>(Assert.Single(modifier.Arguments));
+
+        Assert.Equal("capacity", argument.Name.Value);
+        Assert.IsType<LiteralExpression>(argument.Value);
+    }
+
+    [Fact]
+    public void Parse_NamedArgumentExpression_InCallableArgumentList()
+    {
+        LocalExpressionStatement local = Assert.IsType<LocalExpressionStatement>(ParseSingleLocal("""
+            call(capacity: 10);
+            """, typeof(LocalExpressionStatement)));
+
+        CallExpression call = Assert.IsType<CallExpression>(local.Expression);
+        NamedArgumentExpression argument = Assert.IsType<NamedArgumentExpression>(Assert.Single(call.Arguments));
+
+        Assert.Equal("capacity", argument.Name.Value);
+        Assert.IsType<LiteralExpression>(argument.Value);
+    }
+
+    [Theory]
+    [InlineData("return (A) - B;", TokenKind.Minus)]
+    [InlineData("return (A) * B;", TokenKind.Asterisk)]
+    public void Parse_CastFollowedByPrefixInfixOperator_IsAmbiguous(string source, TokenKind expectedOperator)
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal(source, typeof(LocalReturnStatement)));
+
+        AmbiguousCastOrParenthesizedExpression ambiguous = Assert.IsType<AmbiguousCastOrParenthesizedExpression>(local.Statement.Expression);
+        UnaryExpression castOperand = Assert.IsType<UnaryExpression>(ambiguous.CastExpression.Expression);
+        BinaryExpression parenthesizedAlternative = Assert.IsType<BinaryExpression>(ambiguous.ParenthesizedExpression);
+
+        Assert.Equal(expectedOperator, castOperand.OperatorToken.Kind);
+        Assert.Equal(expectedOperator, parenthesizedAlternative.OperatorToken.Kind);
+        Assert.IsType<ParenthesizedExpression>(parenthesizedAlternative.LeftExpression);
+    }
+
+    [Fact]
+    public void Parse_CastFollowedByIdentifier_IsUnambiguousCast()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A)B;
+            """, typeof(LocalReturnStatement)));
+
+        CastExpression cast = Assert.IsType<CastExpression>(local.Statement.Expression);
+        Assert.IsType<IdentifierNameExpression>(cast.Expression);
+    }
+
+    [Fact]
+    public void Parse_ParenthesizedExpressionFollowedByNonPrefixInfixOperator_IsUnambiguousBinary()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A) / B;
+            """, typeof(LocalReturnStatement)));
+
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(local.Statement.Expression);
+        Assert.Equal(TokenKind.ForwardSlash, binary.OperatorToken.Kind);
+        Assert.IsType<ParenthesizedExpression>(binary.LeftExpression);
+    }
+
+    [Fact]
+    public void Parse_ParenthesizedExpressionFollowedByMemberAccess_IsUnambiguousMemberAccess()
+    {
+        LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
+            return (A).B;
+            """, typeof(LocalReturnStatement)));
+
+        MemberAccessExpression memberAccess = Assert.IsType<MemberAccessExpression>(local.Statement.Expression);
+        Assert.IsType<ParenthesizedExpression>(memberAccess.Expression);
+        Assert.Equal("B", memberAccess.Identifier.Value);
+    }
+
     [Fact]
     public void Parse_TypeDeclaration_WithBaseClauseAndConstraints()
     {
@@ -115,7 +480,7 @@ public sealed class ParserTests
         GenericName name = Assert.IsType<GenericName>(type.Name);
         Assert.Equal("Box", name.Name.Value);
         Assert.Single(name.TypeParameters);
-        Assert.Equal("T", name.TypeParameters[0].Name.Value);
+        Assert.Equal("T", name.TypeParameters[0].Identifier.Value);
 
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Equal(2, baseClause.BaseTypes.Count);
@@ -143,6 +508,24 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_QualifiedDeclarationNamesAllowGenericsOnlyOnTheFinalTypeName()
+    {
+        var (_, validDiagnostics, _, _) = CompilerTestBed.Parse("""
+            struct A.B<T>;
+            """);
+        var (_, invalidTypeDiagnostics, _, _) = CompilerTestBed.Parse("""
+            struct A.B<T>.C;
+            """);
+        var (_, invalidNamespaceDiagnostics, _, _) = CompilerTestBed.Parse("""
+            namespace A<T>;
+            """);
+
+        Assert.Empty(validDiagnostics.Diagnostics);
+        Assert.NotEmpty(invalidTypeDiagnostics.Diagnostics);
+        Assert.NotEmpty(invalidNamespaceDiagnostics.Diagnostics);
+    }
+
+    [Fact]
     public void Parse_FunctionDeclaration_WithTypeConstraints()
     {
         FunctionDeclaration function = ParseSingleTopLevelFunction("""
@@ -154,8 +537,8 @@ public sealed class ParserTests
         GenericName identifier = Assert.IsType<GenericName>(function.Signature.Identifier);
         Assert.Equal("Build", identifier.Name.Value);
         Assert.Equal(2, identifier.TypeParameters.Count);
-        Assert.Equal("TInput", identifier.TypeParameters[0].Name.Value);
-        Assert.Equal("TResult", identifier.TypeParameters[1].Name.Value);
+        Assert.Equal("TInput", identifier.TypeParameters[0].Identifier.Value);
+        Assert.Equal("TResult", identifier.TypeParameters[1].Identifier.Value);
 
         Assert.Equal(2, function.Signature.Constraints.Count);
 
@@ -170,6 +553,100 @@ public sealed class ParserTests
         GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
         Assert.Equal("Output", resultConstraintType.Name.Value);
         Assert.Equal("TInput", Assert.IsType<SimpleType>(resultConstraintType.TypeArguments[0]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_GenericDeclaration_SupportsCompileTimeAndVariadicParameters()
+    {
+        TypeDeclaration declaration = ParseSingleTopLevelType("""
+            struct Example<T, N: int, F: float, C: const, Rest...> where N : Std.Int32;
+            """);
+
+        GenericName name = Assert.IsType<GenericName>(declaration.Name);
+        Assert.Equal(5, name.TypeParameters.Count);
+        Assert.Equal(GenericParameterKind.Type, name.TypeParameters[0].Kind);
+        Assert.Equal(GenericParameterKind.Integer, name.TypeParameters[1].Kind);
+        Assert.Equal(GenericParameterKind.Float, name.TypeParameters[2].Kind);
+        Assert.Equal(GenericParameterKind.Constant, name.TypeParameters[3].Kind);
+        Assert.True(name.TypeParameters[4].IsVariadic);
+        Assert.Equal(3, name.TypeParameters[4].Ellipsis.Count);
+
+        TypeConstraintClause constraint = Assert.Single(declaration.Constraints);
+        Assert.Equal("N", constraint.TypeParameter.Name.Value);
+        Assert.IsType<QualifiedType>(Assert.IsType<TypeTypeConstraint>(Assert.Single(constraint.Constraints)).Type);
+    }
+
+    [Fact]
+    public void Parse_DeclarationAttributes_SupportQualifiedNamesAndConstructorArguments()
+    {
+        TypeDeclaration type = ParseSingleTopLevelType("""
+            [Marker]
+            [Standard.IntrinsicType("Int32", 32)]
+            public attribute SignedInt;
+            """);
+
+        Assert.Equal(TypeKind.Attribute, type.Kind);
+        Assert.Equal(2, type.Attributes.Count);
+
+        AttributeApplication simpleAttribute = Assert.Single(type.Attributes[0].Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(simpleAttribute.Name).Name.Value);
+        Assert.Empty(simpleAttribute.Arguments);
+        Assert.Null(simpleAttribute.OpenParen);
+        Assert.Null(simpleAttribute.CloseParen);
+
+        AttributeApplication qualifiedAttribute = Assert.Single(type.Attributes[1].Attributes);
+        QualifiedName qualifiedName = Assert.IsType<QualifiedName>(qualifiedAttribute.Name);
+        Assert.Equal(2, qualifiedName.Parts.Count);
+        Assert.Equal("Standard", Assert.IsType<SimpleName>(qualifiedName.Parts[0]).Name.Value);
+        Assert.Equal("IntrinsicType", Assert.IsType<SimpleName>(qualifiedName.Parts[1]).Name.Value);
+        Assert.Equal(2, qualifiedAttribute.Arguments.Count);
+        Assert.IsType<LiteralExpression>(qualifiedAttribute.Arguments[0]);
+        Assert.IsType<LiteralExpression>(qualifiedAttribute.Arguments[1]);
+    }
+
+    [Fact]
+    public void Parse_IntrinsicModifier_IsValidOnlyForAttributeDeclarations()
+    {
+        TypeDeclaration intrinsicAttribute = ParseSingleTopLevelType("""
+            public intrinsic attribute Intrinsic;
+            """);
+
+        Assert.Equal(TypeKind.Attribute, intrinsicAttribute.Kind);
+        Assert.Contains(intrinsicAttribute.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
+
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(ParseSingleTopLevel("""
+            public intrinsic value;
+            """, typeof(TopLevelVariableDeclaration)));
+
+        SimpleType variableType = Assert.IsType<SimpleType>(variable.Declaration.Type);
+        Assert.Equal("intrinsic", variableType.Name.Value);
+        Assert.DoesNotContain(variable.Declaration.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
+    }
+
+    [Fact]
+    public void Parse_PropertyDeclaration_SupportsAccessorModifiersAndBodies()
+    {
+        MemberPropertyDeclaration property = Assert.IsType<MemberPropertyDeclaration>(ParseSingleMember("""
+            [Meta]
+            public int Value
+            {
+                get;
+                private set
+                {
+                    return;
+                }
+            }
+            """, typeof(MemberPropertyDeclaration)));
+
+        Assert.Single(property.Attributes);
+        Assert.Equal("Value", Assert.IsType<SimpleName>(property.Identifier).Name.Value);
+        Assert.Equal(2, property.Body.Accessors.Count);
+        Assert.Equal(PropertyAccessorKind.Get, property.Body.Accessors[0].Kind);
+        Assert.IsType<FunctionEmptyBody>(property.Body.Accessors[0].Body);
+        Assert.Equal(PropertyAccessorKind.Set, property.Body.Accessors[1].Kind);
+        Assert.Single(property.Body.Accessors[1].Modifiers);
+        Assert.Equal(MatchingKeywordKind.Private, property.Body.Accessors[1].Modifiers[0].MatchingKind);
+        Assert.IsType<FunctionBlockBody>(property.Body.Accessors[1].Body);
     }
 
     [Fact]
@@ -201,16 +678,20 @@ public sealed class ParserTests
     public void Parse_SupportedSyntaxSurface_BuildsCurrentNodeSet()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
             namespace Outer;
 
-            public int topValue = 1, topOther;
+            public int topValue = 1;
+            public int topOther;
+            PointerCandidate * topPointer;
+            ReferenceCandidate & topReference;
 
             namespace Extra
             {
                 public class Nested;
             }
 
-            public class Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
+            public struct Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
             {
                 public T Value;
                 public class Nested;
@@ -225,18 +706,27 @@ public sealed class ParserTests
 
                     int local = 1;
                     int[] numbers = new int[3] { 1, 2, 3 };
+                    PointerLocal * localPointer;
+                    ReferenceLocal & localReference;
                     local = -(local + 1) + (int)items[0];
+                    local = (local) - local;
                     local = { int last = 2; 3 };
-                    local = [1, 2, 3][0];
-                    local = new Box<int>(local).Value;
+                    local = [1, 2, 3] with(capacity: 10)[0];
+                    local = new Box<int>(local) with { Value = local }.Value;
+                    numbers = put int[3] with { Length = local };
                     local = put Box<int>(local).Value;
                     local = if (local) local else 0;
-                    local = identity<int>(local);
+                    local = identity<int>(value: local);
 
                     if (local) return local; else ;
                     while (local) ;
                     { int scoped = 0; scoped = local; }
                     return local;
+                }
+
+                unsafe
+                {
+                    void UnsafeFunc() { }
                 }
             }
 
@@ -252,6 +742,7 @@ public sealed class ParserTests
 
             public static void Forward();
 
+            global { int globalBlockValue = 0; }
             call();
             if (1) return; else ;
             while (1) ;
@@ -266,12 +757,15 @@ public sealed class ParserTests
 
         AssertIncludesNodeTypes(
             nodeTypes,
+            typeof(PragmaDirective),
             typeof(NamespaceDeclaration),
             typeof(NamespaceEmptyBody),
             typeof(NamespaceBlockBody),
             typeof(TopLevelTypeDeclaration),
             typeof(TopLevelFunctionDeclaration),
             typeof(TopLevelVariableDeclaration),
+            typeof(TopLevelAmbiguousPointerDeclaration),
+            typeof(TopLevelAmbiguousReferenceDeclaration),
             typeof(TypeDeclaration),
             typeof(TypeBlockBody),
             typeof(TypeEmptyBody),
@@ -281,14 +775,17 @@ public sealed class ParserTests
             typeof(MemberFieldDeclaration),
             typeof(MemberFunctionDeclaration),
             typeof(MemberTypeDeclaration),
+            typeof(MemberBlockDeclaration),
             typeof(LocalTypeDeclaration),
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),
+            typeof(LocalAmbiguousPointerDeclarationStatement),
+            typeof(LocalAmbiguousReferenceDeclarationStatement),
             typeof(TopLevelExpressionStatement),
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
-            typeof(TopLevelBlockStatement),
+            typeof(TopLevelBlock),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),
@@ -299,7 +796,8 @@ public sealed class ParserTests
             typeof(LocalReturnStatement),
             typeof(LocalEmptyStatement),
             typeof(VariableDeclaration),
-            typeof(VariableDeclarator),
+            typeof(AmbiguousPointerDeclaration),
+            typeof(AmbiguousReferenceDeclaration),
             typeof(AssignmentClause),
             typeof(Parameter),
             typeof(ParameterVariableDeclarator),
@@ -327,13 +825,17 @@ public sealed class ParserTests
             typeof(AssignmentExpression),
             typeof(ParenthesizedExpression),
             typeof(CastExpression),
+            typeof(AmbiguousCastOrParenthesizedExpression),
             typeof(BlockExpression),
             typeof(CollectionExpression),
+            typeof(CollectionConstructorModifier),
             typeof(IfExpression),
             typeof(ElseExpression),
             typeof(ConstructorCallExpression),
             typeof(ArrayCreationExpression),
-            typeof(CollectionInitializer));
+            typeof(ObjectWithClause),
+            typeof(CollectionInitializer),
+            typeof(NamedArgumentExpression));
     }
 
     [Fact]

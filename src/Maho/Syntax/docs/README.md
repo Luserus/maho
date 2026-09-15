@@ -16,6 +16,7 @@ The docs here go deep on structure and navigation, and they aim to stay in sync 
 
 - `SyntaxNode.cs`: common base type for syntax nodes.
 - `CompilationUnit.cs`: root node.
+- `PragmaDirective.cs`: file-header analysis configuration directives.
 - `SyntaxTree.cs`: batch-level parse result that groups all compilation units once parsing is done.
 - `TopLevel.cs`, `Member.cs`, `Local.cs`: category base types used to separate grammar layers.
 - `Token.cs`: syntax token object, including trivia and matching-keyword metadata.
@@ -67,6 +68,8 @@ The common base type. The parser debug serializer walks syntax trees through thi
 
 The root node. It owns:
 
+- `Pragmas`: file-header directives used to configure analysis for that one file
+- `Pragmas`: ordered directives; consumers derive top-level mode from these entries.
 - `Members`: top-level syntax items
 - `EndToken`: the terminal EOF token
 
@@ -123,6 +126,7 @@ The parser is intentionally split across multiple files:
 - `Parser.Declarations.cs`: declaration grammar.
 - `Parser.Expressions.cs`: expression grammar.
 - `Parser.Statements.cs`: statement grammar.
+- `Parser.Directives.cs`: file-header pragma grammar.
 - `Parser.Debug.cs`: serialization/debug projection only.
 
 This split is worth knowing before editing anything substantial. The runtime type is still one parser, but the code is organized by grammar concern plus debug concerns.

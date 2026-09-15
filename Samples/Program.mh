@@ -1,0 +1,5 @@
+#pragma toplevel enable
+
+namespace Sample;
+
+Std.IO.Print();

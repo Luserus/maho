@@ -9,4 +9,4 @@ namespace Maho;
 /// <param name="End">Zero-based exclusive end offset.</param>
 /// <param name="StartLocation">One-based start location.</param>
 /// <param name="EndLocation">One-based end location.</param>
-public sealed record TextSpanInfo(int Start, int Length, int End, TextLocation StartLocation, TextLocation EndLocation);
+public record struct TextSpanInfo(int Start, int Length, int End, TextLocation StartLocation, TextLocation EndLocation);

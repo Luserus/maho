@@ -10,15 +10,17 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 - `TopLevelStatement`
 - `LocalStatement`
 
-### Top-level statement forms
+### Top-level block and statement forms
 
-- `TopLevelBlockStatement`
+- `TopLevelBlock`
 - `TopLevelElseStatement`
 - `TopLevelEmptyStatement`
 - `TopLevelExpressionStatement`
 - `TopLevelIfStatement`
 - `TopLevelReturnStatement`
 - `TopLevelVariableDeclarationStatement`
+- `TopLevelAmbiguousPointerDeclaration`
+- `TopLevelAmbiguousReferenceDeclaration`
 - `TopLevelWhileStatement`
 
 ### Local statement forms
@@ -30,6 +32,8 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 - `LocalIfStatement`
 - `LocalReturnStatement`
 - `LocalVariableDeclarationStatement`
+- `LocalAmbiguousPointerDeclarationStatement`
+- `LocalAmbiguousReferenceDeclarationStatement`
 - `LocalWhileStatement`
 
 ## Design note
@@ -42,6 +46,10 @@ The duplication between top-level and local statement nodes is intentional and w
 That makes the syntax tree more explicit, even if it produces more files.
 
 The payoff is that parser and later semantic code can tell whether a statement appeared in top-level or local scope without reconstructing that context from parent chains.
+
+Top-level statement nodes require file-level opt-in through `#pragma toplevel enable`. During
+resolution, variables in an opted-in compilation unit are treated as locals of that file's
+implicit `Main` function.
 
 ## How to traverse this folder
 

@@ -1,0 +1,26 @@
+namespace Example
+{
+    public class Outer<T>
+    {
+        public int field;
+        public int Property { get; set; }
+
+        public static int Method<U>(int parameter)
+        {
+            public class LocalType<W>;
+            public static int Nested<V>() { return 0; }
+            int local = 0;
+            return local;
+        }
+
+        { public class MemberType<X>; }
+    }
+}
+
+public int g2;
+
+{
+    public int global;
+    public static int Function<Y>() { return 0; }
+    public class TopLevelType<Z>;
+}

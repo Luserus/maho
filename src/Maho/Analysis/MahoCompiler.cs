@@ -108,6 +108,82 @@ public static class MahoCompiler
     /// </summary>
     public static CompilerProjectAnalysisResult AnalyzeFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string projectName = "<project>")
     {
+        return AnalyzeFilesCore(filePaths, output, projectName, explicitEntryFile: null);
+    }
+
+    /// <summary>
+    /// Runs a complete compilation request for a collection of source files. Syntax and resolution
+    /// diagnostics are returned normally; a successful front end continues into the next pipeline
+    /// stage, which is currently a deliberate placeholder.
+    /// </summary>
+    public static CompilerProjectAnalysisResult CompileFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string projectName = "<project>")
+    {
+        return ContinueCompilation(AnalyzeFiles(filePaths, output, projectName));
+    }
+
+    /// <summary>
+    /// Loads an <c>.mhpr</c> project file, discovers its source files, and analyzes the
+    /// project using its entry-point configuration.
+    /// </summary>
+    public static CompilerProjectAnalysisResult AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None)
+    {
+        if (string.IsNullOrWhiteSpace(projectFilePath))
+            throw new ArgumentException("Project file path cannot be empty.", nameof(projectFilePath));
+
+        string fullProjectPath = Path.GetFullPath(projectFilePath);
+
+        if (!string.Equals(Path.GetExtension(fullProjectPath), ".mhpr", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Project files must use the '.mhpr' extension.", nameof(projectFilePath));
+
+        MahoProjectConfiguration configuration;
+
+        try
+        {
+            string projectJson = File.ReadAllText(fullProjectPath);
+            configuration = MahoProjectFileParser.Parse(projectJson);
+        }
+        catch (MahoProjectParseException ex)
+        {
+            throw new ArgumentException($"Project file is invalid: {ex.Message}", nameof(projectFilePath), ex);
+        }
+
+        string projectDirectory = Path.GetDirectoryName(fullProjectPath)!;
+        string[] sourceFiles = Directory.GetFiles(projectDirectory, "*.mh", SearchOption.AllDirectories);
+        Array.Sort(sourceFiles, StringComparer.Ordinal);
+
+        if (sourceFiles.Length == 0)
+            throw new FileNotFoundException("Project does not contain any '.mh' source files.", fullProjectPath);
+
+        string? explicitEntryFile = ResolveProjectEntryFile(configuration, projectDirectory, sourceFiles, projectFilePath);
+        string projectName = Path.GetFileNameWithoutExtension(fullProjectPath);
+        return AnalyzeFilesCore(sourceFiles, output, projectName, explicitEntryFile);
+    }
+
+    /// <summary>
+    /// Runs a complete compilation request described by a <c>.mhpr</c> project file. A successful
+    /// front end continues into the next pipeline stage, which is currently a deliberate placeholder.
+    /// </summary>
+    public static CompilerProjectAnalysisResult CompileProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None)
+    {
+        return ContinueCompilation(AnalyzeProjectFile(projectFilePath, output));
+    }
+
+    private static CompilerProjectAnalysisResult ContinueCompilation(CompilerProjectAnalysisResult analysis)
+    {
+        if (analysis.HasErrors)
+            return analysis;
+
+        LowerAndEmit(analysis);
+        return analysis;
+    }
+
+    private static void LowerAndEmit(CompilerProjectAnalysisResult analysis)
+    {
+        throw new CompilerPipelineNotImplementedException(analysis);
+    }
+
+    private static CompilerProjectAnalysisResult AnalyzeFilesCore(IReadOnlyList<string> filePaths, AnalysisOutput output, string projectName, string? explicitEntryFile)
+    {
         if (string.IsNullOrWhiteSpace(projectName))
             throw new ArgumentException("Project name cannot be empty.", nameof(projectName));
 
@@ -155,7 +231,8 @@ public static class MahoCompiler
                     rootCount++;
             }
 
-            Diagnostic[] resolutionDiagnostics = [];
+            Diagnostics.Diagnostic[] resolutionDiagnostics = [];
+            string? selectedEntryFile = null;
 
             if (rootCount > 0)
             {
@@ -172,9 +249,10 @@ public static class MahoCompiler
 
                 DiagnosticsManager resolutionDiagnosticsManager = new();
                 SyntaxTree syntaxTree = new(projectName, roots);
-                _ = new Resolver(resolutionDiagnosticsManager).Resolve(syntaxTree);
+                selectedEntryFile = ValidateTopLevelEntryPoint(parsedFiles, explicitEntryFile);
+                new Resolver().Resolve(syntaxTree);
                 int resolutionDiagnosticCount = resolutionDiagnosticsManager.Diagnostics.Count;
-                resolutionDiagnostics = new Diagnostic[resolutionDiagnosticCount];
+                resolutionDiagnostics = new Diagnostics.Diagnostic[resolutionDiagnosticCount];
 
                 for (int i = 0; i < resolutionDiagnosticCount; i++)
                     resolutionDiagnostics[i] = resolutionDiagnosticsManager.Diagnostics[i];
@@ -195,7 +273,10 @@ public static class MahoCompiler
             for (int i = 0; i < results.Length; i++)
                 finalResults[i] = results[i]!;
 
-            return new CompilerProjectAnalysisResult(projectName, finalResults);
+            return new CompilerProjectAnalysisResult(projectName, finalResults)
+            {
+                EntryFile = selectedEntryFile
+            };
         }
         finally
         {
@@ -207,6 +288,80 @@ public static class MahoCompiler
         }
     }
 
+    private static string? ResolveProjectEntryFile(MahoProjectConfiguration configuration, string projectDirectory, IReadOnlyList<string> sourceFiles, string projectFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(configuration.EntryFile))
+            return null;
+
+        string entryFile = Path.GetFullPath(Path.Combine(projectDirectory, configuration.EntryFile));
+
+        if (!File.Exists(entryFile))
+            throw new FileNotFoundException("Configured EntryFile was not found.", entryFile);
+
+        for (int index = 0; index < sourceFiles.Count; index++)
+        {
+            if (string.Equals(sourceFiles[index], entryFile, StringComparison.OrdinalIgnoreCase))
+                return entryFile;
+        }
+
+        throw new ArgumentException("Configured EntryFile must be a '.mh' file within the project directory.", nameof(projectFilePath));
+    }
+
+    private static string? ValidateTopLevelEntryPoint(IReadOnlyList<ParsedFileAnalysis?> parsedFiles, string? explicitEntryFile)
+    {
+        List<ParsedFileAnalysis> candidates = [];
+
+        for (int index = 0; index < parsedFiles.Count; index++)
+        {
+            ParsedFileAnalysis? parsedFile = parsedFiles[index];
+
+            if (parsedFile is not null && PragmaDirective.EnablesTopLevelStatements(parsedFile.Root.Pragmas) && ContainsTopLevelStatement(parsedFile.Root.Members))
+                candidates.Add(parsedFile);
+        }
+
+        if (candidates.Count > 1)
+        {
+            foreach (ParsedFileAnalysis candidate in candidates)
+            {
+                candidate.Diagnostics.ReportError("MH0012", "Only one source file may contain opted-in top-level statements.", GetTopLevelPragmaSpan(candidate.Root));
+            }
+        }
+
+        if (explicitEntryFile is not null)
+            return explicitEntryFile;
+
+        return candidates.Count is 1 ? candidates[0].SourcePath : null;
+    }
+
+    private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
+    {
+        foreach (TopLevel member in members)
+        {
+            switch (member)
+            {
+                case TopLevelStatement:
+                    return true;
+                case TopLevelBlock block when ContainsTopLevelStatement(block.Members):
+                    return true;
+                case NamespaceDeclaration { Body: NamespaceBlockBody body } when ContainsTopLevelStatement(body.Members):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static TextSpan GetTopLevelPragmaSpan(CompilationUnit unit)
+    {
+        foreach (PragmaDirective pragma in unit.Pragmas)
+        {
+            if (pragma.Name.Value == "toplevel" && pragma.Value.Value == "enable")
+                return pragma.HashToken.Span;
+        }
+
+        return unit.EndToken.Span;
+    }
+
     /// <summary>
     /// Runs the shared front-end pipeline against a prepared <see cref="SourceText"/> instance.
     /// Lexer and parser share one diagnostics manager so callers receive a single coherent report.
@@ -214,7 +369,7 @@ public static class MahoCompiler
     private static CompilerAnalysisResult AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)
     {
         ParsedFileAnalysis parsedFile = ParseCore(text, sourcePath, output);
-        _ = new Resolver(parsedFile.Diagnostics).Resolve(SyntaxTree.CreateSingleRoot(parsedFile.Root, sourcePath));
+        new Resolver().Resolve(SyntaxTree.CreateSingleRoot(parsedFile.Root, sourcePath));
         return CreateAnalysisResult(parsedFile);
     }
 
@@ -248,7 +403,7 @@ public static class MahoCompiler
     /// Finalizes one file result from its syntax-stage artifacts plus any project-wide diagnostics
     /// that were attributed back to the same source buffer during resolution.
     /// </summary>
-    private static CompilerAnalysisResult CreateAnalysisResult(ParsedFileAnalysis parsedFile, Diagnostic[]? projectDiagnostics = null)
+    private static CompilerAnalysisResult CreateAnalysisResult(ParsedFileAnalysis parsedFile, Diagnostics.Diagnostic[]? projectDiagnostics = null)
     {
         DiagnosticInfo[] diagnostics = CreateDiagnostics(parsedFile.Diagnostics.Diagnostics, parsedFile.Text, projectDiagnostics);
 
@@ -299,7 +454,7 @@ public static class MahoCompiler
     /// Projects internal diagnostics into the public result model, enriching raw spans with
     /// line/column information so consumers do not need the original source buffer.
     /// </summary>
-    private static DiagnosticInfo[] CreateDiagnostics(IReadOnlyList<Diagnostic> fileDiagnostics, SourceText text, Diagnostic[]? projectDiagnostics = null)
+    private static DiagnosticInfo[] CreateDiagnostics(IReadOnlyList<Diagnostics.Diagnostic> fileDiagnostics, SourceText text, Diagnostics.Diagnostic[]? projectDiagnostics = null)
     {
         int projectedCount = fileDiagnostics.Count;
 
@@ -327,11 +482,11 @@ public static class MahoCompiler
     /// Appends projected diagnostics to one output buffer. Project-wide diagnostics are filtered by
     /// source identity so each file only receives the diagnostics that actually belong to it.
     /// </summary>
-    private static void AppendDiagnostics(DiagnosticInfo[] output, ref int outputIndex, IReadOnlyList<Diagnostic> diagnostics, SourceText text, bool filterBySource)
+    private static void AppendDiagnostics(DiagnosticInfo[] output, ref int outputIndex, IReadOnlyList<Diagnostics.Diagnostic> diagnostics, SourceText text, bool filterBySource)
     {
         for (int i = 0; i < diagnostics.Count; i++)
         {
-            Diagnostic diagnostic = diagnostics[i];
+            Diagnostics.Diagnostic diagnostic = diagnostics[i];
 
             if (filterBySource && !ReferenceEquals(diagnostic.Source, text))
                 continue;

@@ -10,6 +10,9 @@ public sealed record CompilerProjectAnalysisResult(
     string ProjectName,
     CompilerBatchFileResult[] Files)
 {
+    /// <summary> Selected explicit or implicit entry source file, when project analysis found one. </summary>
+    public string? EntryFile { get; init; }
+
     /// <summary> Indicates whether any file in the batch reported errors or analysis failure. </summary>
     public bool HasErrors
     {

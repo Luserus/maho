@@ -4,17 +4,26 @@ namespace Maho.Syntax;
 internal enum MatchingKeywordKind : byte
 {
     None,
+    Get,
+    Set,
+    Global,
     If,
     Else,
     While,
+    Goto,
+    Using,
+    Int,
+    Float,
     Return,
     Public,
     Private,
     Internal,
     Protected,
     Sealed,
+    Virtual,
     Extern,
     Namespace,
+    Attribute,
     Struct,
     Class,
     Enum,
@@ -26,5 +35,10 @@ internal enum MatchingKeywordKind : byte
     Put,
     Const,
     Where,
-    Partial
+    With,
+    Partial,
+    Unsafe,
+    Intrinsic,
+    Var,
+    Dyn
 }

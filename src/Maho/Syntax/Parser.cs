@@ -114,11 +114,46 @@ internal sealed partial class Parser
     /// <summary> Parsed root produced by the last successful call to <see cref="Parse"/>. </summary>
     public CompilationUnit Root { get; private set; } = null!;
 
+    /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
+    private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global;
+    /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
+    private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
-    private bool IsCurrentTokenModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                            MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial;
+    private bool IsCurrentTokenModifier => IsCurrentTokenRegularModifier || IsCurrentTokenIntrinsicAttributeModifier;
+    /// <summary> Indicates whether the current token starts a bracketed attribute list. </summary>
+    private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
-    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
+    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or MatchingKeywordKind.Attribute;
+
+    /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
+    private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
+    {
+        if (tokenIndex < 0 || tokenIndex >= tokens.Count || tokens[tokenIndex].MatchingKind is not MatchingKeywordKind.Intrinsic)
+            return false;
+
+        int probe = tokenIndex + 1;
+
+        while (probe < tokens.Count)
+        {
+            MatchingKeywordKind kind = tokens[probe].MatchingKind;
+
+            if (kind is MatchingKeywordKind.Attribute)
+                return true;
+
+            if (kind is MatchingKeywordKind.Intrinsic or MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or MatchingKeywordKind.Unsafe or
+                MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial)
+            {
+                probe++;
+                continue;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
 
     /// <summary> Controls whether statement parsing should allow a trailing expression result. </summary>
     private enum StatementParseMode : byte
@@ -142,7 +177,7 @@ internal sealed partial class Parser
     {
         this.text = text;
         this.diagnostics = diagnostics;
-    } 
+    }
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
     /// <param name="tokens"> The tokens to parse. </param>
@@ -181,19 +216,20 @@ internal sealed partial class Parser
     /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()
     {
+        IReadOnlyList<PragmaDirective> pragmas = ParsePragmaDirectives(out bool topLevelStatementsEnabled);
         var topLevels = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
             var start = current;
-            var topLevel = ParseTopLevel();
+            var topLevel = ParseTopLevel(topLevelStatementsEnabled);
             topLevels.Add(topLevel);
             RecoverTopLevelIfStalled(start);
         }
 
         var eofToken = Consume();
 
-        return new CompilationUnit(topLevels, eofToken);
+        return new CompilationUnit(pragmas, topLevels, eofToken);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -220,33 +256,53 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
-    private TopLevel ParseTopLevel()
+    private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
-            return ParseNamespaceDeclaration();
-        else if (IsCurrentTokenModifier)
-            return ParseTopLevelDeclaration();
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+            return ParseTopLevelAliasDeclaration();
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
+            return ParseNamespaceDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
+            return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
+        else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
+                 CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
+            return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
+        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
+        {
+            if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
+                return ParseTopLevelAmbiguousPointerDeclaration();
 
-        return ParseTopLevelStatement();
+            if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
+                return ParseTopLevelAmbiguousReferenceDeclaration();
+
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        }
+
+        return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
     }
 
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember()
     {
+        IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (IsCurrentTokenTypeDeclarationStart)
-            return ParseMemberTypeDeclaration(modifiers);
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+            return ParseMemberBlockDeclaration(attributes, modifiers);
+        else if (IsCurrentTokenTypeDeclarationStart)
+            return ParseMemberTypeDeclaration(attributes, modifiers);
         else
-            return ParseMemberFieldDeclarationOrFunction(modifiers);
+            return ParseMemberFieldDeclarationOrFunctionOrProperty(attributes, modifiers);
     }
 
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
-        if (IsCurrentTokenModifier)
+        if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
-        
+
         return ParseLocalStatement(parseMode);
     }
 
@@ -258,7 +314,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseTypeSyntax());
+            nodesAndSeparators.Add(ParseTypeArgument());
             wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -275,6 +331,11 @@ internal sealed partial class Parser
 
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
+
+    /// <summary>Parses either a type argument or a literal compile-time argument.</summary>
+    private TypeSyntax ParseTypeArgument() => IsLiteralTokenKind(CurrentToken.Kind)
+        ? new LiteralTypeArgument(Consume())
+        : ParseTypeSyntax();
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
     private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
@@ -308,7 +369,7 @@ internal sealed partial class Parser
             length = i + 1;
             foundKind = node.Kind;
         }
-                
+
         return (foundKind ?? TokenKind.NullToken, length);
     }
 
@@ -334,6 +395,31 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+    }
+
+    private TopLevelBlock ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, bool topLevelStatementsEnabled)
+    {
+        var openBrace = Consume();
+        var members = new List<TopLevel>();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var start = current;
+            var member = ParseTopLevel(topLevelStatementsEnabled);
+            members.Add(member);
+            RecoverTopLevelIfStalled(start);
+        }
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
+
+        return new TopLevelBlock(attributes, modifiers, openBrace, members, closeBrace);
+    }
+
+    private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
+    {
+        if (!topLevelStatementsEnabled)
+            diagnostics.ReportError("MH0011", "Top-level statements require '#pragma toplevel enable' in this file.", CurrentToken.Span);
+
+        return ParseTopLevelStatement();
     }
 
     /// <summary> Peek ahead in the tokens list by specified offset. </summary>

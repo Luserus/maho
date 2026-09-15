@@ -24,12 +24,14 @@ internal sealed partial class Parser
     private bool CanStartTopLevelConstruct() =>
         CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
         CurrentToken.MatchingKind is MatchingKeywordKind.Namespace ||
+        IsCurrentTokenAttributeListStart ||
         IsCurrentTokenModifier ||
         CanStartExpression();
 
     /// <summary> Checks whether the current token can begin a member declaration or member statement. </summary>
     private bool CanStartMemberConstruct() =>
         CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
+        IsCurrentTokenAttributeListStart ||
         IsCurrentTokenModifier ||
         IsCurrentTokenTypeDeclarationStart ||
         CurrentToken.Kind is TokenKind.Identifier;
@@ -37,6 +39,7 @@ internal sealed partial class Parser
     /// <summary> Checks whether the current token can begin a local construct. </summary>
     private bool CanStartLocalConstruct() =>
         CurrentToken.Kind is TokenKind.EndToken or TokenKind.RightBrace or TokenKind.Semicolon ||
+        IsCurrentTokenAttributeListStart ||
         IsCurrentTokenModifier ||
         CanStartExpression();
 

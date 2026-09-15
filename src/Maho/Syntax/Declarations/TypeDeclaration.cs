@@ -5,6 +5,8 @@ namespace Maho.Syntax;
 /// <summary> Base type for type declarations that can appear at top level or inside a type body. </summary>
 internal sealed class TypeDeclaration : SyntaxNode
 {
+    /// <summary> Attributes attached to the type declaration. </summary>
+    public IReadOnlyList<AttributeListSyntax> Attributes { get; }
     /// <summary> Declaration modifiers, such as visibility or storage modifiers. </summary>
     public IReadOnlyList<Token> Modifiers { get; }
     /// <summary> The keyword introducing the type declaration. </summary>
@@ -19,8 +21,9 @@ internal sealed class TypeDeclaration : SyntaxNode
     public TypeBody Body { get; }
 
     /// <summary> Creates one type declaration from its parsed components. </summary>
-    public TypeDeclaration(IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBaseClause? @base, IReadOnlyList<TypeConstraintClause> constraints, TypeBody body)
+    public TypeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBaseClause? @base, IReadOnlyList<TypeConstraintClause> constraints, TypeBody body)
     {
+        Attributes = attributes;
         Modifiers = modifiers;
         Keyword = keyword;
         Kind = kind;

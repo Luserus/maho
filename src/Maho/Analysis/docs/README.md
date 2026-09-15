@@ -14,6 +14,7 @@ This folder matters because it defines what leaves the compiler:
 - `CompilerAnalysisResult.cs`: immutable single-file result payload.
 - `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
 - `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)`.
+- `../Projects/MahoProjectConfiguration.cs`: domain-specific `.mhpr` project configuration.
 - `AnalysisOutput.cs`: flags that decide which debug payloads are included.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
@@ -50,6 +51,39 @@ Important details:
 - each file result is preserved even if another file fails,
 - the returned `CompilerProjectAnalysisResult` keeps file results in input order,
 - this API centralizes batch scheduling policy inside the compiler library.
+
+### `AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None)`
+
+Loads a domain-specific, JSON-inspired `.mhpr` file, recursively discovers the project's `.mh`
+sources, and applies its entry-point selection policy. The outer project scope is intentionally
+brace-less and property names are bare identifiers:
+
+```mhpr
+EntryFile : "Program.mh";
+GlobalUnsafeEnabled : false;
+ProjectsReferenced : [];
+GlobalAliases : {
+	"int32" : "Std.Int32",
+	"float32" : "Std.Float32"
+};
+```
+
+Top-level project properties are terminated by semicolons. Array and object values retain
+comma-separated entries.
+
+`EntryFile` is optional. Without it, exactly one source file containing opted-in top-level
+statements becomes the implicit entry candidate; multiple candidates report an ambiguity.
+This one-file restriction applies even when `EntryFile` is explicitly configured.
+`GlobalUnsafeEnabled`, `ProjectsReferenced`, and `GlobalAliases` are represented by the project
+configuration model and reserved for later semantic passes.
+
+### `CompileFiles(...)` and `CompileProjectFile(...)`
+
+These are the production compiler entry points used by the CLI. They run the same front-end work as
+their `Analyze*` counterparts, return normal syntax/resolution failures, and otherwise enter the
+next lowering/code-generation stage. That stage currently throws
+`CompilerPipelineNotImplementedException`, retaining the completed front-end result for debug and
+diagnostics consumers.
 
 ### `AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)`
 
@@ -130,6 +164,7 @@ Fields:
 
 - `ProjectName`: friendly identity for the analyzed batch.
 - `Files`: ordered file outcomes.
+- `EntryFile`: configured or unambiguous implicit entry source, when one was selected.
 
 #### `HasErrors`
 

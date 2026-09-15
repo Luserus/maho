@@ -5,11 +5,11 @@ internal sealed class ModifiedType : TypeSyntax
 {
     /// <summary> Base type before the postfix modifier is applied. </summary>
     public TypeSyntax Type { get; }
-    /// <summary> Optional postfix modifier. </summary>
-    public PostfixTypeModifier? Modifier { get; }
+    /// <summary> Postfix modifier. </summary>
+    public PostfixTypeModifier Modifier { get; }
 
     /// <summary> Creates one modified type node. </summary>
-    public ModifiedType(TypeSyntax type, PostfixTypeModifier? modifier)
+    public ModifiedType(TypeSyntax type, PostfixTypeModifier modifier)
     {
         Type = type;
         Modifier = modifier;

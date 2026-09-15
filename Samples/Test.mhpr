@@ -1,0 +1,7 @@
+EntryFile : "Program.mh";
+GlobalUnsafeEnabled : false;
+ProjectsReferenced : [];
+GlobalAliases : {
+    "int32" : "Std.Int32",
+    "float32" : "Std.Float32"
+};

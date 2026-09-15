@@ -8,12 +8,12 @@ internal sealed class GenericName : NamedSyntax
     /// <summary> Opening angle bracket token. </summary>
     public Token LessThanToken { get; }
     /// <summary> Generic parameter list. </summary>
-    public SeparatedSyntaxList<SimpleName> TypeParameters { get; }
+    public SeparatedSyntaxList<GenericParameterSyntax> TypeParameters { get; }
     /// <summary> Closing angle bracket token. </summary>
     public Token GreaterThanToken { get; }
 
     /// <summary> Creates one generic name node. </summary>
-    public GenericName(Token name, Token lessThanToken, SeparatedSyntaxList<SimpleName> typeParameters, Token greaterThanToken)
+    public GenericName(Token name, Token lessThanToken, SeparatedSyntaxList<GenericParameterSyntax> typeParameters, Token greaterThanToken)
     {
         Name = name;
         LessThanToken = lessThanToken;

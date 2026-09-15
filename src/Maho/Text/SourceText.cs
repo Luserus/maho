@@ -4,7 +4,6 @@ using System.IO.MemoryMappedFiles;
 using System.Text;
 
 namespace Maho.Text;
-
 /// <summary>
 /// Represents the source text of the program.
 /// Supports two load modes:
@@ -77,7 +76,7 @@ internal sealed class SourceText : IDisposable
         lazyLines = ParseLines();
     }
 
-    /// <summary> Returns a non-allocating character view over one source span. </summary>
+    /// <summary> Returns a non-allocating character view over one source span. </summary
     public ReadOnlySpan<char> AsSpan(TextSpan span)
     {
         if (span.Length == 0)
@@ -146,7 +145,7 @@ internal sealed class SourceText : IDisposable
             lineStart = position;
         }
 
-        // Keep the trailing unterminated line addressable; diagnostics rely on this behavior.
+        // Keep the trailing unterminated line addressable; diagnostics rely on this behavior
         if (position >= lineStart)
             AddLine(lines, ref lineIndex, position, lineStart, 0);
 

@@ -1,5 +1,4 @@
 using Maho.Diagnostics;
-using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -24,10 +23,5 @@ internal static class CompilerTestBed
         return (text, diagnostics, parser, root);
     }
 
-    public static ResolutionProjectResult ResolveProject(params CompilationUnit[] roots)
-    {
-        DiagnosticsManager diagnostics = new();
-        Resolver resolver = new(diagnostics);
-        return resolver.Resolve(new SyntaxTree("test-project", roots));
-    }
+
 }

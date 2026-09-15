@@ -32,6 +32,8 @@ These files define how type references are represented independently of semantic
 - `TypeDeclaration`
 - `FunctionDeclaration`
 - `VariableDeclaration`
+- `AmbiguousPointerDeclaration`
+- `AmbiguousReferenceDeclaration`
 - `Parameter`
 
 These are the shared declaration nouns.

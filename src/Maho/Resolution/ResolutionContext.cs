@@ -1,144 +1,323 @@
 using System.Collections.Generic;
-using Maho.Diagnostics;
-using Maho.Symbols;
+using System.Runtime.InteropServices;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
 
-/// <summary> Mutable semantic state for one compilation unit inside a coordinated project resolution run. </summary>
 internal sealed class ResolutionContext
 {
-    /// <summary>
-    /// Maps syntax nodes to the lexical scope semantically attached to them. This covers both
-    /// symbol-owned scopes such as functions/types and purely lexical scopes such as blocks.
-    /// </summary>
-    private readonly Dictionary<SyntaxNode, Scope> scopes = new(ReferenceEqualityComparer.Instance);
-    /// <summary>
-    /// Maps declaration syntax to the symbol introduced by that syntax. This lets later passes jump
-    /// from parser nodes to semantic identities without rediscovering declarations.
-    /// </summary>
-    private readonly Dictionary<SyntaxNode, Symbol> declaredSymbols = new(ReferenceEqualityComparer.Instance);
-    /// <summary>
-    /// Stores declaration-site type-reference models built by later passes. Pass 1 intentionally
-    /// leaves this empty so type work can be grouped in a later semantic stage.
-    /// </summary>
-    private readonly Dictionary<TypeSyntax, ResolvedTypeReference> resolvedTypeReferences = new(ReferenceEqualityComparer.Instance);
+    public SyntaxTree SyntaxTree { get; }
+    public ResolvedTree ResolvedTree { get; }
 
-    /// <summary> Shared project-wide semantic state for this unit. </summary>
-    public ResolutionCoordinatorContext Project { get; }
-    /// <summary> Root compilation unit whose local semantic maps are stored here. </summary>
-    public CompilationUnit Root { get; }
-    /// <summary> Convenience projection of the shared diagnostics sink. </summary>
-    public DiagnosticsManager Diagnostics => Project.Diagnostics;
-    /// <summary> Convenience projection of the project root namespace. </summary>
-    public NamespaceSymbol GlobalNamespace => Project.GlobalNamespace;
-    /// <summary> Convenience projection of the project global lexical scope. </summary>
-    public Scope GlobalScope => Project.GlobalScope;
-    /// <summary> Convenience projection of referenced project semantic surfaces. </summary>
-    public ResolutionProjectReference[] References => Project.References;
+    public NamespaceTrieNode GlobalNamespace { get; }
 
-    /// <summary> Creates the unit-local semantic state for one compilation unit. </summary>
-    public ResolutionContext(CompilationUnit root, ResolutionCoordinatorContext project)
+    public List<TypeSymbol> TypeSymbols { get; }
+    public List<NestedTypeSymbol> NestedTypeSymbols { get; }
+    public List<FunctionSymbol> FunctionSymbols { get; }
+    public List<MethodSymbol> MethodSymbols { get; }
+    public List<GlobalVariableSymbol> GlobalVariableSymbols { get; }
+    public List<FieldSymbol> FieldSymbols { get; }
+    public List<ParameterSymbol> ParameterSymbols { get; }
+    public List<LocalVariableSymbol> LocalVariableSymbols { get; }
+    public List<PropertySymbol> PropertySymbols { get; }
+    public List<TypeParameterSymbol> TypeParameterSymbols {get; }
+    public List<LabelSymbol> LabelSymbols { get; }
+    public List<AliasSymbol> AliasSymbols { get; }
+
+    public List<Scope> Scopes { get; }
+    public Scope GlobalScope => Scopes[0];
+    private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
+
+    private int typeID;
+    private int nestedTypeID;
+    private int functionID;
+    private int methodID;
+    private int globalVariableID;
+    private int fieldID;
+    private int parameterID;
+    private int localVariableID;
+    private int propertyID;
+    private int typeParameterID;
+    private int labelID;
+    private int aliasID;
+
+    public ResolutionContext(SyntaxTree syntaxTree, ResolvedTree resolvedTree, NamespaceTrieNode globalNamespace, SymbolStore symbols, List<Scope> scopes)
     {
-        Project = project;
-        Root = root;
+        SyntaxTree = syntaxTree;
+        ResolvedTree = resolvedTree;
 
-        // Every compilation unit starts life inside the shared global namespace/scope, so unit-local
-        // lookups can always fall back to that root without special cases.
-        ResolveDeclaredSymbol(root, GlobalNamespace);
-        ResolveScope(root, GlobalScope);
+        GlobalNamespace = globalNamespace;
+
+        TypeSymbols = symbols.TypeSymbols;
+        NestedTypeSymbols = symbols.NestedTypeSymbols;
+        FunctionSymbols = symbols.FunctionSymbols;
+        MethodSymbols = symbols.MethodSymbols;
+        GlobalVariableSymbols = symbols.GlobalVariableSymbols;
+        FieldSymbols = symbols.FieldSymbols;
+        ParameterSymbols = symbols.ParameterSymbols;
+        LocalVariableSymbols = symbols.LocalVariableSymbols;
+        PropertySymbols = symbols.PropertySymbols;
+        TypeParameterSymbols = symbols.TypeParameterSymbols;
+        LabelSymbols = symbols.LabelSymbols;
+        AliasSymbols = symbols.AliasSymbols;
+
+        Scopes = scopes;
+
+        typeID = TypeSymbols.Count;
+        nestedTypeID = NestedTypeSymbols.Count;
+        functionID = FunctionSymbols.Count;
+        methodID = MethodSymbols.Count;
+        globalVariableID = GlobalVariableSymbols.Count;
+        fieldID = FieldSymbols.Count;
+        parameterID = ParameterSymbols.Count;
+        localVariableID = LocalVariableSymbols.Count;
+        propertyID = PropertySymbols.Count;
+        typeParameterID = TypeParameterSymbols.Count;
+        labelID = LabelSymbols.Count;
+        aliasID = AliasSymbols.Count;
     }
 
-    /// <summary> Declares a symbol and associates the declaring syntax with it. </summary>
-    public void DeclareSymbol(SyntaxNode syntax, Symbol symbol, Scope scope)
+    public Scope CreateScope(Scope? parent)
     {
-        // Declaration storage is split in two directions:
-        //   1. put the symbol into the scope's name table
-        //   2. remember which syntax node declared that symbol
-        scope.Declare(symbol);
-        ResolveDeclaredSymbol(syntax, symbol);
-    }
-
-    /// <summary> Associates a syntax node with a semantic symbol. </summary>
-    public void ResolveDeclaredSymbol(SyntaxNode syntax, Symbol symbol)
-    {
-        // Multiple wrappers may legitimately point at the same symbol, but one syntax node should
-        // never silently change owners once a pass has associated it.
-        if (declaredSymbols.TryGetValue(syntax, out Symbol? existing) && !ReferenceEquals(existing, symbol))
-            return;
-
-        declaredSymbols[syntax] = symbol;
-    }
-
-    /// <summary>
-    /// Creates and records a nested lexical scope. If an owner symbol is provided, the new scope is
-    /// also registered in the project-wide symbol -> scope map.
-    /// </summary>
-    public Scope CreateChildScope(SyntaxNode syntax, Scope parent, Symbol? ownerSymbol = null)
-    {
-        Scope scope = new(parent, syntax, ownerSymbol);
-        ResolveScope(syntax, scope);
-
-        if (ownerSymbol is not null)
-            Project.ResolveSymbolScope(ownerSymbol, scope);
-
+        var scope = new Scope(parent);
+        Scopes.Add(scope);
         return scope;
     }
 
-    /// <summary> Resolves the scope owned by a symbol, creating it on first use. </summary>
-    public Scope ResolveSymbolScope(Symbol ownerSymbol, SyntaxNode syntax, Scope parent)
+    public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, NamespaceTrieNode? containingNamespace, TypeDeclaration? syntax)
     {
-        if (Project.TryResolveSymbolScope(ownerSymbol, out Scope? existing) && existing is not null)
+        TypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            // Different syntax nodes can legitimately point at the same owned scope, such as a
-            // wrapper declaration node and its inner declaration node.
-            ResolveScope(syntax, existing);
-            return existing;
+            symbol = new ProductTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+        }
+        else
+            symbol = new SumTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+
+        TypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
+    {
+        MemberNestedTypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        {
+            symbol = new MemberProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+        }
+        else
+            symbol = new MemberSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+
+        NestedTypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, MethodSymbol? parent, TypeDeclaration? syntax)
+    {
+        LocalTypeSymbol symbol;
+
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        {
+            symbol = new LocalProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+        }
+        else
+            symbol = new LocalSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+
+        NestedTypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, FunctionDeclaration? syntax)
+    {
+        var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
+        FunctionSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
+    {
+        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, name, parent, syntax);
+        MethodSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, MethodSymbol? parent, FunctionDeclaration? syntax)
+    {
+        var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
+        MethodSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, VariableDeclaration? syntax)
+    {
+        var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
+        GlobalVariableSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
+    {
+        var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, syntax);
+        FieldSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction)
+    {
+        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingFunction);
+        ParameterSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
+    {
+        var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, syntax);
+        LocalVariableSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)
+    {
+        var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, syntax);
+        PropertySymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
+    {
+        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
+        TypeParameterSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LabelSymbol CreateLabelSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction, SyntaxNode? syntax)
+    {
+        var symbol = new LabelSymbol(labelID++, enclosingScope, name, containingFunction, syntax);
+        LabelSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, AliasDeclaration? syntax)
+    {
+        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingSymbol, syntax);
+        AliasSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AliasDeclaration? syntax)
+    {
+        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
+        AliasSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
+
+    public static void BindChildScope(Scope parent, Symbol owner, Scope child) => parent.ChildScopes[GetHandle(owner)] = child;
+
+    public void RegisterSyntaxScope(SyntaxNode syntax, Scope scope) => SyntaxScopes[syntax] = scope;
+
+    public Scope GetSyntaxScope(SyntaxNode syntax, Scope fallback) => SyntaxScopes.TryGetValue(syntax, out var scope) ? scope : fallback;
+
+    private static void Register(Scope scope, Symbol symbol)
+    {
+        scope.Symbols.Add(GetHandle(symbol), symbol);
+        ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+
+        symbols ??= [];
+        symbols.Add(symbol);
+    }
+
+    public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolPart ns)
+    {
+        var node = trieNode.Next.GetValueOrDefault(ns);
+
+        if (node is null)
+        {
+            var newNode = new NamespaceTrieNode();
+            trieNode.Next[ns] = newNode;
+            return newNode;
         }
 
-        return CreateChildScope(syntax, parent, ownerSymbol);
+        return node;
     }
 
-    /// <summary> Attempts to resolve the scope owned by a symbol from the shared project map. </summary>
-    public bool TryResolveSymbolScope(Symbol symbol, out Scope? scope) => Project.TryResolveSymbolScope(symbol, out scope);
-
-    /// <summary> Attempts to resolve the lexical scope attached to a syntax node in this unit. </summary>
-    public bool TryResolveScope(SyntaxNode syntax, out Scope? scope) => scopes.TryGetValue(syntax, out scope);
-
-    /// <summary> Attempts to resolve the symbol declared by a syntax node in this unit. </summary>
-    public bool TryResolveDeclaredSymbol(SyntaxNode syntax, out Symbol? symbol) => declaredSymbols.TryGetValue(syntax, out symbol);
-
-    /// <summary> Associates one syntax node with the scope that semantically contains it. </summary>
-    public void ResolveScope(SyntaxNode syntax, Scope scope)
+    public static SymbolName GetSymbolName(TypeSyntax typeSyntax)
     {
-        // As with declared symbols, a syntax node should not bounce between different scopes once
-        // established. If that happens, some pass is disagreeing about structural ownership.
-        if (scopes.TryGetValue(syntax, out Scope? existing) && !ReferenceEquals(existing, scope))
-            return;
+        var listOfParts = new List<SymbolPart>();
 
-        scopes[syntax] = scope;
+        AddTypeNameParts(typeSyntax, listOfParts);
+        
+        SymbolPart[] parts = [.. listOfParts];
+
+        return new SymbolName(parts);
     }
 
-    /// <summary> Stores the semantic interpretation of declaration-site type syntax for later passes. </summary>
-    public void ResolveTypeReference(TypeSyntax syntax, ResolvedTypeReference typeReference)
+    public static SymbolName GetSymbolName(NamedSyntax name) => name switch
     {
-        if (resolvedTypeReferences.TryGetValue(syntax, out ResolvedTypeReference? existing) && !ReferenceEquals(existing, typeReference))
-            return;
+        SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name)),
+        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.TypeParameters.Count)),
+        QualifiedName qualifiedName => GetQualifiedName(qualifiedName),
+        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+    };
 
-        resolvedTypeReferences[syntax] = typeReference;
+    private static SymbolPart GetSymbolPart(NamedSyntax name) => name switch
+    {
+        SimpleName simpleName => new SymbolPart(simpleName.Name),
+        GenericName genericName => new SymbolPart(genericName.Name, genericName.TypeParameters.Count),
+        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+    };
+
+    private static SymbolName GetQualifiedName(QualifiedName qualifiedName)
+    {
+        var parts = new SymbolPart[qualifiedName.Parts.Count];
+
+        for (int i = 0; i < parts.Length; i++)
+            parts[i] = GetSymbolPart(qualifiedName.Parts[i]);
+
+        return new SymbolName(parts);
     }
 
-    /// <summary> Attempts to resolve a previously stored semantic type-reference model. </summary>
-    public bool TryResolveTypeReference(TypeSyntax syntax, out ResolvedTypeReference? typeReference) => resolvedTypeReferences.TryGetValue(syntax, out typeReference);
+    private static void AddTypeNameParts(TypeSyntax type, List<SymbolPart> parts)
+    {
+        switch (type)
+        {
+            case SimpleType simple:
+                parts.Add(new SymbolPart(simple.Name));
+                break;
 
-    /// <summary> Freezes the unit-local semantic maps into a stable result object. </summary>
-    public ResolutionResult ToResult() =>
-        new(
-            Root,
-            GlobalNamespace,
-            GlobalScope,
-            scopes,
-            declaredSymbols,
-            Project.SymbolScopes,
-            resolvedTypeReferences);
+            case GenericType generic:
+                parts.Add(new SymbolPart(generic.Name, generic.TypeArguments.Count));
+                break;
+
+            case QualifiedType qualified:
+                AddTypeNameParts(qualified.Left, parts);
+                AddTypeNameParts(qualified.Right, parts);
+                break;
+
+            case ModifiedType modified:
+                AddTypeNameParts(modified.Type, parts);
+                break;
+
+            default:
+                throw new System.ArgumentOutOfRangeException(nameof(type));
+        }
+    }
 }

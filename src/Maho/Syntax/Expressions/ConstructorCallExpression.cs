@@ -11,13 +11,16 @@ internal sealed class ConstructorCallExpression : ObjectCreationExpression
     public SeparatedSyntaxList<Expression> Arguments { get; }
     /// <summary> Closing parenthesis token. </summary>
     public Token CloseParen { get; }
+    /// <summary> Optional object initializer clause. </summary>
+    public ObjectWithClause? WithClause { get; }
 
     /// <summary> Creates one constructor-call expression node. </summary>
-    public ConstructorCallExpression(Token keyword, ObjectCreationKind kind, TypeSyntax type, Token openParen, SeparatedSyntaxList<Expression> arguments, Token closeParen) : base(keyword, kind)
+    public ConstructorCallExpression(Token keyword, ObjectCreationKind kind, TypeSyntax type, Token openParen, SeparatedSyntaxList<Expression> arguments, Token closeParen, ObjectWithClause? withClause) : base(keyword, kind)
     {
         Type = type;
         OpenParen = openParen;
         Arguments = arguments;
         CloseParen = closeParen;
+        WithClause = withClause;
     }
 }

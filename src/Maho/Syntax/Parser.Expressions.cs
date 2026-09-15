@@ -27,7 +27,12 @@ internal sealed partial class Parser
         else
             left = ParsePrimaryExpression();
 
-        // LED: loop for postfix (prefer) and infix
+        return ParseExpressionContinuation(left, minBindingPower);
+    }
+
+    /// <summary> Continues a parsed expression with postfix and infix operators. </summary>
+    private Expression ParseExpressionContinuation(Expression left, int minBindingPower = 0)
+    {
         while (true)
         {
             if (CurrentToken.Kind is TokenKind.LeftParen)
@@ -56,7 +61,7 @@ internal sealed partial class Parser
                 continue;
             }
 
-            (kind, length) = GetCombinedOperatorData();
+            var (kind, length) = GetCombinedOperatorData();
 
             if (length == 0)
                 break; // no operator here
@@ -142,7 +147,10 @@ internal sealed partial class Parser
 
     private Expression ParseParenthesizedOrCastExpression()
     {
-        var (success, _) = LooksLikeCastExpression();
+        var (success, context) = LooksLikeCastExpression();
+
+        if (success && context is LookaheadResultContext.AmbiguousCastOrParenthesizedExpression)
+            return ParseAmbiguousCastOrParenthesizedExpression();
 
         if (success)
         {
@@ -150,6 +158,21 @@ internal sealed partial class Parser
         }
 
         return ParseParenthesizedExpression();
+    }
+
+    private AmbiguousCastOrParenthesizedExpression ParseAmbiguousCastOrParenthesizedExpression()
+    {
+        var start = current;
+        var castExpression = ParseCastExpression();
+        var castEnd = current;
+
+        current = start;
+        var parenthesizedExpression = ParseParenthesizedExpression();
+        var parenthesizedAlternative = ParseExpressionContinuation(parenthesizedExpression);
+        var parenthesizedEnd = current;
+
+        current = castEnd >= parenthesizedEnd ? castEnd : parenthesizedEnd;
+        return new AmbiguousCastOrParenthesizedExpression(castExpression, parenthesizedAlternative);
     }
 
     private ParenthesizedExpression ParseParenthesizedExpression()
@@ -243,8 +266,9 @@ internal sealed partial class Parser
         var leftBracket = Consume();
         var expressions = ParseExpressionList(TokenKind.RightBracket);
         var rightBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the collection expression");
+        var modifiers = ParseCollectionExpressionModifiers();
 
-        return new CollectionExpression(leftBracket, expressions, rightBracket);
+        return new CollectionExpression(leftBracket, expressions, rightBracket, modifiers);
     }
 
     private SeparatedSyntaxList<Expression> ParseExpressionList(TokenKind delimiter)
@@ -284,6 +308,39 @@ internal sealed partial class Parser
         return new CollectionInitializer(leftBrace, expressions, rightBrace);
     }
 
+    private ObjectWithClause ParseObjectWithClause()
+    {
+        var withKeyword = Consume();
+        var initializer = CurrentToken.Kind is TokenKind.LeftBrace
+            ? ParseCollectionInitializer()
+            : new CollectionInitializer(
+                ExpectToken(TokenKind.LeftBrace, "'{'", "after 'with'"),
+                new SeparatedSyntaxList<Expression>([]),
+                ExpectToken(TokenKind.RightBrace, "'}'", "to close the with clause"));
+
+        return new ObjectWithClause(withKeyword, initializer);
+    }
+
+    private IReadOnlyList<CollectionExpressionModifier> ParseCollectionExpressionModifiers()
+    {
+        List<CollectionExpressionModifier> modifiers = [];
+
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftParen)
+            modifiers.Add(ParseCollectionConstructorModifier());
+
+        return modifiers;
+    }
+
+    private CollectionConstructorModifier ParseCollectionConstructorModifier()
+    {
+        var withKeyword = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'with'");
+        var arguments = ParseExpressionArgumentList();
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the collection constructor modifier");
+
+        return new CollectionConstructorModifier(withKeyword, openParen, arguments, closeParen);
+    }
+
     private ObjectCreationExpression ParseObjectCreationExpression()
     {
         var keyword = Consume();
@@ -304,23 +361,25 @@ internal sealed partial class Parser
 
             if (CurrentToken.Kind is TokenKind.LeftBrace)
                 initializer = ParseCollectionInitializer();
+            
+            ObjectWithClause? withClause = null;
 
-            return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer);
+            if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
+                withClause = ParseObjectWithClause();
+
+            return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer, withClause);
         }
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", GetObjectCreationContext(keyword.MatchingKind));
 
         var arguments = ParseExpressionArgumentList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the argument list");
+        ObjectWithClause? objectWithClause = null;
 
-        return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen);
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
+            objectWithClause = ParseObjectWithClause();
+
+        return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen, objectWithClause);
     }
-
-    private static string GetObjectCreationContext(MatchingKeywordKind keywordKind) => keywordKind switch
-    {
-        MatchingKeywordKind.New => "after 'new'",
-        MatchingKeywordKind.Put => "after 'put'",
-        _ => "after the object creation keyword"
-    };
 
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {
@@ -331,8 +390,8 @@ internal sealed partial class Parser
         {
             if (CurrentToken.Kind is TokenKind.Semicolon)
                 break;
-            
-            nodesAndSeparators.Add(ParseExpectedExpression("in the argument list", MissingTokenAnchor.AfterPrevious));
+
+            nodesAndSeparators.Add(ParseArgumentExpression());
 
             wasCommaLast = false;
 
@@ -349,5 +408,19 @@ internal sealed partial class Parser
             diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the argument list");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
+    }
+
+    private Expression ParseArgumentExpression()
+    {
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
+        {
+            var name = Consume();
+            var colon = Consume();
+            var value = ParseExpectedExpression("after ':' in the named argument", MissingTokenAnchor.AfterPrevious);
+
+            return new NamedArgumentExpression(name, colon, value);
+        }
+
+        return ParseExpectedExpression("in the argument list", MissingTokenAnchor.AfterPrevious);
     }
 }

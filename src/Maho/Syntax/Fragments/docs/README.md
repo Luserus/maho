@@ -35,10 +35,12 @@ This cluster models type-shape decoration without forcing every type node to inl
 
 ### Declarator pieces
 
-- `VariableDeclarator`
 - `ParameterVariableDeclarator`
 - `AssignmentClause`
 - `FunctionSignature`
+- `ObjectWithClause`
+- `CollectionExpressionModifier`
+- `CollectionConstructorModifier`
 
 These are the grammar joints that declarations commonly compose.
 
