@@ -50,7 +50,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             case NamespaceDeclaration declaration:
                 return ResolveNamespaceDeclaration(declaration, scope, containingNamespace, topLevelMain, topLevelMainScope);
-            case TopLevelBlock block:
+            case TopLevelBlockDeclaration block:
                 ResolveTopLevelScope(block.Members, scope, containingNamespace,
                                      HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
                 return containingNamespace;
@@ -74,7 +74,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private static bool HasGlobalModifier(TopLevelBlock block)
+    private static bool HasGlobalModifier(TopLevelBlockDeclaration block)
     {
         foreach (Token modifier in block.Modifiers)
         {

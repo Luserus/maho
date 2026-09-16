@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
 /// <summary> Local declaration that introduces a nested type. </summary>
-internal sealed class LocalTypeDeclaration : Local
+internal sealed class LocalTypeDeclaration : LocalDeclaration
 {
     /// <summary> Nested type declaration. </summary>
     public TypeDeclaration Type { get; }

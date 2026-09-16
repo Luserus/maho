@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
 /// <summary> Top-level variable declaration statement. </summary>
-internal sealed class TopLevelVariableDeclaration : TopLevel
+internal sealed class TopLevelVariableDeclaration : TopLevelDeclaration
 {
     /// <summary> The variable declaration. </summary>
     public VariableDeclaration Declaration { get; }

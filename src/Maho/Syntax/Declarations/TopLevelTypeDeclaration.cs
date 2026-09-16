@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
 /// <summary> Top-level wrapper around a type declaration. </summary>
-internal sealed class TopLevelTypeDeclaration : TopLevel
+internal sealed class TopLevelTypeDeclaration : TopLevelDeclaration
 {
     /// <summary> Wrapped type declaration. </summary>
     public TypeDeclaration Type { get; }

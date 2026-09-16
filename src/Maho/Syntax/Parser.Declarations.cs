@@ -5,13 +5,15 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    private TopLevel ParseTopLevelDeclaration(bool topLevelStatementsEnabled)
+    private TopLevelDeclaration ParseTopLevelDeclaration(bool topLevelStatementsEnabled)
     {
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock(attributes, modifiers, topLevelStatementsEnabled);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
+            return ParseTopLevelAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else
@@ -73,7 +75,6 @@ internal sealed partial class Parser
 
         var kind = keyword.MatchingKind switch
         {
-            MatchingKeywordKind.Attribute => TypeKind.Attribute,
             MatchingKeywordKind.Class => TypeKind.Class,
             MatchingKeywordKind.Struct => TypeKind.Struct,
             MatchingKeywordKind.Interface => TypeKind.Interface,
@@ -234,6 +235,14 @@ internal sealed partial class Parser
 
     private TypeEmptyBody ParseTypeEmptyBody() => new TypeEmptyBody(Consume());
 
+    
+    private TopLevelAttributeDeclaration ParseTopLevelAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var attribute = ParseAttributeSignature(attributes, modifiers);
+
+        return new TopLevelAttributeDeclaration(attribute);
+    }
+
     private TopLevelTypeDeclaration ParseTopLevelTypeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var type = ParseType(attributes, modifiers);
@@ -241,7 +250,24 @@ internal sealed partial class Parser
         return new TopLevelTypeDeclaration(type);
     }
 
-    private TopLevel ParseTopLevelVariableDeclarationOrFunction(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    private TopLevelBlockDeclaration ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, bool topLevelStatementsEnabled)
+    {
+        var openBrace = Consume();
+        var members = new List<TopLevel>();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var start = current;
+            var member = ParseTopLevel(topLevelStatementsEnabled);
+            members.Add(member);
+            RecoverTopLevelIfStalled(start);
+        }
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
+
+        return new TopLevelBlockDeclaration(attributes, modifiers, openBrace, members, closeBrace);
+    }
+
+    private TopLevelDeclaration ParseTopLevelVariableDeclarationOrFunction(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var type = ParseTypeSyntax();
         var identifier = ParseNamedSyntax();
@@ -252,7 +278,7 @@ internal sealed partial class Parser
             return ParseTopLevelVariableDeclaration(attributes, modifiers, type, identifier);
     }
 
-    private TopLevel ParseTopLevelVariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
+    private TopLevelVariableDeclaration ParseTopLevelVariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var declaration = ParseVariableDeclaration(attributes, modifiers, type, identifier);
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the top-level variable declaration", MissingTokenAnchor.AfterPrevious);
@@ -276,11 +302,18 @@ internal sealed partial class Parser
         return new TopLevelAmbiguousReferenceDeclaration(declaration, semicolon);
     }
 
-    private TopLevel ParseTopLevelFunctionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
+    private TopLevelFunctionDeclaration ParseTopLevelFunctionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
         var function = ParseFunction(attributes, modifiers, type, identifier);
 
         return new TopLevelFunctionDeclaration(function);
+    }
+
+    private MemberAttributeDeclaration ParseMemberAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var attribute = ParseAttributeSignature(attributes, modifiers);
+
+        return new MemberAttributeDeclaration(attribute);
     }
 
     private MemberTypeDeclaration ParseMemberTypeDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
@@ -355,10 +388,19 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseLocalBlockStatement(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
+            return ParseLocalAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
         else
             return ParseLocalVariableDeclarationStatementOrFunction(attributes, modifiers);
+    }
+
+    private LocalAttributeDeclaration ParseLocalAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var attribute = ParseAttributeSignature(attributes, modifiers);
+
+        return new LocalAttributeDeclaration(attribute);
     }
 
     private LocalTypeDeclaration ParseLocalTypeDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
@@ -388,6 +430,28 @@ internal sealed partial class Parser
         var function = ParseFunction(attributes, modifiers, type, identifier);
 
         return new LocalFunctionDeclaration(function);
+    }
+
+    private AttributeSignature ParseAttributeSignature(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var keyword = Consume();
+        var identifier = ParseNamedSyntax();
+        
+        AttributeParameters? parameters = null;
+
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+            parameters = ParseAttributeParameters();
+
+        return new AttributeSignature(attributes, modifiers, keyword, identifier, parameters);
+    }
+
+    private AttributeParameters ParseAttributeParameters()
+    {
+        var leftParen = Consume();
+        var parameters = ParseParameterList();
+        var rightParen = ExpectToken(TokenKind.RightParen, "')'", "to close the parameter list");
+
+        return new AttributeParameters(leftParen, parameters, rightParen);
     }
 
     private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)

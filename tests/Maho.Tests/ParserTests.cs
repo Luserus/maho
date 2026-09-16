@@ -153,7 +153,7 @@ public sealed class ParserTests
 
         Assert.Empty(diagnostics.Diagnostics);
 
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(Assert.Single(root.Members));
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(root.Members));
         Assert.Collection(block.Modifiers, modifier => Assert.Equal(MatchingKeywordKind.Global, modifier.MatchingKind));
         Assert.IsType<TopLevelVariableDeclaration>(block.Members[0]);
         Assert.IsType<TopLevelTypeDeclaration>(block.Members[1]);
@@ -178,9 +178,9 @@ public sealed class ParserTests
             {
                 int value = 1;
             }
-            """, typeof(TopLevelBlock));
+            """, typeof(TopLevelBlockDeclaration));
 
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(topLevel);
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(topLevel);
         Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(block.Members));
     }
 
@@ -257,7 +257,7 @@ public sealed class ParserTests
     [Fact]
     public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
     {
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(ParseSingleTopLevel("""
             [Attribute]
             unsafe
             {
@@ -269,7 +269,7 @@ public sealed class ParserTests
                     }
                 }
             }
-            """, typeof(TopLevelBlock)));
+            """, typeof(TopLevelBlockDeclaration)));
 
         Assert.Single(block.Attributes);
         Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
@@ -286,11 +286,11 @@ public sealed class ParserTests
     [Fact]
     public void Parse_UnmarkedTypeDeclarationInsideTopLevelBlock()
     {
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(ParseSingleTopLevel("""
             {
                 struct UnmarkedTopLevelBlock;
             }
-            """, typeof(TopLevelBlock)));
+            """, typeof(TopLevelBlockDeclaration)));
 
         TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
         Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(topLevelType.Type.Name).Name.Value);
@@ -311,7 +311,7 @@ public sealed class ParserTests
             """, typeof(NamespaceDeclaration)));
 
         NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
-        TopLevelBlock topLevelBlock = Assert.IsType<TopLevelBlock>(Assert.Single(namespaceBody.Members));
+        TopLevelBlockDeclaration topLevelBlock = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(namespaceBody.Members));
 
         Assert.Single(topLevelBlock.Attributes);
         Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
@@ -837,7 +837,7 @@ public sealed class ParserTests
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
-            typeof(TopLevelBlock),
+            typeof(TopLevelBlockDeclaration),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),

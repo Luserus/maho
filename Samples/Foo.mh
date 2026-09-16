@@ -1,26 +1,35 @@
-namespace Example
+namespace Std;
+
+using int32 = Int32;
+using int64 = Int64;
+using str8 = String8;
+using char8 = Char8;
+
+public intrinsic attribute Intrinsic(str8 TypeName);
+
+[Intrinsic("ValType")]
+public struct ValType;
+
+[Intrinsic("Int32")]
+public struct Int32 : ValType;
+
+[Intrinsic("Int64")]
+public struct Int64 : ValType;
+
+[Intrinsic("Char8")]
+public struct Char8 : ValType;
+
+public struct Span<T>
 {
-    public class Outer<T>
-    {
-        public int field;
-        public int Property { get; set; }
-
-        public static int Method<U>(int parameter)
-        {
-            public class LocalType<W>;
-            public static int Nested<V>() { return 0; }
-            int local = 0;
-            return local;
-        }
-
-        { public class MemberType<X>; }
-    }
+    private T* memory;
+    
+    public int64 Length { get; }
 }
 
-public int g2;
-
+[Intrinsic("String8")]
+public struct String8 : ValType
 {
-    public int global;
-    public static int Function<Y>() { return 0; }
-    public class TopLevelType<Z>;
+    public int64 Length { get; }
+
+    private Span<char8> string;
 }

@@ -1,5 +1,8 @@
 #pragma toplevel enable
 
+using Std;
+
 namespace Sample;
 
-Std.IO.Print();
+str8 str = "Hello";
+int64 len = str.Length;

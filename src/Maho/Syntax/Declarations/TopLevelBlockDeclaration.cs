@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Maho.Syntax;
 
 /// <summary> Top-level block that groups a sequence of top-level items. </summary>
-internal sealed class TopLevelBlock : TopLevel
+internal sealed class TopLevelBlockDeclaration : TopLevelDeclaration
 {
     /// <summary> Attributes attached to the block. </summary>
     public IReadOnlyList<AttributeListSyntax> Attributes { get; }
@@ -17,7 +17,7 @@ internal sealed class TopLevelBlock : TopLevel
     public Token CloseBrace { get; }
 
     /// <summary> Creates one top-level block node. </summary>
-    public TopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<TopLevel> members, Token closeBrace)
+    public TopLevelBlockDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<TopLevel> members, Token closeBrace)
     {
         Attributes = attributes;
         Modifiers = modifiers;

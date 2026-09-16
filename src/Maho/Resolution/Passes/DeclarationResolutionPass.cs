@@ -61,7 +61,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         switch (node)
         {
-            case TopLevelBlock block:
+            case TopLevelBlockDeclaration block:
                 foreach (var member in block.Members) ResolveTopLevel(member, scope, containingFunction);
                 break;
             case NamespaceDeclaration declaration when declaration.Body is NamespaceBlockBody body:

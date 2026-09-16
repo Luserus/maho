@@ -125,7 +125,7 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token starts a bracketed attribute list. </summary>
     private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
-    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or MatchingKeywordKind.Attribute;
+    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -291,6 +291,8 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseMemberBlockDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
+            return ParseMemberAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(attributes, modifiers);
         else
@@ -396,23 +398,6 @@ internal sealed partial class Parser
         Token last = token;
 
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
-    }
-
-    private TopLevelBlock ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, bool topLevelStatementsEnabled)
-    {
-        var openBrace = Consume();
-        var members = new List<TopLevel>();
-
-        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
-        {
-            var start = current;
-            var member = ParseTopLevel(topLevelStatementsEnabled);
-            members.Add(member);
-            RecoverTopLevelIfStalled(start);
-        }
-        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
-
-        return new TopLevelBlock(attributes, modifiers, openBrace, members, closeBrace);
     }
 
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
