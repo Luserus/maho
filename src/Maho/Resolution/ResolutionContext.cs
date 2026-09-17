@@ -11,6 +11,8 @@ internal sealed class ResolutionContext
 
     public NamespaceTrieNode GlobalNamespace { get; }
 
+    public List<AttributeSymbol> AttributeSymbols { get; }
+    public List<NestedAttributeSymbol> NestedAttributeSymbols { get; }
     public List<TypeSymbol> TypeSymbols { get; }
     public List<NestedTypeSymbol> NestedTypeSymbols { get; }
     public List<FunctionSymbol> FunctionSymbols { get; }
@@ -28,6 +30,8 @@ internal sealed class ResolutionContext
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
 
+    private int attributeID;
+    private int nestedAttributeID;
     private int typeID;
     private int nestedTypeID;
     private int functionID;
@@ -48,6 +52,8 @@ internal sealed class ResolutionContext
 
         GlobalNamespace = globalNamespace;
 
+        AttributeSymbols = symbols.AttributeSymbols;
+        NestedAttributeSymbols = symbols.NestedAttributeSymbols;
         TypeSymbols = symbols.TypeSymbols;
         NestedTypeSymbols = symbols.NestedTypeSymbols;
         FunctionSymbols = symbols.FunctionSymbols;
@@ -63,6 +69,8 @@ internal sealed class ResolutionContext
 
         Scopes = scopes;
 
+        attributeID = AttributeSymbols.Count;
+        nestedAttributeID = NestedAttributeSymbols.Count;
         typeID = TypeSymbols.Count;
         nestedTypeID = NestedTypeSymbols.Count;
         functionID = FunctionSymbols.Count;
@@ -100,9 +108,9 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
+    public MemberTypeSymbol CreateMemberTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
-        MemberNestedTypeSymbol symbol;
+        MemberTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
@@ -116,7 +124,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, MethodSymbol? parent, TypeDeclaration? syntax)
+    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
         LocalTypeSymbol symbol;
 
@@ -128,6 +136,33 @@ internal sealed class ResolutionContext
             symbol = new LocalSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
 
         NestedTypeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public AttributeSymbol CreateAttributeSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AttributeSignature? syntax)
+    {
+        var symbol = new AttributeSymbol(attributeID++, name, enclosingScope, containingNamespace, syntax);
+
+        AttributeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MemberAttributeSymbol CreateMemberAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
+    {
+        var symbol = new MemberAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+
+        NestedAttributeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalAttributeSymbol CreateLocalAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
+    {
+        var symbol = new LocalAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+
+        NestedAttributeSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
@@ -148,7 +183,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, MethodSymbol? parent, FunctionDeclaration? syntax)
+    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
     {
         var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);

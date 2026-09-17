@@ -1,7 +1,5 @@
 #pragma toplevel enable
 
-using Std;
-
 namespace Sample;
 
 str8 str = "Hello";

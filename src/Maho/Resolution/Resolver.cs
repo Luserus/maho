@@ -14,7 +14,7 @@ internal sealed class Resolver
 
     public ResolutionContext Resolve(SyntaxTree syntaxTree)
     {
-        var symbolStore = new SymbolStore([], [], [], [], [], [], [], [], [], [], [], []);
+        var symbolStore = new SymbolStore([], [], [], [], [], [], [], [], [], [], [], [], [], []);
         var context = new ResolutionContext(syntaxTree, resolvedTree, new NamespaceTrieNode(), symbolStore, [new Scope(null)]);
 
         foreach (var pass in passes)

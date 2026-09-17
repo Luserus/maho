@@ -40,7 +40,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveTopLevelStatements(CompilationUnit root)
     {
-        Scope scope = context.GetSyntaxScope(root, context.GlobalScope);
+        var scope = context.GetSyntaxScope(root, context.GlobalScope);
         SymbolHandle? main = null;
         foreach (var function in context.FunctionSymbols)
         {
@@ -94,7 +94,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax is null)
             return;
 
-        Scope scope = GetOwnedScope(symbol);
+        var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
@@ -107,7 +107,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax is null)
             return;
 
-        Scope scope = GetOwnedScope(symbol);
+        var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
@@ -120,10 +120,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
-        Scope scope = GetOwnedScope(symbol);
+        var scope = GetOwnedScope(symbol);
         ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
-        SymbolHandle? target = ResolveType(symbol.Syntax.Target, scope);
+        var target = ResolveType(symbol.Syntax.Target, scope);
 
         symbol.HasCompatibleConstraints = target is { } handle &&
             AliasConstraintsAreCompatible(handle, symbol.Syntax.Target, scope);
@@ -132,8 +132,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private bool AliasConstraintsAreCompatible(SymbolHandle target, TypeSyntax targetSyntax, Scope scope)
     {
-        IReadOnlyList<SymbolHandle> targetParameters = GetGenericParameters(target);
-        IReadOnlyList<TypeSyntax> targetArguments = GetGenericArguments(targetSyntax);
+        var targetParameters = GetGenericParameters(target);
+        var targetArguments = GetGenericArguments(targetSyntax);
 
         if (targetParameters.Count == 0)
             return true;
@@ -231,7 +231,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
-        Scope scope = GetOwnedScope(symbol);
+        var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
@@ -244,7 +244,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
-        Scope scope = GetOwnedScope(symbol);
+        var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
@@ -257,7 +257,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.ContainingFunction is not { } containing)
             return;
 
-        FunctionSignature? signature = containing.Kind switch
+        var signature = containing.Kind switch
         {
             SymbolKind.Function => context.FunctionSymbols[containing.ID].Syntax?.Signature,
             SymbolKind.Method => context.MethodSymbols[containing.ID].Syntax?.Signature,
@@ -397,7 +397,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var clause in clauses)
         {
-            GenericParameterSymbol? parameter = FindGenericParameter(parameters, ResolutionContext.GetSymbolName(clause.GenericParameter).Last);
+            var parameter = FindGenericParameter(parameters, ResolutionContext.GetSymbolName(clause.GenericParameter).Last);
             if (parameter is null)
                 continue;
 
@@ -418,7 +418,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveGenericParameterDeclarations(NamedSyntax name, IReadOnlyList<SymbolHandle> parameters)
     {
-        GenericName? genericName = name switch
+        var genericName = name switch
         {
             GenericName generic => generic,
             QualifiedName qualified when qualified.Parts.Count > 0 => qualified.Parts[^1] as GenericName,
@@ -473,19 +473,19 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is not { } symbol)
             return null;
 
-        SymbolHandle handle = ResolutionContext.GetHandle(symbol);
+        var handle = ResolutionContext.GetHandle(symbol);
         context.ResolvedTree.AddReference(syntax, handle);
         return handle;
     }
 
     private void ResolveGenericArguments(GenericType generic, SymbolHandle? target, Scope scope)
     {
-        IReadOnlyList<SymbolHandle> parameters = target is { } handle ? GetGenericParameters(handle) : [];
+        var parameters = target is { } handle ? GetGenericParameters(handle) : [];
 
         for (int index = 0; index < generic.GenericArguments.Count; index++)
         {
-            TypeSyntax argument = generic.GenericArguments[index];
-            GenericParameterSymbol? parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
+            var argument = generic.GenericArguments[index];
+            var parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
                 ? context.GenericParameterSymbols[parameters[index].ID]
                 : null;
 
@@ -517,7 +517,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (ResolveSingle(scope, new SymbolName(new SymbolPart(expression.Identifier))) is not { } symbol)
             return null;
 
-        SymbolHandle handle = ResolutionContext.GetHandle(symbol);
+        var handle = ResolutionContext.GetHandle(symbol);
         context.ResolvedTree.AddReference(expression, handle);
         return handle;
     }
@@ -526,7 +526,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         switch (syntax)
         {
-            case GenericType generic:
+            case GenericType:
                 break;
             case QualifiedType qualified:
                 ResolveType(qualified.Left, scope);
@@ -626,7 +626,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveNamedExpression(NamedExpression syntax, Scope scope)
     {
-        SymbolPart name = syntax is GenericNameExpression generic
+        var name = syntax is GenericNameExpression generic
             ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count)
             : new SymbolPart(syntax.Identifier);
         if (ResolveSingle(scope, new SymbolName(name)) is { } symbol)
@@ -679,7 +679,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         fields.Clear(); properties.Clear(); methods.Clear(); nestedTypes.Clear();
         foreach (var symbol in scope.Symbols.Values)
         {
-            SymbolHandle handle = ResolutionContext.GetHandle(symbol);
+            var handle = ResolutionContext.GetHandle(symbol);
             switch (symbol.Kind)
             {
                 case SymbolKind.Field: fields.Add(handle); break;

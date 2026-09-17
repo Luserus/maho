@@ -1,7 +1,7 @@
 namespace Maho.Resolution;
 
 /// <summary> Broad semantic categories used by the symbol model. </summary>
-internal enum SymbolKind
+internal enum SymbolKind : byte
 {
     Alias,
     /// <summary> Namespace container symbol. </summary>

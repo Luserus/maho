@@ -485,7 +485,7 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Internal:
                 case MatchingKeywordKind.Public:
                 case MatchingKeywordKind.Static:
-                case MatchingKeywordKind.Sealed:
+                case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
                     list.Add(LookaheadConsume());
                     break;

@@ -6,6 +6,7 @@ namespace Maho.Resolution;
 internal abstract class MethodSymbol : Symbol
 {
     public FunctionFlags Flags { get; internal set; }
+    public SymbolHandle? Parent { get; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
@@ -17,9 +18,10 @@ internal abstract class MethodSymbol : Symbol
 
     public FunctionDeclaration? Syntax { get; }
 
-    protected MethodSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, FunctionDeclaration? syntax) : base(id, name, enclosingScope)
+    protected MethodSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax) : base(id, name, enclosingScope)
     {
         Kind = SymbolKind.Method;
+        Parent = parent;
         GenericParameters = [];
         Attributes = [];
         LocalVariables = [];

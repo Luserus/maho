@@ -28,7 +28,7 @@ internal sealed class PragmaDirective : SyntaxNode
     {
         bool enabled = false;
 
-        foreach (PragmaDirective pragma in pragmas)
+        foreach (var pragma in pragmas)
         {
             if (pragma.PragmaKeyword.Value != "pragma" || pragma.Name.Value != "toplevel")
                 continue;

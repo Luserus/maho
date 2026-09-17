@@ -1,9 +1,8 @@
 namespace Std;
 
-using int32 = Int32;
-using int64 = Int64;
-using str8 = String8;
-using char8 = Char8;
+using int64 = Std.Int64;
+using str8 = Std.String8;
+using char8 = Std.Char8;
 
 public intrinsic attribute Intrinsic(str8 TypeName);
 
@@ -15,6 +14,9 @@ public struct Int32 : ValType;
 
 [Intrinsic("Int64")]
 public struct Int64 : ValType;
+
+[Intrinsic("Float32")]
+public struct Float32 : ValType;
 
 [Intrinsic("Char8")]
 public struct Char8 : ValType;
