@@ -10,7 +10,7 @@ internal abstract class NestedTypeSymbol : Symbol
     public SymbolHandle? Parent { get; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
-    public List<SymbolHandle> BaseTypes { get; internal set; }
+    public List<TypeRef> BaseTypes { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
     

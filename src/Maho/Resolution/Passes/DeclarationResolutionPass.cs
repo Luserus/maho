@@ -14,16 +14,16 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         this.context = context;
 
-        foreach (var alias in context.AliasSymbols)
-            ResolveAlias(alias);
         foreach (var attribute in context.AttributeSymbols)
-            ResolveAttributeDeclaration(attribute, attribute.Signature);
+            ResolveAttributeDeclaration(attribute, attribute.Syntax);
         foreach (var attribute in context.NestedAttributeSymbols)
-            ResolveAttributeDeclaration(attribute, attribute.Signature);
+            ResolveAttributeDeclaration(attribute, attribute.Syntax);
         foreach (var type in context.TypeSymbols)
             ResolveType(type, type.Syntax);
         foreach (var type in context.NestedTypeSymbols)
             ResolveType(type, type.Syntax);
+        foreach (var alias in context.AliasSymbols)
+            ResolveAlias(alias);
         foreach (var function in context.FunctionSymbols)
             ResolveFunction(function);
         foreach (var method in context.MethodSymbols)
@@ -147,9 +147,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
         var target = ResolveType(symbol.Syntax.Target, scope);
 
-        symbol.HasCompatibleConstraints = target is { } handle &&
+        symbol.HasCompatibleConstraints = target.IsResolved && target.Handle is { } handle &&
             AliasConstraintsAreCompatible(handle, symbol.Syntax.Target, scope);
-        symbol.Target = symbol.HasCompatibleConstraints ? target : null;
+        symbol.Target = symbol.HasCompatibleConstraints ? target : TypeRef.Error;
     }
 
     private bool AliasConstraintsAreCompatible(SymbolHandle target, TypeSyntax targetSyntax, Scope scope)
@@ -209,11 +209,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
-    private bool SatisfiesAllConstraints(SymbolHandle candidate, IReadOnlyList<SymbolHandle> required)
+    private bool SatisfiesAllConstraints(SymbolHandle candidate, IReadOnlyList<TypeRef> required)
     {
         foreach (var constraint in required)
-            if (!SatisfiesConstraint(candidate, constraint, []))
+        {
+            if (constraint.IsError)
+                continue;
+            if (constraint.IsResolved && !SatisfiesConstraint(candidate, constraint.Handle!.Value, []))
                 return false;
+        }
         return true;
     }
 
@@ -228,20 +232,20 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             case SymbolKind.GenericParameter:
                 foreach (var constraint in context.GenericParameterSymbols[candidate.ID].Constraints)
-                    if (SatisfiesConstraint(constraint, required, visited))
+                    if (constraint.IsResolved && SatisfiesConstraint(constraint.Handle!.Value, required, visited))
                         return true;
                 break;
             case SymbolKind.Type:
                 foreach (var baseType in context.TypeSymbols[candidate.ID].BaseTypes)
-                    if (SatisfiesConstraint(baseType, required, visited))
+                    if (baseType.IsResolved && SatisfiesConstraint(baseType.Handle!.Value, required, visited))
                         return true;
                 break;
             case SymbolKind.NestedType:
                 foreach (var baseType in context.NestedTypeSymbols[candidate.ID].BaseTypes)
-                    if (SatisfiesConstraint(baseType, required, visited))
+                    if (baseType.IsResolved && SatisfiesConstraint(baseType.Handle!.Value, required, visited))
                         return true;
                 break;
-            case SymbolKind.Alias when context.AliasSymbols[candidate.ID].Target is { } target:
+            case SymbolKind.Alias when context.AliasSymbols[candidate.ID].Target is { IsResolved: true, Handle: { } target }:
                 return SatisfiesConstraint(target, required, visited);
         }
 
@@ -280,7 +284,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         symbol.Type = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope);
-        ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol);
+        ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol ?? default);
     }
 
     private void ResolveVariable(GlobalVariableSymbol symbol, VariableDeclaration? syntax) =>
@@ -292,7 +296,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private void ResolveVariable(LocalVariableSymbol symbol, VariableDeclaration? syntax) =>
         ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value);
 
-    private void ResolveVariableCore(Symbol symbol, VariableDeclaration? syntax, Action<SymbolHandle?> setType, Action<List<SymbolHandle>> setAttributes)
+    private void ResolveVariableCore(Symbol symbol, VariableDeclaration? syntax, Action<TypeRef> setType, Action<List<SymbolHandle>> setAttributes)
     {
         if (syntax is null)
             return;
@@ -409,8 +413,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             context.ResolvedTree.AddReference(clause.GenericParameter, ResolutionContext.GetHandle(parameter));
             foreach (var constraint in clause.Constraints)
-                if (constraint is TypeTypeConstraint typeConstraint && ResolveType(typeConstraint.Type, scope) is { } resolved)
-                    parameter.Constraints.Add(resolved);
+                if (constraint is TypeTypeConstraint typeConstraint)
+                    parameter.Constraints.Add(ResolveType(typeConstraint.Type, scope));
         }
     }
 
@@ -452,21 +456,31 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return result;
     }
 
-    private List<SymbolHandle> ResolveTypes(SeparatedSyntaxList<TypeSyntax> types, Scope scope)
+    private List<TypeRef> ResolveTypes(SeparatedSyntaxList<TypeSyntax> types, Scope scope)
     {
-        var result = new List<SymbolHandle>(types.Count);
+        var result = new List<TypeRef>(types.Count);
         foreach (var type in types)
-            if (ResolveType(type, scope) is { } resolved)
-                result.Add(resolved);
+            result.Add(ResolveType(type, scope));
         return result;
     }
 
-    private SymbolHandle? ResolveType(TypeSyntax syntax, Scope scope)
+    private TypeRef ResolveType(TypeSyntax syntax, Scope scope)
     {
+        if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
+        {
+            if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is { } varSymbol)
+            {
+                var varHandle = ResolutionContext.GetHandle(varSymbol);
+                context.ResolvedTree.AddReference(syntax, varHandle);
+                return TypeRef.Resolved(varHandle);
+            }
+            return TypeRef.Inferred;
+        }
+
         if (syntax is GenericType generic)
         {
-            SymbolHandle? genericTarget = ResolveTypeName(generic, scope);
-            ResolveGenericArguments(generic, genericTarget, scope);
+            TypeRef genericTarget = ResolveTypeName(generic, scope);
+            ResolveGenericArguments(generic, genericTarget.Handle, scope);
             return genericTarget;
         }
 
@@ -474,14 +488,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return ResolveTypeName(syntax, scope);
     }
 
-    private SymbolHandle? ResolveTypeName(TypeSyntax syntax, Scope scope)
+    private TypeRef ResolveTypeName(TypeSyntax syntax, Scope scope)
     {
         if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is not { } symbol)
-            return null;
+            return TypeRef.Error;
 
         var handle = ResolutionContext.GetHandle(symbol);
         context.ResolvedTree.AddReference(syntax, handle);
-        return handle;
+        return TypeRef.Resolved(handle);
     }
 
     private void ResolveGenericArguments(GenericType generic, SymbolHandle? target, Scope scope)
@@ -515,7 +529,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private SymbolHandle? ResolveGenericArgumentAsType(TypeSyntax argument, Scope scope) => argument switch
     {
         NamedExpressionGenericArgument named => ResolveNamedArgumentAsType(named.Expression, scope),
-        _ => ResolveType(argument, scope)
+        _ => ResolveType(argument, scope).Handle
     };
 
     private SymbolHandle? ResolveNamedArgumentAsType(IdentifierNameExpression expression, Scope scope)

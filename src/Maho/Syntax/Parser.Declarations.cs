@@ -235,18 +235,19 @@ internal sealed partial class Parser
 
     private TypeEmptyBody ParseTypeEmptyBody() => new TypeEmptyBody(Consume());
 
-    
+
     private TopLevelAttributeDeclaration ParseTopLevelAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var attribute = ParseAttributeSignature(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, ";", "after the top level attribute definition", MissingTokenAnchor.AfterPrevious);
 
-        return new TopLevelAttributeDeclaration(attribute);
+        return new TopLevelAttributeDeclaration(attribute, semicolon);
     }
 
     private TopLevelTypeDeclaration ParseTopLevelTypeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var type = ParseType(attributes, modifiers);
-        
+
         return new TopLevelTypeDeclaration(type);
     }
 
@@ -312,8 +313,9 @@ internal sealed partial class Parser
     private MemberAttributeDeclaration ParseMemberAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var attribute = ParseAttributeSignature(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, ";", "after the member attribute definition", MissingTokenAnchor.AfterPrevious);
 
-        return new MemberAttributeDeclaration(attribute);
+        return new MemberAttributeDeclaration(attribute, semicolon);
     }
 
     private MemberTypeDeclaration ParseMemberTypeDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
@@ -321,7 +323,7 @@ internal sealed partial class Parser
         attributes ??= ParseAttributeLists();
         modifiers ??= ParseModifiers();
         var type = ParseType(attributes, modifiers);
-        
+
         return new MemberTypeDeclaration(type);
     }
 
@@ -399,8 +401,9 @@ internal sealed partial class Parser
     private LocalAttributeDeclaration ParseLocalAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var attribute = ParseAttributeSignature(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, ";", "after the attribute definition");
 
-        return new LocalAttributeDeclaration(attribute);
+        return new LocalAttributeDeclaration(attribute, semicolon);
     }
 
     private LocalTypeDeclaration ParseLocalTypeDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null)
@@ -422,7 +425,7 @@ internal sealed partial class Parser
             return ParseLocalFunctionDeclaration(attributes, modifiers, type, identifier);
         else
             return ParseLocalVariableDeclarationStatement(attributes, modifiers, type, identifier);
-    
+
     }
 
     private LocalFunctionDeclaration ParseLocalFunctionDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? identifier = null)
@@ -436,7 +439,7 @@ internal sealed partial class Parser
     {
         var keyword = Consume();
         var identifier = ParseNamedSyntax();
-        
+
         AttributeParameters? parameters = null;
 
         if (CurrentToken.Kind is TokenKind.LeftParen)
@@ -734,10 +737,10 @@ internal sealed partial class Parser
         {
             PostfixTypeModifier modifier = CurrentToken.Kind switch
             {
-                TokenKind.LeftBracket  => ParseArrayTypeModifier(),
+                TokenKind.LeftBracket => ParseArrayTypeModifier(),
                 TokenKind.QuestionMark => ParseOptionalTypeModifier(),
-                TokenKind.Asterisk     => ParsePointerTypeModifier(),
-                TokenKind.Ampersand    => ParseReferenceTypeModifier(),
+                TokenKind.Asterisk => ParsePointerTypeModifier(),
+                TokenKind.Ampersand => ParseReferenceTypeModifier(),
                 _ => throw new InvalidOperationException()
             };
 

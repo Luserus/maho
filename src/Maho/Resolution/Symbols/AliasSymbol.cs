@@ -10,7 +10,7 @@ internal sealed class AliasSymbol : Symbol
     public ulong Flags { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
-    public SymbolHandle? Target { get; internal set; }
+    public TypeRef Target { get; internal set; } = TypeRef.Unresolved;
     public bool HasCompatibleConstraints { get; internal set; } = true;
 
     public AliasDeclaration? Syntax { get; }

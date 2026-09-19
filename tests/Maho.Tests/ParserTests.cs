@@ -11,7 +11,7 @@ public sealed class ParserTests
     [InlineData("namespace Demo;", typeof(NamespaceDeclaration), typeof(NamespaceEmptyBody))]
     [InlineData("namespace Demo { public class Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
     [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
-    [InlineData("public attribute Marker;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("public attribute Marker;", typeof(TopLevelAttributeDeclaration), null)]
     [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Main();", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Main() { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
@@ -630,22 +630,21 @@ public sealed class ParserTests
     [Fact]
     public void Parse_DeclarationAttributes_SupportQualifiedNamesAndConstructorArguments()
     {
-        TypeDeclaration type = ParseSingleTopLevelType("""
+        AttributeSignature attribute = ParseSingleTopLevelAttribute("""
             [Marker]
             [Standard.IntrinsicType("Int32", 32)]
             public attribute SignedInt;
             """);
 
-        Assert.Equal(TypeKind.Attribute, type.Kind);
-        Assert.Equal(2, type.Attributes.Count);
+        Assert.Equal(2, attribute.Attributes.Count);
 
-        AttributeApplication simpleAttribute = Assert.Single(type.Attributes[0].Attributes);
+        AttributeApplication simpleAttribute = Assert.Single(attribute.Attributes[0].Attributes);
         Assert.Equal("Marker", Assert.IsType<SimpleName>(simpleAttribute.Name).Name.Value);
         Assert.Empty(simpleAttribute.Arguments);
         Assert.Null(simpleAttribute.OpenParen);
         Assert.Null(simpleAttribute.CloseParen);
 
-        AttributeApplication qualifiedAttribute = Assert.Single(type.Attributes[1].Attributes);
+        AttributeApplication qualifiedAttribute = Assert.Single(attribute.Attributes[1].Attributes);
         QualifiedName qualifiedName = Assert.IsType<QualifiedName>(qualifiedAttribute.Name);
         Assert.Equal(2, qualifiedName.Parts.Count);
         Assert.Equal("Standard", Assert.IsType<SimpleName>(qualifiedName.Parts[0]).Name.Value);
@@ -658,11 +657,11 @@ public sealed class ParserTests
     [Fact]
     public void Parse_IntrinsicModifier_IsValidOnlyForAttributeDeclarations()
     {
-        TypeDeclaration intrinsicAttribute = ParseSingleTopLevelType("""
+        AttributeSignature intrinsicAttribute = ParseSingleTopLevelAttribute("""
             public intrinsic attribute Intrinsic;
             """);
 
-        Assert.Equal(TypeKind.Attribute, intrinsicAttribute.Kind);
+        Assert.Equal(2, intrinsicAttribute.Modifiers.Count);
         Assert.Contains(intrinsicAttribute.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
 
         TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(ParseSingleTopLevel("""
@@ -954,6 +953,12 @@ public sealed class ParserTests
         Local local = Assert.Single(body.Locals);
         Assert.IsType(expectedType, local);
         return local;
+    }
+
+    private static AttributeSignature ParseSingleTopLevelAttribute(string source)
+    {
+        TopLevelAttributeDeclaration declaration = Assert.IsType<TopLevelAttributeDeclaration>(ParseSingleTopLevel(source, typeof(TopLevelAttributeDeclaration)));
+        return declaration.Attribute;
     }
 
     private static TypeDeclaration ParseSingleTopLevelType(string source)

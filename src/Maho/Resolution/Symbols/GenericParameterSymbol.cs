@@ -9,7 +9,7 @@ internal sealed class GenericParameterSymbol : Symbol
     public GenericParameterKind ParameterKind { get; }
     public bool IsVariadic { get; }
 
-    public List<SymbolHandle> Constraints { get; internal set; }
+    public List<TypeRef> Constraints { get; internal set; }
 
     public GenericParameterSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic) : base(id, name, enclosingScope)
     {

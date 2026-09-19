@@ -11,7 +11,7 @@ internal sealed class LocalVariableSymbol : Symbol
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
-    public SymbolHandle? Type { get; internal set; }
+    public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
 
     public VariableDeclaration? Syntax { get; }
 

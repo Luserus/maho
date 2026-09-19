@@ -16,6 +16,7 @@ internal abstract class NestedAttributeSymbol : Symbol
 
     protected NestedAttributeSymbol(SymbolID id, SymbolPart name, Scope enclosingScope, SymbolHandle? parent, AttributeSignature? syntax) : base(id, name, enclosingScope)
     {
+        Kind = SymbolKind.NestedAttribute;
         Parent = parent;
         Attributes = [];
         Parameters = [];

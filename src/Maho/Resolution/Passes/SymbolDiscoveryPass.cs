@@ -349,7 +349,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var list = new List<SymbolHandle>(signature.Parameters.Count);
         foreach (var param in signature.Parameters)
         {
-            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingFunction);
+            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingFunction, param);
             list.Add(ResolutionContext.GetHandle(symbol));
         }
 

@@ -9,7 +9,7 @@ internal abstract class TypeSymbol : Symbol
     public TypeFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace { get; }
 
-    public List<SymbolHandle> BaseTypes { get; internal set; }
+    public List<TypeRef> BaseTypes { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }

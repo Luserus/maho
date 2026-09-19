@@ -21,7 +21,7 @@ internal sealed class PropertySymbol : Symbol
     public List<SymbolHandle> SetterLocalVariables { get; internal set; }
     public List<SymbolHandle> SetterLocalFunctions { get; internal set; }
     public List<SymbolHandle> SetterLocalTypes { get; internal set; }
-    public SymbolHandle? Type { get; internal set; }
+    public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
 
     public MemberPropertyDeclaration? Syntax { get; }
 

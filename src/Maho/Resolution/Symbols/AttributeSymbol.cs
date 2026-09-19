@@ -15,6 +15,7 @@ internal sealed class AttributeSymbol : Symbol
 
     public AttributeSymbol(SymbolID id, SymbolPart name, Scope enclosingScope, NamespaceTrieNode? containingNamespace, AttributeSignature? syntax) : base(id, name, enclosingScope)
     {
+        Kind = SymbolKind.Attribute;
         Attributes = [];
         ContainingNamespace = containingNamespace;
         Parameters = [];
