@@ -14,12 +14,16 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         this.context = context;
 
+        foreach (var alias in context.AliasSymbols)
+            ResolveAlias(alias);
+        foreach (var attribute in context.AttributeSymbols)
+            ResolveAttributeDeclaration(attribute, attribute.Signature);
+        foreach (var attribute in context.NestedAttributeSymbols)
+            ResolveAttributeDeclaration(attribute, attribute.Signature);
         foreach (var type in context.TypeSymbols)
             ResolveType(type, type.Syntax);
         foreach (var type in context.NestedTypeSymbols)
             ResolveType(type, type.Syntax);
-        foreach (var alias in context.AliasSymbols)
-            ResolveAlias(alias);
         foreach (var function in context.FunctionSymbols)
             ResolveFunction(function);
         foreach (var method in context.MethodSymbols)
@@ -87,6 +91,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveTopLevel(statement.Statement, scope, containingFunction);
                 break;
         }
+    }
+
+    private void ResolveAttributeDeclaration(AttributeSymbol symbol, AttributeSignature? syntax)
+    {
+        if (syntax is null)
+            return;
+
+        var scope = GetOwnedScope(symbol);
+        symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
+    }
+
+    private void ResolveAttributeDeclaration(NestedAttributeSymbol symbol, AttributeSignature? syntax)
+    {
+        if (syntax is null)
+            return;
+
+        var scope = GetOwnedScope(symbol);
+        symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
     }
 
     private void ResolveType(TypeSymbol symbol, TypeDeclaration? syntax)
@@ -172,12 +194,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         switch (syntax)
         {
             case GenericType generic:
-            {
-                var arguments = new List<TypeSyntax>(generic.GenericArguments.Count);
-                foreach (var argument in generic.GenericArguments)
-                    arguments.Add(argument);
-                return arguments;
-            }
+                {
+                    var arguments = new List<TypeSyntax>(generic.GenericArguments.Count);
+                    foreach (var argument in generic.GenericArguments)
+                        arguments.Add(argument);
+                    return arguments;
+                }
             case QualifiedType qualified:
                 return GetGenericArguments(qualified.Right);
             case ModifiedType modified:
@@ -254,27 +276,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveParameter(ParameterSymbol symbol)
     {
-        if (symbol.ContainingFunction is not { } containing)
+        if (symbol.Syntax is null)
             return;
 
-        var signature = containing.Kind switch
-        {
-            SymbolKind.Function => context.FunctionSymbols[containing.ID].Syntax?.Signature,
-            SymbolKind.Method => context.MethodSymbols[containing.ID].Syntax?.Signature,
-            _ => null
-        };
-        if (signature is null)
-            return;
-
-        foreach (var parameter in signature.Parameters)
-        {
-            if (ResolutionContext.GetSymbolName(parameter.Declarator.Identifier).Last != symbol.Name)
-                continue;
-
-            symbol.Type = ResolveType(parameter.Declarator.Type, symbol.EnclosingScope);
-            ResolveExpression(parameter.Initializer?.Initializer, symbol.EnclosingScope, containing);
-            return;
-        }
+        symbol.Type = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope);
+        ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol);
     }
 
     private void ResolveVariable(GlobalVariableSymbol symbol, VariableDeclaration? syntax) =>
@@ -538,7 +544,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
-    private void ResolveExpression(Expression? expression, Scope scope, SymbolHandle containingFunction)
+    private void ResolveExpression(Expression? expression, Scope scope, SymbolHandle containingSymbol)
     {
         if (expression is null)
             return;
@@ -549,70 +555,70 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveNamedExpression(named, scope);
                 break;
             case BinaryExpression binary:
-                ResolveExpression(binary.LeftExpression, scope, containingFunction);
-                ResolveExpression(binary.RightExpression, scope, containingFunction);
+                ResolveExpression(binary.LeftExpression, scope, containingSymbol);
+                ResolveExpression(binary.RightExpression, scope, containingSymbol);
                 break;
             case AssignmentExpression assignment:
-                ResolveExpression(assignment.LhsExpression, scope, containingFunction);
-                ResolveExpression(assignment.RhsExpression, scope, containingFunction);
+                ResolveExpression(assignment.LhsExpression, scope, containingSymbol);
+                ResolveExpression(assignment.RhsExpression, scope, containingSymbol);
                 break;
             case UnaryExpression unary:
-                ResolveExpression(unary.Operand, scope, containingFunction);
+                ResolveExpression(unary.Operand, scope, containingSymbol);
                 break;
             case ParenthesizedExpression parenthesized:
-                ResolveExpression(parenthesized.Expression, scope, containingFunction);
+                ResolveExpression(parenthesized.Expression, scope, containingSymbol);
                 break;
             case CastExpression cast:
                 ResolveType(cast.Type, scope);
-                ResolveExpression(cast.Expression, scope, containingFunction);
+                ResolveExpression(cast.Expression, scope, containingSymbol);
                 break;
             case AmbiguousCastOrParenthesizedExpression ambiguous:
-                ResolveExpression(ambiguous.CastExpression, scope, containingFunction);
-                ResolveExpression(ambiguous.ParenthesizedExpression, scope, containingFunction);
+                ResolveExpression(ambiguous.CastExpression, scope, containingSymbol);
+                ResolveExpression(ambiguous.ParenthesizedExpression, scope, containingSymbol);
                 break;
             case CallExpression call:
-                ResolveExpression(call.Callee, scope, containingFunction);
-                foreach (var argument in call.Arguments) ResolveExpression(argument, scope, containingFunction);
+                ResolveExpression(call.Callee, scope, containingSymbol);
+                foreach (var argument in call.Arguments) ResolveExpression(argument, scope, containingSymbol);
                 break;
             case IndexExpression index:
-                ResolveExpression(index.Expression, scope, containingFunction);
-                ResolveExpression(index.Index, scope, containingFunction);
+                ResolveExpression(index.Expression, scope, containingSymbol);
+                ResolveExpression(index.Index, scope, containingSymbol);
                 break;
             case MemberAccessExpression access:
-                ResolveExpression(access.Expression, scope, containingFunction);
+                ResolveExpression(access.Expression, scope, containingSymbol);
                 break;
             case NamedArgumentExpression argument:
-                ResolveExpression(argument.Value, scope, containingFunction);
+                ResolveExpression(argument.Value, scope, containingSymbol);
                 break;
             case IfExpression conditional:
-                ResolveExpression(conditional.Condition, scope, containingFunction);
-                ResolveExpression(conditional.ThenExpression, scope, containingFunction);
-                ResolveExpression(conditional.ElseExpression, scope, containingFunction);
+                ResolveExpression(conditional.Condition, scope, containingSymbol);
+                ResolveExpression(conditional.ThenExpression, scope, containingSymbol);
+                ResolveExpression(conditional.ElseExpression, scope, containingSymbol);
                 break;
             case ElseExpression @else:
-                ResolveExpression(@else.Expression, scope, containingFunction);
+                ResolveExpression(@else.Expression, scope, containingSymbol);
                 break;
             case BlockExpression block:
                 Scope blockScope = context.GetSyntaxScope(block, scope);
-                foreach (var local in block.Locals) ResolveLocal(local, blockScope, containingFunction);
-                ResolveExpression(block.FinalExpression, blockScope, containingFunction);
+                foreach (var local in block.Locals) ResolveLocal(local, blockScope, containingSymbol);
+                ResolveExpression(block.FinalExpression, blockScope, containingSymbol);
                 break;
             case CollectionExpression collection:
-                foreach (var item in collection.Expressions) ResolveExpression(item, scope, containingFunction);
+                foreach (var item in collection.Expressions) ResolveExpression(item, scope, containingSymbol);
                 foreach (var modifier in collection.Modifiers)
                     if (modifier is CollectionConstructorModifier constructor)
-                        foreach (var argument in constructor.Arguments) ResolveExpression(argument, scope, containingFunction);
+                        foreach (var argument in constructor.Arguments) ResolveExpression(argument, scope, containingSymbol);
                 break;
             case ConstructorCallExpression constructor:
                 ResolveType(constructor.Type, scope);
-                foreach (var argument in constructor.Arguments) ResolveExpression(argument, scope, containingFunction);
-                ResolveInitializer(constructor.WithClause?.Initializer, scope, containingFunction);
+                foreach (var argument in constructor.Arguments) ResolveExpression(argument, scope, containingSymbol);
+                ResolveInitializer(constructor.WithClause?.Initializer, scope, containingSymbol);
                 break;
             case ArrayCreationExpression array:
                 ResolveType(array.Type, scope);
-                ResolveExpression(array.Size, scope, containingFunction);
-                ResolveInitializer(array.Initializer, scope, containingFunction);
-                ResolveInitializer(array.WithClause?.Initializer, scope, containingFunction);
+                ResolveExpression(array.Size, scope, containingSymbol);
+                ResolveInitializer(array.Initializer, scope, containingSymbol);
+                ResolveInitializer(array.WithClause?.Initializer, scope, containingSymbol);
                 break;
         }
     }
@@ -653,9 +659,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private static Scope GetOwnedScope(Symbol symbol) =>
         symbol.EnclosingScope.GetChildScope(ResolutionContext.GetHandle(symbol)) ?? symbol.EnclosingScope;
 
+
     private static SymbolHandle GetContainingFunction(Symbol symbol) => symbol switch
     {
-        ParameterSymbol parameter when parameter.ContainingFunction is { } handle => handle,
+        ParameterSymbol parameter when parameter.ContainingSymbol is { } handle => handle,
         LocalVariableSymbol local when local.Parent is { } handle => handle,
         _ => default
     };

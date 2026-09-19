@@ -7,6 +7,8 @@ internal enum SymbolKind : byte
     /// <summary> Namespace container symbol. </summary>
     Namespace,
     /// <summary> Type declaration symbol. </summary>
+	Attribute,
+    NestedAttribute,
     Type,
     /// <summary> Function declaration symbol. </summary>
     NestedType,

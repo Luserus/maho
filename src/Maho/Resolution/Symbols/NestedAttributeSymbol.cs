@@ -10,12 +10,15 @@ internal abstract class NestedAttributeSymbol : Symbol
 
     public List<SymbolHandle> Attributes { get; internal set; }
 
+    public List<SymbolHandle> Parameters { get; internal set; }
+
     public AttributeSignature? Syntax { get; }
 
     protected NestedAttributeSymbol(SymbolID id, SymbolPart name, Scope enclosingScope, SymbolHandle? parent, AttributeSignature? syntax) : base(id, name, enclosingScope)
     {
         Parent = parent;
         Attributes = [];
+        Parameters = [];
         Syntax = syntax;
     }
 }

@@ -22,7 +22,7 @@ internal sealed class ResolutionContext
     public List<ParameterSymbol> ParameterSymbols { get; }
     public List<LocalVariableSymbol> LocalVariableSymbols { get; }
     public List<PropertySymbol> PropertySymbols { get; }
-    public List<GenericParameterSymbol> GenericParameterSymbols {get; }
+    public List<GenericParameterSymbol> GenericParameterSymbols { get; }
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
 
@@ -207,9 +207,9 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction)
+    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, Parameter? syntax)
     {
-        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingFunction);
+        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingSymbol, syntax);
         ParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -299,7 +299,7 @@ internal sealed class ResolutionContext
         var listOfParts = new List<SymbolPart>();
 
         AddTypeNameParts(typeSyntax, listOfParts);
-        
+
         SymbolPart[] parts = [.. listOfParts];
 
         return new SymbolName(parts);

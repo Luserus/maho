@@ -10,12 +10,14 @@ internal sealed class AttributeSymbol : Symbol
 
     public List<SymbolHandle> Attributes { get; internal set; }
 
+    public List<SymbolHandle> Parameters { get; internal set; }
     public AttributeSignature? Syntax { get; }
-    
+
     public AttributeSymbol(SymbolID id, SymbolPart name, Scope enclosingScope, NamespaceTrieNode? containingNamespace, AttributeSignature? syntax) : base(id, name, enclosingScope)
     {
         Attributes = [];
         ContainingNamespace = containingNamespace;
+        Parameters = [];
         Syntax = syntax;
     }
 }

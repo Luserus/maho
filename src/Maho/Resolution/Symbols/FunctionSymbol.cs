@@ -12,6 +12,7 @@ internal sealed class FunctionSymbol : Symbol
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
+    public List<SymbolHandle> Parameters { get; internal set; }
     public List<SymbolHandle> LocalVariables { get; internal set; }
     public List<SymbolHandle> LocalFunctions { get; internal set; }
     public List<SymbolHandle> LocalTypes { get; internal set; }
@@ -27,6 +28,7 @@ internal sealed class FunctionSymbol : Symbol
         ContainingNamespace = containingNamespace;
         GenericParameters = [];
         Attributes = [];
+        Parameters = [];
         LocalVariables = [];
         LocalFunctions = [];
         LocalTypes = [];
