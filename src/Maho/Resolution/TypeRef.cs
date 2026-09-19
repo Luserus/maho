@@ -1,19 +1,8 @@
+global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
+
 using System;
 
 namespace Maho.Resolution;
-
-/// <summary>Represents the semantic state of a type reference in the compiler.</summary>
-internal enum TypeRefKind : byte
-{
-    /// <summary>The type reference has not yet been processed by the resolution pass.</summary>
-    Unresolved = 0,
-    /// <summary>The type reference is omitted or 'var', pending expression-level type inference.</summary>
-    Inferred,
-    /// <summary>The type reference failed to resolve or is syntactically invalid.</summary>
-    Error,
-    /// <summary>The type reference was successfully resolved to a concrete symbol.</summary>
-    Resolved
-}
 
 /// <summary>A full-fidelity representation of a type reference across symbols and declarations.</summary>
 internal readonly struct TypeRef : IEquatable<TypeRef>
@@ -32,10 +21,10 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         Handle = handle;
     }
 
-    public static TypeRef Unresolved => new(TypeRefKind.Unresolved, null);
-    public static TypeRef Inferred => new(TypeRefKind.Inferred, null);
-    public static TypeRef Error => new(TypeRefKind.Error, null);
-    public static TypeRef Resolved(SymbolHandle handle) => new(TypeRefKind.Resolved, handle);
+    public static TypeRef Unresolved => new TypeRef(TypeRefKind.Unresolved, null);
+    public static TypeRef Inferred => new TypeRef(TypeRefKind.Inferred, null);
+    public static TypeRef Error => new TypeRef(TypeRefKind.Error, null);
+    public static TypeRef Resolved(SymbolHandle handle) => new TypeRef(TypeRefKind.Resolved, handle);
 
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
 

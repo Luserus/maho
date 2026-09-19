@@ -1,5 +1,3 @@
-global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
-
 using System;
 
 namespace Maho.Resolution;
