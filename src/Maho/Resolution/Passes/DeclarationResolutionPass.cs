@@ -16,28 +16,40 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var attribute in context.AttributeSymbols)
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+
         foreach (var attribute in context.NestedAttributeSymbols)
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+
         foreach (var type in context.TypeSymbols)
             ResolveType(type, type.Syntax);
+
         foreach (var type in context.NestedTypeSymbols)
             ResolveType(type, type.Syntax);
+
         foreach (var alias in context.AliasSymbols)
             ResolveAlias(alias);
+
         foreach (var function in context.FunctionSymbols)
             ResolveFunction(function);
+
         foreach (var method in context.MethodSymbols)
             ResolveMethod(method);
+
         foreach (var parameter in context.ParameterSymbols)
             ResolveParameter(parameter);
+
         foreach (var global in context.GlobalVariableSymbols)
             ResolveVariable(global, global.Syntax);
+
         foreach (var field in context.FieldSymbols)
             ResolveVariable(field, field.Syntax);
+
         foreach (var local in context.LocalVariableSymbols)
             ResolveVariable(local, local.Syntax);
+
         foreach (var property in context.PropertySymbols)
             ResolveProperty(property);
+
         foreach (var root in context.SyntaxTree.Roots)
             ResolveTopLevelStatements(root);
     }
@@ -55,6 +67,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
             }
         }
+
         if (main is null)
             return;
 
@@ -67,10 +80,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         switch (node)
         {
             case TopLevelBlockDeclaration block:
-                foreach (var member in block.Members) ResolveTopLevel(member, scope, containingFunction);
+                foreach (var member in block.Members)
+                    ResolveTopLevel(member, scope, containingFunction);
                 break;
             case NamespaceDeclaration declaration when declaration.Body is NamespaceBlockBody body:
-                foreach (var member in body.Members) ResolveTopLevel(member, scope, containingFunction);
+                foreach (var member in body.Members)
+                    ResolveTopLevel(member, scope, containingFunction);
                 break;
             case TopLevelExpressionStatement statement:
                 ResolveExpression(statement.Expression, scope, containingFunction);
@@ -84,6 +99,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case TopLevelIfStatement statement:
                 ResolveExpression(statement.Condition, scope, containingFunction);
                 ResolveTopLevel(statement.ThenStatement, scope, containingFunction);
+
                 if (statement.ElseStatement is not null)
                     ResolveTopLevel(statement.ElseStatement.Statement, scope, containingFunction);
                 break;
