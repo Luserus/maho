@@ -66,7 +66,7 @@ cd Samples && ../maho Test.mhpr
 Supported flags:
 
 - `--debug (lex|parse)+ --output <path|->`: emit selected debug payloads to a file or `stdout`.
-- `--diagnostics [--text|--json] --output <path|->`: emit diagnostics to a file or `stderr`.
+- `--diagnostics [text|json] --output <path|->`: emit diagnostics to a file or `stderr`.
 - `-h`, `--help`: print usage information.
 
 When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.
