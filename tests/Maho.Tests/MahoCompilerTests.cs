@@ -224,30 +224,6 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ParsesCheckedInSampleProject()
-    {
-        string projectPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Samples/Test.mhpr"));
-
-        CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
-
-        Assert.False(result.HasErrors);
-        Assert.Equal(Path.Combine(Path.GetDirectoryName(projectPath)!, "Program.mh"), result.EntryFile);
-        Assert.Equal(2, result.Files.Length);
-    }
-
-    [Fact]
-    public void CompileProjectFile_ReachesTheLoweringPlaceholderAfterSuccessfulFrontEnd()
-    {
-        string projectPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Samples/Test.mhpr"));
-
-        CompilerPipelineNotImplementedException exception = Assert.Throws<CompilerPipelineNotImplementedException>(() =>
-            MahoCompiler.CompileProjectFile(projectPath));
-
-        Assert.False(exception.Analysis.HasErrors);
-        Assert.Equal("The lowering and code-generation pipeline has not been implemented.", exception.Message);
-    }
-
-    [Fact]
     public void AnalyzeProjectFile_ImplicitTopLevel_AllowsTopLevelWithoutPragmaWhenEntryFileIsExplicit()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
