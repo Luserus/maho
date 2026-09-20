@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Maho.Syntax;
 
 /// <summary> File-level pragma directive parsed before the compilation unit's top-level members. </summary>
-internal sealed class PragmaDirective : SyntaxNode
+internal sealed class PragmaDirective : Directive
 {
     /// <summary> The leading <c>#</c> token. </summary>
     public Token HashToken { get; }
@@ -40,5 +40,24 @@ internal sealed class PragmaDirective : SyntaxNode
         }
 
         return enabled;
+    }
+
+    /// <summary> Returns true if explicitly enabled, false if explicitly disabled, or null if unspecified. </summary>
+    public static bool? GetTopLevelPragmaState(IReadOnlyList<PragmaDirective> pragmas)
+    {
+        bool? state = null;
+
+        foreach (var pragma in pragmas)
+        {
+            if (pragma.PragmaKeyword.Value != "pragma" || pragma.Name.Value != "toplevel")
+                continue;
+
+            if (pragma.Value.Value == "enable")
+                state = true;
+            else if (pragma.Value.Value == "disable")
+                state = false;
+        }
+
+        return state;
     }
 }

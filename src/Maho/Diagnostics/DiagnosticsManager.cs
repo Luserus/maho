@@ -62,6 +62,65 @@ internal sealed class DiagnosticsManager
     public void ReportError(string code, string message, TextSpan span, SourceText? source = null) =>
         Report(new Diagnostic(code, message, span, DiagnosticKind.Error, source: source ?? defaultSource));
 
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich error diagnostic. </summary>
+    public DiagnosticBuilder BuildError(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Error, primarySpan, source ?? defaultSource);
+
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich warning diagnostic. </summary>
+    public DiagnosticBuilder BuildWarning(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Warning, primarySpan, source ?? defaultSource);
+
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich info diagnostic. </summary>
+    public DiagnosticBuilder BuildInfo(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Info, primarySpan, source ?? defaultSource);
+
+    /// <summary>
+    /// Reports an unsupported binary operator or type mismatch between left and right operands,
+    /// annotating the operator with a primary caret and the operands with secondary underlines.
+    /// </summary>
+    public void ReportTypeMismatch(
+        TextSpan opSpan,
+        string op,
+        TextSpan lhsSpan,
+        string lhsTypeName,
+        TextSpan rhsSpan,
+        string rhsTypeName,
+        string? note = null,
+        string? help = null,
+        SourceText? source = null)
+    {
+        var builder = BuildError("MH2001", $"Cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'.", opSpan, source)
+            .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
+            .WithSecondaryLabel(lhsSpan, $"this expression has type '{lhsTypeName}'")
+            .WithSecondaryLabel(rhsSpan, $"this expression has type '{rhsTypeName}'");
+
+        if (note is not null)
+            builder.WithNote(note);
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
+
+    /// <summary>
+    /// Reports a re-declared symbol in the same scope, pointing to both the re-declaration site
+    /// (primary label) and the previous declaration site (secondary label).
+    /// </summary>
+    public void ReportDuplicateDeclaration(
+        string symbolKind,
+        string name,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError("MH1002", $"{symbolKind} '{name}' is already declared in this scope.", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{name}' re-declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{name}' here", firstSource)
+            .WithHelp($"consider renaming or removing one of the duplicate {symbolKind.ToLowerInvariant()} declarations.")
+            .Report();
+    }
+
     /// <summary>
     /// Reports an error diagnostic that also preserves the expected syntax text for downstream
     /// renderers that want to produce more specific remediation hints.
@@ -177,6 +236,6 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that resolution state became inconsistent without crashing the analysis pipeline. </summary>
     public void ReportResolutionStateError(TextSpan span, string subject, SourceText? source = null) =>
-        ReportError("MH1099", $"Resolution state became inconsistent while resolving {subject}.", span, source);
+        ReportError("MH0039", $"Resolution state became inconsistent while resolving {subject}.", span, source);
 
 }

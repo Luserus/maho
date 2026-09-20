@@ -38,4 +38,9 @@ internal struct SymbolStore
         LabelSymbols = labelSymbols;
         AliasSymbols = aliasSymbols;
     }
+
+    /// <summary>
+    /// Creates an empty symbol store with fresh collections for every symbol category.
+    /// </summary>
+    public static SymbolStore CreateEmpty() => new([], [], [], [], [], [], [], [], [], [], [], [], [], []);
 }

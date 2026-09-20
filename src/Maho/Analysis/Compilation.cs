@@ -1,0 +1,232 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Maho.Diagnostics;
+using Maho.Resolution;
+using Maho.Syntax;
+using Maho.Text;
+
+namespace Maho.Analysis;
+
+/// <summary>
+/// Represents an immutable compilation unit or project batch in the Maho compiler.
+/// Coordinates lexing, parsing, multi-file syntax trees, project references, and semantic resolution.
+/// </summary>
+public sealed class Compilation
+{
+    public string ProjectName { get; }
+    internal IReadOnlyList<SyntaxTree> SyntaxTrees { get; }
+    internal IReadOnlyList<SourceText> SourceTexts { get; }
+    public CompilationOptions Options { get; }
+    public IReadOnlyList<Compilation> ReferencedCompilations { get; }
+    internal ResolutionContext? Context { get; }
+    public IReadOnlyList<DiagnosticInfo> Diagnostics { get; }
+
+    public bool HasErrors => Diagnostics.Any(d =>
+        d.Severity == DiagnosticSeverity.Error ||
+        (Options.WarningsAsErrors && d.Severity == DiagnosticSeverity.Warning));
+
+    private Compilation(
+        string projectName,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
+        IReadOnlyList<SourceText> sourceTexts,
+        CompilationOptions options,
+        IReadOnlyList<Compilation> referencedCompilations,
+        ResolutionContext? context,
+        IReadOnlyList<DiagnosticInfo> diagnostics)
+    {
+        ProjectName = projectName;
+        SyntaxTrees = syntaxTrees;
+        SourceTexts = sourceTexts;
+        Options = options;
+        ReferencedCompilations = referencedCompilations;
+        Context = context;
+        Diagnostics = diagnostics;
+    }
+
+    /// <summary>
+    /// Creates a compilation from a single in-memory source string.
+    /// </summary>
+    public static Compilation FromSource(string source, string filePath = "source.mh", CompilationOptions? options = null)
+    {
+        options ??= CompilationOptions.Default;
+        var sourceText = new SourceText(source);
+        var diagnosticsManager = new DiagnosticsManager(sourceText);
+
+        var lexer = new Lexer(sourceText, diagnosticsManager);
+        lexer.Lex();
+
+        var parser = new Parser(sourceText, diagnosticsManager);
+        var unit = parser.Parse(lexer.Tokens);
+
+        var syntaxTree = SyntaxTree.CreateSingleRoot(unit, filePath);
+        var resolver = new Resolver();
+        var context = resolver.Resolve(syntaxTree);
+
+        var projectedDiagnostics = ProjectDiagnostics(diagnosticsManager.Diagnostics, sourceText, filePath);
+
+        return new Compilation(
+            Path.GetFileNameWithoutExtension(filePath),
+            [syntaxTree],
+            [sourceText],
+            options,
+            [],
+            context,
+            projectedDiagnostics);
+    }
+
+    /// <summary>
+    /// Creates a compilation from a collection of source files.
+    /// </summary>
+    public static Compilation FromFiles(
+        IEnumerable<string> filePaths,
+        string? projectName = null,
+        CompilationOptions? options = null,
+        IReadOnlyList<Compilation>? referencedCompilations = null)
+    {
+        options ??= CompilationOptions.Default;
+        referencedCompilations ??= [];
+        var pathsList = filePaths.Select(Path.GetFullPath).ToList();
+        projectName ??= pathsList.Count > 0 ? Path.GetFileNameWithoutExtension(pathsList[0]) : "Project";
+
+        var sourceTexts = new SourceText[pathsList.Count];
+        var roots = new CompilationUnit[pathsList.Count];
+        var fileDms = new DiagnosticsManager[pathsList.Count];
+        var allInternalDiagnostics = new List<(Diagnostic Diagnostic, SourceText Source, string Path)>();
+
+        Parallel.For(0, pathsList.Count, i =>
+        {
+            var path = pathsList[i];
+            var text = new SourceText(new SourceFile(path));
+            sourceTexts[i] = text;
+
+            bool isEntryFile = options.EntryFile != null &&
+                (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+
+            bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
+            bool allowImplicit = options.ImplicitTopLevel || (isSingleFileScript && (options.EntryFile == null || isEntryFile));
+
+            var dm = new DiagnosticsManager(text);
+            fileDms[i] = dm;
+
+            var lexer = new Lexer(text, dm);
+            lexer.Lex();
+
+            var parser = new Parser(text, dm, allowImplicit);
+            var root = parser.Parse(lexer.Tokens);
+            roots[i] = root;
+        });
+
+        // Validate top-level statements across files
+        List<(CompilationUnit Root, DiagnosticsManager Dm)> filesWithTopLevel = [];
+        for (int i = 0; i < roots.Length; i++)
+        {
+            if (roots[i].EnablesTopLevelStatements && ContainsTopLevelStatement(roots[i].Members))
+            {
+                filesWithTopLevel.Add((roots[i], fileDms[i]));
+            }
+        }
+
+        if (filesWithTopLevel.Count > 1)
+        {
+            foreach (var (candRoot, candDm) in filesWithTopLevel)
+            {
+                candDm.ReportError("MH0012", "Only one source file may contain top-level statements.", GetTopLevelPragmaSpan(candRoot));
+            }
+        }
+
+        for (int i = 0; i < pathsList.Count; i++)
+        {
+            foreach (var diag in fileDms[i].Diagnostics)
+                allInternalDiagnostics.Add((diag, sourceTexts[i], pathsList[i]));
+        }
+
+        var syntaxTree = new SyntaxTree(projectName, roots.ToArray());
+        var resolver = new Resolver();
+
+        var referencedContexts = referencedCompilations
+            .Where(c => c.Context != null)
+            .Select(c => c.Context!)
+            .ToList();
+
+        var context = resolver.Resolve(syntaxTree, referencedContexts);
+
+        var projected = new List<DiagnosticInfo>(allInternalDiagnostics.Count);
+        foreach (var (diag, text, path) in allInternalDiagnostics)
+            projected.Add(DiagnosticInfo.FromDiagnostic(diag, text, path));
+
+        return new Compilation(
+            projectName,
+            [syntaxTree],
+            sourceTexts,
+            options,
+            referencedCompilations,
+            context,
+            projected);
+    }
+
+    /// <summary>
+    /// Creates a compilation from a domain-specific <c>.mhpr</c> project file.
+    /// </summary>
+    public static Compilation FromProjectFile(string projectFilePath, CompilationOptions? options = null)
+    {
+        var project = Maho.Build.MahoBuildSystem.LoadProject(projectFilePath, options);
+        var referencedCompilations = new List<Compilation>();
+        foreach (var refProj in project.Configuration.ProjectsReferenced)
+        {
+            string refPath = Path.IsPathRooted(refProj) ? refProj : Path.Combine(project.ProjectDirectory, refProj);
+            if (File.Exists(refPath))
+                referencedCompilations.Add(FromProjectFile(refPath, options));
+        }
+
+        return FromFiles(project.SourceFiles, project.ProjectName, project.Options, referencedCompilations);
+    }
+
+    private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
+    {
+        foreach (TopLevel member in members)
+        {
+            switch (member)
+            {
+                case TopLevelStatement:
+                    return true;
+                case TopLevelBlockDeclaration block when ContainsTopLevelStatement(block.Members):
+                    return true;
+                case NamespaceDeclaration { Body: NamespaceBlockBody body } when ContainsTopLevelStatement(body.Members):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static TextSpan GetTopLevelPragmaSpan(CompilationUnit unit)
+    {
+        foreach (PragmaDirective pragma in unit.Pragmas)
+        {
+            if (pragma.Name.Value == "toplevel" && pragma.Value.Value == "enable")
+                return pragma.HashToken.Span;
+        }
+
+        return unit.EndToken.Span;
+    }
+
+    /// <summary>
+    /// Spawns an interactive <see cref="AnalysisSession"/> rooted in this compilation.
+    /// </summary>
+    public AnalysisSession CreateSession() => new(this);
+
+    private static List<DiagnosticInfo> ProjectDiagnostics(
+        IReadOnlyList<Diagnostic> diagnostics,
+        SourceText sourceText,
+        string filePath)
+    {
+        var result = new List<DiagnosticInfo>(diagnostics.Count);
+        foreach (var diag in diagnostics)
+            result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
+        return result;
+    }
+}

@@ -4,31 +4,38 @@ An experimental programming language and compiler project inspired by C#.
 
 ## Current Status
 
-The repository is currently split into two projects:
+The repository is split into three main components:
 
-- `src/Maho/Maho.csproj`: the reusable core library.
-- `src/Maho.Cli/Maho.Cli.csproj`: the command-line executable.
-- `Maho.sln`: solution file for editor/LSP support across both projects.
+- `src/Maho/Maho.csproj`: the reusable core compiler library.
+- `src/Maho.Cli/Maho.Cli.csproj`: the command-line driver and terminal renderer.
+- `tests/Maho.Tests/Maho.Tests.csproj`: unit and integration test suite.
+- `Maho.sln`: solution file for editor/LSP support across all projects.
 
-Today the core can:
+Today the compiler can:
 
-- load `.mh` source files,
-- lex and parse them,
-- return lexer and parser debug views as JSON,
-- report structured diagnostics for invalid syntax,
-- run project-wide resolution over parsed compilation units.
+- Load and process `.mh` source files, directories, and domain-specific `.mhpr` project files.
+- Lex and parse source files into strongly-typed syntax trees.
+- Emit structured lexer and parser debug views as JSON.
+- Run project-wide semantic resolution across compilation units, including symbol discovery, declaration resolution, alias unwrapping, base type inheritance, and generic constraints.
+- Support multi-project references (`.mhpr`) with imported symbol tables without cross-project declaration pollution.
+- Provide stateful interactive evaluation via `AnalysisSession` for REPLs and CLI interpreters, allowing isolated code snippets to be analyzed incrementally against prior symbol tables.
+- Render rich, terminal diagnostics with ANSI colors, line gutters, primary carets (`^^^^`), secondary context dashes (`----`), informational notes, remediation help, and code fix suggestions.
 
-The semantic layer is still growing, and code generation is not implemented yet.
+The semantic pipeline is actively expanding, with runtime intrinsic types discovery underway. Code generation and lowering will follow once semantic passes are complete.
 
 ## Documentation
 
-Detailed subsystem guides are collected in [`docs/repository-guide.md`](docs/repository-guide.md).
+Detailed subsystem guides are collected in [`docs/repository-guide.md`](docs/repository-guide.md):
+
+- [`docs/cli.md`](docs/cli.md): command-line options and driver workflows.
+- [`docs/compiler-library.md`](docs/compiler-library.md): architecture of the `Maho` library.
+- [`docs/analysis.md`](docs/analysis.md): public compilation, session, and diagnostic APIs.
+- [`docs/diagnostics.md`](docs/diagnostics.md): internal diagnostics model and reporters.
+- [`docs/language-theory.md`](docs/language-theory.md): grammar specifications and language design.
 
 ## Build
 
 This project uses the .NET SDK and targets `net10.0`.
-
-If you want editor features such as C# solution loading, navigation, and language server support, open the repository through `Maho.sln`.
 
 Build the CLI entrypoint from the repository root:
 
@@ -44,6 +51,12 @@ To build the library on its own:
 dotnet build src/Maho/Maho.csproj
 ```
 
+To run the test suite:
+
+```bash
+dotnet test
+```
+
 ## CLI
 
 Run the CLI with:
@@ -52,41 +65,76 @@ Run the CLI with:
 ./maho [options] [source-path]
 ```
 
-The wrapper script forwards arguments to `dotnet run --project src/Maho.Cli/Maho.Cli.csproj -- ...`, so you can use the shorter command from the repository root.
+The `./maho` wrapper script forwards arguments to the compiled driver.
 
-Examples:
+### Examples
 
 ```bash
+# Compile a project file (.mhpr) with pretty diagnostics
 ./maho Samples/Test.mhpr
-./maho --debug lex --output output/test-lex.json Samples/Program.mh
-./maho --debug lex parse --output - --diagnostics json --output - Samples/Test.mhpr
-cd Samples && ../maho Test.mhpr
+
+# Inspect lexer tokens as JSON
+./maho --debug lex --output output/tokens.json Samples/Program.mh
+
+# Inspect parser AST as JSON and output to stdout
+./maho --debug parse --output - Samples/Program.mh
+
+# Output diagnostics in JSON format to stderr or file
+./maho --diagnostics json --output diagnostics.json Samples/Test.mhpr
+
+# Enforce warnings as errors and full file paths
+./maho -Werror --diagnostic-paths full Samples/Test.mhpr
+
+# Check compiler version or help
+./maho --version
+./maho --help
 ```
 
-Supported flags:
+### Supported Flags
 
-- `--debug (lex|parse)+ --output <path|->`: emit selected debug payloads to a file or `stdout`.
-- `--diagnostics [text|json] --output <path|->`: emit diagnostics to a file or `stderr`.
-- `-h`, `--help`: print usage information.
+- `--debug (lex|parse)+ --output <path|->`: emit selected debug AST/token payloads to a file or `stdout`.
+- `--diagnostics [pretty|text|json] --output <path|->`: emit diagnostics in rich pretty-printed format (default), short text format, or JSON to a file or `stderr`.
+- `--color [auto|always|never]`: control ANSI colored terminal output.
+- `--no-color`: disable ANSI colors in diagnostic output.
+- `--diagnostic-paths (relative|full)`: choose between relative paths (user-friendly default) or full paths in diagnostic headers.
+- `-Werror`, `--warnings-as-errors`: treat compiler warnings as errors.
+- `-v`, `--version`: print the compiler version and exit.
+- `-h`, `--help`: print usage information and exit.
 
 When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.
 
-Normal invocations proceed into the compiler pipeline. The current lowering/code-generation boundary is
-deliberately unimplemented, so syntactically valid programs stop there with a compiler error. Debug
-output is therefore an explicit inspection channel rather than the compiler's final product.
+## Project Files (`.mhpr`)
 
-## Library
+Maho projects can be configured with `.mhpr` project files:
 
-The core library exposes `MahoCompiler.AnalyzeFile(...)` and `MahoCompiler.AnalyzeText(...)`.
+```mhpr
+EntryFile : "Program.mh";
+ImplicitTopLevel : true;
+GlobalUnsafeEnabled : false;
+ProjectsReferenced : [
+    "../Core/Core.mhpr"
+];
+GlobalAliases : {
+    "int32" : "Std.Int32",
+    "string" : "Std.String8"
+};
+```
 
-It also exposes `MahoCompiler.AnalyzeFiles(...)` for batch analysis, which keeps file-level parallelism inside the library instead of making the CLI manage it directly.
+- `EntryFile`: specifies the designated entry-point file.
+- `ImplicitTopLevel`: when `true`, allows top-level statements in the entry file without requiring `#pragma toplevel enable`. If no `EntryFile` is configured, the single file containing top-level statements is automatically selected as the entry point.
+- `ProjectsReferenced`: referenced `.mhpr` projects whose exported symbols are imported into the compilation scope.
+- `GlobalAliases`: project-wide type aliases.
 
-The analysis APIs return:
+## Library API
 
-- requested lexer JSON,
-- requested parser JSON,
-- structured diagnostics with file offsets and line/column locations.
+The `Maho` library provides:
 
-`CompileFiles(...)` and `CompileProjectFile(...)` continue beyond front-end analysis. They currently
-raise `CompilerPipelineNotImplementedException` at the lowering/code-generation boundary after a
-successful front end.
+- `Compilation`: batch compilation coordinating source files, syntax trees, project references, and resolution.
+  - `Compilation.FromSource(code, path, options)`
+  - `Compilation.FromFiles(filePaths, projectName, options, referencedCompilations)`
+  - `Compilation.FromProjectFile(projectFilePath, options)`
+  - `compilation.CreateSession()`
+- `AnalysisSession`: stateful incremental compilation for interactive REPLs and CLI interpreters.
+  - `session.AnalyzeSnippet(code)`: parses and resolves isolated expressions, statements, or declarations against previous session symbols.
+  - `session.CommitSnippet(result)`: incorporates successful declarations into the active session scope.
+- `TerminalDiagnosticRenderer`: client-side Rust-style terminal diagnostic renderer in `Maho.Cli.Diagnostics`.

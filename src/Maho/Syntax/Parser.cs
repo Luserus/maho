@@ -172,11 +172,14 @@ internal sealed partial class Parser
     /// <summary> Builds the shared operator trie once for the parser type. </summary>
     static Parser() => operatorTrie = BuildOperatorTrie();
 
+    private readonly bool allowImplicitTopLevel;
+
     /// <summary> Creates a parser over one token stream and shared diagnostics sink. </summary>
-    public Parser(SourceText text, DiagnosticsManager diagnostics)
+    public Parser(SourceText text, DiagnosticsManager diagnostics, bool allowImplicitTopLevel = false)
     {
         this.text = text;
         this.diagnostics = diagnostics;
+        this.allowImplicitTopLevel = allowImplicitTopLevel;
     }
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
@@ -188,6 +191,7 @@ internal sealed partial class Parser
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
+
         return compilationUnit;
     }
 
@@ -216,11 +220,20 @@ internal sealed partial class Parser
     /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()
     {
-        IReadOnlyList<PragmaDirective> pragmas = ParsePragmaDirectives(out bool topLevelStatementsEnabled);
+        var directives = new List<Directive>();
+        bool topLevelStatementsEnabled = allowImplicitTopLevel;
         var topLevels = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+            {
+                var parsedDirectives = ParseDirectives(out bool enabled, topLevelStatementsEnabled);
+                directives.AddRange(parsedDirectives);
+                topLevelStatementsEnabled = enabled;
+                continue;
+            }
+
             var start = current;
             var topLevel = ParseTopLevel(topLevelStatementsEnabled);
             topLevels.Add(topLevel);
@@ -229,7 +242,7 @@ internal sealed partial class Parser
 
         var eofToken = Consume();
 
-        return new CompilationUnit(pragmas, topLevels, eofToken);
+        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -259,7 +272,11 @@ internal sealed partial class Parser
     private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new TopLevelUsingDirective(ParseUsingDirective());
             return ParseTopLevelAliasDeclaration();
+        }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
@@ -286,6 +303,13 @@ internal sealed partial class Parser
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember()
     {
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new MemberUsingDirective(ParseUsingDirective());
+            return ParseMemberAliasDeclaration();
+        }
+
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
@@ -302,6 +326,13 @@ internal sealed partial class Parser
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new LocalUsingDirective(ParseUsingDirective());
+            return ParseLocalAliasDeclaration();
+        }
+
         if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
 
@@ -421,6 +452,7 @@ internal sealed partial class Parser
     {
         var currentToken = CurrentToken;
         current++;
+
         return currentToken;
     }
 }

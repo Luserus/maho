@@ -140,6 +140,214 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_UsingDirective_SimpleNamespace()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Directive directive = Assert.Single(root.Directives);
+        UsingDirective usingDirective = Assert.IsType<UsingDirective>(directive);
+        Assert.Equal(MatchingKeywordKind.Using, usingDirective.Keyword.MatchingKind);
+        SimpleName name = Assert.IsType<SimpleName>(usingDirective.Namespace);
+        Assert.Equal("Std", name.Name.Value);
+        Assert.Equal(TokenKind.Semicolon, usingDirective.Semicolon.Kind);
+
+        Assert.Single(root.Usings);
+        Assert.Empty(root.Pragmas);
+        Assert.Empty(root.Members);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_QualifiedNamespace()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std.Collections.Generic;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        QualifiedName qualified = Assert.IsType<QualifiedName>(usingDirective.Namespace);
+        Assert.Equal(3, qualified.Parts.Count);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(qualified.Parts[0]).Name.Value);
+        Assert.Equal("Collections", Assert.IsType<SimpleName>(qualified.Parts[1]).Name.Value);
+        Assert.Equal("Generic", Assert.IsType<SimpleName>(qualified.Parts[2]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_UsingDirectives_InterleavedWithPragmas()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            using Std;
+            using Std.IO;
+
+            int value = 42;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.Equal(3, root.Directives.Count);
+        Assert.IsType<PragmaDirective>(root.Directives[0]);
+        Assert.IsType<UsingDirective>(root.Directives[1]);
+        Assert.IsType<UsingDirective>(root.Directives[2]);
+
+        Assert.Single(root.Pragmas);
+        Assert.Equal(2, root.Usings.Count);
+        Assert.True(root.EnablesTopLevelStatements);
+
+        Assert.Single(root.Members);
+        Assert.IsType<TopLevelVariableDeclaration>(root.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_DisambiguatesFromAliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std;
+            using MyInt = Std.Int32;
+            using GenericBox<T> = Std.Box<T>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        // Directive list only contains the using directive
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(root.Directives);
+
+        // Alias declarations are TopLevel members, NOT directives
+        Assert.Equal(2, root.Members.Count);
+        TopLevelAliasDeclaration simpleAlias = Assert.IsType<TopLevelAliasDeclaration>(root.Members[0]);
+        Assert.Equal("MyInt", Assert.IsType<SimpleName>(simpleAlias.Alias.Name).Name.Value);
+
+        TopLevelAliasDeclaration genericAlias = Assert.IsType<TopLevelAliasDeclaration>(root.Members[1]);
+        Assert.Equal("GenericBox", Assert.IsType<GenericName>(genericAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_MissingSemicolon_ReportsDiagnosticAndRecovers()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std
+            class MyClass;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Contains(diagnostics.Diagnostics, d => d.Message.Contains("';'"));
+
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(root.Members);
+        Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_InsideNamespaceBody_IsParsedIntoNamespaceDirectives()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            namespace MyNamespace
+            {
+                using Std;
+
+                public struct Point;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        Assert.Single(root.Members);
+        NamespaceDeclaration ns = Assert.IsType<NamespaceDeclaration>(root.Members[0]);
+        NamespaceBlockBody body = Assert.IsType<NamespaceBlockBody>(ns.Body);
+        Assert.Single(body.Directives);
+        Assert.Single(body.Usings);
+        UsingDirective usingDirective = body.Usings[0];
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(body.Members);
+        Assert.IsType<TopLevelTypeDeclaration>(body.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_TypeBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class MyClass
+            {
+                using Std.Math;
+                using Num = Std.Int32;
+
+                public Num value;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var typeDecl = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<TypeBlockBody>(typeDecl.Type.Body);
+        Assert.Equal(3, body.Members.Count);
+
+        var memberUsing = Assert.IsType<MemberUsingDirective>(body.Members[0]);
+        var memberAlias = Assert.IsType<MemberAliasDeclaration>(body.Members[1]);
+        Assert.IsType<MemberFieldDeclaration>(body.Members[2]);
+
+        Assert.Equal("Std", Assert.IsType<SimpleName>(Assert.IsType<QualifiedName>(memberUsing.Directive.Namespace).Parts[0]).Name.Value);
+        Assert.Equal("Num", Assert.IsType<SimpleName>(memberAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_LocalBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                {
+                    using Std.Collections;
+                    using IntList = Std.List;
+
+                    IntList items;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
+        var blockStmt = Assert.IsType<LocalBlockStatement>(Assert.Single(body.Locals));
+
+        Assert.Equal(3, blockStmt.Locals.Count);
+        var localUsing = Assert.IsType<LocalUsingDirective>(blockStmt.Locals[0]);
+        var localAlias = Assert.IsType<LocalAliasDeclaration>(blockStmt.Locals[1]);
+        Assert.IsType<LocalVariableDeclarationStatement>(blockStmt.Locals[2]);
+
+        Assert.Equal("Collections", Assert.IsType<SimpleName>(Assert.IsType<QualifiedName>(localUsing.Directive.Namespace).Parts[1]).Name.Value);
+        Assert.Equal("IntList", Assert.IsType<SimpleName>(localAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_TopLevelBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            global
+            {
+                using Std;
+                using MyInt = Std.Int32;
+                int x = 1;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var topBlock = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(root.Members));
+        Assert.Equal(3, topBlock.Members.Count);
+
+        var topUsing = Assert.IsType<TopLevelUsingDirective>(topBlock.Members[0]);
+        var topAlias = Assert.IsType<TopLevelAliasDeclaration>(topBlock.Members[1]);
+        Assert.IsType<TopLevelVariableDeclaration>(topBlock.Members[2]);
+
+        Assert.Equal("Std", Assert.IsType<SimpleName>(topUsing.Directive.Namespace).Name.Value);
+        Assert.Equal("MyInt", Assert.IsType<SimpleName>(topAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
     public void Parse_GlobalModifiedTopLevelBlock_PreservesItsDeclarations()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
@@ -730,12 +938,15 @@ public sealed class ParserTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             #pragma toplevel enable
+            using Extra;
             namespace Outer;
 
             public int topValue = 1;
             public int topOther;
             PointerCandidate * topPointer;
             ReferenceCandidate & topReference;
+            using TopAlias = Extra.Nested;
+            using Extra;
 
             namespace Extra
             {
@@ -744,11 +955,15 @@ public sealed class ParserTests
 
             public struct Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
             {
+                using Extra;
+                using MemberAlias = Extra.Nested;
                 public T Value;
                 public class Nested;
 
                 public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
+                    using Extra;
+                    using LocalAlias = Extra.Nested;
                     public class LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
                     public static int LocalFunc<TLocal>(TLocal input) where TLocal: Extra.Nested
                     {
@@ -793,7 +1008,7 @@ public sealed class ParserTests
 
             public static void Forward();
 
-            global { int globalBlockValue = 0; }
+            global { using Extra; int globalBlockValue = 0; }
             call();
             if (1) return; else ;
             while (1) ;
@@ -809,6 +1024,14 @@ public sealed class ParserTests
         AssertIncludesNodeTypes(
             nodeTypes,
             typeof(PragmaDirective),
+            typeof(UsingDirective),
+            typeof(TopLevelUsingDirective),
+            typeof(TopLevelAliasDeclaration),
+            typeof(MemberUsingDirective),
+            typeof(MemberAliasDeclaration),
+            typeof(LocalUsingDirective),
+            typeof(LocalAliasDeclaration),
+            typeof(AliasDeclaration),
             typeof(NamespaceDeclaration),
             typeof(NamespaceEmptyBody),
             typeof(NamespaceBlockBody),

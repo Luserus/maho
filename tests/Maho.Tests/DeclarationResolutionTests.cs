@@ -81,12 +81,12 @@ public sealed class DeclarationResolutionTests
             using Specialized = Namespace.Generic<Namespace.Int32>;
             using Projected<T> where T : Namespace.Constraint = Namespace.Generic<T>;
             using Invalid<T> = Namespace.Generic<T>;
-            using Mixed<T> = Namespace.Type<T, Int32>;
+            using Mixed<T> = Namespace.Type<T, Namespace.Int32>;
 
             public Direct direct;
             public Specialized specialized;
             public Projected<Namespace.Int32> projected;
-            public Mixed<Int32> mixed;
+            public Mixed<Namespace.Int32> mixed;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -133,7 +133,7 @@ public sealed class DeclarationResolutionTests
         GenericType mixedTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(mixedSyntax.Alias.Target).Right);
         AssertReference(context, mixedTarget, ResolutionContext.GetHandle(type));
         AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.GenericArguments[0]).Expression, ResolutionContext.GetHandle(context.GenericParameterSymbols[mixed.GenericParameters[0].ID]));
-        AssertReference(context, Assert.IsType<NamedExpressionGenericArgument>(mixedTarget.GenericArguments[1]).Expression, ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
+        AssertReference(context, mixedTarget.GenericArguments[1], ResolutionContext.GetHandle(Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "Int32")));
     }
 
     [Fact]

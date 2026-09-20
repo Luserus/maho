@@ -18,18 +18,23 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveCompilationUnit(CompilationUnit unit)
     {
-        FunctionSymbol? topLevelMain = null;
-        var topLevelMainScope = context.GlobalScope;
+        var fileScope = context.CreateScope(context.GlobalScope);
+        context.RegisterSyntaxScope(unit, fileScope);
 
-        if (PragmaDirective.EnablesTopLevelStatements(unit.Pragmas))
+        foreach (var usingDirective in unit.Usings)
+            ResolveUsingDirective(usingDirective, fileScope);
+
+        FunctionSymbol? topLevelMain = null;
+        var topLevelMainScope = fileScope;
+
+        if (unit.EnablesTopLevelStatements)
         {
-            topLevelMainScope = context.CreateScope(context.GlobalScope);
-            topLevelMain = context.CreateFunctionSymbol(context.GlobalScope, new SymbolPart("Main"), context.GlobalNamespace, syntax: null);
-            ResolutionContext.BindChildScope(context.GlobalScope, topLevelMain, topLevelMainScope);
-            context.RegisterSyntaxScope(unit, topLevelMainScope);
+            topLevelMainScope = context.CreateScope(fileScope);
+            topLevelMain = context.CreateFunctionSymbol(fileScope, new SymbolPart("Main"), context.GlobalNamespace, syntax: null);
+            ResolutionContext.BindChildScope(fileScope, topLevelMain, topLevelMainScope);
         }
 
-        ResolveTopLevelScope(unit.Members, context.GlobalScope, context.GlobalNamespace, topLevelMain, topLevelMainScope);
+        ResolveTopLevelScope(unit.Members, fileScope, context.GlobalNamespace, topLevelMain, topLevelMainScope);
     }
 
     private NamespaceTrieNode ResolveTopLevelScope(IReadOnlyList<TopLevel> members, Scope scope, NamespaceTrieNode containingNamespace,
@@ -51,7 +56,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case NamespaceDeclaration declaration:
                 return ResolveNamespaceDeclaration(declaration, scope, containingNamespace, topLevelMain, topLevelMainScope);
             case TopLevelBlockDeclaration block:
-                ResolveTopLevelScope(block.Members, scope, containingNamespace, HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
+                {
+                    Scope blockScope = context.CreateScope(scope);
+                    context.RegisterSyntaxScope(block, blockScope);
+                    ResolveTopLevelScope(block.Members, blockScope, containingNamespace, HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
+                    return containingNamespace;
+                }
+            case TopLevelUsingDirective directive:
+                ResolveUsingDirective(directive.Directive, scope);
                 return containingNamespace;
             case TopLevelAttributeDeclaration declaration:
                 ResolveTopLevelAttributeDeclaration(declaration.Attribute, scope, containingNamespace);
@@ -74,6 +86,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             default:
                 return containingNamespace;
         }
+    }
+
+    private void ResolveUsingDirective(UsingDirective directive, Scope scope)
+    {
+        var nsNode = GetOrDeclareNamespace(context.GlobalNamespace, directive.Namespace);
+        if (!scope.UsingNamespaces.Contains(nsNode))
+            scope.UsingNamespaces.Add(nsNode);
     }
 
     private static bool HasGlobalModifier(TopLevelBlockDeclaration block)
@@ -109,10 +128,23 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var declaredNamespace = GetOrDeclareNamespace(containingNamespace, declaration.Name);
 
         if (declaration.Body is NamespaceEmptyBody)
+        {
+            if (!scope.UsingNamespaces.Contains(declaredNamespace))
+                scope.UsingNamespaces.Add(declaredNamespace);
             return declaredNamespace;
+        }
 
         var body = (NamespaceBlockBody)declaration.Body;
-        ResolveTopLevelScope(body.Members, scope, declaredNamespace, topLevelMain, topLevelMainScope);
+        var blockScope = context.CreateScope(scope);
+        if (!blockScope.UsingNamespaces.Contains(declaredNamespace))
+            blockScope.UsingNamespaces.Add(declaredNamespace);
+
+        foreach (var usingDirective in body.Usings)
+            ResolveUsingDirective(usingDirective, blockScope);
+
+        context.RegisterSyntaxScope(body, blockScope);
+
+        ResolveTopLevelScope(body.Members, blockScope, declaredNamespace, topLevelMain, topLevelMainScope);
         return containingNamespace;
     }
 
@@ -120,12 +152,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                                                     FunctionSymbol? topLevelMain, Scope topLevelMainScope)
     {
         var flags = ResolveVariableFlags(declaration.Modifiers);
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : scope;
 
         if (topLevelMain is null)
         {
             foreach (var declarator in declaration.Declarators)
             {
-                var symbol = context.CreateGlobalVariableSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier).Last, containingNamespace, declaration);
+                var symbol = context.CreateGlobalVariableSymbol(ownerScope, ResolutionContext.GetSymbolName(declarator.Identifier).Last, containingNamespace, declaration);
                 symbol.Flags = flags;
             }
 
@@ -145,8 +178,27 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var aliasScope = context.CreateScope(enclosingScope);
-        var symbol = context.CreateAliasSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingNamespace, declaration);
+        var symbol = context.CreateAliasSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingNamespace, declaration);
+        ResolutionContext.BindChildScope(ownerScope, symbol, aliasScope);
+        context.RegisterSyntaxScope(declaration, aliasScope);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
+    }
+
+    private void ResolveMemberAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, SymbolHandle? containingType)
+    {
+        var aliasScope = context.CreateScope(enclosingScope);
+        var symbol = context.CreateAliasSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingType, declaration);
+        ResolutionContext.BindChildScope(enclosingScope, symbol, aliasScope);
+        context.RegisterSyntaxScope(declaration, aliasScope);
+        symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
+    }
+
+    private void ResolveLocalAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, SymbolHandle? containingSymbol)
+    {
+        var aliasScope = context.CreateScope(enclosingScope);
+        var symbol = context.CreateAliasSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingSymbol, declaration);
         ResolutionContext.BindChildScope(enclosingScope, symbol, aliasScope);
         context.RegisterSyntaxScope(declaration, aliasScope);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
@@ -154,12 +206,13 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTopLevelAttributeDeclaration(AttributeSignature declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var attributeScope = context.CreateScope(enclosingScope);
         var declaredNamespace = GetDeclaredTypeNamespace(declaration.Name, containingNamespace);
-        var symbol = context.CreateAttributeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, declaredNamespace, declaration);
+        var symbol = context.CreateAttributeSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Name).Last, declaredNamespace, declaration);
 
         symbol.Flags = ResolveAttributeFlags(declaration.Modifiers);
-        ResolutionContext.BindChildScope(enclosingScope, symbol, attributeScope);
+        ResolutionContext.BindChildScope(ownerScope, symbol, attributeScope);
         context.RegisterSyntaxScope(declaration, attributeScope);
         symbol.Parameters = DiscoverParameters(declaration, attributeScope, ResolutionContext.GetHandle(symbol));
     }
@@ -190,13 +243,14 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTopLevelTypeDeclaration(TypeDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var typeScope = context.CreateScope(enclosingScope);
         var declaredNamespace = GetDeclaredTypeNamespace(declaration.Name, containingNamespace);
-        var symbol = context.CreateTypeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, ToResolutionTypeKind(declaration.Kind),
+        var symbol = context.CreateTypeSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Name).Last, ToResolutionTypeKind(declaration.Kind),
                                                       declaredNamespace, declaration);
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
-        ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
+        ResolutionContext.BindChildScope(ownerScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
         symbol.GenericParameters = ResolveGenericParameters(declaration.Name, typeScope, symbol);
@@ -248,8 +302,18 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         switch (member)
         {
             case MemberBlockDeclaration block:
-                foreach (var child in block.Members)
-                    ResolveMember(child, scope, containingType);
+                {
+                    Scope blockScope = context.CreateScope(scope);
+                    context.RegisterSyntaxScope(block, blockScope);
+                    foreach (var child in block.Members)
+                        ResolveMember(child, blockScope, containingType);
+                    break;
+                }
+            case MemberAliasDeclaration declaration:
+                ResolveMemberAliasDeclaration(declaration.Alias, scope, containingType);
+                break;
+            case MemberUsingDirective directive:
+                ResolveUsingDirective(directive.Directive, scope);
                 break;
             case MemberAttributeDeclaration declaration:
                 ResolveMemberAttributeDeclaration(declaration.Attribute, scope, containingType);
@@ -271,10 +335,11 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTopLevelFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var functionScope = context.CreateScope(enclosingScope);
-        var symbol = context.CreateFunctionSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last, containingNamespace,
+        var symbol = context.CreateFunctionSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last, containingNamespace,
                                                               declaration);
-        ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
+        ResolutionContext.BindChildScope(ownerScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
@@ -403,6 +468,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 }
             case LocalLabelStatement label:
                 context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingSymbol, label);
+                break;
+            case LocalAliasDeclaration declaration:
+                ResolveLocalAliasDeclaration(declaration.Alias, scope, containingSymbol);
+                break;
+            case LocalUsingDirective directive:
+                ResolveUsingDirective(directive.Directive, scope);
                 break;
             case LocalAttributeDeclaration declaration:
                 RegisterLocalAttribute(containingSymbol, ResolveLocalAttributeDeclaration(declaration.Attribute, scope, containingMethod));

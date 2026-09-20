@@ -80,13 +80,19 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         switch (node)
         {
             case TopLevelBlockDeclaration block:
-                foreach (var member in block.Members)
-                    ResolveTopLevel(member, scope, containingFunction);
-                break;
+                {
+                    var blockScope = context.GetSyntaxScope(block, scope);
+                    foreach (var member in block.Members)
+                        ResolveTopLevel(member, blockScope, containingFunction);
+                    break;
+                }
             case NamespaceDeclaration declaration when declaration.Body is NamespaceBlockBody body:
-                foreach (var member in body.Members)
-                    ResolveTopLevel(member, scope, containingFunction);
-                break;
+                {
+                    var blockScope = context.GetSyntaxScope(body, scope);
+                    foreach (var member in body.Members)
+                        ResolveTopLevel(member, blockScope, containingFunction);
+                    break;
+                }
             case TopLevelExpressionStatement statement:
                 ResolveExpression(statement.Expression, scope, containingFunction);
                 break;
@@ -523,6 +529,29 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             TypeRef genericTarget = ResolveTypeName(generic, scope);
             ResolveGenericArguments(generic, genericTarget.Handle, scope);
             return genericTarget;
+        }
+
+        if (syntax is QualifiedType qualified)
+        {
+            ResolveType(qualified.Left, scope);
+
+            if (qualified.Right is GenericType qualifiedGeneric)
+            {
+                TypeRef target = ResolveTypeName(syntax, scope);
+                if (target.Handle is { } handle)
+                {
+                    context.ResolvedTree.AddReference(qualifiedGeneric, handle);
+                }
+                ResolveGenericArguments(qualifiedGeneric, target.Handle, scope);
+                return target;
+            }
+
+            TypeRef result = ResolveTypeName(syntax, scope);
+            if (result.Handle is { } rightHandle)
+            {
+                context.ResolvedTree.AddReference(qualified.Right, rightHandle);
+            }
+            return result;
         }
 
         ResolveTypeChildren(syntax, scope);

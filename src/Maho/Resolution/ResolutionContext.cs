@@ -30,6 +30,12 @@ internal sealed class ResolutionContext
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
 
+    /// <summary> Other projects or modules referenced by this compilation unit. </summary>
+    public IReadOnlyList<ResolutionContext> ReferencedProjects { get; }
+
+    /// <summary> Symbol stores imported from external projects or prior compilation phases. </summary>
+    public IReadOnlyList<SymbolStore> ImportedProjectSymbols { get; }
+
     private int attributeID;
     private int nestedAttributeID;
     private int typeID;
@@ -45,12 +51,21 @@ internal sealed class ResolutionContext
     private int labelID;
     private int aliasID;
 
-    public ResolutionContext(SyntaxTree syntaxTree, ResolvedTree resolvedTree, NamespaceTrieNode globalNamespace, SymbolStore symbols, List<Scope> scopes)
+    public ResolutionContext(
+        SyntaxTree syntaxTree,
+        ResolvedTree resolvedTree,
+        NamespaceTrieNode globalNamespace,
+        SymbolStore symbols,
+        List<Scope> scopes,
+        IReadOnlyList<ResolutionContext>? referencedProjects = null,
+        IReadOnlyList<SymbolStore>? importedSymbols = null)
     {
         SyntaxTree = syntaxTree;
         ResolvedTree = resolvedTree;
 
         GlobalNamespace = globalNamespace;
+        Scopes = scopes;
+        GlobalScope.GlobalNamespace = globalNamespace;
 
         AttributeSymbols = symbols.AttributeSymbols;
         NestedAttributeSymbols = symbols.NestedAttributeSymbols;
@@ -67,7 +82,8 @@ internal sealed class ResolutionContext
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
 
-        Scopes = scopes;
+        ReferencedProjects = referencedProjects ?? [];
+        ImportedProjectSymbols = importedSymbols ?? [];
 
         attributeID = AttributeSymbols.Count;
         nestedAttributeID = NestedAttributeSymbols.Count;
@@ -83,6 +99,74 @@ internal sealed class ResolutionContext
         genericParameterID = GenericParameterSymbols.Count;
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
+
+        if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
+            InitializeProjectReferences();
+    }
+
+    private void InitializeProjectReferences()
+    {
+        foreach (var project in ReferencedProjects)
+        {
+            MergeNamespaceTrie(GlobalNamespace, project.GlobalNamespace);
+
+            if (!GlobalScope.ImportedScopes.Contains(project.GlobalScope))
+                GlobalScope.ImportedScopes.Add(project.GlobalScope);
+        }
+
+        if (ImportedProjectSymbols.Count > 0)
+        {
+            foreach (var store in ImportedProjectSymbols)
+            {
+                var importedScope = CreateScopeFromSymbolStore(store);
+                if (!GlobalScope.ImportedScopes.Contains(importedScope))
+                    GlobalScope.ImportedScopes.Add(importedScope);
+            }
+        }
+    }
+
+    private void CreateScopeFromSymbolStoreAndRegister(SymbolStore store, Scope scope)
+    {
+        foreach (var type in store.TypeSymbols)
+            Register(scope, type, type.ContainingNamespace);
+
+        foreach (var function in store.FunctionSymbols)
+            Register(scope, function, function.ContainingNamespace);
+
+        foreach (var global in store.GlobalVariableSymbols)
+            Register(scope, global, global.ContainingNamespace);
+
+        foreach (var attribute in store.AttributeSymbols)
+            Register(scope, attribute, attribute.ContainingNamespace);
+
+        foreach (var alias in store.AliasSymbols)
+            Register(scope, alias, alias.ContainingNamespace);
+    }
+
+    private Scope CreateScopeFromSymbolStore(SymbolStore store)
+    {
+        var scope = new Scope(null);
+        CreateScopeFromSymbolStoreAndRegister(store, scope);
+        return scope;
+    }
+
+    private static void MergeNamespaceTrie(NamespaceTrieNode target, NamespaceTrieNode source)
+    {
+        foreach (var symbol in source.Symbols)
+        {
+            target.RegisterSymbol(symbol);
+        }
+
+        foreach (var (key, value) in source.Next)
+        {
+            if (!target.Next.TryGetValue(key, out var existing))
+            {
+                existing = new NamespaceTrieNode { Name = key, Parent = target };
+                target.Next[key] = existing;
+            }
+
+            MergeNamespaceTrie(existing, value);
+        }
     }
 
     public Scope CreateScope(Scope? parent)
@@ -104,7 +188,7 @@ internal sealed class ResolutionContext
             symbol = new SumTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
 
         TypeSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -145,7 +229,7 @@ internal sealed class ResolutionContext
         var symbol = new AttributeSymbol(attributeID++, name, enclosingScope, containingNamespace, syntax);
 
         AttributeSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -171,7 +255,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
         FunctionSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -195,7 +279,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
         GlobalVariableSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -259,7 +343,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
         AliasSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -308,13 +392,26 @@ internal sealed class ResolutionContext
         return null;
     }
 
-    private static void Register(Scope scope, Symbol symbol)
+    private void Register(Scope scope, Symbol symbol, NamespaceTrieNode? containingNamespace = null)
     {
         scope.Symbols.Add(GetHandle(symbol), symbol);
-        ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
 
-        symbols ??= [];
-        symbols.Add(symbol);
+        if (containingNamespace != null && containingNamespace != GlobalNamespace)
+        {
+            containingNamespace.RegisterSymbol(symbol);
+            if (symbol is AliasSymbol)
+            {
+                ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+                symbols ??= [];
+                symbols.Add(symbol);
+            }
+        }
+        else
+        {
+            ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+            symbols ??= [];
+            symbols.Add(symbol);
+        }
     }
 
     public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolPart ns)
@@ -323,7 +420,7 @@ internal sealed class ResolutionContext
 
         if (node is null)
         {
-            var newNode = new NamespaceTrieNode();
+            var newNode = new NamespaceTrieNode { Name = ns, Parent = trieNode };
             trieNode.Next[ns] = newNode;
             return newNode;
         }

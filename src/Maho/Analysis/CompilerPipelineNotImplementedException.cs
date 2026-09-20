@@ -1,18 +1,18 @@
 using System;
 
-namespace Maho;
+namespace Maho.Analysis;
 
 /// <summary>
-/// Indicates that front-end analysis completed successfully but the next compiler stage has not
-/// been implemented yet. The completed analysis is retained for diagnostics and debug output.
+/// Intentional placeholder exception thrown when compilation reaches an unimplemented stage.
+/// Holds the analysis outcome produced up to the boundary.
 /// </summary>
 public sealed class CompilerPipelineNotImplementedException : Exception
 {
-    /// <summary> Completed front-end analysis that reached the unimplemented pipeline boundary. </summary>
+    /// <summary> The analysis outcome produced prior to reaching the unimplemented stage. </summary>
     public CompilerProjectAnalysisResult Analysis { get; }
 
-    internal CompilerPipelineNotImplementedException(CompilerProjectAnalysisResult analysis)
-        : base("The lowering and code-generation pipeline has not been implemented.")
+    public CompilerPipelineNotImplementedException(string message, CompilerProjectAnalysisResult analysis)
+        : base(message)
     {
         Analysis = analysis;
     }

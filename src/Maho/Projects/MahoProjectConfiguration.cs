@@ -9,6 +9,8 @@ public sealed class MahoProjectConfiguration
     public string? EntryFile { get; init; }
     /// <summary> Whether unsafe operations are enabled project-wide. </summary>
     public bool GlobalUnsafeEnabled { get; init; }
+    /// <summary> Whether implicit top-level statements are allowed for the project's entry file. </summary>
+    public bool ImplicitTopLevel { get; init; }
     /// <summary> Referenced project paths, retained for project-graph resolution. </summary>
     public string[] ProjectsReferenced { get; init; } = [];
     /// <summary> Project-wide alias declarations, retained for alias resolution. </summary>

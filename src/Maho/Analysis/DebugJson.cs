@@ -29,17 +29,14 @@ internal static class DebugJson
     /// </summary>
     public static DebugTextSpanInfo CreateSpan(SourceText text, TextSpan span)
     {
-        // Reuse the public span projection so debug payloads and diagnostics never disagree about
-        // line/column math for the same source range.
-        TextSpanInfo spanInfo = MahoCompiler.CreateSpanInfo(span, text);
         return new DebugTextSpanInfo(
-            spanInfo.Start,
-            spanInfo.Length,
-            spanInfo.End,
-            spanInfo.StartLocation.Line,
-            spanInfo.StartLocation.Column,
-            spanInfo.EndLocation.Line,
-            spanInfo.EndLocation.Column);
+            span.Start,
+            span.Length,
+            span.End,
+            span.GetStartLine(text) + 1,
+            span.GetStartColumn(text) + 1,
+            span.GetEndLine(text) + 1,
+            span.GetEndColumn(text) + 1);
     }
 
     /// <summary>
@@ -53,8 +50,6 @@ internal static class DebugJson
         for (int i = 0; i < trivias.Length; i++)
         {
             SyntaxTrivia trivia = trivias[i];
-            // Capture the original trivia text as well as the kind so downstream tooling can choose
-            // between structural and source-faithful views.
             triviaItems[i] = new DebugSyntaxTriviaInfo(
                 trivia.Kind.ToString(),
                 text.ToString(trivia.Span),

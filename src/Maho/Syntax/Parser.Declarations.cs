@@ -29,10 +29,10 @@ internal sealed partial class Parser
         return new NamespaceDeclaration(keyword, name, body);
     }
 
-    private TopLevelAliasDeclaration ParseTopLevelAliasDeclaration()
+    private AliasDeclaration ParseAliasDeclaration()
     {
         Token keyword = Consume();
-        NamedSyntax name = ParseNamedSyntax();
+        NamedSyntax name = ParseNamedSyntax(allowQualified: true, allowGenericName: true);
         List<TypeConstraintClause> constraints = [];
 
         while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
@@ -41,8 +41,12 @@ internal sealed partial class Parser
         Token equals = ExpectToken(TokenKind.Equals, "'='", "after the alias name or constraints");
         TypeSyntax target = ParseTypeSyntax();
         Token semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the alias target", MissingTokenAnchor.AfterPrevious);
-        return new TopLevelAliasDeclaration(new AliasDeclaration(keyword, name, constraints, equals, target, semicolon));
+        return new AliasDeclaration(keyword, name, constraints, equals, target, semicolon);
     }
+
+    private TopLevelAliasDeclaration ParseTopLevelAliasDeclaration() => new(ParseAliasDeclaration());
+    private MemberAliasDeclaration ParseMemberAliasDeclaration() => new(ParseAliasDeclaration());
+    private LocalAliasDeclaration ParseLocalAliasDeclaration() => new(ParseAliasDeclaration());
 
     private NamespaceBody ParseNamespaceBody(bool topLevelStatementsEnabled)
     {
@@ -54,11 +58,18 @@ internal sealed partial class Parser
 
     private NamespaceBlockBody ParseNamespaceBlockBody(bool topLevelStatementsEnabled)
     {
-        var members = new List<TopLevel>();
         var openBrace = Consume();
+        var directives = new List<Directive>();
+        var members = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
+            if (IsUsingDirective())
+            {
+                directives.Add(ParseUsingDirective());
+                continue;
+            }
+
             var start = current;
             var member = ParseTopLevel(topLevelStatementsEnabled);
             members.Add(member);
@@ -66,7 +77,7 @@ internal sealed partial class Parser
         }
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the namespace body");
 
-        return new NamespaceBlockBody(openBrace, members, closeBrace);
+        return new NamespaceBlockBody(openBrace, directives, members, closeBrace);
     }
 
     private TypeDeclaration ParseType(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)

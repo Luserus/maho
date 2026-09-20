@@ -1,13 +1,17 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Maho.Analysis;
+using Maho.Build;
+using Maho.Cli.Diagnostics;
 
 namespace Maho.Cli;
 
 /// <summary> Owns the terminal-facing compiler workflow and explicit debug/diagnostics routing. </summary>
-internal static class CommandLine
+public static class CommandLine
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -17,6 +21,7 @@ internal static class CommandLine
 
     private enum DiagnosticsFormat : byte
     {
+        Pretty,
         Text,
         Json
     }
@@ -27,6 +32,11 @@ internal static class CommandLine
         bool DiagnosticsRequested,
         DiagnosticsFormat DiagnosticsFormat,
         string? DiagnosticsDestination,
+        DiagnosticColorMode ColorMode,
+        DiagnosticPathStyle PathStyle,
+        bool WarningsAsErrors,
+        bool ShowHelp,
+        bool ShowVersion,
         string? SourcePath);
 
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
@@ -40,9 +50,15 @@ internal static class CommandLine
             return 1;
         }
 
-        if (options.SourcePath is "--help")
+        if (options.ShowHelp)
         {
             PrintUsage(Console.Out);
+            return 0;
+        }
+
+        if (options.ShowVersion)
+        {
+            PrintVersion(Console.Out);
             return 0;
         }
 
@@ -78,25 +94,40 @@ internal static class CommandLine
             writeFailed |= !WriteOutput(options.DebugDestination, debugOutput, Console.Out, "debug output");
         }
 
-        string diagnosticsOutput = options.DiagnosticsFormat is DiagnosticsFormat.Json
-            ? BuildDiagnosticsJsonOutput(sourcePath, analysis, pipelineError)
-            : BuildDiagnosticsTextOutput(sourcePath, analysis, pipelineError);
+        string diagnosticsOutput = options.DiagnosticsFormat switch
+        {
+            DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(sourcePath, analysis, pipelineError),
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(sourcePath, analysis, pipelineError),
+            _ => BuildDiagnosticsPrettyOutput(sourcePath, analysis, pipelineError, options.ColorMode, options.PathStyle)
+        };
 
         if (options.DiagnosticsRequested || !string.IsNullOrEmpty(diagnosticsOutput))
             writeFailed |= !WriteOutput(options.DiagnosticsDestination, diagnosticsOutput, Console.Error, "diagnostics");
 
-        return analysis.HasErrors || pipelineError is not null || writeFailed ? 1 : 0;
+        bool hasErrors = analysis.HasErrors ||
+            (options.WarningsAsErrors && analysis.Files.Any(f => f.Analysis?.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning) == true));
+
+        return hasErrors || pipelineError is not null || writeFailed ? 1 : 0;
     }
 
     private static CompilerProjectAnalysisResult Compile(string sourcePath, AnalysisOutput debugOutput)
     {
         if (string.Equals(Path.GetExtension(sourcePath), ".mhpr", StringComparison.OrdinalIgnoreCase))
-            return MahoCompiler.CompileProjectFile(sourcePath, debugOutput);
+            return MahoBuildSystem.CompileProject(sourcePath, debugOutput);
 
-        if (!TryResolveInputFiles(sourcePath, out string[] files, out string? resolutionError))
-            throw new ArgumentException(resolutionError, nameof(sourcePath));
+        if (File.Exists(sourcePath))
+        {
+            string fullPath = Path.GetFullPath(sourcePath);
+            var options = CompilationOptions.Default with { ImplicitTopLevel = true, EntryFile = fullPath };
+            return MahoCompiler.CompileFiles([fullPath], debugOutput, fullPath, options);
+        }
 
-        return MahoCompiler.CompileFiles(files, debugOutput, sourcePath);
+        if (Directory.Exists(sourcePath))
+        {
+            return MahoBuildSystem.CompileDirectory(sourcePath, debugOutput);
+        }
+
+        throw new ArgumentException($"Input path not found: {sourcePath}", nameof(sourcePath));
     }
 
     private static string BuildDebugOutput(string inputPath, CompilerProjectAnalysisResult analysis)
@@ -110,7 +141,7 @@ internal static class CommandLine
                 ["filePath"] = file.SourcePath
             };
 
-            if (file.Analysis is CompilerAnalysisResult fileAnalysis)
+            if (file.DebugOutput is { } fileAnalysis)
             {
                 if (fileAnalysis.LexerJson is string lexerJson)
                     fileOutput["lexer"] = JsonNode.Parse(lexerJson);
@@ -144,7 +175,7 @@ internal static class CommandLine
         {
             string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, file.SourcePath) : file.SourcePath;
 
-            if (file.Analysis is CompilerAnalysisResult fileAnalysis)
+            if (file.Output is { } fileAnalysis)
             {
                 foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
                 {
@@ -175,6 +206,37 @@ internal static class CommandLine
         return output.ToString();
     }
 
+    private static string BuildDiagnosticsPrettyOutput(
+        string inputPath,
+        CompilerProjectAnalysisResult analysis,
+        string? pipelineError,
+        DiagnosticColorMode colorMode,
+        DiagnosticPathStyle pathStyle)
+    {
+        var renderer = new TerminalDiagnosticRenderer(colorMode, pathStyle, Directory.GetCurrentDirectory());
+        var sb = new StringBuilder();
+
+        foreach (CompilerBatchFileResult file in analysis.Files)
+        {
+            if (file.Output is { } fileAnalysis)
+            {
+                foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
+                {
+                    sb.Append(renderer.Render(diagnostic));
+                }
+            }
+            else if (file.AnalysisError is string analysisError)
+            {
+                sb.AppendLine($"error[MH9001]: {analysisError}");
+            }
+        }
+
+        if (pipelineError is not null)
+            sb.AppendLine($"error[MH9000]: {pipelineError}");
+
+        return sb.ToString();
+    }
+
     private static string BuildDiagnosticsJsonOutput(string inputPath, CompilerProjectAnalysisResult analysis, string? pipelineError)
     {
         JsonArray files = [];
@@ -184,7 +246,7 @@ internal static class CommandLine
             JsonObject fileOutput = new()
             {
                 ["filePath"] = file.SourcePath,
-                ["diagnostics"] = file.Analysis is CompilerAnalysisResult fileAnalysis
+                ["diagnostics"] = file.Output is { } fileAnalysis
                     ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, JsonOptions)
                     : new JsonArray()
             };
@@ -242,31 +304,17 @@ internal static class CommandLine
     private static bool TryResolveInputFiles(string sourcePath, out string[] files, out string? errorMessage)
     {
         files = [];
-
-        if (File.Exists(sourcePath))
+        try
         {
-            files = [sourcePath];
+            files = MahoBuildSystem.ResolveSourceFiles(sourcePath);
             errorMessage = null;
             return true;
         }
-
-        if (!Directory.Exists(sourcePath))
+        catch (Exception ex) when (IsUserFacingError(ex))
         {
-            errorMessage = $"Input path not found: {sourcePath}";
+            errorMessage = ex.Message;
             return false;
         }
-
-        files = Directory.GetFiles(sourcePath, "*.mh", SearchOption.AllDirectories);
-        Array.Sort(files, StringComparer.Ordinal);
-
-        if (files.Length == 0)
-        {
-            errorMessage = $"No '.mh' files were found in directory: {sourcePath}";
-            return false;
-        }
-
-        errorMessage = null;
-        return true;
     }
 
     private static bool TryGetSourcePath(string? sourcePathArgument, out string sourcePath, out string? errorMessage)
@@ -292,8 +340,13 @@ internal static class CommandLine
         AnalysisOutput debugOutput = AnalysisOutput.None;
         string? debugDestination = null;
         bool diagnosticsRequested = false;
-        DiagnosticsFormat diagnosticsFormat = DiagnosticsFormat.Text;
+        DiagnosticsFormat diagnosticsFormat = DiagnosticsFormat.Pretty;
         string? diagnosticsDestination = null;
+        DiagnosticColorMode colorMode = DiagnosticColorMode.Auto;
+        DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative;
+        bool warningsAsErrors = false;
+        bool showHelp = false;
+        bool showVersion = false;
         string? sourcePath = null;
 
         for (int index = 0; index < args.Length; index++)
@@ -304,16 +357,13 @@ internal static class CommandLine
             {
                 case "-h":
                 case "--help":
-                    if (args.Length != 1)
-                    {
-                        options = default;
-                        errorMessage = "The help option cannot be combined with other arguments.";
-                        return false;
-                    }
+                    showHelp = true;
+                    break;
 
-                    options = new CliOptions(AnalysisOutput.None, null, false, DiagnosticsFormat.Text, null, "--help");
-                    errorMessage = null;
-                    return true;
+                case "-v":
+                case "--version":
+                    showVersion = true;
+                    break;
 
                 case "--debug":
                     if (debugOutput is not AnalysisOutput.None)
@@ -348,6 +398,49 @@ internal static class CommandLine
                     diagnosticsRequested = true;
                     break;
 
+                case "--color":
+                    if (index + 1 < args.Length && !args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    {
+                        index++;
+                        colorMode = args[index].ToLowerInvariant() switch
+                        {
+                            "auto" => DiagnosticColorMode.Auto,
+                            "always" => DiagnosticColorMode.Always,
+                            "never" => DiagnosticColorMode.Never,
+                            _ => (DiagnosticColorMode?)null
+                        } ?? throw new ArgumentException($"Invalid color mode '{args[index]}'. Expected auto, always, or never.");
+                    }
+                    else
+                    {
+                        colorMode = DiagnosticColorMode.Always;
+                    }
+                    break;
+
+                case "--no-color":
+                    colorMode = DiagnosticColorMode.Never;
+                    break;
+
+                case "--diagnostic-paths":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    {
+                        options = default;
+                        errorMessage = "The --diagnostic-paths option requires 'relative' or 'full'.";
+                        return false;
+                    }
+                    index++;
+                    pathStyle = args[index].ToLowerInvariant() switch
+                    {
+                        "relative" => DiagnosticPathStyle.Relative,
+                        "full" => DiagnosticPathStyle.Full,
+                        _ => (DiagnosticPathStyle?)null
+                    } ?? throw new ArgumentException($"Invalid path style '{args[index]}'. Expected relative or full.");
+                    break;
+
+                case "-Werror":
+                case "--warnings-as-errors":
+                    warningsAsErrors = true;
+                    break;
+
                 default:
                     if (argument.Length > 0 && argument[0] == '-')
                     {
@@ -368,7 +461,7 @@ internal static class CommandLine
             }
         }
 
-        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, sourcePath);
+        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, sourcePath);
         errorMessage = null;
         return true;
     }
@@ -421,13 +514,16 @@ internal static class CommandLine
 
     private static bool TryReadDiagnosticsRequest(string[] args, ref int index, out DiagnosticsFormat format, out string? destination, out string? errorMessage)
     {
-        format = DiagnosticsFormat.Text;
+        format = DiagnosticsFormat.Pretty;
         destination = null;
 
         while (++index < args.Length && args[index] != "--output")
         {
-            switch (args[index])
+            switch (args[index].ToLowerInvariant())
             {
+                case "pretty":
+                    format = DiagnosticsFormat.Pretty;
+                    break;
                 case "text":
                     format = DiagnosticsFormat.Text;
                     break;
@@ -483,16 +579,21 @@ internal static class CommandLine
         };
     }
 
+    private static void PrintVersion(TextWriter writer) => writer.WriteLine($"Maho Compiler: v{MahoCompiler.VersionString}");
+
     private static void PrintUsage(TextWriter writer)
     {
         writer.WriteLine("Usage: maho [options] [source-path]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --debug (lex|parse)+ --output <file|->");
-        writer.WriteLine("                                 Write selected debug JSON to a file or stdout.");
-        writer.WriteLine("  --diagnostics [text|json] --output <file|->");
-        writer.WriteLine("                                 Write diagnostics to a file or stderr.");
-        writer.WriteLine("  -h, --help                     Show this help text.");
+        writer.WriteLine("  --debug (lex|parse)+ --output <file|->                      Write selected debug JSON to a file or stdout.");
+        writer.WriteLine("  --diagnostics [pretty|text|json] --output <file|->          Write diagnostics to a file or stderr (default: pretty).");
+        writer.WriteLine("  --color [auto|always|never]                                 Control ANSI colored diagnostics.");
+        writer.WriteLine("  --no-color                                                  Disable colored diagnostics.");
+        writer.WriteLine("  --diagnostic-paths (relative|full)                          Choose relative or full file paths in diagnostics.");
+        writer.WriteLine("  -Werror, --warnings-as-errors                               Treat compiler warnings as errors.");
+        writer.WriteLine("  -v, --version                                               Show compiler version.");
+        writer.WriteLine("  -h, --help                                                  Show this help text.");
         writer.WriteLine();
         writer.WriteLine("The source path may be a '.mh' file, a '.mhpr' project file, or a directory.");
         writer.WriteLine("Directories are searched recursively for '.mh' files. '-' selects stdout for debug and stderr for diagnostics.");

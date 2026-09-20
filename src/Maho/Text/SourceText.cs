@@ -30,11 +30,16 @@ internal sealed class SourceText : IDisposable
     /// <summary> Character at the given position. </summary>
     public char this[int position] => EnsureText()[position];
 
+    /// <summary> Optional file path this source was loaded from. </summary>
+    public string? FilePath { get; }
+
     // --- Constructors ---
 
     /// <summary> Loads source text from a file. </summary>
     public SourceText(SourceFile sourceFile)
     {
+        FilePath = sourceFile.FilePath;
+
         if (!File.Exists(sourceFile.FilePath))
             throw new FileNotFoundException("Source file not found", sourceFile.FilePath);
 
@@ -69,8 +74,9 @@ internal sealed class SourceText : IDisposable
     }
 
     /// <summary> Wraps an already-decoded in-memory string. Always eager. </summary>
-    public SourceText(string text)
+    public SourceText(string text, string? filePath = null)
     {
+        FilePath = filePath;
         cachedText = text ?? string.Empty;
         loadMode = SourceTextLoadMode.Eager;
         lazyLines = ParseLines();

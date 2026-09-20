@@ -22,6 +22,7 @@ internal sealed class MahoProjectFileParser
     {
         string? entryFile = null;
         bool globalUnsafeEnabled = false;
+        bool implicitTopLevel = false;
         string[] projectsReferenced = [];
         Dictionary<string, string> globalAliases = [];
         HashSet<string> seenProperties = [];
@@ -47,6 +48,10 @@ internal sealed class MahoProjectFileParser
                 case "GlobalUnsafeEnabled":
                     globalUnsafeEnabled = ParseBoolean("for GlobalUnsafeEnabled");
                     break;
+                case "ImplicitTopLevel":
+                case "AllowImplicitTopLevel":
+                    implicitTopLevel = ParseBoolean($"for {name}");
+                    break;
                 case "ProjectsReferenced":
                     projectsReferenced = ParseStringArray("for ProjectsReferenced");
                     break;
@@ -66,6 +71,7 @@ internal sealed class MahoProjectFileParser
         {
             EntryFile = entryFile,
             GlobalUnsafeEnabled = globalUnsafeEnabled,
+            ImplicitTopLevel = implicitTopLevel,
             ProjectsReferenced = projectsReferenced,
             GlobalAliases = globalAliases
         };
