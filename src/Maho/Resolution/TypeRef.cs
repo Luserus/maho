@@ -41,6 +41,12 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static bool operator ==(SymbolHandle left, TypeRef right) => right == left;
     public static bool operator !=(SymbolHandle left, TypeRef right) => !(right == left);
 
+    /// <summary>
+    /// Gets the underlying type <see cref="SymbolHandle"/> (global or nested) referenced by this <see cref="TypeRef"/>,
+    /// unwrapping any aliases transitively. Returns <c>null</c> if unresolved or not a type.
+    /// </summary>
+    public SymbolHandle? GetType(ResolutionContext context) => context.GetType(this);
+
     public override string ToString() => Kind switch
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",

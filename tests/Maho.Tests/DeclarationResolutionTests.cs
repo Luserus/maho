@@ -402,6 +402,356 @@ public sealed class DeclarationResolutionTests
         Assert.Equal(res1, fromHandle);
     }
 
+    [Fact]
+    public void Resolve_ResolvesAliasesAndTypeRefs_InBaseTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Base;
+            public struct Secondary;
+            public struct GenericBase<T>;
+            public struct Int32;
+
+            using BaseAlias = Base;
+            using SecondaryAlias = Secondary;
+            using ConcreteAlias = GenericBase<Int32>;
+
+            public struct Derived : BaseAlias;
+            public struct MultiDerived : BaseAlias, SecondaryAlias;
+            public struct GenericDerived : ConcreteAlias;
+            using ChainedAlias = BaseAlias;
+            public struct ChainedDerived : ChainedAlias;
+            public struct Outer
+            {
+                public struct Nested : BaseAlias;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        AliasSymbol baseAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "BaseAlias");
+        AliasSymbol secondaryAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SecondaryAlias");
+        AliasSymbol concreteAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ConcreteAlias");
+        AliasSymbol chainedAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ChainedAlias");
+
+        var baseAliasHandle = ResolutionContext.GetHandle(baseAlias);
+        var secondaryAliasHandle = ResolutionContext.GetHandle(secondaryAlias);
+        var concreteAliasHandle = ResolutionContext.GetHandle(concreteAlias);
+        var chainedAliasHandle = ResolutionContext.GetHandle(chainedAlias);
+
+        TypeSymbol derived = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Derived");
+        TypeSymbol multiDerived = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "MultiDerived");
+        TypeSymbol genericDerived = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "GenericDerived");
+        TypeSymbol chainedDerived = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "ChainedDerived");
+        NestedTypeSymbol nested = Assert.Single(context.NestedTypeSymbols, s => s.Name.ToString() == "Nested");
+
+        // Verify TypeRef resolution for base types
+        Assert.Equal(TypeRef.Resolved(baseAliasHandle), Assert.Single(derived.BaseTypes));
+        Assert.True(derived.BaseTypes[0].IsResolved);
+        Assert.Equal(TypeRefKind.Resolved, derived.BaseTypes[0].Kind);
+
+        Assert.Equal(2, multiDerived.BaseTypes.Count);
+        Assert.Equal(TypeRef.Resolved(baseAliasHandle), multiDerived.BaseTypes[0]);
+        Assert.Equal(TypeRef.Resolved(secondaryAliasHandle), multiDerived.BaseTypes[1]);
+
+        Assert.Equal(TypeRef.Resolved(concreteAliasHandle), Assert.Single(genericDerived.BaseTypes));
+        Assert.Equal(TypeRef.Resolved(chainedAliasHandle), Assert.Single(chainedDerived.BaseTypes));
+        Assert.Equal(TypeRef.Resolved(baseAliasHandle), Assert.Single(nested.BaseTypes));
+
+        // Verify syntax references in ResolvedTree
+        TopLevelTypeDeclaration derivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[7]);
+        AssertReference(context, Assert.Single(derivedSyntax.Type.Base!.BaseTypes), baseAliasHandle);
+
+        TopLevelTypeDeclaration multiDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[8]);
+        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[0], baseAliasHandle);
+        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[1], secondaryAliasHandle);
+
+        TopLevelTypeDeclaration genericDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[9]);
+        AssertReference(context, Assert.Single(genericDerivedSyntax.Type.Base!.BaseTypes), concreteAliasHandle);
+
+        TopLevelTypeDeclaration chainedDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[11]);
+        AssertReference(context, Assert.Single(chainedDerivedSyntax.Type.Base!.BaseTypes), chainedAliasHandle);
+
+        TopLevelTypeDeclaration outerSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[12]);
+        TypeBlockBody outerBody = Assert.IsType<TypeBlockBody>(outerSyntax.Type.Body);
+        MemberTypeDeclaration nestedSyntax = Assert.IsType<MemberTypeDeclaration>(outerBody.Members[0]);
+        AssertReference(context, Assert.Single(nestedSyntax.Type.Base!.BaseTypes), baseAliasHandle);
+    }
+
+    [Fact]
+    public void Resolve_ResolvesAliasesAndTypeRefs_InGenericConstraints()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Constraint;
+            public struct SecondaryConstraint;
+            using ConstraintAlias = Constraint;
+            using SecondaryAlias = SecondaryConstraint;
+
+            public struct GenericType<T> where T : ConstraintAlias;
+            public struct MultiConstraintType<T> where T : ConstraintAlias, SecondaryAlias;
+
+            public struct Container
+            {
+                public void Method<T>() where T : ConstraintAlias { }
+            }
+
+            public void Function<T>() where T : ConstraintAlias { }
+
+            using Projected<T> where T : ConstraintAlias = GenericType<T>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        AliasSymbol constraintAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ConstraintAlias");
+        AliasSymbol secondaryAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SecondaryAlias");
+        AliasSymbol projected = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "Projected");
+
+        var constraintAliasHandle = ResolutionContext.GetHandle(constraintAlias);
+        var secondaryAliasHandle = ResolutionContext.GetHandle(secondaryAlias);
+
+        // Type generic parameter constraint
+        TypeSymbol genericType = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "GenericType");
+        GenericParameterSymbol typeParam = context.GenericParameterSymbols[genericType.GenericParameters[0].ID];
+        Assert.Equal(TypeRef.Resolved(constraintAliasHandle), Assert.Single(typeParam.Constraints));
+        Assert.True(typeParam.Constraints[0].IsResolved);
+
+        // Multi constraint generic parameter
+        TypeSymbol multiConstraintType = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "MultiConstraintType");
+        GenericParameterSymbol multiParam = context.GenericParameterSymbols[multiConstraintType.GenericParameters[0].ID];
+        Assert.Equal(2, multiParam.Constraints.Count);
+        Assert.Equal(TypeRef.Resolved(constraintAliasHandle), multiParam.Constraints[0]);
+        Assert.Equal(TypeRef.Resolved(secondaryAliasHandle), multiParam.Constraints[1]);
+
+        // Method generic parameter constraint
+        MethodSymbol method = Assert.Single(context.MethodSymbols, s => s.Name.ToString() == "Method");
+        GenericParameterSymbol methodParam = context.GenericParameterSymbols[method.GenericParameters[0].ID];
+        Assert.Equal(TypeRef.Resolved(constraintAliasHandle), Assert.Single(methodParam.Constraints));
+
+        // Function generic parameter constraint
+        FunctionSymbol function = Assert.Single(context.FunctionSymbols, s => s.Name.ToString() == "Function");
+        GenericParameterSymbol funcParam = context.GenericParameterSymbols[function.GenericParameters[0].ID];
+        Assert.Equal(TypeRef.Resolved(constraintAliasHandle), Assert.Single(funcParam.Constraints));
+
+        // Alias generic parameter constraint
+        GenericParameterSymbol projectedParam = context.GenericParameterSymbols[projected.GenericParameters[0].ID];
+        Assert.Equal(TypeRef.Resolved(constraintAliasHandle), Assert.Single(projectedParam.Constraints));
+        Assert.True(projected.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(genericType)), projected.Target);
+
+        // Verify syntax references in ResolvedTree
+        TopLevelTypeDeclaration genericTypeSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[4]);
+        TypeConstraintClause typeConstraintClause = Assert.Single(genericTypeSyntax.Type.Constraints);
+        AssertReference(context, Assert.IsType<TypeTypeConstraint>(Assert.Single(typeConstraintClause.Constraints)).Type, constraintAliasHandle);
+
+        TopLevelTypeDeclaration multiSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[5]);
+        TypeConstraintClause multiClause = Assert.Single(multiSyntax.Type.Constraints);
+        AssertReference(context, Assert.IsType<TypeTypeConstraint>(multiClause.Constraints[0]).Type, constraintAliasHandle);
+        AssertReference(context, Assert.IsType<TypeTypeConstraint>(multiClause.Constraints[1]).Type, secondaryAliasHandle);
+
+        TopLevelFunctionDeclaration funcSyntax = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[7]);
+        TypeConstraintClause funcClause = Assert.Single(funcSyntax.Function.Signature.Constraints);
+        AssertReference(context, Assert.IsType<TypeTypeConstraint>(Assert.Single(funcClause.Constraints)).Type, constraintAliasHandle);
+
+        TopLevelAliasDeclaration projectedSyntax = Assert.IsType<TopLevelAliasDeclaration>(root.Members[8]);
+        TypeConstraintClause projectedClause = Assert.Single(projectedSyntax.Alias.Constraints);
+        AssertReference(context, Assert.IsType<TypeTypeConstraint>(Assert.Single(projectedClause.Constraints)).Type, constraintAliasHandle);
+    }
+
+    [Fact]
+    public void Resolve_ValidatesAliasConstraintCompatibility_WithBaseTypeAliasing()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Base;
+            public struct Unrelated;
+            using BaseAlias = Base;
+
+            public struct DerivedDirect : Base;
+            public struct DerivedViaAlias : BaseAlias;
+
+            public struct Generic<T> where T : Base;
+
+            using ValidDirect = Generic<DerivedDirect>;
+            using ValidViaAlias = Generic<DerivedViaAlias>;
+            using ValidAliasArg = Generic<BaseAlias>;
+            using Invalid = Generic<Unrelated>;
+
+            public struct GrandBase;
+            using GrandAlias = GrandBase;
+            public struct Middle : GrandAlias;
+            using MiddleAlias = Middle;
+            public struct Leaf : MiddleAlias;
+
+            public struct GrandChecker<T> where T : GrandBase;
+            using ValidLeaf = GrandChecker<Leaf>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        TypeSymbol generic = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Generic");
+        TypeSymbol grandChecker = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "GrandChecker");
+
+        AliasSymbol validDirect = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ValidDirect");
+        AliasSymbol validViaAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ValidViaAlias");
+        AliasSymbol validAliasArg = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ValidAliasArg");
+        AliasSymbol invalid = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "Invalid");
+        AliasSymbol validLeaf = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ValidLeaf");
+
+        Assert.True(validDirect.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(generic)), validDirect.Target);
+
+        Assert.True(validViaAlias.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(generic)), validViaAlias.Target);
+
+        Assert.True(validAliasArg.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(generic)), validAliasArg.Target);
+
+        Assert.False(invalid.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Error, invalid.Target);
+
+        Assert.True(validLeaf.HasCompatibleConstraints);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(grandChecker)), validLeaf.Target);
+    }
+
+    [Fact]
+    public void Resolve_ValidatesAliasConstraintCompatibility_WithConstraintAliasing()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Base;
+            using BaseAlias = Base;
+            public struct DerivedDirect : Base;
+            public struct DerivedViaAlias : BaseAlias;
+
+            public struct GenericRequiringAlias<T> where T : BaseAlias;
+
+            using SpecAlias = GenericRequiringAlias<BaseAlias>;
+            using SpecViaAlias = GenericRequiringAlias<DerivedViaAlias>;
+            using SpecDirect = GenericRequiringAlias<Base>;
+            using SpecDerivedDirect = GenericRequiringAlias<DerivedDirect>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        AliasSymbol specAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SpecAlias");
+        AliasSymbol specViaAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SpecViaAlias");
+        AliasSymbol specDirect = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SpecDirect");
+        AliasSymbol specDerivedDirect = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "SpecDerivedDirect");
+
+        Assert.True(specAlias.HasCompatibleConstraints);
+        Assert.True(specViaAlias.HasCompatibleConstraints);
+        // Currently, candidate does not satisfy an alias constraint if candidate references the underlying type directly (required is not unwrapped)
+        Assert.False(specDirect.HasCompatibleConstraints);
+        Assert.False(specDerivedDirect.HasCompatibleConstraints);
+    }
+
+    [Fact]
+    public void TypeRef_GetType_ResolvesDirectAndAliasedTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct GlobalType;
+            public struct Container
+            {
+                public struct NestedType;
+            }
+
+            using DirectGlobalAlias = GlobalType;
+            using ChainedGlobalAlias = DirectGlobalAlias;
+            using BrokenAlias = UnknownType;
+
+            public GlobalType globalVar;
+            public Container.NestedType nestedVar;
+            public DirectGlobalAlias aliasVar;
+            public ChainedGlobalAlias chainedVar;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        TypeSymbol globalType = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "GlobalType");
+        NestedTypeSymbol nestedType = Assert.Single(context.NestedTypeSymbols, s => s.Name.ToString() == "NestedType");
+
+        var globalHandle = ResolutionContext.GetHandle(globalType);
+        var nestedHandle = ResolutionContext.GetHandle(nestedType);
+
+        // Direct types via TypeRef
+        TypeRef directGlobalRef = TypeRef.Resolved(globalHandle);
+        TypeRef directNestedRef = TypeRef.Resolved(nestedHandle);
+
+        Assert.Equal(globalHandle, context.GetType(directGlobalRef));
+        Assert.Equal(globalHandle, directGlobalRef.GetType(context));
+
+        Assert.Equal(nestedHandle, context.GetType(directNestedRef));
+        Assert.Equal(nestedHandle, directNestedRef.GetType(context));
+
+        GlobalVariableSymbol nestedVar = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVar");
+        Assert.Equal(nestedHandle, context.GetType(nestedVar.Type));
+        Assert.Equal(nestedHandle, nestedVar.Type.GetType(context));
+
+        // Aliased global types
+        AliasSymbol directGlobalAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "DirectGlobalAlias");
+        AliasSymbol chainedGlobalAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "ChainedGlobalAlias");
+        AliasSymbol brokenAlias = Assert.Single(context.AliasSymbols, s => s.Name.ToString() == "BrokenAlias");
+
+        TypeRef globalAliasRef = TypeRef.Resolved(ResolutionContext.GetHandle(directGlobalAlias));
+        TypeRef chainedAliasRef = TypeRef.Resolved(ResolutionContext.GetHandle(chainedGlobalAlias));
+        TypeRef brokenAliasRef = TypeRef.Resolved(ResolutionContext.GetHandle(brokenAlias));
+
+        Assert.Equal(globalHandle, context.GetType(globalAliasRef));
+        Assert.Equal(globalHandle, globalAliasRef.GetType(context));
+
+        Assert.Equal(globalHandle, context.GetType(chainedAliasRef));
+        Assert.Equal(globalHandle, chainedAliasRef.GetType(context));
+
+        Assert.Null(context.GetType(brokenAliasRef));
+        Assert.Null(brokenAliasRef.GetType(context));
+
+        // Aliased nested type (via Target set to nestedHandle)
+        var nestedAliasHandle = (SymbolKind.Alias, new SymbolID(context.AliasSymbols.Count));
+        var nestedAlias = new AliasSymbol(nestedAliasHandle.Item2, context.GlobalScope, new SymbolPart("NestedAlias"), default(NamespaceTrieNode), null)
+        {
+            Target = TypeRef.Resolved(nestedHandle)
+        };
+        context.AliasSymbols.Add(nestedAlias);
+        TypeRef nestedAliasRef = TypeRef.Resolved(nestedAliasHandle);
+
+        Assert.Equal(nestedHandle, context.GetType(nestedAliasRef));
+        Assert.Equal(nestedHandle, nestedAliasRef.GetType(context));
+
+        // Non-resolved TypeRefs
+        Assert.Null(context.GetType(TypeRef.Unresolved));
+        Assert.Null(TypeRef.Unresolved.GetType(context));
+
+        Assert.Null(context.GetType(TypeRef.Inferred));
+        Assert.Null(TypeRef.Inferred.GetType(context));
+
+        Assert.Null(context.GetType(TypeRef.Error));
+        Assert.Null(TypeRef.Error.GetType(context));
+
+        // Cyclic aliases
+        var cyclicHandleA = (SymbolKind.Alias, new SymbolID(context.AliasSymbols.Count));
+        var cyclicHandleB = (SymbolKind.Alias, new SymbolID(context.AliasSymbols.Count + 1));
+        var cyclicAliasA = new AliasSymbol(cyclicHandleA.Item2, context.GlobalScope, new SymbolPart("CyclicA"), default(NamespaceTrieNode), null)
+        {
+            Target = TypeRef.Resolved(cyclicHandleB)
+        };
+        var cyclicAliasB = new AliasSymbol(cyclicHandleB.Item2, context.GlobalScope, new SymbolPart("CyclicB"), default(NamespaceTrieNode), null)
+        {
+            Target = TypeRef.Resolved(cyclicHandleA)
+        };
+        context.AliasSymbols.Add(cyclicAliasA);
+        context.AliasSymbols.Add(cyclicAliasB);
+
+        Assert.Null(context.GetType(TypeRef.Resolved(cyclicHandleA)));
+        Assert.Null(TypeRef.Resolved(cyclicHandleA).GetType(context));
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));

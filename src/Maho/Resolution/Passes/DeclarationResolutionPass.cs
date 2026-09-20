@@ -134,6 +134,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
         PopulateProductMembers(symbol);
@@ -147,6 +148,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
         PopulateProductMembers(symbol);
@@ -209,13 +211,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         switch (syntax)
         {
             case GenericType generic:
-                {
-                    var arguments = new List<TypeSyntax>(generic.GenericArguments.Count);
-                    foreach (var argument in generic.GenericArguments)
-                        arguments.Add(argument);
+                var arguments = new List<TypeSyntax>(generic.GenericArguments.Count);
 
-                    return arguments;
-                }
+                foreach (var argument in generic.GenericArguments)
+                    arguments.Add(argument);
+
+                return arguments;
             case QualifiedType qualified:
                 return GetGenericArguments(qualified.Right);
             case ModifiedType modified:
@@ -231,6 +232,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             if (constraint.IsError)
                 continue;
+
             if (constraint.IsResolved && !SatisfiesConstraint(candidate, constraint.Handle!.Value, []))
                 return false;
         }
@@ -242,6 +244,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         if (candidate == required)
             return true;
+
         if (!visited.Add(candidate))
             return false;
 
@@ -277,6 +280,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
+
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
@@ -290,6 +294,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
+
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
@@ -301,6 +306,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         symbol.Type = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope);
+
         ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol ?? default);
     }
 
@@ -338,10 +344,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             Scope scope = context.GetSyntaxScope(accessor.Body, symbol.EnclosingScope);
             var attributes = ResolveAttributes(accessor.Attributes, symbol.EnclosingScope);
+
             if (accessor.Kind is PropertyAccessorKind.Get)
                 symbol.GetterAttributes = attributes;
             else
                 symbol.SetterAttributes = attributes;
+
             ResolveBodyOnce(accessor.Body, scope, ResolutionContext.GetHandle(symbol));
         }
     }
@@ -434,6 +442,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 continue;
 
             context.ResolvedTree.AddReference(clause.GenericParameter, ResolutionContext.GetHandle(parameter));
+
             foreach (var constraint in clause.Constraints)
                 if (constraint is TypeTypeConstraint typeConstraint)
                     parameter.Constraints.Add(ResolveType(typeConstraint.Type, scope));
@@ -516,6 +525,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
 
         ResolveTypeChildren(syntax, scope);
+
         return ResolveTypeName(syntax, scope);
     }
 

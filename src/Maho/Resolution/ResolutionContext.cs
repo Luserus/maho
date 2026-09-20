@@ -271,6 +271,43 @@ internal sealed class ResolutionContext
 
     public Scope GetSyntaxScope(SyntaxNode syntax, Scope fallback) => SyntaxScopes.TryGetValue(syntax, out var scope) ? scope : fallback;
 
+    /// <summary>
+    /// Gets the underlying type <see cref="SymbolHandle"/> (global or nested) referenced by a <see cref="TypeRef"/>,
+    /// unwrapping any aliases transitively. Returns <c>null</c> if unresolved or not a type.
+    /// </summary>
+    public SymbolHandle? GetType(TypeRef typeRef)
+    {
+        if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
+            return null;
+
+        var current = handle;
+        var visited = new HashSet<SymbolHandle>();
+
+        while (visited.Add(current))
+        {
+            switch (current.Kind)
+            {
+                case SymbolKind.Type when current.ID.Value >= 0 && current.ID.Value < TypeSymbols.Count:
+                case SymbolKind.NestedType when current.ID.Value >= 0 && current.ID.Value < NestedTypeSymbols.Count:
+                    return current;
+
+                case SymbolKind.Alias when current.ID.Value >= 0 && current.ID.Value < AliasSymbols.Count:
+                    var alias = AliasSymbols[current.ID];
+
+                    if (!alias.Target.IsResolved || alias.Target.Handle is not { } target)
+                        return null;
+
+                    current = target;
+                    break;
+
+                default:
+                    return null;
+            }
+        }
+
+        return null;
+    }
+
     private static void Register(Scope scope, Symbol symbol)
     {
         scope.Symbols.Add(GetHandle(symbol), symbol);
