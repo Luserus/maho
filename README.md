@@ -58,14 +58,14 @@ Examples:
 
 ```bash
 ./maho Samples/Test.mhpr
-./maho --debug --lex --output output/test-lex.json Samples/Program.mh
-./maho --debug --lex --parse --output - --diagnostics --json --output - Samples/Test.mhpr
+./maho --debug lex --output output/test-lex.json Samples/Program.mh
+./maho --debug lex parse --output - --diagnostics json --output - Samples/Test.mhpr
 cd Samples && ../maho Test.mhpr
 ```
 
 Supported flags:
 
-- `--debug (--lex|--parse)+ --output <path|->`: emit selected debug payloads to a file or `stdout`.
+- `--debug (lex|parse)+ --output <path|->`: emit selected debug payloads to a file or `stdout`.
 - `--diagnostics [--text|--json] --output <path|->`: emit diagnostics to a file or `stderr`.
 - `-h`, `--help`: print usage information.
 
