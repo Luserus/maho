@@ -7,7 +7,7 @@ internal sealed class GlobalVariableSymbol : Symbol
 {
     public VariableFlags Flags { get; internal set; }
     public NamespaceTrieNode? ContainingNamespace;
-    
+
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 

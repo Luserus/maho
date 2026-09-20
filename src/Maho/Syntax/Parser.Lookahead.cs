@@ -89,7 +89,7 @@ internal sealed partial class Parser
                 lookaheadCurrent = saved;
                 return (false, LookaheadResultContext.FailedParseTypeSyntax);
             }
-            
+
             LookaheadConsume(); // identifier
 
             if (LookaheadCurrentToken.Kind is TokenKind.Dot)
@@ -251,7 +251,7 @@ internal sealed partial class Parser
             length = i + 1;
             foundKind = node.Kind;
         }
-                
+
         return (foundKind ?? TokenKind.NullToken, length);
     }
 

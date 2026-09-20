@@ -88,7 +88,7 @@ internal sealed partial class Parser
             if (entry.IsInfix)
             {
                 int lbp = entry.LeftBindingPower;
-                if (lbp < minBindingPower) 
+                if (lbp < minBindingPower)
                     break;
 
                 // consume combined operator
@@ -279,7 +279,7 @@ internal sealed partial class Parser
         {
             if (CurrentToken.Kind is TokenKind.Semicolon)
                 break;
-                
+
             nodesAndSeparators.Add(ParseExpectedExpression("after ',' in the expression list", MissingTokenAnchor.AfterPrevious));
 
             if (CurrentToken.Kind is TokenKind.Comma)
@@ -355,7 +355,7 @@ internal sealed partial class Parser
 
             if (CurrentToken.Kind is TokenKind.LeftBrace)
                 initializer = ParseCollectionInitializer();
-            
+
             ObjectWithClause? withClause = null;
 
             if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)

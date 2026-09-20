@@ -35,4 +35,3 @@ internal struct SymbolID : IEquatable<SymbolID>
 
     public bool Equals(SymbolID other) => other.Value == Value;
 }
-

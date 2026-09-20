@@ -116,7 +116,7 @@ internal sealed partial class Parser
                         {
                             if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
                                 return ParseLocalAmbiguousDeclarationStatement(context);
-                            
+
                             return ParseLocalVariableDeclarationStatement();
                         }
                         break;
@@ -148,7 +148,7 @@ internal sealed partial class Parser
                         {
                             if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
                                 return ParseLocalAmbiguousDeclarationStatement(context);
-                            
+
                             return ParseLocalVariableDeclarationStatement();
                         }
                         break;

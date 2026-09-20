@@ -15,4 +15,3 @@ internal sealed class LabelSymbol : Symbol
         Syntax = syntax;
     }
 }
-

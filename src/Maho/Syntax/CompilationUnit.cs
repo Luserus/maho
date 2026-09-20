@@ -18,5 +18,5 @@ internal sealed class CompilationUnit : SyntaxNode
         Pragmas = pragmas;
         Members = members;
         EndToken = endToken;
-    } 
+    }
 }

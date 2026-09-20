@@ -6,4 +6,3 @@ internal sealed class NamespaceTrieNode
 {
     public Dictionary<SymbolPart, NamespaceTrieNode> Next { get; } = [];
 }
-

@@ -25,7 +25,7 @@ internal abstract class TypeSymbol : Symbol
         GenericParameters = [];
         BaseTypes = [];
         Attributes = [];
-        
+
         Syntax = syntax;
     }
 }

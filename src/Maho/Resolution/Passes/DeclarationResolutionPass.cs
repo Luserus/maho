@@ -342,7 +342,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var accessor in symbol.Syntax.Body.Accessors)
         {
-            Scope scope = context.GetSyntaxScope(accessor.Body, symbol.EnclosingScope);
+            var scope = context.GetSyntaxScope(accessor.Body, symbol.EnclosingScope);
             var attributes = ResolveAttributes(accessor.Attributes, symbol.EnclosingScope);
 
             if (accessor.Kind is PropertyAccessorKind.Get)
@@ -422,6 +422,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 continue;
             if (found is not null)
                 return;
+
             found = label;
         }
 
@@ -715,6 +716,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private static Symbol? ResolveSingle(Scope scope, SymbolName name)
     {
         var symbols = scope[name];
+
         if (symbols.Count is 1)
             return symbols[0];
 
@@ -748,17 +750,29 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private static void PopulateProductMembers(List<SymbolHandle> fields, List<SymbolHandle> properties, List<SymbolHandle> methods, List<SymbolHandle> nestedTypes, Scope scope)
     {
-        fields.Clear(); properties.Clear(); methods.Clear(); nestedTypes.Clear();
+        fields.Clear();
+        properties.Clear();
+        methods.Clear();
+        nestedTypes.Clear();
 
         foreach (var symbol in scope.Symbols.Values)
         {
             var handle = ResolutionContext.GetHandle(symbol);
+
             switch (symbol.Kind)
             {
-                case SymbolKind.Field: fields.Add(handle); break;
-                case SymbolKind.Property: properties.Add(handle); break;
-                case SymbolKind.Method: methods.Add(handle); break;
-                case SymbolKind.NestedType: nestedTypes.Add(handle); break;
+                case SymbolKind.Field:
+                    fields.Add(handle);
+                    break;
+                case SymbolKind.Property:
+                    properties.Add(handle);
+                    break;
+                case SymbolKind.Method:
+                    methods.Add(handle);
+                    break;
+                case SymbolKind.NestedType:
+                    nestedTypes.Add(handle);
+                    break;
             }
         }
     }

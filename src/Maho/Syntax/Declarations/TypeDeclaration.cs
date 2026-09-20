@@ -10,7 +10,7 @@ internal sealed class TypeDeclaration : SyntaxNode
     /// <summary> Declaration modifiers, such as visibility or storage modifiers. </summary>
     public IReadOnlyList<Token> Modifiers { get; }
     /// <summary> The keyword introducing the type declaration. </summary>
-    public Token Keyword { get;}
+    public Token Keyword { get; }
     /// <summary> Declared kind, such as class or struct. </summary>
     public TypeKind Kind { get; }
     /// <summary> Declared name, including any generic parameter list. </summary>

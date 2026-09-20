@@ -13,7 +13,7 @@ internal abstract class NestedTypeSymbol : Symbol
     public List<TypeRef> BaseTypes { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
-    
+
 
     public TypeDeclaration? Syntax { get; }
 
