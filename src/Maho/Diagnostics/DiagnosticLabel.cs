@@ -11,7 +11,10 @@ public enum DiagnosticLabelStyle : byte
     Primary,
 
     /// <summary> Rendered with dashes (----) in a secondary/context color. </summary>
-    Secondary
+    Secondary,
+
+    /// <summary> Included for context without rendering an underline. </summary>
+    Context
 }
 
 /// <summary>

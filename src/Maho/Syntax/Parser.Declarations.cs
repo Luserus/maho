@@ -711,7 +711,7 @@ internal sealed partial class Parser
 
     private TypeSyntax ParsePrimaryType()
     {
-        if (CurrentToken.Kind is not TokenKind.Identifier)
+        if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
             diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type name");
             return new SimpleType(RecoverWithMissingToken());

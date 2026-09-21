@@ -370,7 +370,7 @@ internal sealed partial class Parser
     /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
     {
-        if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+        if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
 
         var identifier = LookaheadConsume();

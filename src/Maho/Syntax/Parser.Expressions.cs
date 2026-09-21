@@ -94,7 +94,8 @@ internal sealed partial class Parser
                 // consume combined operator
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
-                var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
+                string? context = opTok.Kind is TokenKind.Equals ? "after '=' in the assignment expression" : $"after '{opTok.Value}' in the binary expression";
+                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious);
 
                 if (opTok.Kind is TokenKind.Equals)
                     left = new AssignmentExpression(left, opTok, right);

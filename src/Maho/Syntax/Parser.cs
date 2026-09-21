@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -126,6 +127,9 @@ internal sealed partial class Parser
     private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
+    /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
+    private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
+        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -286,15 +290,22 @@ internal sealed partial class Parser
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
-        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
+        else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
-            if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
-                return ParseTopLevelAmbiguousPointerDeclaration();
+            if (!success && context is LookaheadResultContext.MissingDelimeter)
+                return ParseTopLevelDeclaration(topLevelStatementsEnabled);
 
-            if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
-                return ParseTopLevelAmbiguousReferenceDeclaration();
+            if (success)
+            {
+                if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
+                    return ParseTopLevelAmbiguousPointerDeclaration();
 
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+                if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
+                    return ParseTopLevelAmbiguousReferenceDeclaration();
+
+                return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+            }
+
         }
 
         return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);

@@ -43,10 +43,13 @@ internal sealed partial class Parser
             _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
         };
 
-    /// <summary> Chooses the cleaner anchor for a missing closing delimiter. </summary>
-    private MissingTokenAnchor GetClosingTokenAnchor()
+    /// <summary> Chooses the cleaner anchor for a missing token or delimiter based on token layout. </summary>
+    private MissingTokenAnchor GetEffectiveAnchor(MissingTokenAnchor anchor, bool isClosingToken = false)
     {
-        if (current <= 0)
+        if (current <= 0 || CurrentToken.Kind is TokenKind.EndToken)
+            return anchor;
+
+        if (!isClosingToken && anchor is MissingTokenAnchor.BeforeCurrent)
             return MissingTokenAnchor.BeforeCurrent;
 
         int currentLine = text.GetLineIndex(CurrentToken.Span.Start);
@@ -72,13 +75,18 @@ internal sealed partial class Parser
         if (CurrentToken.Kind == expectedKind)
             return Consume();
 
-        MissingTokenAnchor effectiveAnchor = IsClosingToken(expectedKind)
-            ? GetClosingTokenAnchor()
-            : anchor;
+        MissingTokenAnchor effectiveAnchor = GetEffectiveAnchor(anchor, IsClosingToken(expectedKind));
         TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
         int missingTokenPosition = GetMissingTokenPosition(effectiveAnchor);
 
-        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context);
+        TextSpan? unexpectedSpan = null;
+        if (CurrentToken.Kind is not TokenKind.EndToken && CurrentToken.Span.Length > 0)
+        {
+            if (text.GetLineIndex(CurrentToken.Span.Start) != text.GetLineIndex(diagnosticSpan.Start))
+                unexpectedSpan = CurrentToken.Span;
+        }
+
+        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context, unexpectedSpan: unexpectedSpan);
 
         return CreateMissingTokenAt(missingTokenPosition);
     }
@@ -96,12 +104,22 @@ internal sealed partial class Parser
     /// <summary> Constructs a missing expression node and reports the appropriate diagnostic. </summary>
     private Expression CreateMissingExpression(string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
     {
-        diagnostics.ReportExpectedExpression(GetMissingTokenDiagnosticSpan(anchor), GetTokenDisplay(CurrentToken), context);
+        MissingTokenAnchor effectiveAnchor = GetEffectiveAnchor(anchor);
+        TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
 
-        if (anchor is MissingTokenAnchor.BeforeCurrent)
+        TextSpan? unexpectedSpan = null;
+        if (CurrentToken.Kind is not TokenKind.EndToken && CurrentToken.Span.Length > 0)
+        {
+            if (text.GetLineIndex(CurrentToken.Span.Start) != text.GetLineIndex(diagnosticSpan.Start))
+                unexpectedSpan = CurrentToken.Span;
+        }
+
+        diagnostics.ReportExpectedExpression(diagnosticSpan, GetTokenDisplay(CurrentToken), context, unexpectedSpan: unexpectedSpan);
+
+        if (effectiveAnchor is MissingTokenAnchor.BeforeCurrent)
             return new LiteralExpression(RecoverWithMissingToken());
 
-        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(anchor)));
+        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(effectiveAnchor)));
     }
 
     /// <summary> Parses an expression or synthesizes a missing one when parsing cannot continue. </summary>

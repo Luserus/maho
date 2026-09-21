@@ -125,9 +125,51 @@ internal sealed class DiagnosticsManager
     /// Reports an error diagnostic that also preserves the expected syntax text for downstream
     /// renderers that want to produce more specific remediation hints.
     /// </summary>
-    private void ReportExpected(string code, string expected, DiagnosticText found, TextSpan span, string? context = null, SourceText? source = null) =>
-        Report(new Diagnostic(code, expected, found, span, DiagnosticKind.Error, context, source ?? defaultSource));
+    private void ReportExpected(
+        string code,
+        string expected,
+        DiagnosticText found,
+        TextSpan span,
+        string? context = null,
+        SourceText? source = null,
+        TextSpan? unexpectedSpan = null)
+    {
+        var effectiveSource = source ?? defaultSource;
+        IReadOnlyList<DiagnosticLabel> labels = [];
+        TextSpan effectiveSpan = span;
 
+        if (unexpectedSpan.HasValue)
+        {
+            if (effectiveSource is not null)
+            {
+                int expectedLine = effectiveSource.GetLineIndex(span.Start);
+                int unexpectedLine = effectiveSource.GetLineIndex(unexpectedSpan.Value.Start);
+                if (expectedLine != unexpectedLine)
+                {
+                    effectiveSpan = unexpectedSpan.Value;
+                    labels =
+                    [
+                        new DiagnosticLabel(span, null, DiagnosticLabelStyle.Context, effectiveSource),
+                        new DiagnosticLabel(unexpectedSpan.Value, null, DiagnosticLabelStyle.Primary, effectiveSource)
+                    ];
+                }
+            }
+            else
+            {
+                effectiveSpan = unexpectedSpan.Value;
+                labels =
+                [
+                    new DiagnosticLabel(span, null, DiagnosticLabelStyle.Context, null),
+                    new DiagnosticLabel(unexpectedSpan.Value, null, DiagnosticLabelStyle.Primary, null)
+                ];
+            }
+        }
+
+        Report(new Diagnostic(code, expected, found, effectiveSpan, DiagnosticKind.Error, context, effectiveSource)
+        {
+            Labels = labels
+        });
+    }
 
     /// <summary> Reports an invalid token emitted by the lexer, preserving the offending text when possible. </summary>
     public void ReportBadToken(TextSpan span, DiagnosticText tokenText) =>
@@ -146,32 +188,32 @@ internal sealed class DiagnosticsManager
         ReportError("MH0003", "Character literal cannot be empty.", span, source);
 
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
-    public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0004", expected, found, span, context, source);
+    public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0004", expected, found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where an expression was needed to continue meaningfully. </summary>
-    public void ReportExpectedExpression(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0005", "an expression", found, span, context, source);
+    public void ReportExpectedExpression(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0005", "an expression", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where an identifier-shaped token was required. </summary>
-    public void ReportExpectedIdentifier(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0006", "an identifier", found, span, context, source);
+    public void ReportExpectedIdentifier(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0006", "an identifier", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where type syntax was required. </summary>
-    public void ReportExpectedType(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0007", "a type", found, span, context, source);
+    public void ReportExpectedType(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0007", "a type", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where a declaration or type body was required. </summary>
-    public void ReportExpectedBody(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0008", expected, found, span, context, source);
+    public void ReportExpectedBody(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0008", expected, found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where parameter syntax was required. </summary>
-    public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0009", "a parameter", found, span, context, source);
+    public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0009", "a parameter", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where generic parameter syntax was required. </summary>
-    public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0010", "a generic parameter", found, span, context, source);
+    public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0010", "a generic parameter", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
     public void ReportUnexpectedToken(TextSpan span, DiagnosticText found, SourceText? source = null) =>

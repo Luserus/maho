@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using Maho;
+using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Tests;
@@ -1241,5 +1242,64 @@ public sealed class ParserTests
     {
         Assert.NotEqual(0, list.Count);
         Assert.Equal(TokenKind.Comma, Assert.IsType<Token>(list.GetSeparator(list.Count - 1)).Kind);
+    }
+
+    [Fact]
+    public void Parse_ErrorSpans_PointToUnexpectedTokenOnSameLineAndEndOfLineForMissingTokens()
+    {
+        var (text, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            namespace Sample;
+
+            some err
+            nice = }
+            foo.;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+
+        // 1. "some err" should be parsed as TopLevelVariableDeclaration missing a semicolon
+        var someErrMember = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
+        Assert.Equal("some", Assert.IsType<SimpleType>(someErrMember.Declaration.Type).Name.Value);
+        Assert.Equal("err", Assert.IsType<SimpleName>(someErrMember.Declaration.Declarators[0].Identifier).Name.Value);
+
+        // Diagnostic for missing ';' after "some err" points to unexpected token on line 5 (1-based line 5:1) with line 4 as Context
+        var missingSemiDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("variable declaration"));
+        Assert.Equal(5, missingSemiDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiDiag.Span.GetStartColumn(text) + 1);
+        Assert.Equal(2, missingSemiDiag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Context, missingSemiDiag.Labels[0].Style);
+        Assert.Equal(4, missingSemiDiag.Labels[0].Span.GetStartLine(text) + 1);
+        Assert.Equal(9, missingSemiDiag.Labels[0].Span.GetStartColumn(text) + 1);
+        Assert.Equal(DiagnosticLabelStyle.Primary, missingSemiDiag.Labels[1].Style);
+        Assert.Equal(5, missingSemiDiag.Labels[1].Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiDiag.Labels[1].Span.GetStartColumn(text) + 1);
+
+        // 2. "nice = }" should be parsed as an expression statement (assignment expression)
+        var niceStmt = Assert.IsType<TopLevelExpressionStatement>(root.Members[2]);
+        var assignExpr = Assert.IsType<AssignmentExpression>(niceStmt.Expression);
+        Assert.Equal("nice", Assert.IsType<IdentifierNameExpression>(assignExpr.LhsExpression).Identifier.Value);
+
+        // Diagnostic for missing expression after '=' on the same line points to '}' (1-based line 5:8)
+        var missingExprDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0005");
+        Assert.Equal(5, missingExprDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(8, missingExprDiag.Span.GetStartColumn(text) + 1);
+
+        // Diagnostic for missing ';' after "nice = }" points to unexpected token on line 6 (1-based line 6:1) with line 5 as Context
+        var missingSemiNiceDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("top-level expression"));
+        Assert.Equal(6, missingSemiNiceDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiNiceDiag.Span.GetStartColumn(text) + 1);
+        Assert.Equal(2, missingSemiNiceDiag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Context, missingSemiNiceDiag.Labels[0].Style);
+        Assert.Equal(5, missingSemiNiceDiag.Labels[0].Span.GetStartLine(text) + 1);
+        Assert.Equal(9, missingSemiNiceDiag.Labels[0].Span.GetStartColumn(text) + 1);
+        Assert.Equal(DiagnosticLabelStyle.Primary, missingSemiNiceDiag.Labels[1].Style);
+        Assert.Equal(6, missingSemiNiceDiag.Labels[1].Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiNiceDiag.Labels[1].Span.GetStartColumn(text) + 1);
+
+        // 3. "foo.;" should have diagnostic pointing to ';' (1-based line 6:5)
+        var missingIdentDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0006");
+        Assert.Equal(6, missingIdentDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(5, missingIdentDiag.Span.GetStartColumn(text) + 1);
     }
 }
