@@ -114,6 +114,11 @@ GlobalUnsafeEnabled : false;
 ProjectsReferenced : [
     "../Core/Core.mhpr"
 ];
+Sources : {
+    Directory : "$",
+    SourceFiles : [ "Program.mh" ],
+    ByName : "*.mh"
+};
 GlobalAliases : {
     "int32" : "Std.Int32",
     "string" : "Std.String8"
@@ -123,6 +128,7 @@ GlobalAliases : {
 - `EntryFile`: specifies the designated entry-point file.
 - `ImplicitTopLevel`: when `true`, allows top-level statements in the entry file without requiring `#pragma toplevel enable`. If no `EntryFile` is configured, the single file containing top-level statements is automatically selected as the entry point.
 - `ProjectsReferenced`: referenced `.mhpr` projects whose exported symbols are imported into the compilation scope.
+- `Sources`: specifies source file discovery options via a dictionary (`Directory`, `SourceFiles`, `ByName`) or a shorthand array of file paths.
 - `GlobalAliases`: project-wide type aliases.
 
 ## Library API

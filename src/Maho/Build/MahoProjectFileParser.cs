@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Maho;
+namespace Maho.Build;
 
 /// <summary> Parses the compiler's domain-specific, JSON-inspired <c>.mhpr</c> format. </summary>
 internal sealed class MahoProjectFileParser
@@ -25,6 +25,7 @@ internal sealed class MahoProjectFileParser
         bool implicitTopLevel = false;
         string[] projectsReferenced = [];
         Dictionary<string, string> globalAliases = [];
+        MahoProjectSourcesConfiguration? sources = null;
         HashSet<string> seenProperties = [];
 
         SkipWhitespace();
@@ -58,6 +59,9 @@ internal sealed class MahoProjectFileParser
                 case "GlobalAliases":
                     globalAliases = ParseStringMap("for GlobalAliases");
                     break;
+                case "Sources":
+                    sources = ParseSourcesConfiguration("for Sources");
+                    break;
                 default:
                     throw Error($"Unknown project property '{name}'.");
             }
@@ -73,7 +77,80 @@ internal sealed class MahoProjectFileParser
             GlobalUnsafeEnabled = globalUnsafeEnabled,
             ImplicitTopLevel = implicitTopLevel,
             ProjectsReferenced = projectsReferenced,
-            GlobalAliases = globalAliases
+            GlobalAliases = globalAliases,
+            Sources = sources
+        };
+    }
+
+    private MahoProjectSourcesConfiguration ParseSourcesConfiguration(string context)
+    {
+        SkipWhitespace();
+        if (CurrentChar is '[')
+        {
+            return new MahoProjectSourcesConfiguration
+            {
+                SourceFiles = ParseStringArray(context)
+            };
+        }
+
+        Expect('{', context);
+        SkipWhitespace();
+
+        string? directory = null;
+        string[] sourceFiles = [];
+        string? byName = null;
+        HashSet<string> seenProperties = [];
+
+        while (CurrentChar is not '}')
+        {
+            string key = CurrentChar is '"'
+                ? ParseString("for Sources property name")
+                : ParseIdentifier("for Sources property name");
+
+            if (!seenProperties.Add(key))
+                throw Error($"Property '{key}' cannot be specified more than once in Sources.");
+
+            SkipWhitespace();
+            Expect(':', $"after Sources property '{key}'");
+            SkipWhitespace();
+
+            switch (key)
+            {
+                case "Directory":
+                    directory = ParseString("for Directory in Sources");
+                    break;
+                case "SourceFiles":
+                    sourceFiles = ParseStringArray("for SourceFiles in Sources");
+                    break;
+                case "ByName":
+                    byName = ParseString("for ByName in Sources");
+                    break;
+                default:
+                    throw Error($"Unknown property '{key}' in Sources.");
+            }
+
+            SkipWhitespace();
+
+            if (CurrentChar is ',')
+            {
+                current++;
+                SkipWhitespace();
+                if (CurrentChar is '}')
+                    break;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        Expect('}', context);
+
+        return new MahoProjectSourcesConfiguration
+        {
+            Directory = directory,
+            SourceFiles = sourceFiles,
+            ByName = byName
         };
     }
 
@@ -88,11 +165,17 @@ internal sealed class MahoProjectFileParser
             values.Add(ParseString(context));
             SkipWhitespace();
 
-            if (CurrentChar is not ',')
+            if (CurrentChar is ',')
+            {
+                current++;
+                SkipWhitespace();
+                if (CurrentChar is ']')
+                    break;
+            }
+            else
+            {
                 break;
-
-            current++;
-            SkipWhitespace();
+            }
         }
 
         Expect(']', context);
@@ -117,11 +200,17 @@ internal sealed class MahoProjectFileParser
 
             SkipWhitespace();
 
-            if (CurrentChar is not ',')
+            if (CurrentChar is ',')
+            {
+                current++;
+                SkipWhitespace();
+                if (CurrentChar is '}')
+                    break;
+            }
+            else
+            {
                 break;
-
-            current++;
-            SkipWhitespace();
+            }
         }
 
         Expect('}', context);

@@ -14,7 +14,7 @@ This folder matters because it defines what leaves the compiler:
 - `CompilerAnalysisResult.cs`: immutable single-file result payload.
 - `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
 - `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)`.
-- `../Projects/MahoProjectConfiguration.cs`: domain-specific `.mhpr` project configuration.
+- `../Build/MahoProjectConfiguration.cs`: domain-specific `.mhpr` project configuration.
 - `AnalysisOutput.cs`: flags that decide which debug payloads are included.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
@@ -54,14 +54,19 @@ Important details:
 
 ### `AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None)`
 
-Loads a domain-specific, JSON-inspired `.mhpr` file, recursively discovers the project's `.mh`
-sources, and applies its entry-point selection policy. The outer project scope is intentionally
+Loads a domain-specific, JSON-inspired `.mhpr` file, discovers the project's source files
+according to its `Sources` configuration, and applies its entry-point selection policy. The outer project scope is intentionally
 brace-less and property names are bare identifiers:
 
 ```mhpr
 EntryFile : "Program.mh";
 GlobalUnsafeEnabled : false;
 ProjectsReferenced : [];
+Sources : {
+	Directory : "$",
+	SourceFiles : [ "Program.mh" ],
+	ByName : "*.mh"
+};
 GlobalAliases : {
 	"int32" : "Std.Int32",
 	"float32" : "Std.Float32"

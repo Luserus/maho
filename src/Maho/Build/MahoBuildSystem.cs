@@ -41,7 +41,7 @@ public static class MahoBuildSystem
 {
     /// <summary>
     /// Resolves source files for compilation from a file or directory path.
-    /// Filters for <c>*.mh</c> files in directories unless instructed otherwise.
+    /// Filters for <c>*.mh</c> files in directories unless instructed otherwise by <paramref name="config"/>.
     /// </summary>
     public static string[] ResolveSourceFiles(string path, MahoProjectConfiguration? config = null)
     {
@@ -51,11 +51,75 @@ public static class MahoBuildSystem
         if (!Directory.Exists(path))
             throw new DirectoryNotFoundException($"Input path not found: {path}");
 
-        string[] sourceFiles = Directory.GetFiles(path, "*.mh", SearchOption.AllDirectories);
-        Array.Sort(sourceFiles, StringComparer.Ordinal);
+        string projectDir = Path.GetFullPath(path);
+        string baseDir = projectDir;
 
-        if (sourceFiles.Length == 0)
-            throw new FileNotFoundException($"No source files found in directory: {path}", path);
+        if (config?.Sources?.Directory is { } configuredDir && !string.IsNullOrWhiteSpace(configuredDir))
+        {
+            if (configuredDir == "$")
+                baseDir = projectDir;
+            else if (configuredDir.StartsWith("$/", StringComparison.Ordinal) || configuredDir.StartsWith("$\\", StringComparison.Ordinal))
+                baseDir = Path.GetFullPath(Path.Combine(projectDir, configuredDir[2..]));
+            else if (Path.IsPathRooted(configuredDir))
+                baseDir = Path.GetFullPath(configuredDir);
+            else
+                baseDir = Path.GetFullPath(Path.Combine(projectDir, configuredDir));
+
+            if (!Directory.Exists(baseDir))
+                throw new DirectoryNotFoundException($"Source directory not found: {baseDir}");
+        }
+
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (config?.Sources?.SourceFiles is { Length: > 0 } explicitFiles)
+        {
+            foreach (string file in explicitFiles)
+            {
+                string filePath;
+                if (file.StartsWith("$/", StringComparison.Ordinal) || file.StartsWith("$\\", StringComparison.Ordinal))
+                    filePath = Path.GetFullPath(Path.Combine(projectDir, file[2..]));
+                else if (Path.IsPathRooted(file))
+                    filePath = Path.GetFullPath(file);
+                else
+                    filePath = Path.GetFullPath(Path.Combine(baseDir, file));
+
+                if (!File.Exists(filePath))
+                    throw new FileNotFoundException($"Configured source file not found: {filePath}", filePath);
+
+                files.Add(filePath);
+            }
+        }
+
+        if (config?.Sources?.ByName is { } byNamePattern)
+        {
+            string[] matchingFiles = Directory.GetFiles(baseDir, byNamePattern, SearchOption.AllDirectories);
+            foreach (string match in matchingFiles)
+                files.Add(Path.GetFullPath(match));
+        }
+        else if (config?.Sources?.SourceFiles is not { Length: > 0 })
+        {
+            string[] defaultFiles = Directory.GetFiles(baseDir, "*.mh", SearchOption.AllDirectories);
+            foreach (string file in defaultFiles)
+                files.Add(Path.GetFullPath(file));
+        }
+
+        if (config?.EntryFile is { } configuredEntry && !string.IsNullOrWhiteSpace(configuredEntry))
+        {
+            string entryPath = Path.IsPathRooted(configuredEntry)
+                ? Path.GetFullPath(configuredEntry)
+                : Path.GetFullPath(Path.Combine(projectDir, configuredEntry));
+
+            if (!File.Exists(entryPath))
+                throw new FileNotFoundException($"Configured EntryFile not found: {entryPath}", entryPath);
+
+            files.Add(entryPath);
+        }
+
+        if (files.Count == 0)
+            throw new FileNotFoundException($"No source files found in directory: {baseDir}", baseDir);
+
+        string[] sourceFiles = [.. files];
+        Array.Sort(sourceFiles, StringComparer.Ordinal);
 
         return sourceFiles;
     }

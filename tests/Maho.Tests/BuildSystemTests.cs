@@ -141,4 +141,208 @@ public sealed class BuildSystemTests
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public void MahoBuildSystem_LoadsProject_WithSourcesObject_ResolvesSourceFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_SourcesObjTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                EntryFile : "Main.mh";
+                Sources : {
+                    Directory : "$",
+                    SourceFiles : [ "Main.mh" ],
+                    ByName : "*.mh"
+                };
+                """);
+
+            string mainFile = Path.Combine(tempDir, "Main.mh");
+            File.WriteAllText(mainFile, "var result = 42;");
+
+            string extraFile = Path.Combine(tempDir, "Extra.mh");
+            File.WriteAllText(extraFile, "public struct Extra;");
+
+            var project = MahoBuildSystem.LoadProject(projectFile);
+
+            Assert.NotNull(project.Configuration.Sources);
+            Assert.Equal("$", project.Configuration.Sources.Directory);
+            Assert.Equal(["Main.mh"], project.Configuration.Sources.SourceFiles);
+            Assert.Equal("*.mh", project.Configuration.Sources.ByName);
+            Assert.Equal(2, project.SourceFiles.Count);
+            Assert.Contains(Path.GetFullPath(mainFile), project.SourceFiles);
+            Assert.Contains(Path.GetFullPath(extraFile), project.SourceFiles);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_LoadsProject_WithExplicitSourceFiles_FiltersOutUnlistedFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_ExplicitSourcesTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                EntryFile : "Main.mh";
+                Sources : {
+                    SourceFiles : [ "Main.mh" ]
+                };
+                """);
+
+            string mainFile = Path.Combine(tempDir, "Main.mh");
+            File.WriteAllText(mainFile, "var result = 42;");
+
+            string ignoredFile = Path.Combine(tempDir, "Ignored.mh");
+            File.WriteAllText(ignoredFile, "public struct Ignored;");
+
+            var project = MahoBuildSystem.LoadProject(projectFile);
+
+            Assert.Single(project.SourceFiles);
+            Assert.Equal(Path.GetFullPath(mainFile), project.SourceFiles[0]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_LoadsProject_WithCustomDirectory_ResolvesFromSubdirectory()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CustomDirTest_" + Guid.NewGuid().ToString("N"));
+        string srcDir = Path.Combine(tempDir, "src");
+        Directory.CreateDirectory(srcDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                Sources : {
+                    Directory : "src",
+                    ByName : "*.mh"
+                };
+                """);
+
+            string srcFile = Path.Combine(srcDir, "Code.mh");
+            File.WriteAllText(srcFile, "public struct Widget;");
+
+            string rootFile = Path.Combine(tempDir, "RootIgnored.mh");
+            File.WriteAllText(rootFile, "public struct RootIgnored;");
+
+            var project = MahoBuildSystem.LoadProject(projectFile);
+
+            Assert.Single(project.SourceFiles);
+            Assert.Equal(Path.GetFullPath(srcFile), project.SourceFiles[0]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_LoadsProject_WithSourcesArrayShorthand_ResolvesFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_ArrayShorthandTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                Sources : [ "Main.mh" ];
+                """);
+
+            string mainFile = Path.Combine(tempDir, "Main.mh");
+            File.WriteAllText(mainFile, "public struct Main;");
+
+            var project = MahoBuildSystem.LoadProject(projectFile);
+
+            Assert.Single(project.SourceFiles);
+            Assert.Equal(Path.GetFullPath(mainFile), project.SourceFiles[0]);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_MissingSourceFile_ThrowsFileNotFoundException()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_MissingFileTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                Sources : {
+                    SourceFiles : [ "DoesNotExist.mh" ]
+                };
+                """);
+
+            Assert.Throws<FileNotFoundException>(() => MahoBuildSystem.LoadProject(projectFile));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_MissingDirectory_ThrowsDirectoryNotFoundException()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_MissingDirTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                Sources : {
+                    Directory : "non_existent_folder"
+                };
+                """);
+
+            Assert.Throws<DirectoryNotFoundException>(() => MahoBuildSystem.LoadProject(projectFile));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MahoBuildSystem_EntryFile_EnsuresInclusionWithNonStandardExtension()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_EntryNonMhTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            File.WriteAllText(projectFile, """
+                EntryFile : "Main.custom";
+                """);
+
+            string mainFile = Path.Combine(tempDir, "Main.custom");
+            File.WriteAllText(mainFile, "public struct EntryCustom;");
+
+            string helperFile = Path.Combine(tempDir, "Helper.mh");
+            File.WriteAllText(helperFile, "public struct Helper;");
+
+            var project = MahoBuildSystem.LoadProject(projectFile);
+
+            Assert.Equal(2, project.SourceFiles.Count);
+            Assert.Contains(Path.GetFullPath(mainFile), project.SourceFiles);
+            Assert.Contains(Path.GetFullPath(helperFile), project.SourceFiles);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 }

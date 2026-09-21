@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Maho.Analysis;
+using Maho.Build;
 
 namespace Maho.Tests;
 

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Maho;
+namespace Maho.Build;
 
 /// <summary> Configuration read from one domain-specific <c>.mhpr</c> project file. </summary>
 public sealed class MahoProjectConfiguration
@@ -15,4 +15,6 @@ public sealed class MahoProjectConfiguration
     public string[] ProjectsReferenced { get; init; } = [];
     /// <summary> Project-wide alias declarations, retained for alias resolution. </summary>
     public Dictionary<string, string> GlobalAliases { get; init; } = [];
+    /// <summary> Optional configuration specifying how project source files are discovered and selected. </summary>
+    public MahoProjectSourcesConfiguration? Sources { get; init; }
 }
