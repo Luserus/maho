@@ -579,7 +579,7 @@ public static class CommandLine
         };
     }
 
-    private static void PrintVersion(TextWriter writer) => writer.WriteLine($"Maho Compiler: v{MahoCompiler.VersionString}");
+    private static void PrintVersion(TextWriter writer) => writer.WriteLine($"Maho: v{MahoCompiler.VersionString}");
 
     private static void PrintUsage(TextWriter writer)
     {

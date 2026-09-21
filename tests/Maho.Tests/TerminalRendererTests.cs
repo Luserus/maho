@@ -37,8 +37,8 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("error[MH1002]: type 'Foo' is already declared in this scope", output);
-        Assert.Contains("--> test.mh:2:14", output);
+        Assert.Contains("Error [MH1002]: type 'Foo' is already declared in this scope", output);
+        Assert.Contains("--> test.mh: (2:14)", output);
         Assert.Contains("2 | public class Foo;", output);
         Assert.Contains("^^^ duplicate declaration", output);
         Assert.Contains("= note: first declared on line 1", output);
@@ -95,7 +95,7 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("warning[MH2001]: naming convention violation", output);
+        Assert.Contains("Warning [MH2001]: naming convention violation", output);
         Assert.Contains("= suggestion: rename to PascalCase", output);
         Assert.Contains("- var oldName = 10;", output);
         Assert.Contains("+ var NewName = 10;", output);

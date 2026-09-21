@@ -33,7 +33,7 @@ public sealed class TerminalDiagnosticRenderer
     {
         this.pathStyle = pathStyle;
         this.rootDirectory = rootDirectory ?? Directory.GetCurrentDirectory();
-        this.useColors = ShouldEnableColors(colorMode);
+        useColors = ShouldEnableColors(colorMode);
     }
 
     /// <summary>
@@ -54,9 +54,9 @@ public sealed class TerminalDiagnosticRenderer
         // 1. Header: error[MH1002]: message
         string severityName = diagnostic.Severity switch
         {
-            DiagnosticSeverity.Error => "error",
-            DiagnosticSeverity.Warning => "warning",
-            _ => "info"
+            DiagnosticSeverity.Error => "Error",
+            DiagnosticSeverity.Warning => "Warning",
+            _ => "Info"
         };
 
         string severityColor = diagnostic.Severity switch
@@ -66,7 +66,7 @@ public sealed class TerminalDiagnosticRenderer
             _ => Cyan
         };
 
-        sb.Append(Colorize(severityColor, $"{severityName}[{diagnostic.Code}]"));
+        sb.Append(Colorize(severityColor, $"{severityName} [{diagnostic.Code}]"));
         sb.Append(Colorize(Bold, $": {diagnostic.Message}"));
         sb.AppendLine();
 
@@ -90,7 +90,7 @@ public sealed class TerminalDiagnosticRenderer
         if (displayPath is not null)
         {
             sb.Append(Colorize(Blue, "  --> "));
-            sb.AppendLine($"{displayPath}:{line}:{col}");
+            sb.AppendLine($"{displayPath}: ({line}:{col})");
         }
 
         // 3. Source snippet with gutter and carets
@@ -102,13 +102,13 @@ public sealed class TerminalDiagnosticRenderer
             string emptyGutter = new string(' ', gutterWidth);
 
             // Empty gutter line: "   |"
-            sb.Append(Colorize(Blue, $" {emptyGutter} |"));
+            sb.Append(Colorize(Blue, $"{emptyGutter} |"));
             sb.AppendLine();
 
             // Source line: "14 | public struct Foo;"
             string sourceLine = lines[line - 1];
             string paddedLineStr = lineStr.PadLeft(gutterWidth);
-            sb.Append(Colorize(Blue, $" {paddedLineStr} | "));
+            sb.Append(Colorize(Blue, $"{paddedLineStr} | "));
             sb.AppendLine(sourceLine);
 
             // Caret underline: "   |        ^^^^^^ message"
@@ -122,7 +122,7 @@ public sealed class TerminalDiagnosticRenderer
             string indent = new string(' ', Math.Max(0, startCol - 1));
             string carets = new string('^', length);
 
-            sb.Append(Colorize(Blue, $" {emptyGutter} | "));
+            sb.Append(Colorize(Blue, $"{emptyGutter} | "));
             sb.Append(indent);
             sb.Append(Colorize(severityColor, carets));
 
@@ -143,7 +143,7 @@ public sealed class TerminalDiagnosticRenderer
                 if (secondaryLine >= 1 && secondaryLine <= lines.Length)
                 {
                     string secLineStr = secondaryLine.ToString().PadLeft(gutterWidth);
-                    sb.Append(Colorize(Blue, $" {secLineStr} | "));
+                    sb.Append(Colorize(Blue, $"{secLineStr} | "));
                     sb.AppendLine(lines[secondaryLine - 1]);
 
                     int secCol = Math.Max(1, label.Span.StartLocation.Column);
@@ -151,7 +151,7 @@ public sealed class TerminalDiagnosticRenderer
                     string secIndent = new string(' ', Math.Max(0, secCol - 1));
                     string dashes = new string('-', secLen);
 
-                    sb.Append(Colorize(Blue, $" {emptyGutter} | "));
+                    sb.Append(Colorize(Blue, $"{emptyGutter} | "));
                     sb.Append(secIndent);
                     sb.Append(Colorize(Cyan, dashes));
                     if (!string.IsNullOrEmpty(label.Message))
@@ -166,7 +166,7 @@ public sealed class TerminalDiagnosticRenderer
             // 4. Notes
             foreach (var note in diagnostic.Notes)
             {
-                sb.Append(Colorize(Blue, $" {emptyGutter} = "));
+                sb.Append(Colorize(Blue, $"{emptyGutter} = "));
                 sb.Append(Colorize(Bold, "note: "));
                 sb.AppendLine(note.Message);
             }
@@ -174,7 +174,7 @@ public sealed class TerminalDiagnosticRenderer
             // 5. Help messages
             foreach (var help in diagnostic.HelpMessages)
             {
-                sb.Append(Colorize(Blue, $" {emptyGutter} = "));
+                sb.Append(Colorize(Blue, $"{emptyGutter} = "));
                 sb.Append(Colorize(Cyan, "help: "));
                 sb.AppendLine(help.Message);
             }
@@ -182,7 +182,7 @@ public sealed class TerminalDiagnosticRenderer
             // 6. Suggestions
             foreach (var suggestion in diagnostic.Suggestions)
             {
-                sb.Append(Colorize(Blue, $" {emptyGutter} = "));
+                sb.Append(Colorize(Blue, $"{emptyGutter} = "));
                 sb.Append(Colorize(Green, "suggestion: "));
                 sb.AppendLine(suggestion.Description);
 
@@ -191,16 +191,16 @@ public sealed class TerminalDiagnosticRenderer
                     if (edit.Span.StartLocation.Line >= 1 && edit.Span.StartLocation.Line <= lines.Length)
                     {
                         string original = lines[edit.Span.StartLocation.Line - 1];
-                        sb.Append(Colorize(Blue, $" {emptyGutter}   - "));
+                        sb.Append(Colorize(Blue, $"{emptyGutter}   - "));
                         sb.AppendLine(Colorize(Red, original));
-                        sb.Append(Colorize(Blue, $" {emptyGutter}   + "));
+                        sb.Append(Colorize(Blue, $"{emptyGutter}   + "));
                         sb.AppendLine(Colorize(Green, edit.NewText));
                     }
                 }
             }
 
             // Final empty gutter line
-            sb.Append(Colorize(Blue, $" {emptyGutter} |"));
+            sb.Append(Colorize(Blue, $"{emptyGutter} |"));
             sb.AppendLine();
         }
         else
