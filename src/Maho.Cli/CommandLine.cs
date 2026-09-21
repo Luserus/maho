@@ -37,11 +37,18 @@ public static class CommandLine
         bool WarningsAsErrors,
         bool ShowHelp,
         bool ShowVersion,
+        string? OutputDestination,
         string? SourcePath);
 
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
     {
+        if (args.Length == 0)
+        {
+            PrintUsage(Console.Out);
+            return 0;
+        }
+
         if (!TryParseArguments(args, out CliOptions options, out string? argumentError))
         {
             Console.Error.WriteLine(argumentError);
@@ -330,6 +337,8 @@ public static class CommandLine
         }
     }
 
+    private static bool IsOutputOption(string arg) => arg is "-o" or "--output";
+
     private static bool TryParseArguments(string[] args, out CliOptions options, out string? errorMessage)
     {
         AnalysisOutput debugOutput = AnalysisOutput.None;
@@ -342,6 +351,7 @@ public static class CommandLine
         bool warningsAsErrors = false;
         bool showHelp = false;
         bool showVersion = false;
+        string? generalOutput = null;
         string? sourcePath = null;
 
         for (int index = 0; index < args.Length; index++)
@@ -358,6 +368,26 @@ public static class CommandLine
                 case "-v":
                 case "--version":
                     showVersion = true;
+                    break;
+
+                case "-o":
+                case "--output":
+                    if (generalOutput is not null)
+                    {
+                        options = default;
+                        errorMessage = "The -o/--output option can only be specified once.";
+                        return false;
+                    }
+
+                    if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
+                    {
+                        options = default;
+                        errorMessage = "The -o/--output option requires a destination path or '-'.";
+                        return false;
+                    }
+
+                    index++;
+                    generalOutput = ParseDestination(args[index]);
                     break;
 
                 case "--debug":
@@ -452,7 +482,10 @@ public static class CommandLine
             }
         }
 
-        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, sourcePath);
+        debugDestination ??= generalOutput;
+        diagnosticsDestination ??= generalOutput;
+
+        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, generalOutput, sourcePath);
         errorMessage = null;
         return true;
     }
@@ -462,7 +495,7 @@ public static class CommandLine
         output = AnalysisOutput.None;
         destination = null;
 
-        while (++index < args.Length && args[index] != "--output")
+        while (++index < args.Length && !IsOutputOption(args[index]))
         {
             AnalysisOutput selector = args[index] switch
             {
@@ -488,13 +521,13 @@ public static class CommandLine
 
         if (index >= args.Length)
         {
-            errorMessage = "The --debug option requires --output followed by a destination path or '-'.";
+            errorMessage = "The --debug option requires -o or --output followed by a destination path or '-'.";
             return false;
         }
 
         if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith("-", StringComparison.Ordinal)))
         {
-            errorMessage = "The --debug option requires a destination path or '-' after --output.";
+            errorMessage = "The --debug option requires a destination path or '-' after -o or --output.";
             return false;
         }
 
@@ -508,7 +541,7 @@ public static class CommandLine
         format = DiagnosticsFormat.Pretty;
         destination = null;
 
-        while (++index < args.Length && args[index] != "--output")
+        while (++index < args.Length && !IsOutputOption(args[index]))
         {
             switch (args[index].ToLowerInvariant())
             {
@@ -529,13 +562,13 @@ public static class CommandLine
 
         if (index >= args.Length)
         {
-            errorMessage = "The --diagnostics option requires --output followed by a destination path or '-'.";
+            errorMessage = "The --diagnostics option requires -o or --output followed by a destination path or '-'.";
             return false;
         }
 
         if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith("-", StringComparison.Ordinal)))
         {
-            errorMessage = "The --diagnostics option requires a destination path or '-' after --output.";
+            errorMessage = "The --diagnostics option requires a destination path or '-' after -o or --output.";
             return false;
         }
 
@@ -574,11 +607,15 @@ public static class CommandLine
 
     private static void PrintUsage(TextWriter writer)
     {
+        PrintVersion(writer);
+        writer.WriteLine("A compiler for the Maho programming language.");
+        writer.WriteLine();
         writer.WriteLine("Usage: maho [options] [source-path]");
         writer.WriteLine();
         writer.WriteLine("Options:");
-        writer.WriteLine("  --debug (lex|parse)+ --output <file|->                      Write selected debug JSON to a file or stdout.");
-        writer.WriteLine("  --diagnostics [pretty|text|json] --output <file|->          Write diagnostics to a file or stderr (default: pretty).");
+        writer.WriteLine("  --debug (lex|parse)+ (-o|--output) <file|->                 Write selected debug JSON to a file or stdout.");
+        writer.WriteLine("  --diagnostics [pretty|text|json] (-o|--output) <file|->     Write diagnostics to a file or stderr (default: pretty).");
+        writer.WriteLine("  -o, --output <file|->                                       Output destination path (or '-' for stdout).");
         writer.WriteLine("  --color [auto|always|never]                                 Control ANSI colored diagnostics.");
         writer.WriteLine("  --diagnostic-paths (relative|full)                          Choose relative or full file paths in diagnostics.");
         writer.WriteLine("  -Werror, --warnings-as-errors                               Treat compiler warnings as errors.");
