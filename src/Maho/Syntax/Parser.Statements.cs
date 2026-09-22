@@ -112,12 +112,18 @@ internal sealed partial class Parser
                             return ParseLocalGotoStatement();
                         else if (Peek().Kind is TokenKind.Colon)
                             return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var context))
                         {
-                            if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                return ParseLocalAmbiguousDeclarationStatement(context);
-                            
-                            return ParseLocalVariableDeclarationStatement();
+                            if (!success && context is LookaheadResultContext.MissingDelimeter)
+                                return ParseLocalVariableDeclarationStatement();
+
+                            if (success)
+                            {
+                                if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                    return ParseLocalAmbiguousDeclarationStatement(context);
+
+                                return ParseLocalVariableDeclarationStatement();
+                            }
                         }
                         break;
 
@@ -144,12 +150,18 @@ internal sealed partial class Parser
                             return ParseLocalGotoStatement();
                         else if (Peek().Kind is TokenKind.Colon)
                             return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
+                        else if (LooksLikeVariableDeclaration() is (var success, var context))
                         {
-                            if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                return ParseLocalAmbiguousDeclarationStatement(context);
-                            
-                            return ParseLocalVariableDeclarationStatement();
+                            if (!success && context is LookaheadResultContext.MissingDelimeter)
+                                return ParseLocalVariableDeclarationStatement();
+
+                            if (success)
+                            {
+                                if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
+                                    return ParseLocalAmbiguousDeclarationStatement(context);
+
+                                return ParseLocalVariableDeclarationStatement();
+                            }
                         }
                         break;
 

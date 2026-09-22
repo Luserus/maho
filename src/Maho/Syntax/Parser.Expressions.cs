@@ -88,13 +88,14 @@ internal sealed partial class Parser
             if (entry.IsInfix)
             {
                 int lbp = entry.LeftBindingPower;
-                if (lbp < minBindingPower) 
+                if (lbp < minBindingPower)
                     break;
 
                 // consume combined operator
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
-                var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
+                string? context = opTok.Kind is TokenKind.Equals ? "after '=' in the assignment expression" : $"after '{opTok.Value}' in the binary expression";
+                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious);
 
                 if (opTok.Kind is TokenKind.Equals)
                     left = new AssignmentExpression(left, opTok, right);
@@ -138,8 +139,8 @@ internal sealed partial class Parser
 
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
         {
-            var (lessThan, typeArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, lessThan, typeArguments, greaterThan);
+            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
+            return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);
         }
 
         return new IdentifierNameExpression(identifier);
@@ -274,27 +275,21 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Expression> ParseExpressionList(TokenKind delimiter)
     {
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind != delimiter && CurrentToken.Kind is not TokenKind.EndToken)
         {
             if (CurrentToken.Kind is TokenKind.Semicolon)
                 break;
-                
+
             nodesAndSeparators.Add(ParseExpectedExpression("after ',' in the expression list", MissingTokenAnchor.AfterPrevious));
-            wasCommaLast = false;
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the collection expression");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
@@ -361,7 +356,7 @@ internal sealed partial class Parser
 
             if (CurrentToken.Kind is TokenKind.LeftBrace)
                 initializer = ParseCollectionInitializer();
-            
+
             ObjectWithClause? withClause = null;
 
             if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
@@ -384,7 +379,6 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()
     {
         List<SyntaxNode> nodesAndSeparators = [];
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
@@ -393,19 +387,13 @@ internal sealed partial class Parser
 
             nodesAndSeparators.Add(ParseArgumentExpression());
 
-            wasCommaLast = false;
-
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            diagnostics.ReportExpectedExpression(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the argument list");
 
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }

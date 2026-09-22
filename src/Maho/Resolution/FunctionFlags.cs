@@ -13,5 +13,6 @@ internal enum FunctionFlags : ulong
     Virtual      = 1UL << 6,
     Readonly    = 1UL << 7,
 
-    Unsafe      = 1UL << 8
+    Unsafe      = 1UL << 8,
+    Partial     = 1UL << 9
 }

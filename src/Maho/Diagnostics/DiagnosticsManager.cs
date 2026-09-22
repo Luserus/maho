@@ -50,25 +50,118 @@ internal sealed class DiagnosticsManager
             diagnostics.Add(diagnostic);
     }
 
-    /// <summary> Reports a non-failing informational diagnostic using the shared internal model. </summary>
-    public void ReportInfo(string code, string message, TextSpan span, SourceText? source = null) =>
-        Report(new Diagnostic(code, message, span, DiagnosticKind.Info, source: source ?? defaultSource));
-
-    /// <summary> Reports a warning diagnostic using the shared internal model. </summary>
-    public void ReportWarning(string code, string message, TextSpan span, SourceText? source = null) =>
-        Report(new Diagnostic(code, message, span, DiagnosticKind.Warning, source: source ?? defaultSource));
-
     /// <summary> Reports an error diagnostic using the shared internal model. </summary>
     public void ReportError(string code, string message, TextSpan span, SourceText? source = null) =>
         Report(new Diagnostic(code, message, span, DiagnosticKind.Error, source: source ?? defaultSource));
+
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich error diagnostic. </summary>
+    public DiagnosticBuilder BuildError(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Error, primarySpan, source ?? defaultSource);
+
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich warning diagnostic. </summary>
+    public DiagnosticBuilder BuildWarning(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Warning, primarySpan, source ?? defaultSource);
+
+    /// <summary> Creates a fluent <see cref="DiagnosticBuilder"/> for constructing a rich info diagnostic. </summary>
+    public DiagnosticBuilder BuildInfo(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
+        new(this, code, message, DiagnosticKind.Info, primarySpan, source ?? defaultSource);
+
+    /// <summary>
+    /// Reports an unsupported binary operator or type mismatch between left and right operands,
+    /// annotating the operator with a primary caret and the operands with secondary underlines.
+    /// </summary>
+    public void ReportTypeMismatch(
+        TextSpan opSpan,
+        string op,
+        TextSpan lhsSpan,
+        string lhsTypeName,
+        TextSpan rhsSpan,
+        string rhsTypeName,
+        string? note = null,
+        string? help = null,
+        SourceText? source = null)
+    {
+        var builder = BuildError("MH2001", $"Cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'.", opSpan, source)
+            .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
+            .WithSecondaryLabel(lhsSpan, $"this expression has type '{lhsTypeName}'")
+            .WithSecondaryLabel(rhsSpan, $"this expression has type '{rhsTypeName}'");
+
+        if (note is not null)
+            builder.WithNote(note);
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
+
+    /// <summary>
+    /// Reports a re-declared symbol in the same scope, pointing to both the re-declaration site
+    /// (primary label) and the previous declaration site (secondary label).
+    /// </summary>
+    public void ReportDuplicateDeclaration(
+        string symbolKind,
+        string name,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError("MH1002", $"{symbolKind} '{name}' is already declared in this scope.", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{name}' re-declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{name}' here", firstSource)
+            .WithHelp($"consider renaming or removing one of the duplicate {symbolKind.ToLowerInvariant()} declarations.")
+            .Report();
+    }
 
     /// <summary>
     /// Reports an error diagnostic that also preserves the expected syntax text for downstream
     /// renderers that want to produce more specific remediation hints.
     /// </summary>
-    private void ReportExpected(string code, string expected, DiagnosticText found, TextSpan span, string? context = null, SourceText? source = null) =>
-        Report(new Diagnostic(code, expected, found, span, DiagnosticKind.Error, context, source ?? defaultSource));
+    private void ReportExpected(
+        string code,
+        string expected,
+        DiagnosticText found,
+        TextSpan span,
+        string? context = null,
+        SourceText? source = null,
+        TextSpan? unexpectedSpan = null)
+    {
+        var effectiveSource = source ?? defaultSource;
+        IReadOnlyList<DiagnosticLabel> labels = [];
+        TextSpan effectiveSpan = span;
 
+        if (unexpectedSpan.HasValue)
+        {
+            if (effectiveSource is not null)
+            {
+                int expectedLine = effectiveSource.GetLineIndex(span.Start);
+                int unexpectedLine = effectiveSource.GetLineIndex(unexpectedSpan.Value.Start);
+                if (expectedLine != unexpectedLine)
+                {
+                    effectiveSpan = unexpectedSpan.Value;
+                    labels =
+                    [
+                        new DiagnosticLabel(span, null, DiagnosticLabelStyle.Context, effectiveSource),
+                        new DiagnosticLabel(unexpectedSpan.Value, null, DiagnosticLabelStyle.Primary, effectiveSource)
+                    ];
+                }
+            }
+            else
+            {
+                effectiveSpan = unexpectedSpan.Value;
+                labels =
+                [
+                    new DiagnosticLabel(span, null, DiagnosticLabelStyle.Context, null),
+                    new DiagnosticLabel(unexpectedSpan.Value, null, DiagnosticLabelStyle.Primary, null)
+                ];
+            }
+        }
+
+        Report(new Diagnostic(code, expected, found, effectiveSpan, DiagnosticKind.Error, context, effectiveSource)
+        {
+            Labels = labels
+        });
+    }
 
     /// <summary> Reports an invalid token emitted by the lexer, preserving the offending text when possible. </summary>
     public void ReportBadToken(TextSpan span, DiagnosticText tokenText) =>
@@ -87,32 +180,46 @@ internal sealed class DiagnosticsManager
         ReportError("MH0003", "Character literal cannot be empty.", span, source);
 
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
-    public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0004", expected, found, span, context, source);
+    public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0004", expected, found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where an expression was needed to continue meaningfully. </summary>
-    public void ReportExpectedExpression(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0005", "an expression", found, span, context, source);
+    public void ReportExpectedExpression(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0005", "an expression", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where an identifier-shaped token was required. </summary>
-    public void ReportExpectedIdentifier(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0006", "an identifier", found, span, context, source);
+    public void ReportExpectedIdentifier(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0006", "an identifier", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where type syntax was required. </summary>
-    public void ReportExpectedType(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0007", "a type", found, span, context, source);
+    public void ReportExpectedType(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0007", "a type", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where a declaration or type body was required. </summary>
-    public void ReportExpectedBody(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0008", expected, found, span, context, source);
+    public void ReportExpectedBody(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0008", expected, found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports a parser recovery site where parameter syntax was required. </summary>
-    public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0009", "a parameter", found, span, context, source);
+    public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0009", "a parameter", found, span, context, source, unexpectedSpan);
 
-    /// <summary> Reports a parser recovery site where a type parameter syntax was required. </summary>
-    public void ReportExpectedTypeParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null) =>
-        ReportExpected("MH0010", "a type parameter", found, span, context, source);
+    /// <summary> Reports a parser recovery site where generic parameter syntax was required. </summary>
+    public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0010", "a generic parameter", found, span, context, source, unexpectedSpan);
+
+    /// <summary> Reports that top-level statements require '#pragma toplevel enable'. </summary>
+    public void ReportTopLevelPragmaRequired(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0011", "Top-level statements require '#pragma toplevel enable' in this file.", span, source)
+            .WithPrimaryLabel(span, "top-level statements require '#pragma toplevel enable'", source)
+            .WithHelp("add '#pragma toplevel enable' to the file or use an explicit main function.")
+            .Report();
+
+    /// <summary> Reports that only one source file may contain top-level statements. </summary>
+    public void ReportMultipleTopLevelSources(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0012", "Only one source file may contain top-level statements.", span, source)
+            .WithPrimaryLabel(span, "extra top-level statement source declared here", source)
+            .WithHelp("ensure only a single file in the project has top-level statements.")
+            .Report();
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
     public void ReportUnexpectedToken(TextSpan span, DiagnosticText found, SourceText? source = null) =>
@@ -129,54 +236,154 @@ internal sealed class DiagnosticsManager
     /// Reports a type reference that could not be matched to any visible declaration.
     /// </summary>
     public void ReportUnresolvedTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
-        ReportError("MH1000", $"Could not resolve type '{typeName}'.", span, source);
+        BuildError("MH1000", $"Could not resolve type '{typeName}'.", span, source)
+            .WithPrimaryLabel(span, $"type '{typeName}' not found", source)
+            .WithHelp("check for a missing import or declaration.")
+            .Report();
 
     /// <summary> Reports a type reference that matched more than one visible declaration. </summary>
     public void ReportAmbiguousTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
-        ReportError("MH1001", $"Type '{typeName}' is ambiguous in the current scope.", span, source);
+        BuildError("MH1001", $"Type '{typeName}' is ambiguous in the current scope.", span, source)
+            .WithPrimaryLabel(span, $"ambiguous reference to '{typeName}'", source)
+            .WithHelp($"qualify '{typeName}' with its namespace or use an alias.")
+            .Report();
 
-    /// <summary> Reports a duplicate type declaration in one lexical scope. </summary>
-    public void ReportDuplicateTypeDeclaration(TextSpan span, string typeName, int arity, SourceText? source = null) =>
-        ReportError(
+    /// <summary> Reports a duplicate type declaration pointing to both declaration sites. </summary>
+    public void ReportDuplicateTypeDeclaration(
+        string typeName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null) =>
+        ReportDuplicateDeclaration("Type", typeName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
+
+    /// <summary> Reports a duplicate alias declaration pointing to both declaration sites. </summary>
+    public void ReportDuplicateAliasDeclaration(
+        string aliasName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null) =>
+        ReportDuplicateDeclaration("Alias", aliasName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
+
+    /// <summary> Reports that partial declarations of a type have conflicting type kinds. </summary>
+    public void ReportConflictingPartialTypeKinds(
+        string typeName,
+        string firstKind,
+        string redeclKind,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
             "MH1002",
-            arity == 0
-                ? $"Type '{typeName}' is already declared in this scope."
-                : $"Type '{typeName}' with arity {arity} is already declared in this scope.",
-            span,
-            source);
+            $"Partial declarations of '{typeName}' have conflicting type kinds ('{firstKind}' and '{redeclKind}').",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"declared as '{redeclKind}' here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"declared as '{firstKind}' here", firstSource)
+            .Report();
+    }
 
-    /// <summary> Reports a duplicate function declaration with the same generic arity and parameter shape. </summary>
-    public void ReportDuplicateFunctionDeclaration(TextSpan span, string functionName, int arity, SourceText? source = null) =>
-        ReportError(
+    /// <summary> Reports a duplicate function declaration pointing to both declaration sites. </summary>
+    public void ReportDuplicateFunctionDeclaration(
+        string functionName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
             "MH1003",
-            arity == 0
-                ? $"Function '{functionName}' with the same parameter types is already declared in this scope."
-                : $"Function '{functionName}' with arity {arity} and the same parameter types is already declared in this scope.",
-            span,
-            source);
+            $"Function '{functionName}' with the same parameter types is already declared in this scope.",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{functionName}' re-declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{functionName}' here", firstSource)
+            .WithHelp("consider renaming the function or changing its parameter types.")
+            .Report();
+    }
+
+    /// <summary> Reports that a partial function has more than one defining declaration with a body. </summary>
+    public void ReportMultiplePartialFunctionBodies(
+        string functionName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
+            "MH1003",
+            $"Partial function '{functionName}' cannot have more than one defining declaration with a body.",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{functionName}' already has an implementation here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous implementation of '{functionName}' here", firstSource)
+            .WithHelp("remove the extra function body or merge the implementations.")
+            .Report();
+    }
+
+    /// <summary> Reports that declarations of a partial function have conflicting return types. </summary>
+    public void ReportConflictingPartialFunctionReturnTypes(
+        string functionName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
+            "MH1003",
+            $"Partial function declarations of '{functionName}' have conflicting return types.",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, "conflicting return type declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, "previous return type declared here", firstSource)
+            .Report();
+    }
 
     /// <summary> Reports that a type participates in an inheritance cycle. </summary>
     public void ReportCyclicTypeHierarchy(TextSpan span, string typeName, SourceText? source = null) =>
-        ReportError("MH1004", $"Type '{typeName}' participates in a cycle in the type hierarchy.", span, source);
+        BuildError("MH1004", $"Type '{typeName}' participates in a cycle in the type hierarchy.", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' participates in a cycle here", source)
+            .WithHelp("break the inheritance cycle by removing one of the base types.")
+            .Report();
 
-    /// <summary> Reports a duplicate variable declaration in one lexical scope. </summary>
-    public void ReportDuplicateVariableDeclaration(TextSpan span, string variableName, SourceText? source = null) =>
-        ReportError("MH1005", $"Variable '{variableName}' is already declared in this scope.", span, source);
+    /// <summary> Reports a duplicate variable declaration pointing to both declaration sites. </summary>
+    public void ReportDuplicateVariableDeclaration(
+        string variableName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
+            "MH1005",
+            $"Variable '{variableName}' is already declared in this scope.",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{variableName}' re-declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{variableName}' here", firstSource)
+            .WithHelp("consider renaming or removing one of the duplicate variable declarations.")
+            .Report();
+    }
 
-    /// <summary> Reports a duplicate property declaration in one lexical scope. </summary>
-    public void ReportDuplicatePropertyDeclaration(TextSpan span, string propertyName, SourceText? source = null) =>
-        ReportError("MH1006", $"Property '{propertyName}' is already declared in this scope.", span, source);
-
-    /// <summary> Reports an intrinsic attribute declaration whose simple compiler-known name is not recognized. </summary>
-    public void ReportUnrecognizedIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
-        ReportError("MH1007", $"Intrinsic attribute '{attributeName}' is not recognized by the compiler.", span, source);
-
-    /// <summary> Reports that a supported intrinsic attribute declaration was not found anywhere in the project. </summary>
-    public void ReportUndeclaredIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
-        ReportError("MH1008", $"Intrinsic attribute '{attributeName}' was not declared in the project.", span, source);
-
-    /// <summary> Reports that resolution state became inconsistent without crashing the analysis pipeline. </summary>
-    public void ReportResolutionStateError(TextSpan span, string subject, SourceText? source = null) =>
-        ReportError("MH1099", $"Resolution state became inconsistent while resolving {subject}.", span, source);
-
+    /// <summary> Reports a duplicate property declaration pointing to both declaration sites. </summary>
+    public void ReportDuplicatePropertyDeclaration(
+        string propertyName,
+        TextSpan redeclSpan,
+        TextSpan firstDeclSpan,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        BuildError(
+            "MH1006",
+            $"Property '{propertyName}' is already declared in this scope.",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"'{propertyName}' re-declared here", redeclSource)
+            .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{propertyName}' here", firstSource)
+            .WithHelp("consider renaming or removing one of the duplicate property declarations.")
+            .Report();
+    }
 }

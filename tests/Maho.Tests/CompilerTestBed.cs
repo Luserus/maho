@@ -22,6 +22,4 @@ internal static class CompilerTestBed
         CompilationUnit root = parser.Parse(lexer.Tokens);
         return (text, diagnostics, parser, root);
     }
-
-
 }

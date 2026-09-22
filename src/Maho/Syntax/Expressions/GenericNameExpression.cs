@@ -5,16 +5,16 @@ internal sealed class GenericNameExpression : NamedExpression
 {
     /// <summary> Opening angle bracket token. </summary>
     public Token LessThanToken { get; }
-    /// <summary> Generic type arguments. </summary>
-    public SeparatedSyntaxList<TypeSyntax> TypeArguments { get; }
+    /// <summary> Generic arguments. </summary>
+    public SeparatedSyntaxList<TypeSyntax> GenericArguments { get; }
     /// <summary> Closing angle bracket token. </summary>
     public Token GreaterThanToken { get; }
 
     /// <summary> Creates one generic-name expression node. </summary>
-    public GenericNameExpression(Token identifier, Token lessThanToken, SeparatedSyntaxList<TypeSyntax> typeArguments, Token greaterThanToken) : base(identifier)
+    public GenericNameExpression(Token identifier, Token lessThanToken, SeparatedSyntaxList<TypeSyntax> genericArguments, Token greaterThanToken) : base(identifier)
     {
         LessThanToken = lessThanToken;
-        TypeArguments = typeArguments;
+        GenericArguments = genericArguments;
         GreaterThanToken = greaterThanToken;
     }
 }

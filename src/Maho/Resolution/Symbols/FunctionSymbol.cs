@@ -9,14 +9,15 @@ internal sealed class FunctionSymbol : Symbol
 
     public NamespaceTrieNode? ContainingNamespace { get; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
+    public List<SymbolHandle> Parameters { get; internal set; }
     public List<SymbolHandle> LocalVariables { get; internal set; }
     public List<SymbolHandle> LocalFunctions { get; internal set; }
     public List<SymbolHandle> LocalTypes { get; internal set; }
 
-    public SymbolHandle? ReturnType { get; internal set; }
+    public TypeRef ReturnType { get; internal set; } = TypeRef.Unresolved;
 
     public FunctionDeclaration? Syntax { get; }
 
@@ -25,8 +26,9 @@ internal sealed class FunctionSymbol : Symbol
     {
         Kind = SymbolKind.Function;
         ContainingNamespace = containingNamespace;
-        TypeParameters = [];
+        GenericParameters = [];
         Attributes = [];
+        Parameters = [];
         LocalVariables = [];
         LocalFunctions = [];
         LocalTypes = [];

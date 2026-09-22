@@ -5,7 +5,7 @@ internal sealed partial class Parser
 {
     /// <summary> Recognizes token kinds that can safely terminate a recovery scan. </summary>
     private static bool IsRecoveryBoundary(TokenKind kind) =>
-        kind is TokenKind.EndToken or TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.Semicolon or TokenKind.Comma;
+        kind is TokenKind.EndToken or TokenKind.Semicolon or TokenKind.Comma or TokenKind.RightParen;
 
     /// <summary> Checks whether the current token can start an expression. </summary>
     private bool CanStartExpression()

@@ -17,4 +17,6 @@ internal readonly struct SymbolName
     public SymbolName(SymbolPart[] parts) => this.parts = parts;
 
     public SymbolName(SymbolPart part) : this([part]) { }
+
+    public override string ToString() => string.Join('.', parts);
 }

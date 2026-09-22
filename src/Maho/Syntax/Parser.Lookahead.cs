@@ -89,7 +89,7 @@ internal sealed partial class Parser
                 lookaheadCurrent = saved;
                 return (false, LookaheadResultContext.FailedParseTypeSyntax);
             }
-            
+
             LookaheadConsume(); // identifier
 
             if (LookaheadCurrentToken.Kind is TokenKind.Dot)
@@ -251,7 +251,7 @@ internal sealed partial class Parser
             length = i + 1;
             foundKind = node.Kind;
         }
-                
+
         return (foundKind ?? TokenKind.NullToken, length);
     }
 
@@ -280,15 +280,16 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses a speculative generic type-argument list without mutating real parser state. </summary>
-    private (SeparatedSyntaxList<TypeSyntax> TypeArguments, bool Success) LookaheadParseTypeArgumentList()
+    private (SeparatedSyntaxList<TypeSyntax> GenericArguments, bool Success) LookaheadParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
             if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
-                nodesAndSeparators.Add(new LiteralTypeArgument(LookaheadConsume()));
+                nodesAndSeparators.Add(new LiteralGenericArgument(new LiteralExpression(LookaheadConsume())));
+            else if (LookaheadCurrentToken.Kind is TokenKind.Identifier && LookaheadPeek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
+                nodesAndSeparators.Add(new NamedExpressionGenericArgument(new IdentifierNameExpression(LookaheadConsume())));
             else
             {
                 if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
@@ -301,44 +302,38 @@ internal sealed partial class Parser
 
                 nodesAndSeparators.Add(type);
             }
-            wasCommaLast = false;
-
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(LookaheadConsume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
 
-        if (wasCommaLast)
-            return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
-
         return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), true);
     }
 
     /// <summary> Parses one complete speculative generic argument clause, including its angle brackets. </summary>
-    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan, bool Success) LookaheadParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> GenericArguments, Token GreaterThan, bool Success) LookaheadParseGenerics()
     {
         var lessThan = LookaheadConsume();
-        var (typeArguments, success) = LookaheadParseTypeArgumentList();
+        var (genericArguments, success) = LookaheadParseGenericArgumentList();
 
         if (!success)
         {
-            return (lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
+            return (lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
         }
 
         Token greaterThan;
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
         {
-            return (lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
+            return (lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), false);
         }
         else
             greaterThan = LookaheadConsume();
 
-        return (lessThan, typeArguments, greaterThan, true);
+        return (lessThan, genericArguments, greaterThan, true);
     }
 
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
@@ -375,7 +370,7 @@ internal sealed partial class Parser
     /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
     {
-        if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+        if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
 
         var identifier = LookaheadConsume();
@@ -408,12 +403,12 @@ internal sealed partial class Parser
     /// <summary> Speculatively parses a generic type name after its identifier has already been consumed. </summary>
     private (GenericType Type, bool Success) LookaheadParseGenericType(Token identifier)
     {
-        var (lessThan, typeArguments, GreaterThan, success) = LookaheadParseGenerics();
+        var (lessThan, genericArguments, GreaterThan, success) = LookaheadParseGenerics();
 
         if (!success)
-            return (new GenericType(identifier, lessThan, typeArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            return (new GenericType(identifier, lessThan, genericArguments, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
-        return (new GenericType(identifier, lessThan, typeArguments, GreaterThan), true);
+        return (new GenericType(identifier, lessThan, genericArguments, GreaterThan), true);
     }
 
     /// <summary> Speculatively parses zero or more postfix type modifiers such as arrays, pointers, references, or optionals. </summary>
@@ -490,7 +485,7 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Internal:
                 case MatchingKeywordKind.Public:
                 case MatchingKeywordKind.Static:
-                case MatchingKeywordKind.Sealed:
+                case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
                     list.Add(LookaheadConsume());
                     break;
@@ -524,24 +519,23 @@ internal sealed partial class Parser
     private (GenericName Type, bool Success) LookaheadParseGenericName(Token name)
     {
         var lessThan = LookaheadConsume();
-        var (typeParameters, success) = LookaheadParseTypeParameterList();
+        var (genericParameters, success) = LookaheadParseGenericParameterList();
 
         if (!success)
             return (new GenericName(name, lessThan, new SeparatedSyntaxList<GenericParameterSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
-            return (new GenericName(name, lessThan, typeParameters, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            return (new GenericName(name, lessThan, genericParameters, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
         var greaterThan = LookaheadConsume();
 
-        return (new GenericName(name, lessThan, typeParameters, greaterThan), true);
+        return (new GenericName(name, lessThan, genericParameters, greaterThan), true);
     }
 
-    /// <summary> Speculatively parses a generic type-parameter list. </summary>
-    private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseTypeParameterList()
+    /// <summary> Speculatively parses a generic-parameter list. </summary>
+    private (SeparatedSyntaxList<GenericParameterSyntax> Type, bool Success) LookaheadParseGenericParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
@@ -582,19 +576,14 @@ internal sealed partial class Parser
             }
 
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
-            wasCommaLast = false;
 
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(LookaheadConsume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
-
-        if (wasCommaLast)
-            return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
 
         return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), true);
     }

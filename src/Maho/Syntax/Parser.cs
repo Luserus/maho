@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Maho.Diagnostics;
@@ -116,7 +117,7 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
                                                    MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global;
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
@@ -125,7 +126,10 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token starts a bracketed attribute list. </summary>
     private bool IsCurrentTokenAttributeListStart => CurrentToken.Kind is TokenKind.LeftBracket;
     /// <summary> Indicates whether the current token can begin a type declaration. </summary>
-    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or MatchingKeywordKind.Attribute;
+    private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
+    /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
+    private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
+        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -143,7 +147,7 @@ internal sealed partial class Parser
                 return true;
 
             if (kind is MatchingKeywordKind.Intrinsic or MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or MatchingKeywordKind.Unsafe or
-                MatchingKeywordKind.Protected or MatchingKeywordKind.Sealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial)
+                MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial)
             {
                 probe++;
                 continue;
@@ -172,11 +176,14 @@ internal sealed partial class Parser
     /// <summary> Builds the shared operator trie once for the parser type. </summary>
     static Parser() => operatorTrie = BuildOperatorTrie();
 
+    private readonly bool allowImplicitTopLevel;
+
     /// <summary> Creates a parser over one token stream and shared diagnostics sink. </summary>
-    public Parser(SourceText text, DiagnosticsManager diagnostics)
+    public Parser(SourceText text, DiagnosticsManager diagnostics, bool allowImplicitTopLevel = false)
     {
         this.text = text;
         this.diagnostics = diagnostics;
+        this.allowImplicitTopLevel = allowImplicitTopLevel;
     }
 
     /// <summary> Parses the tokens into Syntax Tree. This method is in Work-In-Progress and will me modified later to return the Syntax Tree. </summary>
@@ -188,6 +195,7 @@ internal sealed partial class Parser
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
+
         return compilationUnit;
     }
 
@@ -216,11 +224,20 @@ internal sealed partial class Parser
     /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()
     {
-        IReadOnlyList<PragmaDirective> pragmas = ParsePragmaDirectives(out bool topLevelStatementsEnabled);
+        var directives = new List<Directive>();
+        bool topLevelStatementsEnabled = allowImplicitTopLevel;
         var topLevels = new List<TopLevel>();
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
+            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+            {
+                var parsedDirectives = ParseDirectives(out bool enabled, topLevelStatementsEnabled);
+                directives.AddRange(parsedDirectives);
+                topLevelStatementsEnabled = enabled;
+                continue;
+            }
+
             var start = current;
             var topLevel = ParseTopLevel(topLevelStatementsEnabled);
             topLevels.Add(topLevel);
@@ -229,7 +246,7 @@ internal sealed partial class Parser
 
         var eofToken = Consume();
 
-        return new CompilationUnit(pragmas, topLevels, eofToken);
+        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -259,7 +276,11 @@ internal sealed partial class Parser
     private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new TopLevelUsingDirective(ParseUsingDirective());
             return ParseTopLevelAliasDeclaration();
+        }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
@@ -269,15 +290,22 @@ internal sealed partial class Parser
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
-        else if (LooksLikeVariableDeclaration() is (var success, var context) && success)
+        else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
-            if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
-                return ParseTopLevelAmbiguousPointerDeclaration();
+            if (!success && context is LookaheadResultContext.MissingDelimeter)
+                return ParseTopLevelDeclaration(topLevelStatementsEnabled);
 
-            if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
-                return ParseTopLevelAmbiguousReferenceDeclaration();
+            if (success)
+            {
+                if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
+                    return ParseTopLevelAmbiguousPointerDeclaration();
 
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+                if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
+                    return ParseTopLevelAmbiguousReferenceDeclaration();
+
+                return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+            }
+
         }
 
         return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
@@ -286,11 +314,20 @@ internal sealed partial class Parser
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember()
     {
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new MemberUsingDirective(ParseUsingDirective());
+            return ParseMemberAliasDeclaration();
+        }
+
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseMemberBlockDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
+            return ParseMemberAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(attributes, modifiers);
         else
@@ -300,51 +337,59 @@ internal sealed partial class Parser
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
+        {
+            if (IsUsingDirective())
+                return new LocalUsingDirective(ParseUsingDirective());
+            return ParseLocalAliasDeclaration();
+        }
+
         if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
 
         return ParseLocalStatement(parseMode);
     }
 
-    /// <summary> Parses a comma-separated generic type-argument list up to the closing <c>&gt;</c>. </summary>
-    private SeparatedSyntaxList<TypeSyntax> ParseTypeArgumentList()
+    /// <summary> Parses a comma-separated generic-argument list up to the closing <c>&gt;</c>. </summary>
+    private SeparatedSyntaxList<TypeSyntax> ParseGenericArgumentList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
 
         while (CurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
         {
-            nodesAndSeparators.Add(ParseTypeArgument());
-            wasCommaLast = false;
+            nodesAndSeparators.Add(ParseGenericArgument());
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {
                 nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
             }
             else
                 break;
         }
 
-        if (wasCommaLast)
-            diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the type argument list");
-
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
 
-    /// <summary>Parses either a type argument or a literal compile-time argument.</summary>
-    private TypeSyntax ParseTypeArgument() => IsLiteralTokenKind(CurrentToken.Kind)
-        ? new LiteralTypeArgument(Consume())
-        : ParseTypeSyntax();
+    /// <summary>Parses either a type argument or a compile-time expression argument.</summary>
+    private TypeSyntax ParseGenericArgument()
+    {
+        if (IsLiteralTokenKind(CurrentToken.Kind))
+            return new LiteralGenericArgument(new LiteralExpression(Consume()));
+
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
+            return new NamedExpressionGenericArgument(new IdentifierNameExpression(Consume()));
+
+        return ParseTypeSyntax();
+    }
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
-    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> TypeArguments, Token GreaterThan) ParseGenerics()
+    private (Token LessThan, SeparatedSyntaxList<TypeSyntax> GenericArguments, Token GreaterThan) ParseGenerics()
     {
         var lessThan = Consume();
-        var typeArguments = ParseTypeArgumentList();
+        var genericArguments = ParseGenericArgumentList();
         var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic argument list");
 
-        return (lessThan, typeArguments, greaterThan);
+        return (lessThan, genericArguments, greaterThan);
     }
 
     /// <summary> Returns the length and combined form of combined operator token types. </summary>
@@ -397,27 +442,10 @@ internal sealed partial class Parser
         return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
-    private TopLevelBlock ParseTopLevelBlock(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, bool topLevelStatementsEnabled)
-    {
-        var openBrace = Consume();
-        var members = new List<TopLevel>();
-
-        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
-        {
-            var start = current;
-            var member = ParseTopLevel(topLevelStatementsEnabled);
-            members.Add(member);
-            RecoverTopLevelIfStalled(start);
-        }
-        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the top-level block");
-
-        return new TopLevelBlock(attributes, modifiers, openBrace, members, closeBrace);
-    }
-
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
     {
         if (!topLevelStatementsEnabled)
-            diagnostics.ReportError("MH0011", "Top-level statements require '#pragma toplevel enable' in this file.", CurrentToken.Span);
+            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span);
 
         return ParseTopLevelStatement();
     }
@@ -435,6 +463,7 @@ internal sealed partial class Parser
     {
         var currentToken = CurrentToken;
         current++;
+
         return currentToken;
     }
 }

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Maho/Maho.csproj" />
+    <ProjectReference Include="../../src/MahoBuild/MahoBuild.csproj" />
+    <ProjectReference Include="../../src/MahoCli/MahoCli.csproj" />
   </ItemGroup>
 
 </Project>

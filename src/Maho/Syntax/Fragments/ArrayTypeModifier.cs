@@ -13,7 +13,7 @@ internal sealed class ArrayTypeModifier : PostfixTypeModifier
     public ArrayTypeModifier(Token leftBracket, Expression? size, Token rightBracket) : base(PostfixTypeModifierKind.Array)
     {
         LeftBracket = leftBracket;
-        Size =  size;
+        Size = size;
         RightBracket = rightBracket;
     }
 }

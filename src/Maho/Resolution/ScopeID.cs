@@ -31,9 +31,7 @@ internal struct ScopeID : IEquatable<ScopeID>
 
     public override int GetHashCode() => Value;
 
-    public override string ToString() => Value.ToString();
+    public override readonly string ToString() => Value.ToString();
 
-    public bool Equals(ScopeID other) => other.Value == Value;
+    public readonly bool Equals(ScopeID other) => other.Value == Value;
 }
-
-

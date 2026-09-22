@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using Maho;
+using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Tests;
@@ -11,7 +12,7 @@ public sealed class ParserTests
     [InlineData("namespace Demo;", typeof(NamespaceDeclaration), typeof(NamespaceEmptyBody))]
     [InlineData("namespace Demo { public class Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
     [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
-    [InlineData("public attribute Marker;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("public attribute Marker;", typeof(TopLevelAttributeDeclaration), null)]
     [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static int Main();", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static int Main() { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
@@ -132,11 +133,219 @@ public sealed class ParserTests
         Assert.IsType<QualifiedType>(simple.Alias.Target);
         Assert.IsType<QualifiedType>(specialized.Alias.Target);
         GenericName genericName = Assert.IsType<GenericName>(generic.Alias.Name);
-        Assert.Equal("T", Assert.Single(genericName.TypeParameters).Identifier.Value);
+        Assert.Equal("T", Assert.Single(genericName.GenericParameters).Identifier.Value);
         Assert.Single(generic.Alias.Constraints);
         GenericType genericTarget = Assert.IsType<GenericType>(Assert.IsType<QualifiedType>(generic.Alias.Target).Right);
-        Assert.Equal("T", Assert.IsType<SimpleType>(genericTarget.TypeArguments[0]).Name.Value);
-        Assert.Equal("Int32", Assert.IsType<SimpleType>(genericTarget.TypeArguments[1]).Name.Value);
+        Assert.Equal("T", Assert.IsType<NamedExpressionGenericArgument>(genericTarget.GenericArguments[0]).Expression.Identifier.Value);
+        Assert.Equal("Int32", Assert.IsType<NamedExpressionGenericArgument>(genericTarget.GenericArguments[1]).Expression.Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_SimpleNamespace()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Directive directive = Assert.Single(root.Directives);
+        UsingDirective usingDirective = Assert.IsType<UsingDirective>(directive);
+        Assert.Equal(MatchingKeywordKind.Using, usingDirective.Keyword.MatchingKind);
+        SimpleName name = Assert.IsType<SimpleName>(usingDirective.Namespace);
+        Assert.Equal("Std", name.Name.Value);
+        Assert.Equal(TokenKind.Semicolon, usingDirective.Semicolon.Kind);
+
+        Assert.Single(root.Usings);
+        Assert.Empty(root.Pragmas);
+        Assert.Empty(root.Members);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_QualifiedNamespace()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std.Collections.Generic;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        QualifiedName qualified = Assert.IsType<QualifiedName>(usingDirective.Namespace);
+        Assert.Equal(3, qualified.Parts.Count);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(qualified.Parts[0]).Name.Value);
+        Assert.Equal("Collections", Assert.IsType<SimpleName>(qualified.Parts[1]).Name.Value);
+        Assert.Equal("Generic", Assert.IsType<SimpleName>(qualified.Parts[2]).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_UsingDirectives_InterleavedWithPragmas()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            using Std;
+            using Std.IO;
+
+            int value = 42;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.Equal(3, root.Directives.Count);
+        Assert.IsType<PragmaDirective>(root.Directives[0]);
+        Assert.IsType<UsingDirective>(root.Directives[1]);
+        Assert.IsType<UsingDirective>(root.Directives[2]);
+
+        Assert.Single(root.Pragmas);
+        Assert.Equal(2, root.Usings.Count);
+        Assert.True(root.EnablesTopLevelStatements);
+
+        Assert.Single(root.Members);
+        Assert.IsType<TopLevelVariableDeclaration>(root.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_DisambiguatesFromAliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std;
+            using MyInt = Std.Int32;
+            using GenericBox<T> = Std.Box<T>;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        // Directive list only contains the using directive
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(root.Directives);
+
+        // Alias declarations are TopLevel members, NOT directives
+        Assert.Equal(2, root.Members.Count);
+        TopLevelAliasDeclaration simpleAlias = Assert.IsType<TopLevelAliasDeclaration>(root.Members[0]);
+        Assert.Equal("MyInt", Assert.IsType<SimpleName>(simpleAlias.Alias.Name).Name.Value);
+
+        TopLevelAliasDeclaration genericAlias = Assert.IsType<TopLevelAliasDeclaration>(root.Members[1]);
+        Assert.Equal("GenericBox", Assert.IsType<GenericName>(genericAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_MissingSemicolon_ReportsDiagnosticAndRecovers()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            using Std
+            class MyClass;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Contains(diagnostics.Diagnostics, d => d.Message.Contains("';'"));
+
+        UsingDirective usingDirective = Assert.Single(root.Usings);
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(root.Members);
+        Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_UsingDirective_InsideNamespaceBody_IsParsedIntoNamespaceDirectives()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            namespace MyNamespace
+            {
+                using Std;
+
+                public struct Point;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        Assert.Single(root.Members);
+        NamespaceDeclaration ns = Assert.IsType<NamespaceDeclaration>(root.Members[0]);
+        NamespaceBlockBody body = Assert.IsType<NamespaceBlockBody>(ns.Body);
+        Assert.Single(body.Directives);
+        Assert.Single(body.Usings);
+        UsingDirective usingDirective = body.Usings[0];
+        Assert.Equal("Std", Assert.IsType<SimpleName>(usingDirective.Namespace).Name.Value);
+        Assert.Single(body.Members);
+        Assert.IsType<TopLevelTypeDeclaration>(body.Members[0]);
+    }
+
+    [Fact]
+    public void Parse_TypeBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class MyClass
+            {
+                using Std.Math;
+                using Num = Std.Int32;
+
+                public Num value;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var typeDecl = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<TypeBlockBody>(typeDecl.Type.Body);
+        Assert.Equal(3, body.Members.Count);
+
+        var memberUsing = Assert.IsType<MemberUsingDirective>(body.Members[0]);
+        var memberAlias = Assert.IsType<MemberAliasDeclaration>(body.Members[1]);
+        Assert.IsType<MemberFieldDeclaration>(body.Members[2]);
+
+        Assert.Equal("Std", Assert.IsType<SimpleName>(Assert.IsType<QualifiedName>(memberUsing.Directive.Namespace).Parts[0]).Name.Value);
+        Assert.Equal("Num", Assert.IsType<SimpleName>(memberAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_LocalBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                {
+                    using Std.Collections;
+                    using IntList = Std.List;
+
+                    IntList items;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
+        var blockStmt = Assert.IsType<LocalBlockStatement>(Assert.Single(body.Locals));
+
+        Assert.Equal(3, blockStmt.Locals.Count);
+        var localUsing = Assert.IsType<LocalUsingDirective>(blockStmt.Locals[0]);
+        var localAlias = Assert.IsType<LocalAliasDeclaration>(blockStmt.Locals[1]);
+        Assert.IsType<LocalVariableDeclarationStatement>(blockStmt.Locals[2]);
+
+        Assert.Equal("Collections", Assert.IsType<SimpleName>(Assert.IsType<QualifiedName>(localUsing.Directive.Namespace).Parts[1]).Name.Value);
+        Assert.Equal("IntList", Assert.IsType<SimpleName>(localAlias.Alias.Name).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_TopLevelBlock_SupportsUsingDirective_And_AliasDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            global
+            {
+                using Std;
+                using MyInt = Std.Int32;
+                int x = 1;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var topBlock = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(root.Members));
+        Assert.Equal(3, topBlock.Members.Count);
+
+        var topUsing = Assert.IsType<TopLevelUsingDirective>(topBlock.Members[0]);
+        var topAlias = Assert.IsType<TopLevelAliasDeclaration>(topBlock.Members[1]);
+        Assert.IsType<TopLevelVariableDeclaration>(topBlock.Members[2]);
+
+        Assert.Equal("Std", Assert.IsType<SimpleName>(topUsing.Directive.Namespace).Name.Value);
+        Assert.Equal("MyInt", Assert.IsType<SimpleName>(topAlias.Alias.Name).Name.Value);
     }
 
     [Fact]
@@ -153,7 +362,7 @@ public sealed class ParserTests
 
         Assert.Empty(diagnostics.Diagnostics);
 
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(Assert.Single(root.Members));
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(root.Members));
         Assert.Collection(block.Modifiers, modifier => Assert.Equal(MatchingKeywordKind.Global, modifier.MatchingKind));
         Assert.IsType<TopLevelVariableDeclaration>(block.Members[0]);
         Assert.IsType<TopLevelTypeDeclaration>(block.Members[1]);
@@ -178,9 +387,9 @@ public sealed class ParserTests
             {
                 int value = 1;
             }
-            """, typeof(TopLevelBlock));
+            """, typeof(TopLevelBlockDeclaration));
 
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(topLevel);
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(topLevel);
         Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(block.Members));
     }
 
@@ -257,7 +466,7 @@ public sealed class ParserTests
     [Fact]
     public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
     {
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(ParseSingleTopLevel("""
             [Attribute]
             unsafe
             {
@@ -269,7 +478,7 @@ public sealed class ParserTests
                     }
                 }
             }
-            """, typeof(TopLevelBlock)));
+            """, typeof(TopLevelBlockDeclaration)));
 
         Assert.Single(block.Attributes);
         Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
@@ -286,11 +495,11 @@ public sealed class ParserTests
     [Fact]
     public void Parse_UnmarkedTypeDeclarationInsideTopLevelBlock()
     {
-        TopLevelBlock block = Assert.IsType<TopLevelBlock>(ParseSingleTopLevel("""
+        TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(ParseSingleTopLevel("""
             {
                 struct UnmarkedTopLevelBlock;
             }
-            """, typeof(TopLevelBlock)));
+            """, typeof(TopLevelBlockDeclaration)));
 
         TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
         Assert.Equal("UnmarkedTopLevelBlock", Assert.IsType<SimpleName>(topLevelType.Type.Name).Name.Value);
@@ -311,7 +520,7 @@ public sealed class ParserTests
             """, typeof(NamespaceDeclaration)));
 
         NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
-        TopLevelBlock topLevelBlock = Assert.IsType<TopLevelBlock>(Assert.Single(namespaceBody.Members));
+        TopLevelBlockDeclaration topLevelBlock = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(namespaceBody.Members));
 
         Assert.Single(topLevelBlock.Attributes);
         Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
@@ -479,23 +688,23 @@ public sealed class ParserTests
 
         GenericName name = Assert.IsType<GenericName>(type.Name);
         Assert.Equal("Box", name.Name.Value);
-        Assert.Single(name.TypeParameters);
-        Assert.Equal("T", name.TypeParameters[0].Identifier.Value);
+        Assert.Single(name.GenericParameters);
+        Assert.Equal("T", name.GenericParameters[0].Identifier.Value);
 
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Equal(2, baseClause.BaseTypes.Count);
 
         GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0]);
         Assert.Equal("Base", firstBaseType.Name.Value);
-        SimpleType firstBaseArgument = Assert.IsType<SimpleType>(firstBaseType.TypeArguments[0]);
-        Assert.Equal("T", firstBaseArgument.Name.Value);
+        NamedExpressionGenericArgument firstBaseArgument = Assert.IsType<NamedExpressionGenericArgument>(firstBaseType.GenericArguments[0]);
+        Assert.Equal("T", firstBaseArgument.Expression.Identifier.Value);
 
         QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1]);
         Assert.Equal("Outer", Assert.IsType<SimpleType>(secondBaseType.Left).Name.Value);
         Assert.Equal("Inner", Assert.IsType<SimpleType>(secondBaseType.Right).Name.Value);
 
         TypeConstraintClause constraintClause = Assert.Single(type.Constraints);
-        Assert.Equal("T", constraintClause.TypeParameter.Name.Value);
+        Assert.Equal("T", constraintClause.GenericParameter.Name.Value);
         Assert.Equal(2, constraintClause.Constraints.Count);
 
         TypeTypeConstraint firstConstraint = Assert.IsType<TypeTypeConstraint>(constraintClause.Constraints[0]);
@@ -536,23 +745,74 @@ public sealed class ParserTests
 
         GenericName identifier = Assert.IsType<GenericName>(function.Signature.Identifier);
         Assert.Equal("Build", identifier.Name.Value);
-        Assert.Equal(2, identifier.TypeParameters.Count);
-        Assert.Equal("TInput", identifier.TypeParameters[0].Identifier.Value);
-        Assert.Equal("TResult", identifier.TypeParameters[1].Identifier.Value);
+        Assert.Equal(2, identifier.GenericParameters.Count);
+        Assert.Equal("TInput", identifier.GenericParameters[0].Identifier.Value);
+        Assert.Equal("TResult", identifier.GenericParameters[1].Identifier.Value);
 
         Assert.Equal(2, function.Signature.Constraints.Count);
 
         TypeConstraintClause inputConstraint = function.Signature.Constraints[0];
-        Assert.Equal("TInput", inputConstraint.TypeParameter.Name.Value);
+        Assert.Equal("TInput", inputConstraint.GenericParameter.Name.Value);
         TypeTypeConstraint inputTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(inputConstraint.Constraints));
         Assert.Equal("Source", Assert.IsType<SimpleType>(inputTypeConstraint.Type).Name.Value);
 
         TypeConstraintClause resultConstraint = function.Signature.Constraints[1];
-        Assert.Equal("TResult", resultConstraint.TypeParameter.Name.Value);
+        Assert.Equal("TResult", resultConstraint.GenericParameter.Name.Value);
         TypeTypeConstraint resultTypeConstraint = Assert.IsType<TypeTypeConstraint>(Assert.Single(resultConstraint.Constraints));
         GenericType resultConstraintType = Assert.IsType<GenericType>(resultTypeConstraint.Type);
         Assert.Equal("Output", resultConstraintType.Name.Value);
-        Assert.Equal("TInput", Assert.IsType<SimpleType>(resultConstraintType.TypeArguments[0]).Name.Value);
+        Assert.Equal("TInput", Assert.IsType<NamedExpressionGenericArgument>(resultConstraintType.GenericArguments[0]).Expression.Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_TrailingCommas_AreAllowedOutsideVariableDeclarators()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            [First, Second,]
+            public class Box<T, N: int,> : Base<T,>, Other,
+                where T : Constraint, OtherConstraint,
+            {
+                public void Function(Int32 a, Int32 b,)
+                {
+                    Call(a, b,);
+                    new Int32[] { a, b, };
+                }
+            }
+
+            public Box<Int32, 100,> value;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        TypeDeclaration box = Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]).Type;
+        GenericName name = Assert.IsType<GenericName>(box.Name);
+        TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(box.Base);
+        TypeConstraintClause constraint = Assert.Single(box.Constraints);
+        FunctionDeclaration function = Assert.IsType<MemberFunctionDeclaration>(Assert.IsType<TypeBlockBody>(box.Body).Members[0]).Function;
+        FunctionBlockBody body = Assert.IsType<FunctionBlockBody>(function.Body);
+        GenericType variableType = Assert.IsType<GenericType>(Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]).Declaration.Type);
+
+        AssertTrailingComma(box.Attributes[0].Attributes);
+        AssertTrailingComma(name.GenericParameters);
+        AssertTrailingComma(baseClause.BaseTypes);
+        AssertTrailingComma(Assert.IsType<GenericType>(baseClause.BaseTypes[0]).GenericArguments);
+        AssertTrailingComma(constraint.Constraints);
+        AssertTrailingComma(function.Signature.Parameters);
+        AssertTrailingComma(Assert.IsType<CallExpression>(Assert.IsType<LocalExpressionStatement>(body.Locals[0]).Expression).Arguments);
+        AssertTrailingComma(Assert.IsType<ArrayCreationExpression>(Assert.IsType<LocalExpressionStatement>(body.Locals[1]).Expression).Initializer!.Expressions);
+        AssertTrailingComma(variableType.GenericArguments);
+    }
+
+    [Fact]
+    public void Parse_VariableDeclarators_RejectTrailingComma()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("Int32 first, second,;");
+
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0006");
+
+        VariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members)).Declaration;
+        Assert.Equal(2, declaration.Declarators.Count);
+        AssertTrailingComma(declaration.Declarators);
     }
 
     [Fact]
@@ -563,38 +823,37 @@ public sealed class ParserTests
             """);
 
         GenericName name = Assert.IsType<GenericName>(declaration.Name);
-        Assert.Equal(5, name.TypeParameters.Count);
-        Assert.Equal(GenericParameterKind.Type, name.TypeParameters[0].Kind);
-        Assert.Equal(GenericParameterKind.Integer, name.TypeParameters[1].Kind);
-        Assert.Equal(GenericParameterKind.Float, name.TypeParameters[2].Kind);
-        Assert.Equal(GenericParameterKind.Constant, name.TypeParameters[3].Kind);
-        Assert.True(name.TypeParameters[4].IsVariadic);
-        Assert.Equal(3, name.TypeParameters[4].Ellipsis.Count);
+        Assert.Equal(5, name.GenericParameters.Count);
+        Assert.Equal(GenericParameterKind.Type, name.GenericParameters[0].Kind);
+        Assert.Equal(GenericParameterKind.Integer, name.GenericParameters[1].Kind);
+        Assert.Equal(GenericParameterKind.Float, name.GenericParameters[2].Kind);
+        Assert.Equal(GenericParameterKind.Constant, name.GenericParameters[3].Kind);
+        Assert.True(name.GenericParameters[4].IsVariadic);
+        Assert.Equal(3, name.GenericParameters[4].Ellipsis.Count);
 
         TypeConstraintClause constraint = Assert.Single(declaration.Constraints);
-        Assert.Equal("N", constraint.TypeParameter.Name.Value);
+        Assert.Equal("N", constraint.GenericParameter.Name.Value);
         Assert.IsType<QualifiedType>(Assert.IsType<TypeTypeConstraint>(Assert.Single(constraint.Constraints)).Type);
     }
 
     [Fact]
     public void Parse_DeclarationAttributes_SupportQualifiedNamesAndConstructorArguments()
     {
-        TypeDeclaration type = ParseSingleTopLevelType("""
+        AttributeSignature attribute = ParseSingleTopLevelAttribute("""
             [Marker]
             [Standard.IntrinsicType("Int32", 32)]
             public attribute SignedInt;
             """);
 
-        Assert.Equal(TypeKind.Attribute, type.Kind);
-        Assert.Equal(2, type.Attributes.Count);
+        Assert.Equal(2, attribute.Attributes.Count);
 
-        AttributeApplication simpleAttribute = Assert.Single(type.Attributes[0].Attributes);
+        AttributeApplication simpleAttribute = Assert.Single(attribute.Attributes[0].Attributes);
         Assert.Equal("Marker", Assert.IsType<SimpleName>(simpleAttribute.Name).Name.Value);
         Assert.Empty(simpleAttribute.Arguments);
         Assert.Null(simpleAttribute.OpenParen);
         Assert.Null(simpleAttribute.CloseParen);
 
-        AttributeApplication qualifiedAttribute = Assert.Single(type.Attributes[1].Attributes);
+        AttributeApplication qualifiedAttribute = Assert.Single(attribute.Attributes[1].Attributes);
         QualifiedName qualifiedName = Assert.IsType<QualifiedName>(qualifiedAttribute.Name);
         Assert.Equal(2, qualifiedName.Parts.Count);
         Assert.Equal("Standard", Assert.IsType<SimpleName>(qualifiedName.Parts[0]).Name.Value);
@@ -607,11 +866,11 @@ public sealed class ParserTests
     [Fact]
     public void Parse_IntrinsicModifier_IsValidOnlyForAttributeDeclarations()
     {
-        TypeDeclaration intrinsicAttribute = ParseSingleTopLevelType("""
+        AttributeSignature intrinsicAttribute = ParseSingleTopLevelAttribute("""
             public intrinsic attribute Intrinsic;
             """);
 
-        Assert.Equal(TypeKind.Attribute, intrinsicAttribute.Kind);
+        Assert.Equal(2, intrinsicAttribute.Modifiers.Count);
         Assert.Contains(intrinsicAttribute.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Intrinsic);
 
         TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(ParseSingleTopLevel("""
@@ -650,7 +909,7 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_TypeDeclaration_RecoversFromTrailingCommaBeforeConstraintClause()
+    public void Parse_TypeDeclaration_AllowsTrailingCommaBeforeConstraintClause()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public class Box<T> : Base<T>,
@@ -660,13 +919,14 @@ public sealed class ParserTests
             }
             """);
 
-        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Empty(diagnostics.Diagnostics);
 
         TopLevelTypeDeclaration declaration = Assert.Single(root.Members.OfType<TopLevelTypeDeclaration>());
         TypeDeclaration type = declaration.Type;
 
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Single(baseClause.BaseTypes);
+        AssertTrailingComma(baseClause.BaseTypes);
         Assert.Single(type.Constraints);
 
         TypeBlockBody body = Assert.IsType<TypeBlockBody>(type.Body);
@@ -679,12 +939,15 @@ public sealed class ParserTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             #pragma toplevel enable
+            using Extra;
             namespace Outer;
 
             public int topValue = 1;
             public int topOther;
             PointerCandidate * topPointer;
             ReferenceCandidate & topReference;
+            using TopAlias = Extra.Nested;
+            using Extra;
 
             namespace Extra
             {
@@ -693,11 +956,15 @@ public sealed class ParserTests
 
             public struct Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
             {
+                using Extra;
+                using MemberAlias = Extra.Nested;
                 public T Value;
                 public class Nested;
 
                 public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
+                    using Extra;
+                    using LocalAlias = Extra.Nested;
                     public class LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
                     public static int LocalFunc<TLocal>(TLocal input) where TLocal: Extra.Nested
                     {
@@ -742,7 +1009,7 @@ public sealed class ParserTests
 
             public static void Forward();
 
-            global { int globalBlockValue = 0; }
+            global { using Extra; int globalBlockValue = 0; }
             call();
             if (1) return; else ;
             while (1) ;
@@ -758,6 +1025,14 @@ public sealed class ParserTests
         AssertIncludesNodeTypes(
             nodeTypes,
             typeof(PragmaDirective),
+            typeof(UsingDirective),
+            typeof(TopLevelUsingDirective),
+            typeof(TopLevelAliasDeclaration),
+            typeof(MemberUsingDirective),
+            typeof(MemberAliasDeclaration),
+            typeof(LocalUsingDirective),
+            typeof(LocalAliasDeclaration),
+            typeof(AliasDeclaration),
             typeof(NamespaceDeclaration),
             typeof(NamespaceEmptyBody),
             typeof(NamespaceBlockBody),
@@ -785,7 +1060,7 @@ public sealed class ParserTests
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
-            typeof(TopLevelBlock),
+            typeof(TopLevelBlockDeclaration),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),
@@ -904,6 +1179,12 @@ public sealed class ParserTests
         return local;
     }
 
+    private static AttributeSignature ParseSingleTopLevelAttribute(string source)
+    {
+        TopLevelAttributeDeclaration declaration = Assert.IsType<TopLevelAttributeDeclaration>(ParseSingleTopLevel(source, typeof(TopLevelAttributeDeclaration)));
+        return declaration.Attribute;
+    }
+
     private static TypeDeclaration ParseSingleTopLevelType(string source)
     {
         TopLevelTypeDeclaration declaration = Assert.IsType<TopLevelTypeDeclaration>(ParseSingleTopLevel(source, typeof(TopLevelTypeDeclaration)));
@@ -955,5 +1236,70 @@ public sealed class ParserTests
     {
         foreach (Type expectedType in expectedTypes)
             Assert.Contains(expectedType, actualTypes);
+    }
+
+    private static void AssertTrailingComma<T>(SeparatedSyntaxList<T> list) where T : SyntaxNode
+    {
+        Assert.NotEqual(0, list.Count);
+        Assert.Equal(TokenKind.Comma, Assert.IsType<Token>(list.GetSeparator(list.Count - 1)).Kind);
+    }
+
+    [Fact]
+    public void Parse_ErrorSpans_PointToUnexpectedTokenOnSameLineAndEndOfLineForMissingTokens()
+    {
+        var (text, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            namespace Sample;
+
+            some err
+            nice = }
+            foo.;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+
+        // 1. "some err" should be parsed as TopLevelVariableDeclaration missing a semicolon
+        var someErrMember = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
+        Assert.Equal("some", Assert.IsType<SimpleType>(someErrMember.Declaration.Type).Name.Value);
+        Assert.Equal("err", Assert.IsType<SimpleName>(someErrMember.Declaration.Declarators[0].Identifier).Name.Value);
+
+        // Diagnostic for missing ';' after "some err" points to unexpected token on line 5 (1-based line 5:1) with line 4 as Context
+        var missingSemiDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("variable declaration"));
+        Assert.Equal(5, missingSemiDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiDiag.Span.GetStartColumn(text) + 1);
+        Assert.Equal(2, missingSemiDiag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Context, missingSemiDiag.Labels[0].Style);
+        Assert.Equal(4, missingSemiDiag.Labels[0].Span.GetStartLine(text) + 1);
+        Assert.Equal(9, missingSemiDiag.Labels[0].Span.GetStartColumn(text) + 1);
+        Assert.Equal(DiagnosticLabelStyle.Primary, missingSemiDiag.Labels[1].Style);
+        Assert.Equal(5, missingSemiDiag.Labels[1].Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiDiag.Labels[1].Span.GetStartColumn(text) + 1);
+
+        // 2. "nice = }" should be parsed as an expression statement (assignment expression)
+        var niceStmt = Assert.IsType<TopLevelExpressionStatement>(root.Members[2]);
+        var assignExpr = Assert.IsType<AssignmentExpression>(niceStmt.Expression);
+        Assert.Equal("nice", Assert.IsType<IdentifierNameExpression>(assignExpr.LhsExpression).Identifier.Value);
+
+        // Diagnostic for missing expression after '=' on the same line points to '}' (1-based line 5:8)
+        var missingExprDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0005");
+        Assert.Equal(5, missingExprDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(8, missingExprDiag.Span.GetStartColumn(text) + 1);
+
+        // Diagnostic for missing ';' after "nice = }" points to unexpected token on line 6 (1-based line 6:1) with line 5 as Context
+        var missingSemiNiceDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("top-level expression"));
+        Assert.Equal(6, missingSemiNiceDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiNiceDiag.Span.GetStartColumn(text) + 1);
+        Assert.Equal(2, missingSemiNiceDiag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Context, missingSemiNiceDiag.Labels[0].Style);
+        Assert.Equal(5, missingSemiNiceDiag.Labels[0].Span.GetStartLine(text) + 1);
+        Assert.Equal(9, missingSemiNiceDiag.Labels[0].Span.GetStartColumn(text) + 1);
+        Assert.Equal(DiagnosticLabelStyle.Primary, missingSemiNiceDiag.Labels[1].Style);
+        Assert.Equal(6, missingSemiNiceDiag.Labels[1].Span.GetStartLine(text) + 1);
+        Assert.Equal(1, missingSemiNiceDiag.Labels[1].Span.GetStartColumn(text) + 1);
+
+        // 3. "foo.;" should have diagnostic pointing to ';' (1-based line 6:5)
+        var missingIdentDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0006");
+        Assert.Equal(6, missingIdentDiag.Span.GetStartLine(text) + 1);
+        Assert.Equal(5, missingIdentDiag.Span.GetStartColumn(text) + 1);
     }
 }

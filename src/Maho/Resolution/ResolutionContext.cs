@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -8,9 +9,12 @@ internal sealed class ResolutionContext
 {
     public SyntaxTree SyntaxTree { get; }
     public ResolvedTree ResolvedTree { get; }
+    public DiagnosticsManager Diagnostics { get; }
 
     public NamespaceTrieNode GlobalNamespace { get; }
 
+    public List<AttributeSymbol> AttributeSymbols { get; }
+    public List<NestedAttributeSymbol> NestedAttributeSymbols { get; }
     public List<TypeSymbol> TypeSymbols { get; }
     public List<NestedTypeSymbol> NestedTypeSymbols { get; }
     public List<FunctionSymbol> FunctionSymbols { get; }
@@ -20,7 +24,7 @@ internal sealed class ResolutionContext
     public List<ParameterSymbol> ParameterSymbols { get; }
     public List<LocalVariableSymbol> LocalVariableSymbols { get; }
     public List<PropertySymbol> PropertySymbols { get; }
-    public List<TypeParameterSymbol> TypeParameterSymbols {get; }
+    public List<GenericParameterSymbol> GenericParameterSymbols { get; }
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
 
@@ -28,6 +32,14 @@ internal sealed class ResolutionContext
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
 
+    /// <summary> Other projects or modules referenced by this compilation unit. </summary>
+    public IReadOnlyList<ResolutionContext> ReferencedProjects { get; }
+
+    /// <summary> Symbol stores imported from external projects or prior compilation phases. </summary>
+    public IReadOnlyList<SymbolStore> ImportedProjectSymbols { get; }
+
+    private int attributeID;
+    private int nestedAttributeID;
     private int typeID;
     private int nestedTypeID;
     private int functionID;
@@ -37,17 +49,30 @@ internal sealed class ResolutionContext
     private int parameterID;
     private int localVariableID;
     private int propertyID;
-    private int typeParameterID;
+    private int genericParameterID;
     private int labelID;
     private int aliasID;
 
-    public ResolutionContext(SyntaxTree syntaxTree, ResolvedTree resolvedTree, NamespaceTrieNode globalNamespace, SymbolStore symbols, List<Scope> scopes)
+    public ResolutionContext(
+        SyntaxTree syntaxTree,
+        ResolvedTree resolvedTree,
+        NamespaceTrieNode globalNamespace,
+        SymbolStore symbols,
+        List<Scope> scopes,
+        IReadOnlyList<ResolutionContext>? referencedProjects = null,
+        IReadOnlyList<SymbolStore>? importedSymbols = null,
+        DiagnosticsManager? diagnostics = null)
     {
         SyntaxTree = syntaxTree;
         ResolvedTree = resolvedTree;
+        Diagnostics = diagnostics ?? new DiagnosticsManager();
 
         GlobalNamespace = globalNamespace;
+        Scopes = scopes;
+        GlobalScope.GlobalNamespace = globalNamespace;
 
+        AttributeSymbols = symbols.AttributeSymbols;
+        NestedAttributeSymbols = symbols.NestedAttributeSymbols;
         TypeSymbols = symbols.TypeSymbols;
         NestedTypeSymbols = symbols.NestedTypeSymbols;
         FunctionSymbols = symbols.FunctionSymbols;
@@ -57,12 +82,15 @@ internal sealed class ResolutionContext
         ParameterSymbols = symbols.ParameterSymbols;
         LocalVariableSymbols = symbols.LocalVariableSymbols;
         PropertySymbols = symbols.PropertySymbols;
-        TypeParameterSymbols = symbols.TypeParameterSymbols;
+        GenericParameterSymbols = symbols.GenericParameterSymbols;
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
 
-        Scopes = scopes;
+        ReferencedProjects = referencedProjects ?? [];
+        ImportedProjectSymbols = importedSymbols ?? [];
 
+        attributeID = AttributeSymbols.Count;
+        nestedAttributeID = NestedAttributeSymbols.Count;
         typeID = TypeSymbols.Count;
         nestedTypeID = NestedTypeSymbols.Count;
         functionID = FunctionSymbols.Count;
@@ -72,9 +100,77 @@ internal sealed class ResolutionContext
         parameterID = ParameterSymbols.Count;
         localVariableID = LocalVariableSymbols.Count;
         propertyID = PropertySymbols.Count;
-        typeParameterID = TypeParameterSymbols.Count;
+        genericParameterID = GenericParameterSymbols.Count;
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
+
+        if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
+            InitializeProjectReferences();
+    }
+
+    private void InitializeProjectReferences()
+    {
+        foreach (var project in ReferencedProjects)
+        {
+            MergeNamespaceTrie(GlobalNamespace, project.GlobalNamespace);
+
+            if (!GlobalScope.ImportedScopes.Contains(project.GlobalScope))
+                GlobalScope.ImportedScopes.Add(project.GlobalScope);
+        }
+
+        if (ImportedProjectSymbols.Count > 0)
+        {
+            foreach (var store in ImportedProjectSymbols)
+            {
+                var importedScope = CreateScopeFromSymbolStore(store);
+                if (!GlobalScope.ImportedScopes.Contains(importedScope))
+                    GlobalScope.ImportedScopes.Add(importedScope);
+            }
+        }
+    }
+
+    private void CreateScopeFromSymbolStoreAndRegister(SymbolStore store, Scope scope)
+    {
+        foreach (var type in store.TypeSymbols)
+            Register(scope, type, type.ContainingNamespace);
+
+        foreach (var function in store.FunctionSymbols)
+            Register(scope, function, function.ContainingNamespace);
+
+        foreach (var global in store.GlobalVariableSymbols)
+            Register(scope, global, global.ContainingNamespace);
+
+        foreach (var attribute in store.AttributeSymbols)
+            Register(scope, attribute, attribute.ContainingNamespace);
+
+        foreach (var alias in store.AliasSymbols)
+            Register(scope, alias, alias.ContainingNamespace);
+    }
+
+    private Scope CreateScopeFromSymbolStore(SymbolStore store)
+    {
+        var scope = new Scope(null);
+        CreateScopeFromSymbolStoreAndRegister(store, scope);
+        return scope;
+    }
+
+    private static void MergeNamespaceTrie(NamespaceTrieNode target, NamespaceTrieNode source)
+    {
+        foreach (var symbol in source.Symbols)
+        {
+            target.RegisterSymbol(symbol);
+        }
+
+        foreach (var (key, value) in source.Next)
+        {
+            if (!target.Next.TryGetValue(key, out var existing))
+            {
+                existing = new NamespaceTrieNode { Name = key, Parent = target };
+                target.Next[key] = existing;
+            }
+
+            MergeNamespaceTrie(existing, value);
+        }
     }
 
     public Scope CreateScope(Scope? parent)
@@ -96,13 +192,13 @@ internal sealed class ResolutionContext
             symbol = new SumTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
 
         TypeSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
-    public MemberNestedTypeSymbol CreateMemberNestedTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
+    public MemberTypeSymbol CreateMemberTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
-        MemberNestedTypeSymbol symbol;
+        MemberTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
@@ -116,7 +212,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, MethodSymbol? parent, TypeDeclaration? syntax)
+    public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
         LocalTypeSymbol symbol;
 
@@ -132,11 +228,38 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
+    public AttributeSymbol CreateAttributeSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AttributeSignature? syntax)
+    {
+        var symbol = new AttributeSymbol(attributeID++, name, enclosingScope, containingNamespace, syntax);
+
+        AttributeSymbols.Add(symbol);
+        Register(enclosingScope, symbol, containingNamespace);
+        return symbol;
+    }
+
+    public MemberAttributeSymbol CreateMemberAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
+    {
+        var symbol = new MemberAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+
+        NestedAttributeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public LocalAttributeSymbol CreateLocalAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
+    {
+        var symbol = new LocalAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+
+        NestedAttributeSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
     public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, FunctionDeclaration? syntax)
     {
         var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
         FunctionSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -148,7 +271,7 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, MethodSymbol? parent, FunctionDeclaration? syntax)
+    public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
     {
         var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
         MethodSymbols.Add(symbol);
@@ -160,7 +283,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
         GlobalVariableSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -172,9 +295,9 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction)
+    public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, Parameter? syntax)
     {
-        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingFunction);
+        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingSymbol, syntax);
         ParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
@@ -196,10 +319,10 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public TypeParameterSymbol CreateTypeParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
+    public GenericParameterSymbol CreateGenericParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
     {
-        var symbol = new TypeParameterSymbol(typeParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
-        TypeParameterSymbols.Add(symbol);
+        var symbol = new GenericParameterSymbol(genericParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
+        GenericParameterSymbols.Add(symbol);
         Register(enclosingScope, symbol);
         return symbol;
     }
@@ -224,7 +347,7 @@ internal sealed class ResolutionContext
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
         AliasSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
+        Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
@@ -236,13 +359,63 @@ internal sealed class ResolutionContext
 
     public Scope GetSyntaxScope(SyntaxNode syntax, Scope fallback) => SyntaxScopes.TryGetValue(syntax, out var scope) ? scope : fallback;
 
-    private static void Register(Scope scope, Symbol symbol)
+    /// <summary>
+    /// Gets the underlying type <see cref="SymbolHandle"/> (global or nested) referenced by a <see cref="TypeRef"/>,
+    /// unwrapping any aliases transitively. Returns <c>null</c> if unresolved or not a type.
+    /// </summary>
+    public SymbolHandle? GetType(TypeRef typeRef)
+    {
+        if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
+            return null;
+
+        var current = handle;
+        var visited = new HashSet<SymbolHandle>();
+
+        while (visited.Add(current))
+        {
+            switch (current.Kind)
+            {
+                case SymbolKind.Type when current.ID.Value >= 0 && current.ID.Value < TypeSymbols.Count:
+                case SymbolKind.NestedType when current.ID.Value >= 0 && current.ID.Value < NestedTypeSymbols.Count:
+                    return current;
+
+                case SymbolKind.Alias when current.ID.Value >= 0 && current.ID.Value < AliasSymbols.Count:
+                    var alias = AliasSymbols[current.ID];
+
+                    if (!alias.Target.IsResolved || alias.Target.Handle is not { } target)
+                        return null;
+
+                    current = target;
+                    break;
+
+                default:
+                    return null;
+            }
+        }
+
+        return null;
+    }
+
+    private void Register(Scope scope, Symbol symbol, NamespaceTrieNode? containingNamespace = null)
     {
         scope.Symbols.Add(GetHandle(symbol), symbol);
-        ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
 
-        symbols ??= [];
-        symbols.Add(symbol);
+        if (containingNamespace != null && containingNamespace != GlobalNamespace)
+        {
+            containingNamespace.RegisterSymbol(symbol);
+            if (symbol is AliasSymbol)
+            {
+                ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+                symbols ??= [];
+                symbols.Add(symbol);
+            }
+        }
+        else
+        {
+            ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
+            symbols ??= [];
+            symbols.Add(symbol);
+        }
     }
 
     public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolPart ns)
@@ -251,7 +424,7 @@ internal sealed class ResolutionContext
 
         if (node is null)
         {
-            var newNode = new NamespaceTrieNode();
+            var newNode = new NamespaceTrieNode { Name = ns, Parent = trieNode };
             trieNode.Next[ns] = newNode;
             return newNode;
         }
@@ -264,7 +437,7 @@ internal sealed class ResolutionContext
         var listOfParts = new List<SymbolPart>();
 
         AddTypeNameParts(typeSyntax, listOfParts);
-        
+
         SymbolPart[] parts = [.. listOfParts];
 
         return new SymbolName(parts);
@@ -273,7 +446,7 @@ internal sealed class ResolutionContext
     public static SymbolName GetSymbolName(NamedSyntax name) => name switch
     {
         SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name)),
-        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.TypeParameters.Count)),
+        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count)),
         QualifiedName qualifiedName => GetQualifiedName(qualifiedName),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
@@ -281,7 +454,7 @@ internal sealed class ResolutionContext
     private static SymbolPart GetSymbolPart(NamedSyntax name) => name switch
     {
         SimpleName simpleName => new SymbolPart(simpleName.Name),
-        GenericName genericName => new SymbolPart(genericName.Name, genericName.TypeParameters.Count),
+        GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 
@@ -304,7 +477,7 @@ internal sealed class ResolutionContext
                 break;
 
             case GenericType generic:
-                parts.Add(new SymbolPart(generic.Name, generic.TypeArguments.Count));
+                parts.Add(new SymbolPart(generic.Name, generic.GenericArguments.Count));
                 break;
 
             case QualifiedType qualified:

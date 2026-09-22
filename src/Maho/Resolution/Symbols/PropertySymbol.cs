@@ -9,7 +9,7 @@ internal sealed class PropertySymbol : Symbol
     public FunctionFlags GetterFlags { get; internal set; }
     public FunctionFlags SetterFlags { get; internal set; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
     public List<SymbolHandle> GetterAttributes { get; internal set; }
     public List<SymbolHandle> SetterAttributes { get; internal set; }
@@ -21,7 +21,7 @@ internal sealed class PropertySymbol : Symbol
     public List<SymbolHandle> SetterLocalVariables { get; internal set; }
     public List<SymbolHandle> SetterLocalFunctions { get; internal set; }
     public List<SymbolHandle> SetterLocalTypes { get; internal set; }
-    public SymbolHandle? Type { get; internal set; }
+    public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
 
     public MemberPropertyDeclaration? Syntax { get; }
 
@@ -30,7 +30,7 @@ internal sealed class PropertySymbol : Symbol
     {
         Kind = SymbolKind.Property;
         HasBacking = hasBacking;
-        TypeParameters = [];
+        GenericParameters = [];
         Attributes = [];
         GetterAttributes = [];
         SetterAttributes = [];

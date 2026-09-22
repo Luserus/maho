@@ -4,36 +4,92 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    private IReadOnlyList<PragmaDirective> ParsePragmaDirectives(out bool topLevelStatementsEnabled)
+    private bool IsUsingDirective()
     {
-        List<PragmaDirective> pragmas = [];
-        topLevelStatementsEnabled = false;
+        if (CurrentToken.MatchingKind is not MatchingKeywordKind.Using)
+            return false;
 
-        while (CurrentToken.Kind is TokenKind.Octothorpe)
+        int offset = 1;
+        int angleBracketDepth = 0;
+
+        while (true)
         {
-            PragmaDirective pragma = ParsePragmaDirective();
-            pragmas.Add(pragma);
+            var token = Peek(offset);
+            if (token.Kind is TokenKind.EndToken or TokenKind.Semicolon)
+                break;
 
-            if (pragma.PragmaKeyword.Value != "pragma")
+            if (token.Kind is TokenKind.LessThanSign)
+                angleBracketDepth++;
+            else if (token.Kind is TokenKind.GreaterThanSign)
+                angleBracketDepth--;
+            else if (angleBracketDepth == 0)
             {
-                diagnostics.ReportExpectedToken(pragma.PragmaKeyword.Span, "'pragma'", GetTokenDisplay(pragma.PragmaKeyword), "after '#'");
-                continue;
+                if (token.Kind is TokenKind.Equals || token.MatchingKind is MatchingKeywordKind.Where)
+                    return false;
             }
 
-            if (pragma.Name.Value != "toplevel")
-            {
-                diagnostics.ReportExpectedToken(pragma.Name.Span, "'toplevel'", GetTokenDisplay(pragma.Name), "for the pragma name");
-                continue;
-            }
-
-            if (pragma.Value.Value == "enable")
-                topLevelStatementsEnabled = true;
-            else if (pragma.Value.Value == "disable")
-                topLevelStatementsEnabled = false;
-            else
-                diagnostics.ReportExpectedToken(pragma.Value.Span, "'enable' or 'disable'", GetTokenDisplay(pragma.Value), "for '#pragma toplevel'");
+            offset++;
         }
 
+        return true;
+    }
+
+    private UsingDirective ParseUsingDirective()
+    {
+        Token keyword = Consume();
+        NamedSyntax name = ParseNamedSyntax(allowQualified: true, allowGenericName: false);
+        Token semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the namespace name", MissingTokenAnchor.AfterPrevious);
+        return new UsingDirective(keyword, name, semicolon);
+    }
+
+    private IReadOnlyList<Directive> ParseDirectives(out bool topLevelStatementsEnabled, bool allowImplicitTopLevel = false)
+    {
+        List<Directive> directives = [];
+        topLevelStatementsEnabled = allowImplicitTopLevel;
+
+        while (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+        {
+            if (CurrentToken.Kind is TokenKind.Octothorpe)
+            {
+                PragmaDirective pragma = ParsePragmaDirective();
+                directives.Add(pragma);
+
+                if (pragma.PragmaKeyword.Value != "pragma")
+                {
+                    diagnostics.ReportExpectedToken(pragma.PragmaKeyword.Span, "'pragma'", GetTokenDisplay(pragma.PragmaKeyword), "after '#'");
+                    continue;
+                }
+
+                if (pragma.Name.Value != "toplevel")
+                {
+                    diagnostics.ReportExpectedToken(pragma.Name.Span, "'toplevel'", GetTokenDisplay(pragma.Name), "for the pragma name");
+                    continue;
+                }
+
+                if (pragma.Value.Value == "enable")
+                    topLevelStatementsEnabled = true;
+                else if (pragma.Value.Value == "disable")
+                    topLevelStatementsEnabled = false;
+                else
+                    diagnostics.ReportExpectedToken(pragma.Value.Span, "'enable' or 'disable'", GetTokenDisplay(pragma.Value), "for '#pragma toplevel'");
+            }
+            else
+            {
+                UsingDirective usingDirective = ParseUsingDirective();
+                directives.Add(usingDirective);
+            }
+        }
+
+        return directives;
+    }
+
+    private IReadOnlyList<PragmaDirective> ParsePragmaDirectives(out bool topLevelStatementsEnabled, bool allowImplicitTopLevel = false)
+    {
+        var directives = ParseDirectives(out topLevelStatementsEnabled, allowImplicitTopLevel);
+        var pragmas = new List<PragmaDirective>();
+        foreach (var d in directives)
+            if (d is PragmaDirective p)
+                pragmas.Add(p);
         return pragmas;
     }
 

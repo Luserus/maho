@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -14,6 +15,7 @@ internal sealed class Diagnostic
 
     public string DiagnosticCode { get; }
     public TextSpan Span { get; }
+    public TextSpan PrimarySpan => Span;
     public DiagnosticKind Kind { get; }
     public string? ExpectedText { get; }
     public DiagnosticMessageKind MessageKind { get; }
@@ -22,6 +24,21 @@ internal sealed class Diagnostic
     /// diagnostics back to the correct file result after shared passes have completed.
     /// </summary>
     public SourceText? Source { get; }
+
+    /// <summary> Annotated source spans highlighting primary problem sites and secondary context sites. </summary>
+    public IReadOnlyList<DiagnosticLabel> Labels { get; init; } = [];
+
+    /// <summary> Contextual notes attached to the diagnostic. </summary>
+    public IReadOnlyList<DiagnosticNote> Notes { get; init; } = [];
+
+    /// <summary> Actionable advice or remediation hints attached to the diagnostic. </summary>
+    public IReadOnlyList<DiagnosticHelp> HelpMessages { get; init; } = [];
+
+    /// <summary> Machine-applicable or human-guided code fixes for this diagnostic. </summary>
+    public IReadOnlyList<DiagnosticSuggestion> Suggestions { get; init; } = [];
+
+    /// <summary> Arbitrary structured metadata for tooling or IDE extensions. </summary>
+    public IReadOnlyDictionary<string, object?> CustomData { get; init; } = new Dictionary<string, object?>();
 
     /// <summary> Materializes the final diagnostic message at the presentation boundary. </summary>
     public string Message => MessageKind switch

@@ -9,8 +9,8 @@ internal sealed class AliasSymbol : Symbol
     public NamespaceTrieNode? ContainingNamespace { get; }
     public ulong Flags { get; internal set; }
 
-    public IReadOnlyList<SymbolHandle> TypeParameters { get; internal set; }
-    public SymbolHandle? Target { get; internal set; }
+    public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
+    public TypeRef Target { get; internal set; } = TypeRef.Unresolved;
     public bool HasCompatibleConstraints { get; internal set; } = true;
 
     public AliasDeclaration? Syntax { get; }
@@ -19,7 +19,7 @@ internal sealed class AliasSymbol : Symbol
     {
         Kind = SymbolKind.Alias;
         ContainingSymbol = containingSymbol;
-        TypeParameters = [];
+        GenericParameters = [];
         Syntax = syntax;
     }
 
@@ -28,7 +28,7 @@ internal sealed class AliasSymbol : Symbol
 
         Kind = SymbolKind.Alias;
         ContainingNamespace = containingNamespace;
-        TypeParameters = [];
+        GenericParameters = [];
         Syntax = syntax;
     }
 }

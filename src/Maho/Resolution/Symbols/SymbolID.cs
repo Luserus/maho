@@ -1,5 +1,3 @@
-global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
-
 using System;
 
 namespace Maho.Resolution;
@@ -37,4 +35,3 @@ internal struct SymbolID : IEquatable<SymbolID>
 
     public bool Equals(SymbolID other) => other.Value == Value;
 }
-

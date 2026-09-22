@@ -16,5 +16,8 @@ public enum AnalysisOutput
     Lexer = 1 << 0,
 
     /// <summary> Include serialized parser state for syntax-tree inspection. </summary>
-    Parser = 1 << 1
+    Parser = 1 << 1,
+
+    /// <summary> Include both lexer and parser debug payloads. </summary>
+    All = Lexer | Parser
 }

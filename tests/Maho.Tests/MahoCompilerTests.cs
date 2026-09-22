@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Maho.Build;
 
 namespace Maho.Tests;
 
@@ -7,7 +8,7 @@ public sealed class MahoCompilerTests
     [Fact]
     public void AnalyzeText_WithDebugOutputs_ReturnsStructuredPayloads()
     {
-        CompilerAnalysisResult result = MahoCompiler.AnalyzeText("""
+        DebugCompilationOutput result = MahoCompiler.AnalyzeText("""
             namespace Basic;
 
             public class Result;
@@ -33,7 +34,7 @@ public sealed class MahoCompilerTests
     [Fact]
     public void AnalyzeText_InvalidInput_ReturnsStructuredDiagnostics()
     {
-        CompilerAnalysisResult result = MahoCompiler.AnalyzeText("""
+        DebugCompilationOutput result = MahoCompiler.AnalyzeText("""
             public static int Main()
             {
                 $;
@@ -118,7 +119,7 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
@@ -158,7 +159,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
@@ -185,7 +186,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.Equal(Path.GetFullPath(firstPath), result.EntryFile);
@@ -211,7 +212,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(projectPath, string.Empty);
             File.WriteAllText(programPath, "#pragma toplevel enable\nrun();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
@@ -223,26 +224,117 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ParsesCheckedInSampleProject()
+    public void AnalyzeProjectFile_ImplicitTopLevel_AllowsTopLevelWithoutPragmaWhenEntryFileIsExplicit()
     {
-        string projectPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Samples/Test.mhpr"));
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
 
-        CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string programPath = Path.Combine(tempDirectory, "Program.mh");
 
-        Assert.False(result.HasErrors);
-        Assert.Equal(Path.Combine(Path.GetDirectoryName(projectPath)!, "Program.mh"), result.EntryFile);
-        Assert.Equal(2, result.Files.Length);
+            File.WriteAllText(projectPath, """
+                EntryFile : "Program.mh";
+                ImplicitTopLevel : true;
+                """);
+            File.WriteAllText(programPath, "call();");
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            CompilerBatchFileResult program = Assert.Single(result.Files);
+            Assert.False(program.HasErrors);
+            Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     }
 
     [Fact]
-    public void CompileProjectFile_ReachesTheLoweringPlaceholderAfterSuccessfulFrontEnd()
+    public void AnalyzeProjectFile_ImplicitTopLevel_SelectsSingleFileUsingTopLevelWhenNoEntryFile()
     {
-        string projectPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Samples/Test.mhpr"));
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
 
-        CompilerPipelineNotImplementedException exception = Assert.Throws<CompilerPipelineNotImplementedException>(() =>
-            MahoCompiler.CompileProjectFile(projectPath));
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string firstPath = Path.Combine(tempDirectory, "Types.mh");
+            string secondPath = Path.Combine(tempDirectory, "Entry.mh");
 
-        Assert.False(exception.Analysis.HasErrors);
-        Assert.Equal("The lowering and code-generation pipeline has not been implemented.", exception.Message);
+            File.WriteAllText(projectPath, "ImplicitTopLevel : true;");
+            File.WriteAllText(firstPath, "public class Point { public int X; }");
+            File.WriteAllText(secondPath, "run();");
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            Assert.False(result.HasErrors);
+            Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnalyzeProjectFile_ImplicitTopLevel_RejectsMultipleFilesUsingTopLevel()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string firstPath = Path.Combine(tempDirectory, "First.mh");
+            string secondPath = Path.Combine(tempDirectory, "Second.mh");
+
+            File.WriteAllText(projectPath, "ImplicitTopLevel : true;");
+            File.WriteAllText(firstPath, "first();");
+            File.WriteAllText(secondPath, "second();");
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            Assert.True(result.HasErrors);
+            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnalyzeProjectFile_ImplicitTopLevel_PragmaDisableOverridesImplicitTopLevel()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string programPath = Path.Combine(tempDirectory, "Program.mh");
+
+            File.WriteAllText(projectPath, """
+                EntryFile : "Program.mh";
+                ImplicitTopLevel : true;
+                """);
+            File.WriteAllText(programPath, """
+                #pragma toplevel disable
+                call();
+                """);
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            CompilerBatchFileResult program = Assert.Single(result.Files);
+            Assert.True(program.HasErrors);
+            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0011");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     }
 }
