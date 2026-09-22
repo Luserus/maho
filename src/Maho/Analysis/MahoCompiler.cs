@@ -21,8 +21,7 @@ public static class MahoCompiler
     /// <summary>
     /// The version of the Maho compiler library.
     /// </summary>
-    public static Version Version =>
-        typeof(MahoCompiler).Assembly.GetName().Version ?? new Version(0, 1, 0);
+    public static Version Version => typeof(MahoCompiler).Assembly.GetName().Version ?? new Version(0, 1, 0);
 
     /// <summary>
     /// Human-readable version string for the Maho compiler library.
@@ -31,12 +30,12 @@ public static class MahoCompiler
     {
         get
         {
-            var informational = typeof(MahoCompiler).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            var informational = typeof(MahoCompiler).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
             if (!string.IsNullOrWhiteSpace(informational))
             {
                 int plusIndex = informational.IndexOf('+');
+
                 return plusIndex >= 0 ? informational[..plusIndex] : informational;
             }
 
@@ -48,16 +47,12 @@ public static class MahoCompiler
     /// Spawns an interactive <see cref="AnalysisSession"/> rooted in an optional base compilation.
     /// </summary>
     public static AnalysisSession CreateSession(Compilation? rootCompilation = null, CompilationOptions? options = null) =>
-        new(rootCompilation, options);
+        new AnalysisSession(rootCompilation, options);
 
     /// <summary>
     /// Compiles an in-memory source string and returns a polymorphic <see cref="DebugCompilationOutput"/>.
     /// </summary>
-    public static DebugCompilationOutput CompileSource(
-        string source,
-        AnalysisOutput output = AnalysisOutput.None,
-        string filePath = "source.mh",
-        CompilationOptions? options = null)
+    public static DebugCompilationOutput CompileSource(string source, AnalysisOutput output = AnalysisOutput.None, string filePath = "source.mh", CompilationOptions? options = null)
     {
         options ??= CompilationOptions.Default;
         var text = new SourceText(source);
@@ -71,18 +66,14 @@ public static class MahoCompiler
 
         var syntaxTree = SyntaxTree.CreateSingleRoot(root, filePath);
         var resolver = new Resolver();
-        resolver.Resolve(syntaxTree);
+        resolver.Resolve(syntaxTree, diagnostics: dm);
 
         string? lexerJson = output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null;
         string? parserJson = output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null;
 
         var projectedDiagnostics = ProjectDiagnostics(dm.Diagnostics, text, filePath);
 
-        return new DebugCompilationOutput(
-            filePath,
-            lexerJson,
-            parserJson,
-            projectedDiagnostics);
+        return new DebugCompilationOutput(filePath, lexerJson, parserJson, projectedDiagnostics);
     }
 
     /// <summary> Backward-compatible alias for <see cref="CompileSource"/>. </summary>
@@ -98,15 +89,13 @@ public static class MahoCompiler
         return CompileSource(content, output, fullPath);
     }
 
-    private static CompilerProjectAnalysisResult CompileFilesCore(
-        IEnumerable<string> filePaths,
-        AnalysisOutput output = AnalysisOutput.None,
-        string? rootPath = null,
-        CompilationOptions? options = null)
+    private static CompilerProjectAnalysisResult CompileFilesCore(IEnumerable<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string? rootPath = null, CompilationOptions? options = null)
     {
         options ??= CompilationOptions.Default;
+
         if (rootPath is not null && options.RootDirectory is null)
             options = options with { RootDirectory = rootPath };
+
         var pathsList = filePaths.Select(Path.GetFullPath).ToList();
         string projectName = rootPath is not null ? Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : "Project";
 
@@ -129,8 +118,7 @@ public static class MahoCompiler
                 sourceTexts[i] = text;
 
                 bool isEntryFile = options.EntryFile != null &&
-                    (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+                    (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) || string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
 
                 bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
                 bool allowImplicit = options.ImplicitTopLevel || (isSingleFileScript && (options.EntryFile == null || isEntryFile));
@@ -173,35 +161,108 @@ public static class MahoCompiler
             }
         }
 
-        // Validate top-level statements across files
+        // Validate top-level statements and resolve the entry file candidate
+        string? effectiveEntryFile = options.EntryFile;
         List<(int Index, CompilationUnit Root, DiagnosticsManager Dm)> filesWithTopLevel = [];
+
         for (int i = 0; i < validRoots.Count; i++)
         {
-            if (validRoots[i].EnablesTopLevelStatements && ContainsTopLevelStatement(validRoots[i].Members))
-                filesWithTopLevel.Add((i, validRoots[i], validFileDms[i]));
+            var unit = validRoots[i];
+            bool? pragmaState = PragmaDirective.GetTopLevelPragmaState(unit.Pragmas);
+            bool hasStatements = ContainsTopLevelStatement(unit.Members);
+            bool isExplicitEntry = options.EntryFile != null &&
+                (string.Equals(validPaths[i], options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(Path.GetFileName(validPaths[i]), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+
+            if (pragmaState == false)
+            {
+                unit.EnablesTopLevelStatements = false;
+            }
+            else if (pragmaState == true)
+            {
+                unit.EnablesTopLevelStatements = true;
+                if (hasStatements)
+                    filesWithTopLevel.Add((i, unit, validFileDms[i]));
+            }
+            else
+            {
+                if (options.ImplicitTopLevel)
+                {
+                    if (options.EntryFile != null)
+                    {
+                        if (isExplicitEntry)
+                        {
+                            unit.EnablesTopLevelStatements = true;
+                            if (hasStatements)
+                                filesWithTopLevel.Add((i, unit, validFileDms[i]));
+                        }
+                        else
+                        {
+                            unit.EnablesTopLevelStatements = false;
+                            if (hasStatements)
+                                filesWithTopLevel.Add((i, unit, validFileDms[i]));
+                        }
+                    }
+                    else
+                    {
+                        if (hasStatements)
+                            filesWithTopLevel.Add((i, unit, validFileDms[i]));
+
+                        unit.EnablesTopLevelStatements = false;
+                    }
+                }
+                else
+                {
+                    unit.EnablesTopLevelStatements = false;
+                }
+            }
         }
 
-        string? effectiveEntryFile = options.EntryFile;
-        if (filesWithTopLevel.Count == 1 && effectiveEntryFile == null)
-            effectiveEntryFile = validPaths[filesWithTopLevel[0].Index];
+        if (effectiveEntryFile == null && filesWithTopLevel.Count == 1)
+        {
+            int winnerIdx = filesWithTopLevel[0].Index;
+            validRoots[winnerIdx].EnablesTopLevelStatements = true;
+            effectiveEntryFile = validPaths[winnerIdx];
+        }
         else if (pathsList.Count == 1 && options.RootDirectory == null && effectiveEntryFile == null)
+        {
             effectiveEntryFile = pathsList[0];
+            if (validRoots.Count > 0 && PragmaDirective.GetTopLevelPragmaState(validRoots[0].Pragmas) != false)
+                validRoots[0].EnablesTopLevelStatements = true;
+        }
 
         if (filesWithTopLevel.Count > 1)
         {
             foreach (var (_, candRoot, candDm) in filesWithTopLevel)
-            {
-                candDm.ReportError("MH0012", "Only one source file may contain top-level statements.", GetTopLevelPragmaSpan(candRoot));
-            }
+                candDm.ReportMultipleTopLevelSources(GetTopLevelPragmaSpan(candRoot));
         }
 
         // Project-wide resolution
         var syntaxTree = new SyntaxTree(projectName, [.. validRoots]);
         var resolver = new Resolver();
-        var context = resolver.Resolve(syntaxTree);
+        var resolutionDm = new DiagnosticsManager();
+        var context = resolver.Resolve(syntaxTree, diagnostics: resolutionDm);
+
+        foreach (var diag in resolutionDm.Diagnostics)
+        {
+            int targetIdx = -1;
+            for (int k = 0; k < validSourceTexts.Count; k++)
+            {
+                if (ReferenceEquals(diag.Source, validSourceTexts[k]))
+                {
+                    targetIdx = k;
+                    break;
+                }
+            }
+            if (targetIdx >= 0)
+                validFileDms[targetIdx].Report(diag);
+            else if (validFileDms.Count > 0)
+                validFileDms[0].Report(diag);
+        }
 
         var finalResults = new List<CompilerBatchFileResult>(pathsList.Count);
         int validIdx = 0;
+
         for (int i = 0; i < pathsList.Count; i++)
         {
             if (fileResults[i] is { } failedResult)
@@ -237,7 +298,7 @@ public static class MahoCompiler
             ImplicitTopLevel = options.ImplicitTopLevel || (pathsList.Count == 1 && options.RootDirectory == null)
         });
 
-        return new CompilerProjectAnalysisResult(projectName, finalResults.ToArray())
+        return new CompilerProjectAnalysisResult(projectName, [.. finalResults])
         {
             EntryFile = effectiveEntryFile,
             Compilation = compilation
@@ -247,77 +308,53 @@ public static class MahoCompiler
     /// <summary>
     /// Analyzes a collection of source files and returns a structured <see cref="CompilerProjectAnalysisResult"/>.
     /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeFiles(
-        IEnumerable<string> filePaths,
-        AnalysisOutput output = AnalysisOutput.None,
-        string? rootPath = null,
-        CompilationOptions? options = null)
-    {
-        return CompileFilesCore(filePaths, output, rootPath, options);
-    }
+    public static CompilerProjectAnalysisResult AnalyzeFiles(IEnumerable<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string? rootPath = null,
+        CompilationOptions? options = null) => CompileFilesCore(filePaths, output, rootPath, options);
 
     /// <summary>
     /// Compiles a collection of source files and reaches the lowering/codegen stage.
     /// Throws <see cref="CompilerPipelineNotImplementedException"/> after successful front-end analysis.
     /// </summary>
-    public static CompilerProjectAnalysisResult CompileFiles(
-        IEnumerable<string> filePaths,
-        AnalysisOutput output = AnalysisOutput.None,
-        string? rootPath = null,
-        CompilationOptions? options = null)
+    public static CompilerProjectAnalysisResult CompileFiles(IEnumerable<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string? rootPath = null, CompilationOptions? options = null)
     {
         var analysis = AnalyzeFiles(filePaths, output, rootPath, options);
+
         if (!analysis.HasErrors)
             throw new CompilerPipelineNotImplementedException("The lowering and code-generation pipeline has not been implemented.", analysis);
+
         return analysis;
     }
 
     /// <summary>
     /// Analyzes a domain-specific <c>.mhpr</c> project file.
     /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeProjectFile(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        return Maho.Build.MahoBuildSystem.AnalyzeProject(projectFilePath, output, options);
-    }
+    public static CompilerProjectAnalysisResult AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)
+        => Build.MahoBuildSystem.AnalyzeProject(projectFilePath, output, options);
 
     /// <summary>
     /// Compiles a domain-specific <c>.mhpr</c> project file and reaches the lowering/codegen stage.
     /// Throws <see cref="CompilerPipelineNotImplementedException"/> after successful front-end analysis.
     /// </summary>
-    public static CompilerProjectAnalysisResult CompileProjectFile(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        return Maho.Build.MahoBuildSystem.CompileProject(projectFilePath, output, options);
-    }
+    public static CompilerProjectAnalysisResult CompileProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)
+        => Build.MahoBuildSystem.CompileProject(projectFilePath, output, options);
 
     internal static TextSpanInfo CreateSpanInfo(TextSpan span, SourceText text) =>
-        new(
-            span.Start,
-            span.Length,
-            span.End,
-            new TextLocation(span.GetStartLine(text) + 1, span.GetStartColumn(text) + 1),
+        new TextSpanInfo(span.Start, span.Length, span.End, new TextLocation(span.GetStartLine(text) + 1, span.GetStartColumn(text) + 1),
             new TextLocation(span.GetEndLine(text) + 1, span.GetEndColumn(text) + 1));
 
-    private static List<DiagnosticInfo> ProjectDiagnostics(
-        IReadOnlyList<Diagnostic> diagnostics,
-        SourceText sourceText,
-        string filePath)
+    private static List<DiagnosticInfo> ProjectDiagnostics(IReadOnlyList<Diagnostic> diagnostics, SourceText sourceText, string filePath)
     {
         var result = new List<DiagnosticInfo>(diagnostics.Count);
+
         foreach (var diag in diagnostics)
             result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
+
         return result;
     }
 
     private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
     {
-        foreach (TopLevel member in members)
-        {
+        foreach (var member in members)
             switch (member)
             {
                 case TopLevelStatement:
@@ -327,25 +364,21 @@ public static class MahoCompiler
                 case NamespaceDeclaration { Body: NamespaceBlockBody body } when ContainsTopLevelStatement(body.Members):
                     return true;
             }
-        }
 
         return false;
     }
 
     private static TextSpan GetTopLevelPragmaSpan(CompilationUnit unit)
     {
-        foreach (PragmaDirective pragma in unit.Pragmas)
-        {
+        foreach (var pragma in unit.Pragmas)
             if (pragma.Name.Value == "toplevel" && pragma.Value.Value == "enable")
                 return pragma.HashToken.Span;
-        }
 
         return unit.EndToken.Span;
     }
 
-    private static bool IsUserFacingError(Exception ex) =>
-        ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or
-              PathTooLongException or NotSupportedException or ArgumentException;
+    private static bool IsUserFacingError(Exception ex) => ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or
+        PathTooLongException or NotSupportedException or ArgumentException;
 
     private static string FormatFileError(string filePath, Exception ex) => ex switch
     {

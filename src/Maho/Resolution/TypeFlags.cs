@@ -13,4 +13,5 @@ internal enum TypeFlags : ulong
 
     Unsafe      = 1UL << 5,
     Intrinsic   = 1UL << 6,
+    Partial     = 1UL << 7,
 }

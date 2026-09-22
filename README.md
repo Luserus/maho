@@ -95,13 +95,14 @@ The `./maho` wrapper script forwards arguments to the compiled driver.
 - `--debug (lex|parse)+ --output <path|->`: emit selected debug AST/token payloads to a file or `stdout`.
 - `--diagnostics [pretty|text|json] --output <path|->`: emit diagnostics in rich pretty-printed format (default), short text format, or JSON to a file or `stderr`.
 - `--color [auto|always|never]`: control ANSI colored terminal output.
-- `--no-color`: disable ANSI colors in diagnostic output.
-- `--diagnostic-paths (relative|full)`: choose between relative paths (user-friendly default) or full paths in diagnostic headers.
+- `--diagnostic-paths (relative|project|full)`: choose between relative paths (CWD, standard compiler default), project-relative paths, or full absolute paths in diagnostics.
+- `--implicit-toplevel[=true|false]`: allow or disallow implicit top-level statements for entry files (defaults to true for single files, false for projects unless configured).
+- `--no-project`: allow compiling directory sources directly when no `.mhpr` project file is present.
 - `-Werror`, `--warnings-as-errors`: treat compiler warnings as errors.
 - `-v`, `--version`: print the compiler version and exit.
 - `-h`, `--help`: print usage information and exit.
 
-When no source path is provided, the CLI analyzes the current working directory recursively for `.mh` files.
+When a directory path (or `.`) is provided, the CLI looks for a unique `.mhpr` project file in that directory. If no project file is found, `--no-project` must be supplied to analyze directory sources without a project file.
 
 ## Project Files (`.mhpr`)
 

@@ -342,6 +342,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(ownerScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
+        symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         symbol.Parameters = DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), containingMethod: null);
@@ -354,6 +355,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
+        symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -369,6 +371,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, functionScope);
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
+        symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -613,6 +616,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Unsafe => TypeFlags.Unsafe,
                 MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
+                MatchingKeywordKind.Partial => TypeFlags.Partial,
                 _ => TypeFlags.None
             };
         }
@@ -652,6 +656,29 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
                 _ => VariableFlags.None
+            };
+        }
+
+        return flags;
+    }
+
+    private static FunctionFlags ResolveFunctionFlags(IReadOnlyList<Token> modifiers)
+    {
+        var flags = FunctionFlags.None;
+
+        foreach (var mod in modifiers)
+        {
+            flags |= mod.MatchingKind switch
+            {
+                MatchingKeywordKind.Public => FunctionFlags.Public,
+                MatchingKeywordKind.Private => FunctionFlags.Private,
+                MatchingKeywordKind.Protected => FunctionFlags.Protected,
+                MatchingKeywordKind.Internal => FunctionFlags.Internal,
+                MatchingKeywordKind.Static => FunctionFlags.Static,
+                MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
+                MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
+                MatchingKeywordKind.Partial => FunctionFlags.Partial,
+                _ => FunctionFlags.None
             };
         }
 

@@ -18,6 +18,7 @@ public sealed class TerminalDiagnosticRenderer
     private readonly bool useColors;
     private readonly DiagnosticPathStyle pathStyle;
     private readonly string rootDirectory;
+    private readonly string? projectDirectory;
 
     // ANSI Escape Sequences
     private const string Reset = "\u001b[0m";
@@ -31,10 +32,12 @@ public sealed class TerminalDiagnosticRenderer
     public TerminalDiagnosticRenderer(
         DiagnosticColorMode colorMode = DiagnosticColorMode.Auto,
         DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative,
-        string? rootDirectory = null)
+        string? rootDirectory = null,
+        string? projectDirectory = null)
     {
         this.pathStyle = pathStyle;
         this.rootDirectory = rootDirectory ?? Directory.GetCurrentDirectory();
+        this.projectDirectory = projectDirectory;
         useColors = ShouldEnableColors(colorMode);
     }
 
@@ -74,15 +77,41 @@ public sealed class TerminalDiagnosticRenderer
 
         // 2. Source file location: --> path:line:col
         string? displayPath = diagnostic.SourcePath;
-        if (displayPath is not null && pathStyle == DiagnosticPathStyle.Relative)
+        if (displayPath is not null)
         {
-            try
+            if (pathStyle == DiagnosticPathStyle.Relative)
             {
-                displayPath = Path.GetRelativePath(rootDirectory, displayPath);
+                try
+                {
+                    displayPath = Path.GetRelativePath(rootDirectory, displayPath);
+                }
+                catch
+                {
+                    // Fallback to original path
+                }
             }
-            catch
+            else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
             {
-                // Fallback to original path
+                try
+                {
+                    string targetRoot = projectDirectory ?? rootDirectory;
+                    displayPath = Path.GetRelativePath(targetRoot, displayPath);
+                }
+                catch
+                {
+                    // Fallback to original path
+                }
+            }
+            else if (pathStyle == DiagnosticPathStyle.Full)
+            {
+                try
+                {
+                    displayPath = Path.GetFullPath(displayPath);
+                }
+                catch
+                {
+                    // Fallback to original path
+                }
             }
         }
 

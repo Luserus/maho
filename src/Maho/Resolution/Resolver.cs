@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -16,14 +17,15 @@ internal sealed class Resolver
     public ResolutionContext Resolve(
         SyntaxTree syntaxTree,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
-        ResolutionContext? baseContext = null)
+        ResolutionContext? baseContext = null,
+        DiagnosticsManager? diagnostics = null)
     {
         var resolved = baseContext?.ResolvedTree ?? resolvedTree;
         var globalNamespace = baseContext?.GlobalNamespace ?? new NamespaceTrieNode();
         SymbolStore symbolStore;
         List<Scope> scopes;
 
-        if (baseContext != null)
+        if (baseContext is not null)
         {
             symbolStore = new SymbolStore(
                 baseContext.AttributeSymbols,
@@ -56,7 +58,8 @@ internal sealed class Resolver
             symbolStore,
             scopes,
             referencedProjects ?? baseContext?.ReferencedProjects,
-            baseContext?.ImportedProjectSymbols);
+            baseContext?.ImportedProjectSymbols,
+            diagnostics ?? baseContext?.Diagnostics);
 
         foreach (var pass in passes)
             pass.Resolve(context);

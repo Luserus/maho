@@ -63,7 +63,7 @@ public sealed class Compilation
 
         var syntaxTree = SyntaxTree.CreateSingleRoot(unit, filePath);
         var resolver = new Resolver();
-        var context = resolver.Resolve(syntaxTree);
+        var context = resolver.Resolve(syntaxTree, diagnostics: diagnosticsManager);
 
         var projectedDiagnostics = ProjectDiagnostics(diagnosticsManager.Diagnostics, sourceText, filePath);
 
@@ -120,22 +120,80 @@ public sealed class Compilation
             roots[i] = root;
         });
 
-        // Validate top-level statements across files
-        List<(CompilationUnit Root, DiagnosticsManager Dm)> filesWithTopLevel = [];
+        // Validate top-level statements and resolve the entry file candidate
+        string? effectiveEntryFile = options.EntryFile;
+        List<(int Index, CompilationUnit Root, DiagnosticsManager Dm)> filesWithTopLevel = [];
+
         for (int i = 0; i < roots.Length; i++)
         {
-            if (roots[i].EnablesTopLevelStatements && ContainsTopLevelStatement(roots[i].Members))
+            var unit = roots[i];
+            bool? pragmaState = PragmaDirective.GetTopLevelPragmaState(unit.Pragmas);
+            bool hasStatements = ContainsTopLevelStatement(unit.Members);
+            bool isExplicitEntry = options.EntryFile != null &&
+                (string.Equals(pathsList[i], options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(Path.GetFileName(pathsList[i]), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+
+            if (pragmaState == false)
             {
-                filesWithTopLevel.Add((roots[i], fileDms[i]));
+                unit.EnablesTopLevelStatements = false;
             }
+            else if (pragmaState == true)
+            {
+                unit.EnablesTopLevelStatements = true;
+                if (hasStatements)
+                    filesWithTopLevel.Add((i, unit, fileDms[i]));
+            }
+            else
+            {
+                if (options.ImplicitTopLevel)
+                {
+                    if (options.EntryFile != null)
+                    {
+                        if (isExplicitEntry)
+                        {
+                            unit.EnablesTopLevelStatements = true;
+                            if (hasStatements)
+                                filesWithTopLevel.Add((i, unit, fileDms[i]));
+                        }
+                        else
+                        {
+                            unit.EnablesTopLevelStatements = false;
+                            if (hasStatements)
+                                filesWithTopLevel.Add((i, unit, fileDms[i]));
+                        }
+                    }
+                    else
+                    {
+                        if (hasStatements)
+                            filesWithTopLevel.Add((i, unit, fileDms[i]));
+
+                        unit.EnablesTopLevelStatements = false;
+                    }
+                }
+                else
+                {
+                    unit.EnablesTopLevelStatements = false;
+                }
+            }
+        }
+
+        if (effectiveEntryFile == null && filesWithTopLevel.Count == 1)
+        {
+            int winnerIdx = filesWithTopLevel[0].Index;
+            roots[winnerIdx].EnablesTopLevelStatements = true;
+            effectiveEntryFile = pathsList[winnerIdx];
+        }
+        else if (pathsList.Count == 1 && options.RootDirectory == null && effectiveEntryFile == null)
+        {
+            effectiveEntryFile = pathsList[0];
+            if (roots.Length > 0 && PragmaDirective.GetTopLevelPragmaState(roots[0].Pragmas) != false)
+                roots[0].EnablesTopLevelStatements = true;
         }
 
         if (filesWithTopLevel.Count > 1)
         {
-            foreach (var (candRoot, candDm) in filesWithTopLevel)
-            {
-                candDm.ReportError("MH0012", "Only one source file may contain top-level statements.", GetTopLevelPragmaSpan(candRoot));
-            }
+            foreach (var (_, candRoot, candDm) in filesWithTopLevel)
+                candDm.ReportMultipleTopLevelSources(GetTopLevelPragmaSpan(candRoot));
         }
 
         for (int i = 0; i < pathsList.Count; i++)
@@ -152,7 +210,15 @@ public sealed class Compilation
             .Select(c => c.Context!)
             .ToList();
 
-        var context = resolver.Resolve(syntaxTree, referencedContexts);
+        var resolutionDm = new DiagnosticsManager();
+        var context = resolver.Resolve(syntaxTree, referencedContexts, diagnostics: resolutionDm);
+
+        foreach (var diag in resolutionDm.Diagnostics)
+        {
+            var src = diag.Source;
+            string? diagPath = src?.FilePath;
+            allInternalDiagnostics.Add((diag, src ?? (pathsList.Count > 0 ? sourceTexts[0] : null!), diagPath ?? (pathsList.Count > 0 ? pathsList[0] : "source.mh")));
+        }
 
         var projected = new List<DiagnosticInfo>(allInternalDiagnostics.Count);
         foreach (var (diag, text, path) in allInternalDiagnostics)
@@ -173,7 +239,7 @@ public sealed class Compilation
     /// </summary>
     public static Compilation FromProjectFile(string projectFilePath, CompilationOptions? options = null)
     {
-        var project = Maho.Build.MahoBuildSystem.LoadProject(projectFilePath, options);
+        var project = Build.MahoBuildSystem.LoadProject(projectFilePath, options);
         var referencedCompilations = new List<Compilation>();
         foreach (var refProj in project.Configuration.ProjectsReferenced)
         {

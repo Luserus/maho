@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Maho.Analysis;
 
 namespace Maho.Build;
@@ -125,6 +126,30 @@ public static class MahoBuildSystem
     }
 
     /// <summary>
+    /// Searches a directory for a unique <c>.mhpr</c> project file.
+    /// Returns the project file path if exactly one is found, or null if none are found.
+    /// Throws <see cref="InvalidOperationException"/> if multiple project files are found.
+    /// </summary>
+    public static string? FindProjectFile(string directoryPath)
+    {
+        string fullDirPath = Path.GetFullPath(directoryPath);
+        if (!Directory.Exists(fullDirPath))
+            return null;
+
+        string[] projectFiles = Directory.GetFiles(fullDirPath, "*.mhpr");
+        if (projectFiles.Length == 1)
+            return projectFiles[0];
+
+        if (projectFiles.Length > 1)
+        {
+            var fileNames = string.Join(", ", projectFiles.Select(Path.GetFileName));
+            throw new InvalidOperationException($"Multiple project files found in '{directoryPath}': {fileNames}. Specify which project file to compile.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Loads a domain-specific <c>.mhpr</c> project file, parses its configuration, discovers source files, and prepares compilation options.
     /// </summary>
     public static MahoProject LoadProject(string projectFilePath, CompilationOptions? options = null)
@@ -142,7 +167,7 @@ public static class MahoBuildSystem
         string[] sourceFiles = ResolveSourceFiles(projectDir, config);
         string projectName = Path.GetFileNameWithoutExtension(fullProjectPath);
 
-        string? resolvedEntry = config.EntryFile != null
+        string? resolvedEntry = config.EntryFile is not null
             ? (Path.IsPathRooted(config.EntryFile) ? config.EntryFile : Path.GetFullPath(Path.Combine(projectDir, config.EntryFile)))
             : options.EntryFile;
 

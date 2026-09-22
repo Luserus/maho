@@ -13,11 +13,12 @@ public enum DiagnosticColorMode : byte
 }
 
 /// <summary>
-/// Controls whether source file paths are printed relative to the working directory or as full paths.
+/// Controls whether source file paths are printed relative to the working directory, relative to project root, or as full paths.
 /// </summary>
 public enum DiagnosticPathStyle : byte
 {
     Relative,
+    ProjectRelative,
     Full
 }
 

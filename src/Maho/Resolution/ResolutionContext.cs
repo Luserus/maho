@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -8,6 +9,7 @@ internal sealed class ResolutionContext
 {
     public SyntaxTree SyntaxTree { get; }
     public ResolvedTree ResolvedTree { get; }
+    public DiagnosticsManager Diagnostics { get; }
 
     public NamespaceTrieNode GlobalNamespace { get; }
 
@@ -58,10 +60,12 @@ internal sealed class ResolutionContext
         SymbolStore symbols,
         List<Scope> scopes,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
-        IReadOnlyList<SymbolStore>? importedSymbols = null)
+        IReadOnlyList<SymbolStore>? importedSymbols = null,
+        DiagnosticsManager? diagnostics = null)
     {
         SyntaxTree = syntaxTree;
         ResolvedTree = resolvedTree;
+        Diagnostics = diagnostics ?? new DiagnosticsManager();
 
         GlobalNamespace = globalNamespace;
         Scopes = scopes;

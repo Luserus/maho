@@ -445,7 +445,7 @@ internal sealed partial class Parser
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
     {
         if (!topLevelStatementsEnabled)
-            diagnostics.ReportError("MH0011", "Top-level statements require '#pragma toplevel enable' in this file.", CurrentToken.Span);
+            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span);
 
         return ParseTopLevelStatement();
     }

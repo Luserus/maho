@@ -125,6 +125,110 @@ public sealed class DiagnosticEngineTests
     }
 
     [Fact]
+    public void DiagnosticsManager_ReportDuplicateTypeDeclaration_EmitsPrimaryAndSecondaryLabels()
+    {
+        var manager = new DiagnosticsManager();
+        var firstSpan = new TextSpan(10, 5);
+        var secondSpan = new TextSpan(30, 5);
+
+        manager.ReportDuplicateTypeDeclaration("Person", secondSpan, firstSpan);
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1002", diag.DiagnosticCode);
+        Assert.Equal(2, diag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
+        Assert.Contains("Person", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
+    public void DiagnosticsManager_ReportDuplicateFunctionDeclaration_EmitsPrimaryAndSecondaryLabels()
+    {
+        var manager = new DiagnosticsManager();
+        var firstSpan = new TextSpan(5, 4);
+        var secondSpan = new TextSpan(25, 4);
+
+        manager.ReportDuplicateFunctionDeclaration("Calc", secondSpan, firstSpan);
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1003", diag.DiagnosticCode);
+        Assert.Equal(2, diag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
+        Assert.Contains("Calc", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
+    public void DiagnosticsManager_ReportDuplicateVariableDeclaration_EmitsPrimaryAndSecondaryLabels()
+    {
+        var manager = new DiagnosticsManager();
+        var firstSpan = new TextSpan(2, 3);
+        var secondSpan = new TextSpan(20, 3);
+
+        manager.ReportDuplicateVariableDeclaration("val", secondSpan, firstSpan);
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1005", diag.DiagnosticCode);
+        Assert.Equal(2, diag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
+        Assert.Contains("val", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
+    public void DiagnosticsManager_ReportDuplicatePropertyDeclaration_EmitsPrimaryAndSecondaryLabels()
+    {
+        var manager = new DiagnosticsManager();
+        var firstSpan = new TextSpan(4, 4);
+        var secondSpan = new TextSpan(24, 4);
+
+        manager.ReportDuplicatePropertyDeclaration("Size", secondSpan, firstSpan);
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1006", diag.DiagnosticCode);
+        Assert.Equal(2, diag.Labels.Count);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
+        Assert.Contains("Size", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
+    public void DiagnosticsManager_ReportCyclicTypeHierarchy_EmitsPrimaryLabelAndHelp()
+    {
+        var manager = new DiagnosticsManager();
+        var span = new TextSpan(10, 4);
+
+        manager.ReportCyclicTypeHierarchy(span, "Node");
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1004", diag.DiagnosticCode);
+        Assert.Single(diag.Labels);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Contains("cycle", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
+    public void DiagnosticsManager_ReportAmbiguousTypeReference_EmitsPrimaryLabelAndHelp()
+    {
+        var manager = new DiagnosticsManager();
+        var span = new TextSpan(5, 3);
+
+        manager.ReportAmbiguousTypeReference(span, "Foo");
+
+        Diagnostic diag = Assert.Single(manager.Diagnostics);
+        Assert.Equal("MH1001", diag.DiagnosticCode);
+        Assert.Single(diag.Labels);
+        Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
+        Assert.Contains("Foo", diag.Message);
+        Assert.Single(diag.HelpMessages);
+    }
+
+    [Fact]
     public void DiagnosticsManager_ThreadSafety_AllowsConcurrentReports()
     {
         var manager = new DiagnosticsManager();

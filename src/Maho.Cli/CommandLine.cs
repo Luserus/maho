@@ -38,7 +38,9 @@ public static class CommandLine
         bool ShowHelp,
         bool ShowVersion,
         string? OutputDestination,
-        string? SourcePath);
+        string? SourcePath,
+        bool? ImplicitTopLevel = null,
+        bool NoProject = false);
 
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
@@ -80,7 +82,7 @@ public static class CommandLine
 
         try
         {
-            analysis = Compile(sourcePath, options.DebugOutput);
+            analysis = Compile(sourcePath, options);
         }
         catch (CompilerPipelineNotImplementedException ex)
         {
@@ -104,7 +106,7 @@ public static class CommandLine
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
             DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(sourcePath, analysis, pipelineError),
-            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(sourcePath, analysis, pipelineError),
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(sourcePath, analysis, pipelineError, options.PathStyle),
             _ => BuildDiagnosticsPrettyOutput(sourcePath, analysis, pipelineError, options.ColorMode, options.PathStyle)
         };
 
@@ -117,20 +119,48 @@ public static class CommandLine
         return hasErrors || pipelineError is not null || writeFailed ? 1 : 0;
     }
 
-    private static CompilerProjectAnalysisResult Compile(string sourcePath, AnalysisOutput debugOutput)
+    private static CompilerProjectAnalysisResult Compile(string sourcePath, CliOptions cliOptions)
     {
+        var compOptions = new CompilationOptions
+        {
+            ColorMode = cliOptions.ColorMode,
+            PathStyle = cliOptions.PathStyle,
+            WarningsAsErrors = cliOptions.WarningsAsErrors,
+            OutputFormat = cliOptions.DiagnosticsFormat switch
+            {
+                DiagnosticsFormat.Json => DiagnosticFormat.Json,
+                DiagnosticsFormat.Text => DiagnosticFormat.Short,
+                _ => DiagnosticFormat.Pretty
+            },
+            ImplicitTopLevel = cliOptions.ImplicitTopLevel ?? false
+        };
+
         if (string.Equals(Path.GetExtension(sourcePath), ".mhpr", StringComparison.OrdinalIgnoreCase))
-            return MahoBuildSystem.CompileProject(sourcePath, debugOutput);
+            return MahoBuildSystem.CompileProject(sourcePath, cliOptions.DebugOutput, compOptions);
 
         if (File.Exists(sourcePath))
         {
             string fullPath = Path.GetFullPath(sourcePath);
-            var options = CompilationOptions.Default with { ImplicitTopLevel = true, EntryFile = fullPath };
-            return MahoCompiler.CompileFiles([fullPath], debugOutput, fullPath, options);
+            bool implicitTopLevel = cliOptions.ImplicitTopLevel ?? true;
+            compOptions = compOptions with { ImplicitTopLevel = implicitTopLevel, EntryFile = fullPath };
+            return MahoCompiler.CompileFiles([fullPath], cliOptions.DebugOutput, fullPath, compOptions);
         }
 
         if (Directory.Exists(sourcePath))
-            return MahoBuildSystem.CompileDirectory(sourcePath, debugOutput);
+        {
+            if (!cliOptions.NoProject)
+            {
+                string? projectFile = MahoBuildSystem.FindProjectFile(sourcePath);
+                if (projectFile is not null)
+                    return MahoBuildSystem.CompileProject(projectFile, cliOptions.DebugOutput, compOptions);
+
+                throw new ArgumentException($"No project file ('.mhpr') found in '{sourcePath}'. Use --no-project to compile directory sources without a project file.");
+            }
+
+            bool implicitTopLevel = cliOptions.ImplicitTopLevel ?? true;
+            compOptions = compOptions with { ImplicitTopLevel = implicitTopLevel };
+            return MahoBuildSystem.CompileDirectory(sourcePath, cliOptions.DebugOutput, compOptions);
+        }
 
         throw new ArgumentException($"Input path not found: {sourcePath}", nameof(sourcePath));
     }
@@ -189,15 +219,26 @@ public static class CommandLine
         }
     }
 
-    private static string BuildDiagnosticsTextOutput(string inputPath, CompilerProjectAnalysisResult analysis, string? pipelineError)
+    private static string BuildDiagnosticsTextOutput(
+        string inputPath,
+        CompilerProjectAnalysisResult analysis,
+        string? pipelineError,
+        DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative)
     {
         StringBuilder output = new();
-        bool multipleFiles = analysis.Files.Length > 1;
-        string displayRoot = GetDisplayRoot(inputPath);
+        string displayRoot = pathStyle switch
+        {
+            DiagnosticPathStyle.ProjectRelative => GetDisplayRoot(inputPath),
+            _ => Directory.GetCurrentDirectory()
+        };
 
         foreach (CompilerBatchFileResult file in analysis.Files)
         {
-            string displayPath = multipleFiles ? Path.GetRelativePath(displayRoot, file.SourcePath) : file.SourcePath;
+            string displayPath = pathStyle switch
+            {
+                DiagnosticPathStyle.Full => Path.GetFullPath(file.SourcePath),
+                _ => Path.GetRelativePath(displayRoot, file.SourcePath)
+            };
 
             if (file.Output is { } fileAnalysis)
             {
@@ -237,8 +278,12 @@ public static class CommandLine
         DiagnosticColorMode colorMode,
         DiagnosticPathStyle pathStyle)
     {
-        string displayRoot = GetDisplayRoot(inputPath);
-        var renderer = new TerminalDiagnosticRenderer(colorMode, pathStyle, displayRoot);
+        string projectRoot = GetDisplayRoot(inputPath);
+        var renderer = new TerminalDiagnosticRenderer(
+            colorMode,
+            pathStyle,
+            rootDirectory: Directory.GetCurrentDirectory(),
+            projectDirectory: projectRoot);
         var sb = new StringBuilder();
 
         foreach (CompilerBatchFileResult file in analysis.Files)
@@ -353,6 +398,8 @@ public static class CommandLine
         bool showVersion = false;
         string? generalOutput = null;
         string? sourcePath = null;
+        bool? implicitTopLevel = null;
+        bool noProject = false;
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -442,24 +489,51 @@ public static class CommandLine
                     break;
 
                 case "--diagnostic-paths":
-                    if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
                     {
                         options = default;
-                        errorMessage = "The --diagnostic-paths option requires 'relative' or 'full'.";
+                        errorMessage = "The --diagnostic-paths option requires 'relative', 'project', or 'full'.";
                         return false;
                     }
                     index++;
-                    pathStyle = args[index].ToLowerInvariant() switch
+                    var parsedStyle = args[index].ToLowerInvariant() switch
                     {
-                        "relative" => DiagnosticPathStyle.Relative,
-                        "full" => DiagnosticPathStyle.Full,
+                        "relative" or "cwd" => DiagnosticPathStyle.Relative,
+                        "project" or "project-relative" => DiagnosticPathStyle.ProjectRelative,
+                        "full" or "absolute" => DiagnosticPathStyle.Full,
                         _ => (DiagnosticPathStyle?)null
-                    } ?? throw new ArgumentException($"Invalid path style '{args[index]}'. Expected relative or full.");
+                    };
+                    if (parsedStyle is null)
+                    {
+                        options = default;
+                        errorMessage = $"Invalid path style '{args[index]}'. Expected relative, project, or full.";
+                        return false;
+                    }
+                    pathStyle = parsedStyle.Value;
                     break;
 
                 case "-Werror":
                 case "--warnings-as-errors":
                     warningsAsErrors = true;
+                    break;
+
+                case "--no-project":
+                case "--allow-no-project":
+                    noProject = true;
+                    break;
+
+                case string arg when arg.StartsWith("--implicit-toplevel=", StringComparison.OrdinalIgnoreCase):
+                    string boolStr = arg[(arg.IndexOf('=') + 1)..];
+                    if (bool.TryParse(boolStr, out bool parsedBool))
+                    {
+                        implicitTopLevel = parsedBool;
+                    }
+                    else
+                    {
+                        options = default;
+                        errorMessage = $"Invalid value '{boolStr}' for --implicit-toplevel. Expected 'true' or 'false'.";
+                        return false;
+                    }
                     break;
 
                 default:
@@ -485,7 +559,7 @@ public static class CommandLine
         debugDestination ??= generalOutput;
         diagnosticsDestination ??= generalOutput;
 
-        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, generalOutput, sourcePath);
+        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, generalOutput, sourcePath, implicitTopLevel, noProject);
         errorMessage = null;
         return true;
     }
@@ -617,7 +691,9 @@ public static class CommandLine
         writer.WriteLine("  --diagnostics [pretty|text|json] (-o|--output) <file|->     Write diagnostics to a file or stderr (default: pretty).");
         writer.WriteLine("  -o, --output <file|->                                       Output destination path (or '-' for stdout).");
         writer.WriteLine("  --color [auto|always|never]                                 Control ANSI colored diagnostics.");
-        writer.WriteLine("  --diagnostic-paths (relative|full)                          Choose relative or full file paths in diagnostics.");
+        writer.WriteLine("  --diagnostic-paths (relative|project|full)                  Choose relative (CWD), project-relative, or full paths in diagnostics.");
+        writer.WriteLine("  --implicit-toplevel[=true|false]                            Allow implicit top-level statements for entry files.");
+        writer.WriteLine("  --no-project                                                Allow compiling directory sources without a project file (.mhpr).");
         writer.WriteLine("  -Werror, --warnings-as-errors                               Treat compiler warnings as errors.");
         writer.WriteLine("  -v, --version                                               Show compiler version.");
         writer.WriteLine("  -h, --help                                                  Show this help text.");
