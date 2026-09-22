@@ -8,7 +8,7 @@ using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Represents an immutable compilation unit or project batch in the Maho compiler.
@@ -234,22 +234,6 @@ public sealed class Compilation
             projected);
     }
 
-    /// <summary>
-    /// Creates a compilation from a domain-specific <c>.mhpr</c> project file.
-    /// </summary>
-    public static Compilation FromProjectFile(string projectFilePath, CompilationOptions? options = null)
-    {
-        var project = Build.MahoBuildSystem.LoadProject(projectFilePath, options);
-        var referencedCompilations = new List<Compilation>();
-        foreach (var refProj in project.Configuration.ProjectsReferenced)
-        {
-            string refPath = Path.IsPathRooted(refProj) ? refProj : Path.Combine(project.ProjectDirectory, refProj);
-            if (File.Exists(refPath))
-                referencedCompilations.Add(FromProjectFile(refPath, options));
-        }
-
-        return FromFiles(project.SourceFiles, project.ProjectName, project.Options, referencedCompilations);
-    }
 
     private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
     {

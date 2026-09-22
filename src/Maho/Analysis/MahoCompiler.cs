@@ -9,7 +9,7 @@ using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Unified compiler entrypoint and orchestration engine for Maho.
@@ -324,19 +324,6 @@ public static class MahoCompiler
 
         return analysis;
     }
-
-    /// <summary>
-    /// Analyzes a domain-specific <c>.mhpr</c> project file.
-    /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)
-        => Build.MahoBuildSystem.AnalyzeProject(projectFilePath, output, options);
-
-    /// <summary>
-    /// Compiles a domain-specific <c>.mhpr</c> project file and reaches the lowering/codegen stage.
-    /// Throws <see cref="CompilerPipelineNotImplementedException"/> after successful front-end analysis.
-    /// </summary>
-    public static CompilerProjectAnalysisResult CompileProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)
-        => Build.MahoBuildSystem.CompileProject(projectFilePath, output, options);
 
     internal static TextSpanInfo CreateSpanInfo(TextSpan span, SourceText text) =>
         new TextSpanInfo(span.Start, span.Length, span.End, new TextLocation(span.GetStartLine(text) + 1, span.GetStartColumn(text) + 1),

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Captures the outcome of compiling one file inside a compiler-owned batch or project run.

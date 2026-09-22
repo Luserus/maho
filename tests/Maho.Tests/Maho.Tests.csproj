@@ -16,7 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Maho/Maho.csproj" />
-    <ProjectReference Include="../../src/Maho.Cli/Maho.Cli.csproj" />
+    <ProjectReference Include="../../src/MahoBuild/MahoBuild.csproj" />
+    <ProjectReference Include="../../src/MahoCli/MahoCli.csproj" />
   </ItemGroup>
 
 </Project>

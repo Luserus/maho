@@ -12,7 +12,7 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 ## Go here when...
 
-- You want to see how `./maho` becomes actual work:
+- You want to see how `./dist/mahoc` becomes actual work:
   [`cli.md`](cli.md)
 - You want the public analysis API or the result payload contract:
   [`analysis.md`](analysis.md)
@@ -38,16 +38,19 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 ## Current pipeline
 
-At the moment, the codebase is strongest in the front half of the compiler:
+The compiler currently executes a complete front-end pipeline up through declaration resolution:
 
-1. The CLI resolves input files and options.
-2. `MahoCompiler.AnalyzeFiles(...)` owns batch analysis, while `AnalyzeFile(...)` and `AnalyzeText(...)` handle single inputs.
-3. `MahoCompiler` loads source text, lexes, parses, and starts project-wide resolution.
-4. Diagnostics are projected into a public, serializable result model.
-5. Optional debug JSON is produced for lexer and parser state.
-6. The CLI renders either text output or JSON envelopes for both debug data and diagnostics.
-
-Resolution and symbol work are present as a real semantic scaffold, but the layer is still evolving.
+1. The CLI (`MahoCli` / `mahoc`) parses command-line arguments and configuration options.
+2. If compiling a `.mhpr` project file or directory, `MahoBuild.MahoBuildSystem` discovers source files, parses configuration, and prepares the compilation.
+3. `MahoCompiler.AnalyzeFiles(...)` coordinates multi-file front-end analysis (or `AnalyzeFile(...)` / `AnalyzeText(...)` for single inputs).
+4. `SourceText` indexes line offsets and enables absolute and line/column span tracking.
+5. `Lexer` and `Parser` generate a strongly-typed `SyntaxTree` with leading and trailing trivia.
+6. `Resolver` executes the semantic resolution pipeline:
+   - `SymbolDiscoveryPass`: discovers namespaces, builds the namespace trie, registers types/functions/variables/properties/aliases, assigns modifier flags (including `TypeFlags.Partial` and `FunctionFlags.Partial`), and constructs lexical scopes.
+   - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH1004`), checks duplicate non-partial types (`MH1002`), performs partial type canonical merging and kind consistency, enforces partial function body limits and signature matching (`MH1003`), checks duplicate variables (`MH1005`), duplicate properties (`MH1006`), and ambiguous type references (`MH1001`).
+7. Diagnostics are enriched with primary carets, secondary context spans, notes, and remediation help, then projected into `DiagnosticInfo` payloads.
+8. The CLI renders either rich ANSI-colored reports or JSON envelopes for diagnostics and optional debug JSON.
+9. Upon successful front-end resolution, the pipeline reaches the lowering/codegen boundary (currently throwing `MH9000`).
 
 ## Reading strategy
 

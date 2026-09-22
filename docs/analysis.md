@@ -11,10 +11,11 @@ This folder matters because it defines what leaves the compiler:
 ## Files in this folder
 
 - `MahoCompiler.cs`: public compiler entrypoint and orchestration for single-file and batch analysis.
+- `Compilation.cs`: root compilation coordination object managing source units, referenced compilations, and resolution passes.
+- `AnalysisSession.cs`: stateful incremental compilation session for interactive evaluation and REPL environments.
 - `CompilerAnalysisResult.cs`: immutable single-file result payload.
 - `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
 - `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)`.
-- `../Build/MahoProjectConfiguration.cs`: domain-specific `.mhpr` project configuration.
 - `AnalysisOutput.cs`: flags that decide which debug payloads are included.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
@@ -22,44 +23,47 @@ This folder matters because it defines what leaves the compiler:
 - `TextSpanInfo.cs`: public span with both absolute offsets and line/column endpoints.
 - `DebugJson.cs`: internal serializer helpers plus debug DTOs for lexer/parser output.
 
+*(Note: Domain-specific `.mhpr` project loading, source file discovery, and project-graph dependency resolution are owned by the decoupled `MahoBuild` library in `src/MahoBuild`.)*
+
 ## `MahoCompiler` function guide
 
-### `AnalyzeFile(string filePath, AnalysisOutput output = AnalysisOutput.None)`
+### `AnalyzeFile(string filePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)`
 
 Loads source from disk, validates the input path argument, and forwards to `AnalyzeCore(...)`.
 
-Important detail:
-
-- this method owns path normalization,
-- text loading happens through `SourceText` and `SourceFile`, not ad hoc file reads.
-
-### `AnalyzeText(string sourceText, AnalysisOutput output = AnalysisOutput.None, string sourcePath = "<memory>")`
-
-The in-memory companion to `AnalyzeFile(...)`. It is the API to use for tests, editor integrations, or any caller that already has source text in memory.
-
-The notable behavior is that it still requires a `sourcePath` string so the downstream result has a stable identity, even for virtual documents.
-
-### `AnalyzeFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string projectName = "<project>")`
-
-The batch companion to `AnalyzeFile(...)`. It moves file-level parallel orchestration into the core
-compiler library so callers such as the CLI do not need to own `Parallel.For(...)` around compiler
-entrypoints.
-
 Important details:
+- owns path normalization,
+- text loading happens through `SourceText` and `SourceFile`, not ad hoc file reads,
+- executes the resolution pipeline through `DeclarationResolutionPass`.
 
+### `AnalyzeText(string sourceText, AnalysisOutput output = AnalysisOutput.None, string sourcePath = "<memory>", CompilationOptions? options = null)`
+
+The in-memory companion to `AnalyzeFile(...)`. It is the primary API for unit tests, editor integrations, or any caller with source text in memory. It accepts a `sourcePath` string so downstream diagnostics and spans have a stable virtual identity.
+
+### `AnalyzeFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string rootDirectory = "", CompilationOptions? options = null)`
+
+The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel parsing and front-end work across multiple source files:
 - input paths are normalized up front,
-- each file result is preserved even if another file fails,
-- the returned `CompilerProjectAnalysisResult` keeps file results in input order,
-- this API centralizes batch scheduling policy inside the compiler library.
+- parsed compilation units are united under a single `SyntaxTree`,
+- runs the multi-pass `Resolver` across all compilation units,
+- returns a `CompilerProjectAnalysisResult` keeping file results in input order.
 
-### `AnalyzeProjectFile(string projectFilePath, AnalysisOutput output = AnalysisOutput.None)`
+### `CompileFiles(...)` and `CompileSource(...)`
 
-Loads a domain-specific, JSON-inspired `.mhpr` file, discovers the project's source files
-according to its `Sources` configuration, and applies its entry-point selection policy. The outer project scope is intentionally
-brace-less and property names are bare identifiers:
+These are the compiler entry points used for full compilation runs. They execute front-end lexing, parsing, and semantic resolution passes (`SymbolDiscoveryPass` and `DeclarationResolutionPass`). If front-end analysis succeeds with zero errors, execution reaches the lowering/codegen boundary (currently throwing `CompilerPipelineNotImplementedException` with error code `MH9000`).
+
+### Build System Facade (`MahoBuild.MahoBuildSystem`)
+
+When compiling or analyzing `.mhpr` project files or whole directories, the separate `MahoBuild` library provides:
+- `MahoBuildSystem.AnalyzeProject(projectFilePath, output, options)`
+- `MahoBuildSystem.CompileProject(projectFilePath, output, options)`
+- `MahoBuildSystem.CreateCompilation(projectFilePath, options)`
+
+Project files define entry-point selection, global unsafe configuration, project references, and file discovery patterns:
 
 ```mhpr
 EntryFile : "Program.mh";
+ImplicitTopLevel : true;
 GlobalUnsafeEnabled : false;
 ProjectsReferenced : [];
 Sources : {
@@ -72,23 +76,6 @@ GlobalAliases : {
 	"float32" : "Std.Float32"
 };
 ```
-
-Top-level project properties are terminated by semicolons. Array and object values retain
-comma-separated entries.
-
-`EntryFile` is optional. Without it, exactly one source file containing opted-in top-level
-statements becomes the implicit entry candidate; multiple candidates report an ambiguity.
-This one-file restriction applies even when `EntryFile` is explicitly configured.
-`GlobalUnsafeEnabled`, `ProjectsReferenced`, and `GlobalAliases` are represented by the project
-configuration model and reserved for later semantic passes.
-
-### `CompileFiles(...)` and `CompileProjectFile(...)`
-
-These are the production compiler entry points used by the CLI. They run the same front-end work as
-their `Analyze*` counterparts, return normal syntax/resolution failures, and otherwise enter the
-next lowering/code-generation stage. That stage currently throws
-`CompilerPipelineNotImplementedException`, retaining the completed front-end result for debug and
-diagnostics consumers.
 
 ### `AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)`
 

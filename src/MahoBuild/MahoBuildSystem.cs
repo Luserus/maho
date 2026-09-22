@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Maho.Analysis;
 
 namespace Maho.Build;
 
@@ -184,6 +183,23 @@ public static class MahoBuildSystem
     }
 
     /// <summary>
+    /// Creates a Compilation instance representing a project file, including its referenced project compilations.
+    /// </summary>
+    public static Compilation CreateCompilation(string projectFilePath, CompilationOptions? options = null)
+    {
+        var project = LoadProject(projectFilePath, options);
+        var referencedCompilations = new List<Compilation>();
+        foreach (var refProj in project.Configuration.ProjectsReferenced)
+        {
+            string refPath = Path.IsPathRooted(refProj) ? refProj : Path.Combine(project.ProjectDirectory, refProj);
+            if (File.Exists(refPath))
+                referencedCompilations.Add(CreateCompilation(refPath, options));
+        }
+
+        return Compilation.FromFiles(project.SourceFiles, project.ProjectName, project.Options, referencedCompilations);
+    }
+
+    /// <summary>
     /// Analyzes a domain-specific <c>.mhpr</c> project file using the build system.
     /// </summary>
     public static CompilerProjectAnalysisResult AnalyzeProject(
@@ -196,6 +212,15 @@ public static class MahoBuildSystem
     }
 
     /// <summary>
+    /// Analyzes a domain-specific <c>.mhpr</c> project file using the build system. Alias for <see cref="AnalyzeProject"/>.
+    /// </summary>
+    public static CompilerProjectAnalysisResult AnalyzeProjectFile(
+        string projectFilePath,
+        AnalysisOutput output = AnalysisOutput.None,
+        CompilationOptions? options = null)
+        => AnalyzeProject(projectFilePath, output, options);
+
+    /// <summary>
     /// Compiles a domain-specific <c>.mhpr</c> project file using the build system.
     /// </summary>
     public static CompilerProjectAnalysisResult CompileProject(
@@ -206,6 +231,15 @@ public static class MahoBuildSystem
         var project = LoadProject(projectFilePath, options);
         return MahoCompiler.CompileFiles(project.SourceFiles, output, project.ProjectDirectory, project.Options);
     }
+
+    /// <summary>
+    /// Compiles a domain-specific <c>.mhpr</c> project file using the build system. Alias for <see cref="CompileProject"/>.
+    /// </summary>
+    public static CompilerProjectAnalysisResult CompileProjectFile(
+        string projectFilePath,
+        AnalysisOutput output = AnalysisOutput.None,
+        CompilationOptions? options = null)
+        => CompileProject(projectFilePath, output, options);
 
     /// <summary>
     /// Compiles all source files in a directory using default project directory options.

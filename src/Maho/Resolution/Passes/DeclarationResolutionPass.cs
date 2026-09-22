@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Maho.Diagnostics;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -10,6 +9,8 @@ namespace Maho.Resolution;
 /// <summary>Resolves declaration-owned references after every declaration is known.</summary>
 internal sealed class DeclarationResolutionPass : ResolutionPass
 {
+    private record struct FunctionSignatureInfo(Symbol Symbol, FunctionFlags Flags, FunctionDeclaration? Syntax, IReadOnlyList<SymbolHandle> GenericParameters, List<SymbolHandle> Parameters, TypeRef ReturnType);
+
     private ResolutionContext context = null!;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
 
@@ -706,6 +707,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
             case BlockExpression block:
                 Scope blockScope = context.GetSyntaxScope(block, scope);
+
                 foreach (var local in block.Locals)
                     ResolveLocal(local, blockScope, containingSymbol);
 
@@ -722,6 +724,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
             case ConstructorCallExpression constructor:
                 ResolveType(constructor.Type, scope);
+
                 foreach (var argument in constructor.Arguments)
                     ResolveExpression(argument, scope, containingSymbol);
 
@@ -745,11 +748,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveNamedExpression(NamedExpression syntax, Scope scope)
     {
-        var name = syntax is GenericNameExpression generic
-            ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count)
-            : new SymbolPart(syntax.Identifier);
+        var name = syntax is GenericNameExpression generic ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count) : new SymbolPart(syntax.Identifier);
+
         if (ResolveSingle(scope, new SymbolName(name)) is { } symbol)
             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(symbol));
+
         if (syntax is GenericNameExpression genericName)
             foreach (var argument in genericName.GenericArguments)
                 ResolveType(argument, scope);
@@ -843,19 +846,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return false;
 
         var first = symbols[0];
+
         if (first is TypeSymbol firstType)
         {
             if (!firstType.Flags.HasFlag(TypeFlags.Partial))
                 return false;
 
             for (int i = 1; i < symbols.Count; i++)
-            {
-                if (symbols[i] is not TypeSymbol other ||
-                    other.Name != firstType.Name ||
-                    other.ContainingNamespace != firstType.ContainingNamespace ||
-                    !other.Flags.HasFlag(TypeFlags.Partial))
+                if (symbols[i] is not TypeSymbol other || other.Name != firstType.Name || other.ContainingNamespace != firstType.ContainingNamespace || !other.Flags.HasFlag(TypeFlags.Partial))
                     return false;
-            }
 
             return true;
         }
@@ -866,13 +865,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 return false;
 
             for (int i = 1; i < symbols.Count; i++)
-            {
-                if (symbols[i] is not NestedTypeSymbol other ||
-                    other.Name != firstNested.Name ||
-                    other.Parent != firstNested.Parent ||
-                    !other.Flags.HasFlag(TypeFlags.Partial))
+                if (symbols[i] is not NestedTypeSymbol other || other.Name != firstNested.Name || other.Parent != firstNested.Parent || !other.Flags.HasFlag(TypeFlags.Partial))
                     return false;
-            }
 
             return true;
         }
@@ -884,14 +878,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         // 1. Top-level types
         var topGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<TypeSymbol>>();
+
         foreach (var type in context.TypeSymbols)
         {
             var key = (type.ContainingNamespace, type.Name);
+
             if (!topGroups.TryGetValue(key, out var list))
             {
                 list = [];
                 topGroups[key] = list;
             }
+
             list.Add(type);
         }
 
@@ -930,6 +927,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             if (alias.ContainingNamespace != null)
             {
                 var matchingTypes = alias.ContainingNamespace.GetSymbols(alias.Name);
+
                 foreach (var sym in matchingTypes)
                 {
                     if (sym is TypeSymbol typeSym)
@@ -955,6 +953,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (allPartial)
         {
             var first = group[0];
+
             for (int i = 1; i < group.Count; i++)
             {
                 var cur = group[i];
@@ -972,11 +971,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                         first.Syntax?.GetSource());
                 }
             }
+
             return;
         }
 
         var firstDecl = group[0];
         var firstDeclSpan = firstDecl.Syntax?.Name.GetSpan() ?? firstDecl.Syntax?.GetSpan() ?? default;
+
         for (int i = 1; i < group.Count; i++)
         {
             var redecl = group[i];
@@ -992,7 +993,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void CheckNestedTypeGroup(List<NestedTypeSymbol> group)
     {
-        bool allPartial = group.All(static t => t.Flags.HasFlag(TypeFlags.Partial));
+        var allPartial = group.All(static t => t.Flags.HasFlag(TypeFlags.Partial));
 
         if (allPartial)
         {
@@ -1014,11 +1015,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                         first.Syntax?.GetSource());
                 }
             }
+
             return;
         }
 
         var firstDecl = group[0];
         var firstDeclSpan = firstDecl.Syntax?.Name.GetSpan() ?? firstDecl.Syntax?.GetSpan() ?? default;
+
         for (int i = 1; i < group.Count; i++)
         {
             var redecl = group[i];
@@ -1039,6 +1042,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var type in context.TypeSymbols)
         {
             var handle = ResolutionContext.GetHandle(type);
+
             if (!reported.Contains(handle) && HasInheritanceCycle(handle, [handle]))
             {
                 reported.Add(handle);
@@ -1050,6 +1054,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var type in context.NestedTypeSymbols)
         {
             var handle = ResolutionContext.GetHandle(type);
+
             if (!reported.Contains(handle) && HasInheritanceCycle(handle, [handle]))
             {
                 reported.Add(handle);
@@ -1062,6 +1067,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private bool HasInheritanceCycle(SymbolHandle current, HashSet<SymbolHandle> path)
     {
         IReadOnlyList<TypeRef> baseTypes;
+
         if (current.Kind == SymbolKind.Type && current.ID.Value >= 0 && current.ID.Value < context.TypeSymbols.Count)
             baseTypes = context.TypeSymbols[current.ID].BaseTypes;
         else if (current.Kind == SymbolKind.NestedType && current.ID.Value >= 0 && current.ID.Value < context.NestedTypeSymbols.Count)
@@ -1072,6 +1078,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var baseType in baseTypes)
         {
             var underlying = context.GetType(baseType);
+
             if (underlying is not { } baseHandle)
                 continue;
 
@@ -1079,34 +1086,31 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 return true;
 
             path.Add(baseHandle);
+
             if (HasInheritanceCycle(baseHandle, path))
                 return true;
+
             path.Remove(baseHandle);
         }
 
         return false;
     }
 
-    private sealed record FunctionSignatureInfo(
-        Symbol Symbol,
-        FunctionFlags Flags,
-        FunctionDeclaration? Syntax,
-        IReadOnlyList<SymbolHandle> GenericParameters,
-        List<SymbolHandle> Parameters,
-        TypeRef ReturnType);
-
     private void CheckDuplicateAndPartialFunctions()
     {
         // 1. Top-level functions
         var topGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<FunctionSignatureInfo>>();
+
         foreach (var fn in context.FunctionSymbols)
         {
             var key = (fn.ContainingNamespace, fn.Name);
+
             if (!topGroups.TryGetValue(key, out var list))
             {
                 list = [];
                 topGroups[key] = list;
             }
+
             list.Add(new FunctionSignatureInfo(fn, fn.Flags, fn.Syntax, fn.GenericParameters, fn.Parameters, fn.ReturnType));
         }
 
@@ -1115,6 +1119,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         // 2. Member & Local methods
         var methodGroups = new Dictionary<(Scope, SymbolPart), List<FunctionSignatureInfo>>();
+
         foreach (var m in context.MethodSymbols)
         {
             var key = (m.EnclosingScope, m.Name);
@@ -1123,6 +1128,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 list = [];
                 methodGroups[key] = list;
             }
+
             list.Add(new FunctionSignatureInfo(m, m.Flags, m.Syntax, m.GenericParameters, m.Parameters, m.ReturnType));
         }
 
@@ -1137,9 +1143,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         // Partition into sub-groups by parameter signature
         var subGroups = new List<List<FunctionSignatureInfo>>();
+
         foreach (var fn in group)
         {
             bool added = false;
+
             foreach (var sub in subGroups)
             {
                 if (SignaturesMatch(sub[0].GenericParameters, sub[0].Parameters, fn.GenericParameters, fn.Parameters))
@@ -1149,6 +1157,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     break;
                 }
             }
+
             if (!added)
                 subGroups.Add([fn]);
         }
@@ -1165,15 +1174,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 // Partial function: unlimited without body allowed. At most one with body.
                 var withBodies = new List<FunctionSignatureInfo>();
                 foreach (var fn in subGroup)
-                {
                     if (fn.Syntax?.Body is not null and not FunctionEmptyBody)
                         withBodies.Add(fn);
-                }
 
                 if (withBodies.Count > 1)
                 {
                     var firstBody = withBodies[0];
                     var firstSpan = firstBody.Syntax?.Body.GetSpan() ?? firstBody.Syntax?.GetSpan() ?? default;
+
                     for (int i = 1; i < withBodies.Count; i++)
                     {
                         var redecl = withBodies[i];
@@ -1191,6 +1199,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 // Check return type consistency
                 var firstReturn = subGroup[0].ReturnType;
                 var firstSyntax = subGroup[0].Syntax;
+
                 for (int i = 1; i < subGroup.Count; i++)
                 {
                     var cur = subGroup[i];
@@ -1213,6 +1222,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 // Not all partial -> duplicate function declaration error
                 var first = subGroup[0];
                 var firstSpan = first.Syntax?.Signature.Identifier.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+
                 for (int i = 1; i < subGroup.Count; i++)
                 {
                     var redecl = subGroup[i];
@@ -1229,11 +1239,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
-    private bool SignaturesMatch(
-        IReadOnlyList<SymbolHandle> genericParamsA,
-        IReadOnlyList<SymbolHandle> paramsA,
-        IReadOnlyList<SymbolHandle> genericParamsB,
-        IReadOnlyList<SymbolHandle> paramsB)
+    private bool SignaturesMatch(IReadOnlyList<SymbolHandle> genericParamsA, List<SymbolHandle> paramsA, IReadOnlyList<SymbolHandle> genericParamsB, List<SymbolHandle> paramsB)
     {
         if (genericParamsA.Count != genericParamsB.Count)
             return false;
@@ -1253,35 +1259,30 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return true;
     }
 
-    private bool ParameterTypesMatch(
-        TypeRef typeA, IReadOnlyList<SymbolHandle> genericParamsA,
-        TypeRef typeB, IReadOnlyList<SymbolHandle> genericParamsB,
-        Parameter? syntaxA, Parameter? syntaxB)
+    private bool ParameterTypesMatch(TypeRef typeA, IReadOnlyList<SymbolHandle> genericParamsA, TypeRef typeB, IReadOnlyList<SymbolHandle> genericParamsB, Parameter? syntaxA, Parameter? syntaxB)
     {
         int genIndexA = -1;
+
         if (typeA.IsResolved && typeA.Handle is { } hA)
         {
             for (int k = 0; k < genericParamsA.Count; k++)
-            {
                 if (genericParamsA[k] == hA)
                 {
                     genIndexA = k;
                     break;
                 }
-            }
         }
 
         int genIndexB = -1;
+
         if (typeB.IsResolved && typeB.Handle is { } hB)
         {
             for (int k = 0; k < genericParamsB.Count; k++)
-            {
                 if (genericParamsB[k] == hB)
                 {
                     genIndexB = k;
                     break;
                 }
-            }
         }
 
         if (genIndexA >= 0 || genIndexB >= 0)
@@ -1291,6 +1292,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             var targetA = context.GetType(typeA) ?? typeA.Handle;
             var targetB = context.GetType(typeB) ?? typeB.Handle;
+
             return targetA == targetB;
         }
 
@@ -1298,6 +1300,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             var textA = sTypeA.GetSpan() is { } spA && sTypeA.GetSource() is { } srcA ? srcA.ToString(spA) : null;
             var textB = sTypeB.GetSpan() is { } spB && sTypeB.GetSource() is { } srcB ? srcB.ToString(spB) : null;
+
             if (textA != null && textB != null)
                 return string.Equals(textA, textB, StringComparison.Ordinal);
         }
@@ -1309,14 +1312,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         // 1. Global variables
         var globalGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<GlobalVariableSymbol>>();
+
         foreach (var global in context.GlobalVariableSymbols)
         {
             var key = (global.ContainingNamespace, global.Name);
+
             if (!globalGroups.TryGetValue(key, out var list))
             {
                 list = [];
                 globalGroups[key] = list;
             }
+
             list.Add(global);
         }
 
@@ -1327,6 +1333,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             var first = group[0];
             var firstSpan = GetVariableIdentifierSpan(first.Syntax, first.Name);
+
             for (int i = 1; i < group.Count; i++)
             {
                 var redecl = group[i];
@@ -1342,6 +1349,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         // 2. Fields in product types
         var fieldGroups = new Dictionary<(SymbolHandle?, SymbolPart), List<FieldSymbol>>();
+
         foreach (var field in context.FieldSymbols)
         {
             var key = (field.Parent, field.Name);
@@ -1350,6 +1358,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 list = [];
                 fieldGroups[key] = list;
             }
+
             list.Add(field);
         }
 
@@ -1360,6 +1369,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             var first = group[0];
             var firstSpan = GetVariableIdentifierSpan(first.Syntax, first.Name);
+
             for (int i = 1; i < group.Count; i++)
             {
                 var redecl = group[i];
@@ -1379,18 +1389,19 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax != null)
         {
             foreach (var declarator in syntax.Declarators)
-            {
                 if (ResolutionContext.GetSymbolName(declarator.Identifier).Last == name)
                     return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
-            }
+
             return syntax.GetSpan() ?? default;
         }
+
         return default;
     }
 
     private void CheckDuplicateProperties()
     {
         var propGroups = new Dictionary<(Scope, SymbolPart), List<PropertySymbol>>();
+
         foreach (var prop in context.PropertySymbols)
         {
             var key = (prop.EnclosingScope, prop.Name);
@@ -1399,6 +1410,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 list = [];
                 propGroups[key] = list;
             }
+
             list.Add(prop);
         }
 
@@ -1409,6 +1421,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             var first = group[0];
             var firstSpan = first.Syntax?.Identifier.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+
             for (int i = 1; i < group.Count; i++)
             {
                 var redecl = group[i];

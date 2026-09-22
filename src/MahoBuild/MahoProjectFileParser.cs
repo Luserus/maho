@@ -5,7 +5,7 @@ using System.Text;
 namespace Maho.Build;
 
 /// <summary> Parses the compiler's domain-specific, JSON-inspired <c>.mhpr</c> format. </summary>
-internal sealed class MahoProjectFileParser
+public sealed class MahoProjectFileParser
 {
     private readonly string text;
     private int current;
@@ -300,7 +300,7 @@ internal sealed class MahoProjectFileParser
     private MahoProjectParseException Error(string message) => new(message, current);
 }
 
-internal sealed class MahoProjectParseException : Exception
+public sealed class MahoProjectParseException : Exception
 {
     public int Position { get; }
 

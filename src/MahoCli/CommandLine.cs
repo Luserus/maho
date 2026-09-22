@@ -1,14 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Maho.Analysis;
 using Maho.Build;
-using Maho.Cli.Diagnostics;
 
-namespace Maho.Cli;
+namespace Maho;
 
 /// <summary> Owns the terminal-facing compiler workflow and explicit debug/diagnostics routing. </summary>
 public static class CommandLine

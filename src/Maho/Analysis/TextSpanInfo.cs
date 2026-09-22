@@ -1,6 +1,5 @@
 namespace Maho;
 
-using Maho.Syntax;
 using Maho.Text;
 
 /// <summary>

@@ -1,4 +1,4 @@
-namespace Maho.Cli;
+namespace Maho;
 
 /// <summary>
 /// Minimal executable entrypoint that forwards process arguments into the shared CLI pipeline.

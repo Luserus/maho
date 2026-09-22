@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Maho.Diagnostics;
-using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho;

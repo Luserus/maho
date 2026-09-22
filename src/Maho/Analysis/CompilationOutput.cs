@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Specifies the variant of compilation output produced by the compiler.

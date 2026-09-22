@@ -1,108 +1,86 @@
 # Diagnostics System Guide
 
-The `Diagnostics` folder owns the compiler's internal diagnostic model.
+The `Diagnostics` folder owns the compiler's internal diagnostic model and reporting engine.
 
-This is where lexer/parser code reports problems before those problems are projected into public `DiagnosticInfo` records for the outside world.
+This is where lexer, parser, and semantic resolution passes report problems before those problems are projected into public `DiagnosticInfo` records for outside consumers and renderers.
 
-## Files in this folder
+---
 
-- `DiagnosticKind.cs`: severity category used internally.
-- `Diagnostic.cs`: raw internal diagnostic object.
-- `DiagnosticText.cs`: deferred source-backed or synthetic text used while building diagnostics.
-- `DiagnosticsManager.cs`: collector and message factory.
+## 1. Files in this Folder
 
-## Type guide
+- `DiagnosticKind.cs`: internal severity enum (`Info`, `Warning`, `Error`).
+- `Diagnostic.cs`: rich internal diagnostic payload with labels, notes, help hints, and suggestions.
+- `DiagnosticBuilder.cs`: fluent builder for constructing rich diagnostics with multi-span labels and remediation advice.
+- `DiagnosticLabel.cs`: primary and secondary labels attached to source text spans.
+- `DiagnosticSuggestion.cs`: automated code-fix replacement suggestions.
+- `DiagnosticText.cs`: deferred source-backed or synthetic text used while formatting diagnostics.
+- `DiagnosticsManager.cs`: thread-safe collector and centralized diagnostic factory.
 
-### `DiagnosticKind`
+---
 
-Internal enum with `Info`, `Warning`, and `Error`.
+## 2. Rich Diagnostic Architecture
 
-It mirrors the public `DiagnosticSeverity`, but keeping an internal enum gives the compiler freedom to evolve internal reporting without immediately exposing every change to consumers.
+Maho diagnostics support modern, Rustc-style terminal reporting with multi-span context:
 
-### `Diagnostic`
+### Primary and Secondary Labels
+- **Primary Label (`^^^^`)**: Points directly to the offending construct or redeclaration site.
+- **Secondary Label (`----`)**: Highlights related context, such as the original declaration site, previous method signature, or base class definition.
 
-Internal immutable object with:
+### Remediation Notes & Help
+- **Notes (`note:`)**: Explanatory context about compiler rules, arity mismatches, or resolution details.
+- **Help (`help:`)**: Direct, actionable instructions to remediate the error (e.g. suggesting adding `partial` or removing extra bodies).
 
-- `DiagnosticCode`
-- `Message`
-- `Span`
-- `Kind`
+### Automated Suggestions
+- Machine-applicable text replacements specifying target span, replacement text, and human-readable intent.
 
-This is the compiler's native diagnostic unit before projection into the public analysis contract.
+---
 
-### `DiagnosticsManager`
+## 3. Centralized Diagnostic Methods on `DiagnosticsManager`
 
-The central diagnostic collection and reporting helper.
+All diagnostic codes and error templates are centralized in `DiagnosticsManager`. Semantic passes and front-end stages call domain-specific factory methods:
 
-Important members:
+### Lexer Diagnostics (`MH0001` - `MH0003`)
+- `ReportBadToken`: illegal character in source.
+- `ReportUnterminatedString`: string literal reaching EOF without a closing quote.
+- `ReportUnterminatedCharacter`: character literal syntax error.
+- `ReportEmptyCharacterLiteral`: empty `''` character literal.
 
-- `Diagnostics`: exposes the accumulated list as `IReadOnlyList<Diagnostic>`.
-- `HasErrors`: quick check for any `Error` diagnostic.
+### Parser Diagnostics (`MH0004` - `MH0010`)
+- `ReportExpectedToken`: expected punctuation/keyword.
+- `ReportExpectedExpression`: expected expression in statement/assignment context.
+- `ReportExpectedIdentifier`: expected identifier for name/declaration.
+- `ReportExpectedType`: expected type reference syntax.
+- `ReportExpectedBody`: expected method or type block body.
+- `ReportExpectedParameter`: expected parameter in parameter list.
+- `ReportExpectedGenericParameter`: expected generic parameter name.
+- `ReportUnexpectedToken`: token encountered that violates syntax grammar.
+- `ReportMissingToken`: synthetic token inserted during error recovery.
 
-It is also safe for concurrent reporting now, which matters for semantic passes that collect unit facts in parallel before merging them later.
+### Top-Level Statements (`MH0011` - `MH0012`)
+- `ReportTopLevelPragmaRequired` (`MH0011`): top-level statements in a file without `#pragma toplevel enable`.
+- `ReportMultipleTopLevelSources` (`MH0012`): multiple source files attempting to define top-level statements.
 
-## `DiagnosticsManager` function guide
+### Semantic Resolution Diagnostics (`MH1000` - `MH1006`)
+- `ReportUnresolvedTypeReference` (`MH1000`): type name cannot be resolved in lexical or imported scopes.
+- `ReportAmbiguousTypeReference` (`MH1001`): unqualified type reference matches multiple candidate types from different namespaces.
+- `ReportDuplicateTypeDeclaration` (`MH1002`): duplicate type declaration with matching arity where at least one declaration is not marked `partial`. Includes primary label on redeclaration, secondary label on original declaration, and `help:` suggestion.
+- `ReportDuplicateFunctionDeclaration` (`MH1003`):
+  - Duplicate non-partial function declarations matching in parameter signatures and generic arity.
+  - Partial function declaration violations: multiple declarations with implementation bodies (primary label on conflicting body, secondary label on first body).
+- `ReportCyclicTypeHierarchy` (`MH1004`): base type inheritance cycle detected.
+- `ReportDuplicateVariableDeclaration` (`MH1005`): duplicate global variable or member field declaration.
+- `ReportDuplicatePropertyDeclaration` (`MH1006`): duplicate property declaration in the same type.
 
-### `Report(Diagnostic diagnostic)`
+---
 
-The lowest-level append operation. Everything else eventually flows through here.
+## 4. Fluent Diagnostic Construction
 
-### `ReportInfo(...)`, `ReportWarning(...)`, `ReportError(...)`
+For custom or emerging semantic diagnostics, `DiagnosticsManager` exposes a fluent `DiagnosticBuilder`:
 
-Severity-specific convenience wrappers that create a `Diagnostic` and push it through `Report(...)`.
-
-### Lexer-focused helpers
-
-- `ReportBadToken(...)`
-- `ReportUnterminatedString(...)`
-- `ReportUnterminatedCharacter(...)`
-- `ReportEmptyCharacterLiteral(...)`
-
-These methods matter because they define stable diagnostic codes and text for lexical failures. If code or wording changes here, every consumer sees that change.
-
-### Parser-focused helpers
-
-- `ReportExpectedToken(...)`
-- `ReportExpectedExpression(...)`
-- `ReportExpectedIdentifier(...)`
-- `ReportExpectedType(...)`
-- `ReportExpectedBody(...)`
-- `ReportExpectedParameter(...)`
-- `ReportExpectedGenericParameter(...)`
-- `ReportUnexpectedToken(...)`
-- `ReportMissingToken(...)`
-
-The notable design choice is that parser diagnostics share one message shape, "expected X, found Y", and one contiguous diagnostic-code range. The CLI gets specific tips from the serialized expected text instead of from a set of parser-only subcodes.
-
-### Private helpers
-
-#### `CreateExpectedMessage(...)`
-
-Builds parser error messages with an optional context fragment. This prevents every parser site from hand-rolling slightly different wording.
-
-#### `FormatTokenText(...)`
-
-Normalizes how found tokens are printed inside messages.
-
-Worth noting:
-
-- empty text becomes `<end of file>`,
-- sentinel strings like `<missing>` are preserved as-is,
-- normal tokens are quoted.
-
-That small normalization step is why the same diagnostic helper can produce readable messages for both real and synthetic parser tokens.
-
-## What is worth paying attention to here
-
-- Diagnostic codes are effectively part of the external contract once renderers and tests start relying on them.
-- `DiagnosticsManager` is intentionally stateful and centralized; it keeps message formatting out of lexer/parser control flow.
-- `DiagnosticText` keeps source snippets span-based until a message actually needs to be materialized.
-- The folder does not know about JSON, colors, or pretty terminal output. Those responsibilities belong downstream in `Analysis` and the CLI renderer.
-
-## Reading order
-
-1. `DiagnosticKind.cs`
-2. `Diagnostic.cs`
-3. `DiagnosticsManager.cs`
-4. [`analysis.md`](analysis.md)
-5. [`cli.md`](cli.md)
+```csharp
+diagnostics.BuildError("MH1002", $"Type '{name}' is already declared.", redeclSpan, redeclSource)
+    .WithPrimaryLabel(redeclSpan, $"redeclared here as non-partial")
+    .WithSecondaryLabel(firstSpan, $"previous declaration is here")
+    .WithHelp($"Add the 'partial' modifier to all declarations if this type is split across multiple files.")
+    .Report();
+```

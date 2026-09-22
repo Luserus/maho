@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Maho.Analysis;
 using Maho.Diagnostics;
 
-namespace Maho.Cli.Diagnostics;
+namespace Maho;
 
 /// <summary>
 /// Renders rich, compiler diagnostics to the terminal with ANSI colors,

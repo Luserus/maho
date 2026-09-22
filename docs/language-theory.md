@@ -310,37 +310,42 @@ goto-statement          ::= "goto" identifier ";"
 
 ## 6. Current resolution semantics
 
-Resolution runs only after all compilation units form one `SyntaxTree`. It uses two passes.
+Resolution runs only after all compilation units form one unified `SyntaxTree`. It executes through a multi-pass pipeline managed by `Resolver`.
 
-### 6.1 Symbol discovery pass
+### 6.1 Symbol discovery pass (`SymbolDiscoveryPass`)
 
-The discovery pass creates scopes and symbols before resolving declaration-owned references. It discovers:
+The discovery pass creates scopes and symbols before resolving declaration-owned references:
 
-- namespaces and qualified namespace paths;
-- top-level types, nested types, local types, aliases, functions, methods, properties, fields, globals, parameters, locals, and labels;
-- a child scope for every generic owner, type, function, method, accessor body, and local block;
-- `GenericParameterSymbol` instances for every declared generic parameter;
-- every variable declarator separately, including multiple declarators in one declaration;
-- labels before expression resolution, so forward `goto` references can bind.
+- Discovers namespaces and constructs a hierarchical `NamespaceTrieNode` for qualified paths;
+- Discovers top-level types, nested types, local types, aliases, functions, methods, properties, fields, globals, parameters, locals, and labels;
+- Resolves modifier flags onto symbols, including `TypeFlags.Partial` and `FunctionFlags.Partial`;
+- Constructs child scopes for every generic owner, type, function, method, accessor body, and local block;
+- Allocates `GenericParameterSymbol` instances for every declared generic parameter;
+- Registers every variable declarator separately, including multiple declarators in one declaration statement;
+- Registers labels before expression resolution, so forward `goto` references can bind.
 
-If a compilation unit opts into top-level statements, discovery creates a synthetic `Main` function and scope. Ordinary top-level variables in that unit become locals of that `Main`. A top-level block with the `global` modifier is handled specially: its variable declarations bypass that synthetic scope and become global variables.
+If a compilation unit opts into top-level statements, discovery creates a synthetic `Main` function and scope. Ordinary top-level variables in that unit become locals of `Main`. A top-level block with the `global` modifier is handled specially: its variable declarations bypass that synthetic scope and become global variables.
 
 Namespaces and type declarations retain their containing namespace. Functions and methods retain child scopes for parameters and bodies. Local blocks receive nested scopes.
 
-### 6.2 Declaration-resolution pass
+### 6.2 Declaration-resolution pass (`DeclarationResolutionPass`)
 
-The declaration pass records successful, unambiguous references in `ResolvedTree`. It currently resolves:
+The declaration pass records successful, unambiguous references in `ResolvedTree` and enforces semantic declaration invariants:
 
-- attribute names and attribute argument expressions;
-- type base clauses, declared types, parameter types, return types, property types, field types, and variable types;
-- type-constraint-clause parameter names and constraint types;
-- generic-parameter declaration syntax;
-- generic target names and generic arguments according to their declared parameter kind;
-- aliases and their targets;
-- expression names in bodies, initializers, calls, member-access operands, binary/unary expressions, casts, arrays, object creation, conditions, returns, and assignments;
-- labels for `goto`, restricted to the same containing function.
-
-A simple or qualified type/name reference is recorded only when exactly one symbol is found in the applicable scope. The resolver does not currently emit an unresolved-name or ambiguity diagnostic when this lookup fails; later semantic passes are expected to supply full diagnostic policy.
+- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types;
+- **Non-Partial Duplicate Type Declarations (`MH1002`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH1002` with primary label on the redeclaration, secondary label on the previous declaration, and remediation guidance;
+- **Partial Type Canonical Merging**: Multiple partial declarations of the same type in the same scope are merged into a canonical first symbol. Verifies that all partial declarations share the same `TypeKind` (e.g. all `class` or all `struct`);
+- **Partial Function Declarations (`MH1003`)**:
+  - Unlimited bodyless partial declarations are permitted without warnings or errors (macro implementations in later passes can supply bodies);
+  - At most one declaration may contain an implementation body (`Body is not FunctionEmptyBody`). If more than one body is found, reports `MH1003` with primary label on the duplicate body and secondary label on the first body;
+  - Enforces return type consistency across all partial function declarations;
+- **Duplicate Function Declarations (`MH1003`)**: Groups functions by scope and checks parameter type equality and generic arity via `SignaturesMatch(...)`. Reports duplicate function errors when non-partial functions collide;
+- **Duplicate Variables & Fields (`MH1005`)**: Detects duplicate global variables in the same namespace and duplicate fields within product types;
+- **Duplicate Properties (`MH1006`)**: Detects duplicate properties in the same enclosing type;
+- **Cyclic Type Hierarchies (`MH1004`)**: Traverses inheritance graphs via depth-first search, reporting cycles before type layout;
+- **Ambiguous Type References (`MH1001`)**: Emits `MH1001` when an unqualified type reference matches multiple candidate types from different namespaces;
+- **Aliases**: Resolves alias targets and unwraps alias chains;
+- **Labels & Gotos**: Binds `goto` statements to labels within the same containing function.
 
 ### 6.3 Generic arguments and constraints
 
@@ -354,17 +359,17 @@ For a generic type application, the resolver first resolves the target generic s
 
 An alias target is retained only if its type-valued generic arguments satisfy the target's currently known constraints. Constraint satisfaction follows direct equality, recursively declared generic-parameter constraints, base types, and already-resolved aliases. Non-type generic arguments are deliberately excluded from this compatibility check until compile-time expression evaluation exists.
 
-### 6.4 Rules deliberately deferred
+### 6.4 Rules deferred to subsequent passes
 
-The following are not guaranteed or diagnosed by the present resolver:
+The declaration resolution pass deliberately focuses on type-level and member-level signatures. The following are deferred to upcoming passes:
 
-- evaluation, substitution, or constness checking of non-type generic arguments;
-- mapping `int`, `float`, or literal values to compiler-recognized special/library types;
-- generic specialization, variadic expansion, and reflective metaprogramming operations;
-- general type compatibility, assignability, conversion, overload resolution, and return-type validation;
-- complete modifier applicability and accessibility enforcement;
-- full unresolved-name, duplicate-declaration, and ambiguity diagnostics;
-- control-flow correctness beyond binding a `goto` to a same-function label.
+- Statement-level and expression-level type checking inside method bodies;
+- Definite assignment and local variable flow analysis;
+- Binary and unary operator overload resolution;
+- Implicit and explicit type conversions and assignability validation;
+- Evaluation, substitution, and constness checking of non-type generic arguments;
+- Accessibility enforcement (e.g. `private`, `protected`, `internal`);
+- Lowering and IL/native code generation.
 
 ## 7. Worked accepted examples
 

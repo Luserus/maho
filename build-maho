@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CLI_PROJECT="$REPO_ROOT/src/MahoCli/MahoCli.csproj"
+DIST_DIR="$REPO_ROOT/dist"
+
+show_help() {
+    cat <<EOF
+Usage: ./build-maho [options]
+
+Build script for the Maho compiler (mahoc).
+
+Options:
+  --all, all           Build compiler for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
+  --single-file, -s    Produce a single self-contained binary (no loose DLLs, config, or PDBs)
+  --debug, -d          Build with debug configuration and emit PDB symbol files
+  -h, --help           Show this help message
+
+Default behavior:
+  Builds host platform compiler into dist/ with Release configuration,
+  omitting PDB symbols and dependency JSON files.
+EOF
+}
+
+detect_host_rid() {
+    local os arch
+    case "$(uname -s)" in
+        Linux*)  os="linux" ;;
+        Darwin*) os="osx" ;;
+        CYGWIN*|MINGW*|MSYS*) os="win" ;;
+        *)       os="linux" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        *)            arch="x64" ;;
+    esac
+    echo "${os}-${arch}"
+}
+
+build_all=false
+single_file=false
+debug_mode=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --all|all)
+            build_all=true
+            ;;
+        --single-file|-s|single)
+            single_file=true
+            ;;
+        --debug|-d|debug)
+            debug_mode=true
+            ;;
+        -h|--help|help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown argument '$arg'" >&2
+            echo "" >&2
+            show_help >&2
+            exit 1
+            ;;
+    esac
+done
+
+config="Release"
+debug_props=("-p:DebugType=None" "-p:GenerateDependencyFile=false")
+
+if [ "$debug_mode" = true ]; then
+    config="Debug"
+    debug_props=("-p:DebugType=portable" "-p:GenerateDependencyFile=true")
+fi
+
+publish_target() {
+    local rid="$1"
+    local out_dir="$2"
+    local extra_args=("${debug_props[@]}")
+
+    if [ "$single_file" = true ]; then
+        extra_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true")
+    elif [ -n "$rid" ]; then
+        extra_args+=("-r" "$rid" "--no-self-contained")
+    fi
+
+    dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${extra_args[@]}" --nologo -v q
+}
+
+find_binary() {
+    local dir="$1"
+    if [[ -f "$dir/mahoc" ]]; then
+        echo "$dir/mahoc"
+    elif [[ -f "$dir/mahoc.exe" ]]; then
+        echo "$dir/mahoc.exe"
+    else
+        echo "$dir/mahoc"
+    fi
+}
+
+host_rid="$(detect_host_rid)"
+
+if [ "$build_all" = true ]; then
+    platforms=("linux-x64" "linux-arm64" "win-x64" "osx-x64" "osx-arm64")
+
+    echo "==> Building Maho compiler (mahoc) for all major platforms..."
+    mkdir -p "$DIST_DIR"
+
+    for rid in "${platforms[@]}"; do
+        echo "  -> Publishing for $rid..."
+        mkdir -p "$DIST_DIR/$rid"
+        publish_target "$rid" "$DIST_DIR/$rid"
+    done
+
+    echo "  -> Publishing for host platform into $DIST_DIR..."
+    if [ "$single_file" = true ]; then
+        publish_target "$host_rid" "$DIST_DIR"
+    else
+        dotnet publish "$CLI_PROJECT" -c "$config" -o "$DIST_DIR" "${debug_props[@]}" --nologo -v q
+    fi
+
+    host_bin="$(find_binary "$DIST_DIR")"
+
+    echo ""
+    echo "Maho compiler (mahoc) successfully built for all major platforms:"
+    echo "  Host:         $host_bin"
+    echo "  linux-x64:    $(find_binary "$DIST_DIR/linux-x64")"
+    echo "  linux-arm64:  $(find_binary "$DIST_DIR/linux-arm64")"
+    echo "  win-x64:      $(find_binary "$DIST_DIR/win-x64")"
+    echo "  osx-x64:      $(find_binary "$DIST_DIR/osx-x64")"
+    echo "  osx-arm64:    $(find_binary "$DIST_DIR/osx-arm64")"
+    echo ""
+    echo "Execute host compiler via:"
+    echo "  $host_bin [options] [source-path]"
+else
+    echo "==> Building Maho compiler (mahoc) for host platform..."
+    mkdir -p "$DIST_DIR"
+
+    if [ "$single_file" = true ]; then
+        publish_target "$host_rid" "$DIST_DIR"
+    else
+        dotnet publish "$CLI_PROJECT" -c "$config" -o "$DIST_DIR" "${debug_props[@]}" --nologo -v q
+    fi
+
+    bin_path="$(find_binary "$DIST_DIR")"
+
+    echo ""
+    echo "Maho compiler (mahoc) successfully built:"
+    echo "  $bin_path"
+    echo ""
+    echo "Execute compiler via:"
+    echo "  $bin_path [options] [source-path]"
+fi

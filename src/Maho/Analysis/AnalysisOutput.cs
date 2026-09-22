@@ -1,6 +1,6 @@
 using System;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Selects which optional debug payloads should accompany an analysis result.

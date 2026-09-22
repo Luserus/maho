@@ -1,5 +1,3 @@
-using Maho.Analysis;
-using Maho.Cli.Diagnostics;
 using Maho.Diagnostics;
 
 namespace Maho.Tests;

@@ -1,5 +1,3 @@
-using Maho.Cli;
-
 namespace Maho.Tests;
 
 public sealed class CommandLineTests

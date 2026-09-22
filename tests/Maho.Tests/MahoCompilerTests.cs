@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Maho.Analysis;
 using Maho.Build;
 
 namespace Maho.Tests;
@@ -120,7 +119,7 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
@@ -160,7 +159,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
@@ -187,7 +186,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.Equal(Path.GetFullPath(firstPath), result.EntryFile);
@@ -213,7 +212,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(projectPath, string.Empty);
             File.WriteAllText(programPath, "#pragma toplevel enable\nrun();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
@@ -241,7 +240,7 @@ public sealed class MahoCompilerTests
                 """);
             File.WriteAllText(programPath, "call();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
@@ -269,7 +268,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "public class Point { public int X; }");
             File.WriteAllText(secondPath, "run();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
@@ -296,7 +295,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "first();");
             File.WriteAllText(secondPath, "second();");
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
@@ -327,7 +326,7 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeProjectFile(projectPath);
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.True(program.HasErrors);

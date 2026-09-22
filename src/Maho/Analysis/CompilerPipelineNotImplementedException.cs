@@ -1,6 +1,6 @@
 using System;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Intentional placeholder exception thrown when compilation reaches an unimplemented stage.

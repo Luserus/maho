@@ -6,7 +6,7 @@ using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Specifies the intended syntax kind of an interactive snippet.

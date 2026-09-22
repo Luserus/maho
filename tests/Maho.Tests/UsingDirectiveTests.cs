@@ -1,4 +1,3 @@
-using Maho.Analysis;
 using Maho.Resolution;
 using Maho.Syntax;
 

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Maho.Analysis;
+namespace Maho;
 
 /// <summary>
 /// Controls whether ANSI color formatting is applied to terminal diagnostic rendering.
