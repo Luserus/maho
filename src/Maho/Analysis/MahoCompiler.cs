@@ -336,7 +336,7 @@ public static class MahoCompiler
         foreach (var diag in diagnostics)
             result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
 
-        return result;
+        return DiagnosticInfo.OrderDiagnostics(result);
     }
 
     private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)

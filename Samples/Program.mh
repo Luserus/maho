@@ -17,3 +17,8 @@ $Test(Int32);
 x.Data = 10;
 
 SomeOtherType val;
+
+int Func(Int32 x, Int32)
+{
+    $Invalid;
+}

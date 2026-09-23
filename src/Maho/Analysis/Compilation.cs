@@ -229,6 +229,8 @@ public sealed class Compilation
         foreach (var (diag, text, path) in allInternalDiagnostics)
             projected.Add(DiagnosticInfo.FromDiagnostic(diag, text, path));
 
+        var orderedProjected = DiagnosticInfo.OrderDiagnostics(projected);
+
         return new Compilation(
             projectName,
             [syntaxTree],
@@ -236,7 +238,7 @@ public sealed class Compilation
             options,
             referencedCompilations,
             context,
-            projected);
+            orderedProjected);
     }
 
 
@@ -282,6 +284,6 @@ public sealed class Compilation
         var result = new List<DiagnosticInfo>(diagnostics.Count);
         foreach (var diag in diagnostics)
             result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
-        return result;
+        return DiagnosticInfo.OrderDiagnostics(result);
     }
 }

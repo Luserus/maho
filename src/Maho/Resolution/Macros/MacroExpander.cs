@@ -32,6 +32,14 @@ internal sealed class MacroExpander
 
     public bool HasMacro(SymbolPart name) => macroTable.ContainsKey(name);
 
+    private readonly HashSet<MacroInvocationExpression> failedInvocations = new();
+
+    private static TextSpan GetMacroSpan(MacroInvocationExpression invocation) =>
+        TextSpan.FromBounds(invocation.DollarToken.Span.Start, invocation.Name.Span.End);
+
+    private static TextSpan GetInvocationSpan(MacroInvocationExpression invocation) =>
+        TextSpan.FromBounds(invocation.DollarToken.Span.Start, (invocation.RightParen ?? invocation.Name).Span.End);
+
     public MacroDeclaration? LookupMacro(SymbolPart name) =>
         macroTable.TryGetValue(name, out var macro) ? macro : null;
 
@@ -40,23 +48,31 @@ internal sealed class MacroExpander
     /// </summary>
     public Expression ExpandExpression(MacroInvocationExpression invocation, ulong currentDepth, ExpansionOrigin? parentOrigin, SourceText sourceText)
     {
+        if (failedInvocations.Contains(invocation))
+            return invocation;
+
         var name = new SymbolPart(invocation.Name);
         if (!macroTable.TryGetValue(name, out var macro))
         {
-            diagnostics.ReportUnresolvedMacro(invocation.DollarToken.Span, name.ToString(), invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
             return invocation;
         }
 
         if (recursionLimit > 0 && currentDepth >= recursionLimit)
         {
-            diagnostics.ReportMacroRecursionLimitExceeded(invocation.DollarToken.Span, name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
             return invocation;
         }
 
         var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
 
         if (arm is null || substitutedTokens is null)
+        {
+            failedInvocations.Add(invocation);
             return invocation;
+        }
 
         var parser = new Parser(sourceText, diagnostics);
 
@@ -66,7 +82,8 @@ internal sealed class MacroExpander
             if (blockExpr.FinalExpression is null)
             {
                 // Block macro with statements cannot be used in expression context
-                diagnostics.ReportInvalidMacroContext(invocation.DollarToken.Span, name.ToString(), "an expression", "statements", invocation.DollarToken.Source ?? sourceText);
+                failedInvocations.Add(invocation);
+                diagnostics.ReportInvalidMacroContext(GetInvocationSpan(invocation), name.ToString(), "an expression", "statements", invocation.DollarToken.Source ?? sourceText);
                 return invocation;
             }
 
@@ -90,23 +107,31 @@ internal sealed class MacroExpander
     /// </summary>
     public List<Local> ExpandStatement(MacroInvocationExpression invocation, ulong currentDepth, ExpansionOrigin? parentOrigin, SourceText sourceText)
     {
+        if (failedInvocations.Contains(invocation))
+            return [new LocalMacroInvocationDeclaration(invocation, null)];
+
         var name = new SymbolPart(invocation.Name);
         if (!macroTable.TryGetValue(name, out var macro))
         {
-            diagnostics.ReportUnresolvedMacro(invocation.DollarToken.Span, name.ToString(), invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
             return [new LocalMacroInvocationDeclaration(invocation, null)];
         }
 
         if (recursionLimit > 0 && currentDepth >= recursionLimit)
         {
-            diagnostics.ReportMacroRecursionLimitExceeded(invocation.DollarToken.Span, name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
             return [new LocalMacroInvocationDeclaration(invocation, null)];
         }
 
         var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
 
         if (arm is null || substitutedTokens is null)
+        {
+            failedInvocations.Add(invocation);
             return [new LocalMacroInvocationDeclaration(invocation, null)];
+        }
 
         var parser = new Parser(sourceText, diagnostics);
         List<Local> statements;
@@ -135,22 +160,30 @@ internal sealed class MacroExpander
     /// </summary>
     public List<Member> ExpandMember(MacroInvocationExpression invocation, ulong currentDepth, ExpansionOrigin? parentOrigin, SourceText sourceText)
     {
+        if (failedInvocations.Contains(invocation))
+            return [new MemberMacroInvocationDeclaration(invocation, null)];
+
         var name = new SymbolPart(invocation.Name);
         if (!macroTable.TryGetValue(name, out var macro))
         {
-            diagnostics.ReportUnresolvedMacro(invocation.DollarToken.Span, name.ToString(), invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
             return [new MemberMacroInvocationDeclaration(invocation, null)];
         }
 
         if (recursionLimit > 0 && currentDepth >= recursionLimit)
         {
-            diagnostics.ReportMacroRecursionLimitExceeded(invocation.DollarToken.Span, name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
             return [new MemberMacroInvocationDeclaration(invocation, null)];
         }
 
         var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
         if (arm is null || substitutedTokens is null)
+        {
+            failedInvocations.Add(invocation);
             return [new MemberMacroInvocationDeclaration(invocation, null)];
+        }
 
         var parser = new Parser(sourceText, diagnostics);
         var members = parser.ParseMembersSnippet(substitutedTokens);
@@ -167,22 +200,30 @@ internal sealed class MacroExpander
     /// </summary>
     public List<TopLevel> ExpandTopLevel(MacroInvocationExpression invocation, ulong currentDepth, ExpansionOrigin? parentOrigin, SourceText sourceText)
     {
+        if (failedInvocations.Contains(invocation))
+            return [new TopLevelMacroInvocationDeclaration(invocation, null)];
+
         var name = new SymbolPart(invocation.Name);
         if (!macroTable.TryGetValue(name, out var macro))
         {
-            diagnostics.ReportUnresolvedMacro(invocation.DollarToken.Span, name.ToString(), invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
         }
 
         if (recursionLimit > 0 && currentDepth >= recursionLimit)
         {
-            diagnostics.ReportMacroRecursionLimitExceeded(invocation.DollarToken.Span, name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+            failedInvocations.Add(invocation);
+            diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
         }
 
         var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
         if (arm is null || substitutedTokens is null)
+        {
+            failedInvocations.Add(invocation);
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
+        }
 
         var parser = new Parser(sourceText, diagnostics);
         var topLevels = parser.ParseTopLevelsSnippet(substitutedTokens);
@@ -211,7 +252,7 @@ internal sealed class MacroExpander
         }
 
         diagnostics.ReportNoMatchingMacroArm(
-            invocation.DollarToken.Span,
+            GetInvocationSpan(invocation),
             macro.Name.Value,
             invocation.DollarToken.Source ?? sourceText);
 

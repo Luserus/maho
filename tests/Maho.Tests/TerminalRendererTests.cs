@@ -35,12 +35,13 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("Error [MH0530]: type 'Foo' is already declared in this scope", output);
+        Assert.Contains("error [MH0530]: type 'Foo' is already declared in this scope", output);
         Assert.Contains("--> test.mh: (2:14)", output);
         Assert.Contains("2 | public class Foo;", output);
-        Assert.Contains("^^^ duplicate declaration", output);
-        Assert.Contains("= Note: first declared on line 1", output);
-        Assert.Contains("= Help: consider renaming one of the types", output);
+        Assert.Contains("^^^", output);
+        Assert.Contains("└── duplicate declaration", output);
+        Assert.Contains("= note: first declared on line 1", output);
+        Assert.Contains("= help: consider renaming one of the types", output);
     }
 
     [Fact]
@@ -65,9 +66,11 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("^^^ redeclared here", output);
+        Assert.Contains("^^^", output);
+        Assert.Contains("└── redeclared here", output);
         Assert.Contains("1 | public class Bar;", output);
-        Assert.Contains("--- previously declared here", output);
+        Assert.Contains("---", output);
+        Assert.Contains("└── previously declared here", output);
     }
 
     [Fact]
@@ -93,8 +96,8 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("Warning [MH2001]: naming convention violation", output);
-        Assert.Contains("= Suggestion: rename to PascalCase", output);
+        Assert.Contains("warning [MH2001]: naming convention violation", output);
+        Assert.Contains("= suggestion: rename to PascalCase", output);
         Assert.Contains("- var oldName = 10;", output);
         Assert.Contains("+ var NewName = 10;", output);
     }
@@ -251,14 +254,45 @@ public sealed class TerminalRendererTests
                 new DiagnosticLabelInfo(span, "type 'SomeOtherType' not found", DiagnosticLabelStyle.Primary, "sample.mh")
             ],
             HelpMessages: [
-                new DiagnosticHelpInfo("check for a missing import or declaration.", "sample.mh")
+                new DiagnosticHelpInfo("Check for a missing import or declaration.", "sample.mh")
             ]);
 
         string output = renderer.Render(diagnostic);
 
         Assert.Contains(
-            "   | ^^^^^^^^^^^^^ type 'SomeOtherType' not found\n   |\n   = Help: check for a missing import or declaration.",
+            "   | ^^^^^^^^^^^^^\n   |       └── type 'SomeOtherType' not found\n   |\n   = help: Check for a missing import or declaration.",
             output.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public void TerminalRenderer_MultipleLabelsOnSameLine_RendersHierarchicalTreeLevels()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("expr.mh", "1 + \"hello\"");
+
+        var lhsSpan = new TextSpanInfo(0, 1, 1, new TextLocation(1, 1), new TextLocation(1, 2));
+        var opSpan = new TextSpanInfo(2, 1, 3, new TextLocation(1, 3), new TextLocation(1, 4));
+        var rhsSpan = new TextSpanInfo(4, 7, 11, new TextLocation(1, 5), new TextLocation(1, 12));
+
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH2001",
+            Message: "cannot apply binary operator '+' to types 'Int32' and 'String8'",
+            Severity: DiagnosticSeverity.Error,
+            Span: opSpan,
+            SourcePath: "expr.mh",
+            Labels: [
+                new DiagnosticLabelInfo(opSpan, "cannot apply '+'", DiagnosticLabelStyle.Primary, "expr.mh"),
+                new DiagnosticLabelInfo(lhsSpan, "type is 'Int32'", DiagnosticLabelStyle.Secondary, "expr.mh"),
+                new DiagnosticLabelInfo(rhsSpan, "type is 'String8'", DiagnosticLabelStyle.Secondary, "expr.mh")
+            ]);
+
+        string output = renderer.Render(diagnostic).Replace("\r\n", "\n");
+
+        Assert.Contains("1 | 1 + \"hello\"", output);
+        Assert.Contains("  | - ^ -------", output);
+        Assert.Contains("  | | |    └── type is 'String8'", output);
+        Assert.Contains("  | | └── cannot apply '+'", output);
+        Assert.Contains("  | └── type is 'Int32'", output);
     }
 }
 

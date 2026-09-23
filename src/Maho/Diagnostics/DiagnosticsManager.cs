@@ -81,7 +81,7 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
-        var builder = BuildError("MH2001", $"Cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'.", opSpan, source)
+        var builder = BuildError("MH2001", $"cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'", opSpan, source)
             .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
             .WithSecondaryLabel(lhsSpan, $"this expression has type '{lhsTypeName}'")
             .WithSecondaryLabel(rhsSpan, $"this expression has type '{rhsTypeName}'");
@@ -106,10 +106,10 @@ internal sealed class DiagnosticsManager
         SourceText? redeclSource = null,
         SourceText? firstSource = null)
     {
-        BuildError("MH0530", $"{symbolKind} '{name}' is already declared in this scope.", redeclSpan, redeclSource)
+        BuildError("MH0530", $"{symbolKind} '{name}' is already declared in this scope", redeclSpan, redeclSource)
             .WithPrimaryLabel(redeclSpan, $"'{name}' re-declared here", redeclSource)
             .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{name}' here", firstSource)
-            .WithHelp($"consider renaming or removing one of the duplicate {symbolKind.ToLowerInvariant()} declarations.")
+            .WithHelp($"consider renaming or removing one of the duplicate {symbolKind.ToLowerInvariant()} declarations")
             .Report();
     }
 
@@ -169,19 +169,19 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports a string literal that could not be closed before the lexer had to recover. </summary>
     public void ReportUnterminatedString(TextSpan span, SourceText? source = null) =>
-        ReportError("MH0101", "Unterminated string literal.", span, source);
+        ReportError("MH0101", "unterminated string literal", span, source);
 
     /// <summary> Reports a character literal that could not be closed before the lexer had to recover. </summary>
     public void ReportUnterminatedCharacter(TextSpan span, SourceText? source = null) =>
-        ReportError("MH0102", "Unterminated character literal.", span, source);
+        ReportError("MH0102", "unterminated character literal", span, source);
 
     /// <summary> Reports a character literal whose delimiters contain no payload. </summary>
     public void ReportEmptyCharacterLiteral(TextSpan span, SourceText? source = null) =>
-        ReportError("MH0103", "Character literal cannot be empty.", span, source);
+        ReportError("MH0103", "character literal cannot be empty", span, source);
 
     /// <summary> Reports a multi-line comment that was not closed before reaching the end of the source. </summary>
     public void ReportUnterminatedMultiLineComment(TextSpan span, SourceText? source = null) =>
-        ReportError("MH0104", "Unterminated multi-line comment.", span, source);
+        ReportError("MH0104", "unterminated multi-line comment", span, source);
 
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
     public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
@@ -213,16 +213,16 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that top-level statements require '#pragma toplevel enable'. </summary>
     public void ReportTopLevelPragmaRequired(TextSpan span, SourceText? source = null) =>
-        BuildError("MH0160", "Top-level statements require '#pragma toplevel enable' in this file.", span, source)
+        BuildError("MH0160", "top-level statements require '#pragma toplevel enable' in this file", span, source)
             .WithPrimaryLabel(span, "top-level statements require '#pragma toplevel enable'", source)
-            .WithHelp("add '#pragma toplevel enable' to the file or use an explicit main function.")
+            .WithHelp("add '#pragma toplevel enable' to the file or use an explicit main function")
             .Report();
 
     /// <summary> Reports that only one source file may contain top-level statements. </summary>
     public void ReportMultipleTopLevelSources(TextSpan span, SourceText? source = null) =>
-        BuildError("MH0161", "Only one source file may contain top-level statements.", span, source)
+        BuildError("MH0161", "only one source file may contain top-level statements", span, source)
             .WithPrimaryLabel(span, "extra top-level statement source declared here", source)
-            .WithHelp("ensure only a single file in the project has top-level statements.")
+            .WithHelp("ensure only a single file in the project has top-level statements")
             .Report();
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
@@ -240,16 +240,16 @@ internal sealed class DiagnosticsManager
     /// Reports a type reference that could not be matched to any visible declaration.
     /// </summary>
     public void ReportUnresolvedTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0500", $"Could not resolve type '{typeName}'.", span, source)
+        BuildError("MH0500", $"could not resolve type '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"type '{typeName}' not found", source)
-            .WithHelp("check for a missing import or declaration.")
+            .WithHelp("check for a missing import or declaration")
             .Report();
 
     /// <summary> Reports a type reference that matched more than one visible declaration. </summary>
     public void ReportAmbiguousTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0501", $"Type '{typeName}' is ambiguous in the current scope.", span, source)
+        BuildError("MH0501", $"type '{typeName}' is ambiguous in the current scope", span, source)
             .WithPrimaryLabel(span, $"ambiguous reference to '{typeName}'", source)
-            .WithHelp($"qualify '{typeName}' with its namespace or use an alias.")
+            .WithHelp($"qualify '{typeName}' with its namespace or use an alias")
             .Report();
 
     /// <summary> Reports a duplicate type declaration pointing to both declaration sites. </summary>
@@ -259,7 +259,7 @@ internal sealed class DiagnosticsManager
         TextSpan firstDeclSpan,
         SourceText? redeclSource = null,
         SourceText? firstSource = null) =>
-        ReportDuplicateDeclaration("Type", typeName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
+        ReportDuplicateDeclaration("type", typeName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
 
     /// <summary> Reports a duplicate alias declaration pointing to both declaration sites. </summary>
     public void ReportDuplicateAliasDeclaration(
@@ -268,7 +268,7 @@ internal sealed class DiagnosticsManager
         TextSpan firstDeclSpan,
         SourceText? redeclSource = null,
         SourceText? firstSource = null) =>
-        ReportDuplicateDeclaration("Alias", aliasName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
+        ReportDuplicateDeclaration("alias", aliasName, redeclSpan, firstDeclSpan, redeclSource, firstSource);
 
     /// <summary> Reports that partial declarations of a type have conflicting type kinds. </summary>
     public void ReportConflictingPartialTypeKinds(
@@ -282,7 +282,7 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0531",
-            $"Partial declarations of '{typeName}' have conflicting type kinds ('{firstKind}' and '{redeclKind}').",
+            $"partial declarations of '{typeName}' have conflicting type kinds ('{firstKind}' and '{redeclKind}')",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, $"declared as '{redeclKind}' here", redeclSource)
@@ -300,12 +300,12 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0532",
-            $"Function '{functionName}' with the same parameter types is already declared in this scope.",
+            $"function '{functionName}' with the same parameter types is already declared in this scope",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, $"'{functionName}' re-declared here", redeclSource)
             .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{functionName}' here", firstSource)
-            .WithHelp("consider renaming the function or changing its parameter types.")
+            .WithHelp("consider renaming the function or changing its parameter types")
             .Report();
     }
 
@@ -319,12 +319,12 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0533",
-            $"Partial function '{functionName}' cannot have more than one defining declaration with a body.",
+            $"partial function '{functionName}' cannot have more than one defining declaration with a body",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, $"'{functionName}' already has an implementation here", redeclSource)
             .WithSecondaryLabel(firstDeclSpan, $"previous implementation of '{functionName}' here", firstSource)
-            .WithHelp("remove the extra function body or merge the implementations.")
+            .WithHelp("remove the extra function body or merge the implementations")
             .Report();
     }
 
@@ -338,7 +338,7 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0534",
-            $"Partial function declarations of '{functionName}' have conflicting return types.",
+            $"partial function declarations of '{functionName}' have conflicting return types",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, "conflicting return type declared here", redeclSource)
@@ -348,9 +348,9 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that a type participates in an inheritance cycle. </summary>
     public void ReportCyclicTypeHierarchy(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0538", $"Type '{typeName}' participates in a cycle in the type hierarchy.", span, source)
+        BuildError("MH0538", $"type '{typeName}' participates in a cycle in the type hierarchy", span, source)
             .WithPrimaryLabel(span, $"'{typeName}' participates in a cycle here", source)
-            .WithHelp("break the inheritance cycle by removing one of the base types.")
+            .WithHelp("break the inheritance cycle by removing one of the base types")
             .Report();
 
     /// <summary> Reports a duplicate variable declaration pointing to both declaration sites. </summary>
@@ -363,12 +363,12 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0535",
-            $"Variable '{variableName}' is already declared in this scope.",
+            $"variable '{variableName}' is already declared in this scope",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, $"'{variableName}' re-declared here", redeclSource)
             .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{variableName}' here", firstSource)
-            .WithHelp("consider renaming or removing one of the duplicate variable declarations.")
+            .WithHelp("consider renaming or removing one of the duplicate variable declarations")
             .Report();
     }
 
@@ -382,12 +382,12 @@ internal sealed class DiagnosticsManager
     {
         BuildError(
             "MH0536",
-            $"Property '{propertyName}' is already declared in this scope.",
+            $"property '{propertyName}' is already declared in this scope",
             redeclSpan,
             redeclSource)
             .WithPrimaryLabel(redeclSpan, $"'{propertyName}' re-declared here", redeclSource)
             .WithSecondaryLabel(firstDeclSpan, $"previous declaration of '{propertyName}' here", firstSource)
-            .WithHelp("consider renaming or removing one of the duplicate property declarations.")
+            .WithHelp("consider renaming or removing one of the duplicate property declarations")
             .Report();
     }
 
@@ -405,33 +405,33 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that macro expansion exceeded the configured recursion depth limit. </summary>
     public void ReportMacroRecursionLimitExceeded(TextSpan span, string macroName, ulong limit, SourceText? source = null) =>
-        BuildError("MH0600", $"Recursion limit of {limit} exceeded while expanding macro '${macroName}'.", span, source)
+        BuildError("MH0600", $"recursion limit of {limit} exceeded while expanding macro '${macroName}'", span, source)
             .WithPrimaryLabel(span, $"recursion limit reached during expansion of '${macroName}'", source)
-            .WithHelp($"consider simplifying the macro or increasing 'MacroRecursionLimit' (current: {limit}).")
+            .WithHelp($"consider simplifying the macro or increasing 'MacroRecursionLimit' (current: {limit})")
             .Report();
 
     /// <summary> Reports that arguments supplied to a macro invocation matched none of the macro's arms. </summary>
     public void ReportNoMatchingMacroArm(TextSpan span, string macroName, SourceText? source = null) =>
-        BuildError("MH0601", $"No matching arm found for macro '${macroName}' with the supplied arguments.", span, source)
+        BuildError("MH0601", $"no matching arm found for macro '${macroName}' with the supplied arguments", span, source)
             .WithPrimaryLabel(span, $"no arm of '${macroName}' matched these arguments", source)
             .Report();
 
     /// <summary> Reports a macro invocation whose macro symbol could not be found in scope. </summary>
     public void ReportUnresolvedMacro(TextSpan span, string macroName, SourceText? source = null) =>
-        BuildError("MH0602", $"Could not resolve macro '${macroName}'.", span, source)
+        BuildError("MH0602", $"could not resolve macro '${macroName}'", span, source)
             .WithPrimaryLabel(span, $"macro '${macroName}' not found", source)
-            .WithHelp("check for a missing import or macro declaration.")
+            .WithHelp("check for a missing import or macro declaration")
             .Report();
 
     /// <summary> Reports a macro invocation used in an incompatible context (e.g. statement macro in expression). </summary>
     public void ReportInvalidMacroContext(TextSpan span, string macroName, string expectedContext, string actualContent, SourceText? source = null) =>
-        BuildError("MH0603", $"Macro '${macroName}' produces {actualContent} and cannot be used in {expectedContext} context.", span, source)
+        BuildError("MH0603", $"macro '${macroName}' produces {actualContent} and cannot be used in {expectedContext} context", span, source)
             .WithPrimaryLabel(span, $"cannot use {actualContent} macro in {expectedContext} context", source)
             .Report();
 
     /// <summary> Reports a mutual dependency cycle or deadlock during macro expansion. </summary>
     public void ReportMacroDependencyCycle(TextSpan span, string macroName, SourceText? source = null) =>
-        BuildError("MH0604", $"Macro '${macroName}' participates in a circular dependency or expansion deadlock.", span, source)
+        BuildError("MH0604", $"macro '${macroName}' participates in a circular dependency or expansion deadlock", span, source)
             .WithPrimaryLabel(span, $"circular macro expansion involves '${macroName}' here", source)
             .Report();
 }

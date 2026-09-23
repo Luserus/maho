@@ -58,9 +58,9 @@ public sealed class TerminalDiagnosticRenderer
         // 1. Header: error[MH1002]: message
         string severityName = diagnostic.Severity switch
         {
-            DiagnosticSeverity.Error => "Error",
-            DiagnosticSeverity.Warning => "Warning",
-            _ => "Info"
+            DiagnosticSeverity.Error => "error",
+            DiagnosticSeverity.Warning => "warning",
+            _ => "info"
         };
 
         string severityColor = diagnostic.Severity switch
@@ -200,41 +200,103 @@ public sealed class TerminalDiagnosticRenderer
                     sb.Append(Colorize(Blue, $"{lineStr} | "));
                     sb.AppendLine(sourceLine);
 
-                    annotations.Sort((a, b) => a.StartCol.CompareTo(b.StartCol));
-
-                    foreach (var ann in annotations)
+                    var activeAnnotations = annotations.Where(a => a.Style != DiagnosticLabelStyle.Context).ToList();
+                    if (activeAnnotations.Count > 0)
                     {
-                        if (ann.Style is DiagnosticLabelStyle.Context)
-                            continue;
+                        activeAnnotations.Sort((a, b) => a.StartCol.CompareTo(b.StartCol));
 
-                        int startCol = Math.Max(1, ann.StartCol);
-                        int length = Math.Max(1, ann.Length);
-
-                        if (startCol - 1 + length > sourceLine.Length)
-                            length = Math.Max(1, sourceLine.Length - startCol + 1);
-
-                        var indentBuilder = new StringBuilder();
-                        for (int i = 0; i < startCol - 1 && i < sourceLine.Length; i++)
-                            indentBuilder.Append(sourceLine[i] == '\t' ? '\t' : ' ');
-                        if (startCol - 1 > sourceLine.Length)
-                            indentBuilder.Append(' ', startCol - 1 - sourceLine.Length);
-
-                        string indent = indentBuilder.ToString();
-                        char mark = ann.Style is DiagnosticLabelStyle.Secondary ? '-' : '^';
-                        string markColor = ann.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
-                        string underline = new string(mark, length);
-
-                        sb.Append(Colorize(Blue, $"{emptyGutter} | "));
-                        sb.Append(indent);
-                        sb.Append(Colorize(markColor, underline));
-
-                        if (!string.IsNullOrEmpty(ann.Message))
+                        // 1. Partition carets into non-overlapping layers
+                        var caretLayers = new List<List<LineAnnotation>>();
+                        foreach (var ann in activeAnnotations)
                         {
-                            sb.Append(' ');
-                            sb.Append(Colorize(markColor, ann.Message));
+                            int startCol = Math.Max(1, ann.StartCol);
+                            bool placed = false;
+                            foreach (var layer in caretLayers)
+                            {
+                                var last = layer[^1];
+                                int lastEndCol = Math.Max(1, last.StartCol) + Math.Max(1, last.Length);
+                                if (startCol >= lastEndCol)
+                                {
+                                    layer.Add(ann);
+                                    placed = true;
+                                    break;
+                                }
+                            }
+                            if (!placed)
+                            {
+                                caretLayers.Add([ann]);
+                            }
                         }
 
-                        sb.AppendLine();
+                        foreach (var layer in caretLayers)
+                        {
+                            sb.Append(Colorize(Blue, $"{emptyGutter} | "));
+                            int currentVisualCol = 1;
+
+                            foreach (var ann in layer)
+                            {
+                                int startCol = Math.Max(1, ann.StartCol);
+                                int length = Math.Max(1, ann.Length);
+                                if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
+                                    length = Math.Max(1, sourceLine.Length - startCol + 1);
+
+                                AppendWhitespace(sb, sourceLine, currentVisualCol, startCol);
+
+                                char mark = ann.Style is DiagnosticLabelStyle.Secondary ? '-' : '^';
+                                string markColor = ann.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                string underline = new string(mark, length);
+                                sb.Append(Colorize(markColor, underline));
+
+                                currentVisualCol = startCol + length;
+                            }
+                            sb.AppendLine();
+                        }
+
+                        // 2. Render labels below the carets using L-shaped connectors (└──)
+                        int GetConnectorCol(LineAnnotation ann)
+                        {
+                            int startCol = Math.Max(1, ann.StartCol);
+                            int length = Math.Max(1, ann.Length);
+                            if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
+                                length = Math.Max(1, sourceLine.Length - startCol + 1);
+                            return startCol + (length - 1) / 2;
+                        }
+
+                        var labeled = activeAnnotations.Where(a => !string.IsNullOrEmpty(a.Message)).ToList();
+                        labeled.Sort((a, b) => GetConnectorCol(a).CompareTo(GetConnectorCol(b)));
+
+                        for (int k = labeled.Count - 1; k >= 0; k--)
+                        {
+                            var targetAnn = labeled[k];
+                            int targetCol = GetConnectorCol(targetAnn);
+                            string targetColor = targetAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+
+                            sb.Append(Colorize(Blue, $"{emptyGutter} | "));
+                            int currentCol = 1;
+
+                            // Preceding vertical connector lines for pending labels below this line
+                            for (int j = 0; j < k; j++)
+                            {
+                                var branchAnn = labeled[j];
+                                int branchCol = GetConnectorCol(branchAnn);
+                                if (branchCol < currentCol)
+                                    continue;
+
+                                AppendWhitespace(sb, sourceLine, currentCol, branchCol);
+
+                                string branchColor = branchAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                sb.Append(Colorize(branchColor, "|"));
+                                currentCol = branchCol + 1;
+                            }
+
+                            if (targetCol >= currentCol)
+                            {
+                                AppendWhitespace(sb, sourceLine, currentCol, targetCol);
+                            }
+
+                            sb.Append(Colorize(targetColor, "└── "));
+                            sb.AppendLine(Colorize(targetColor, targetAnn.Message ?? ""));
+                        }
                     }
                 }
 
@@ -249,7 +311,7 @@ public sealed class TerminalDiagnosticRenderer
                 foreach (var note in diagnostic.Notes)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Bold, "Note: "));
+                    sb.Append(Colorize(Bold, "note: "));
                     sb.AppendLine(note.Message);
                 }
 
@@ -257,7 +319,7 @@ public sealed class TerminalDiagnosticRenderer
                 foreach (var help in diagnostic.HelpMessages)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Cyan, "Help: "));
+                    sb.Append(Colorize(Cyan, "help: "));
                     sb.AppendLine(help.Message);
                 }
 
@@ -265,7 +327,7 @@ public sealed class TerminalDiagnosticRenderer
                 foreach (var suggestion in diagnostic.Suggestions)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Green, "Suggestion: "));
+                    sb.Append(Colorize(Green, "suggestion: "));
                     sb.AppendLine(suggestion.Description);
 
                     foreach (var edit in suggestion.Edits)
@@ -363,6 +425,17 @@ public sealed class TerminalDiagnosticRenderer
         {
             sb.Append(Colorize(Cyan, "  = help: "));
             sb.AppendLine(help.Message);
+        }
+    }
+
+    private static void AppendWhitespace(StringBuilder sb, string sourceLine, int fromCol, int toCol)
+    {
+        for (int i = fromCol - 1; i < toCol - 1; i++)
+        {
+            if (i >= 0 && i < sourceLine.Length && sourceLine[i] == '\t')
+                sb.Append('\t');
+            else
+                sb.Append(' ');
         }
     }
 

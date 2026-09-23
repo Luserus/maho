@@ -16,7 +16,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
-        Assert.Contains("Type 'Foo' is already declared in this scope", diag.Message);
+        Assert.Contains("type 'Foo' is already declared in this scope", diag.Message);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -266,7 +266,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0538");
-        Assert.Contains("Type 'Loop' participates in a cycle", diag.Message);
+        Assert.Contains("type 'Loop' participates in a cycle", diag.Message);
     }
 
     [Fact]
@@ -292,7 +292,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0535");
-        Assert.Contains("Variable 'x' is already declared", diag.Message);
+        Assert.Contains("variable 'x' is already declared", diag.Message);
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0535");
-        Assert.Contains("Variable 'field' is already declared", diag.Message);
+        Assert.Contains("variable 'field' is already declared", diag.Message);
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0536");
-        Assert.Contains("Property 'Size' is already declared", diag.Message);
+        Assert.Contains("property 'Size' is already declared", diag.Message);
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0501");
-        Assert.Contains("Type 'Common' is ambiguous in the current scope", diag.Message);
+        Assert.Contains("type 'Common' is ambiguous in the current scope", diag.Message);
     }
 
     [Fact]
@@ -425,6 +425,6 @@ public sealed class DeclarationDiagnosticsTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
-        Assert.Contains("Could not resolve type 'NonExistentType'", diag.Message);
+        Assert.Contains("could not resolve type 'NonExistentType'", diag.Message);
     }
 }

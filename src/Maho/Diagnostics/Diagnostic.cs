@@ -45,7 +45,7 @@ internal sealed class Diagnostic
     {
         DiagnosticMessageKind.Fixed => message ?? string.Empty,
         DiagnosticMessageKind.Expected => CreateExpectedMessage(ExpectedText ?? string.Empty, foundText, context),
-        DiagnosticMessageKind.BadToken => $"Invalid token {FormatTokenText(foundText)}.",
+        DiagnosticMessageKind.BadToken => $"invalid token {FormatTokenText(foundText)}",
         _ => string.Empty
     };
 
@@ -89,9 +89,9 @@ internal sealed class Diagnostic
     private static string CreateExpectedMessage(string expected, DiagnosticText found, string? context)
     {
         if (string.IsNullOrWhiteSpace(context))
-            return $"Expected {expected}, found {FormatTokenText(found)}.";
+            return $"expected {expected}, found {FormatTokenText(found)}";
 
-        return $"Expected {expected} {context}, found {FormatTokenText(found)}.";
+        return $"expected {expected} {context}, found {FormatTokenText(found)}";
     }
 
     private static string FormatTokenText(DiagnosticText tokenText)

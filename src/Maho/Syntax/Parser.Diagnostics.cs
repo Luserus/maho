@@ -31,7 +31,7 @@ internal sealed partial class Parser
         {
             MissingTokenAnchor.BeforeCurrent => CurrentToken.Span,
             MissingTokenAnchor.AfterPrevious => new TextSpan(PreviousToken.Span.End, 0),
-            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "unhandled missing token anchor.")
         };
 
     /// <summary> Computes where a synthetic missing token should be inserted. </summary>
@@ -40,7 +40,7 @@ internal sealed partial class Parser
         {
             MissingTokenAnchor.BeforeCurrent => CurrentToken.Span.Start,
             MissingTokenAnchor.AfterPrevious => PreviousToken.Span.End,
-            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "Unhandled missing token anchor.")
+            _ => throw new ArgumentOutOfRangeException(nameof(anchor), anchor, "unhandled missing token anchor.")
         };
 
     /// <summary> Chooses the cleaner anchor for a missing token or delimiter based on token layout. </summary>

@@ -114,7 +114,7 @@ public sealed class LexerTests
         Assert.True(diagnostics.HasErrors);
         var diag = Assert.Single(diagnostics.Diagnostics);
         Assert.Equal("MH0104", diag.DiagnosticCode);
-        Assert.Equal("Unterminated multi-line comment.", diag.Message);
+        Assert.Equal("unterminated multi-line comment", diag.Message);
         Assert.Equal("/* unclosed comment", text.ToString(diag.Span));
 
         Token endToken = Assert.Single(lexer.Tokens);
@@ -130,7 +130,7 @@ public sealed class LexerTests
         Assert.True(diagnostics.HasErrors);
         var diag = Assert.Single(diagnostics.Diagnostics);
         Assert.Equal("MH0104", diag.DiagnosticCode);
-        Assert.Equal("Unterminated multi-line comment.", diag.Message);
+        Assert.Equal("unterminated multi-line comment", diag.Message);
         Assert.Equal("/* unclosed multi-line\ncomment", text.ToString(diag.Span));
 
         // Tokens before the comment are intact

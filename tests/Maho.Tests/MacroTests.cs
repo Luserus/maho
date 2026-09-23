@@ -228,7 +228,7 @@ public sealed class MacroTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0600");
-        Assert.Contains("Recursion limit of 4 exceeded while expanding macro '$loop'", diag.Message);
+        Assert.Contains("recursion limit of 4 exceeded while expanding macro '$loop'", diag.Message);
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class MacroTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0601");
-        Assert.Contains("No matching arm found for macro '$exact'", diag.Message);
+        Assert.Contains("no matching arm found for macro '$exact'", diag.Message);
     }
 
     [Fact]
@@ -268,7 +268,35 @@ public sealed class MacroTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0602");
-        Assert.Contains("Could not resolve macro '$unknown_macro'", diag.Message);
+        Assert.Contains("could not resolve macro '$unknown_macro'", diag.Message);
+        Assert.Equal("$unknown_macro".Length, diag.Span.Length);
+        Assert.Equal("$unknown_macro".Length, Assert.Single(diag.Labels).Span.Length);
+    }
+
+    [Fact]
+    public void Diagnostic_UnresolvedMacro_ReportedOnceEvenWhenOtherMacrosExpandIteratively()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $valid {
+                () => { 42 }
+            }
+
+            public class Host
+            {
+                public int32 Test()
+                {
+                    int32 a = $valid();
+                    $Invalid;
+                    return a;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        // $Invalid should only be reported ONCE even though $valid causes a second expansion iteration
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0602");
+        Assert.Contains("could not resolve macro '$Invalid'", diag.Message);
+        Assert.Equal("$Invalid".Length, diag.Span.Length);
     }
 
     [Fact]
@@ -292,7 +320,7 @@ public sealed class MacroTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0603");
-        Assert.Contains("Macro '$block_macro' produces statements and cannot be used in an expression context", diag.Message);
+        Assert.Contains("macro '$block_macro' produces statements and cannot be used in an expression context", diag.Message);
     }
 
     [Fact]

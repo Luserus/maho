@@ -44,6 +44,15 @@ public static class CommandLine
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
     {
+        try
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+        catch
+        {
+            // Ignore if console output encoding cannot be changed
+        }
+
         if (args.Length == 0)
         {
             PrintUsage(Console.Out);
