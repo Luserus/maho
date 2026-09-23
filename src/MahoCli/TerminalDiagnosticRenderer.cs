@@ -233,15 +233,23 @@ public sealed class TerminalDiagnosticRenderer
                             sb.Append(' ');
                             sb.Append(Colorize(markColor, ann.Message));
                         }
+
                         sb.AppendLine();
                     }
+                }
+
+                bool hasAdditionalInfo = diagnostic.Notes.Count > 0 || diagnostic.HelpMessages.Count > 0 || diagnostic.Suggestions.Count > 0;
+                if (hasAdditionalInfo)
+                {
+                    sb.Append(Colorize(Blue, $"{emptyGutter} |"));
+                    sb.AppendLine();
                 }
 
                 // 4. Notes
                 foreach (var note in diagnostic.Notes)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Bold, "note: "));
+                    sb.Append(Colorize(Bold, "Note: "));
                     sb.AppendLine(note.Message);
                 }
 
@@ -249,7 +257,7 @@ public sealed class TerminalDiagnosticRenderer
                 foreach (var help in diagnostic.HelpMessages)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Cyan, "help: "));
+                    sb.Append(Colorize(Cyan, "Help: "));
                     sb.AppendLine(help.Message);
                 }
 
@@ -257,7 +265,7 @@ public sealed class TerminalDiagnosticRenderer
                 foreach (var suggestion in diagnostic.Suggestions)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} = "));
-                    sb.Append(Colorize(Green, "suggestion: "));
+                    sb.Append(Colorize(Green, "Suggestion: "));
                     sb.AppendLine(suggestion.Description);
 
                     foreach (var edit in suggestion.Edits)

@@ -15,4 +15,5 @@ public struct SomeType<T>
 $Test(Int32);
 
 x.Data = 10;
+
 SomeOtherType val;

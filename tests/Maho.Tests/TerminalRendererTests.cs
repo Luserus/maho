@@ -39,8 +39,8 @@ public sealed class TerminalRendererTests
         Assert.Contains("--> test.mh: (2:14)", output);
         Assert.Contains("2 | public class Foo;", output);
         Assert.Contains("^^^ duplicate declaration", output);
-        Assert.Contains("= note: first declared on line 1", output);
-        Assert.Contains("= help: consider renaming one of the types", output);
+        Assert.Contains("= Note: first declared on line 1", output);
+        Assert.Contains("= Help: consider renaming one of the types", output);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class TerminalRendererTests
         string output = renderer.Render(diagnostic);
 
         Assert.Contains("Warning [MH2001]: naming convention violation", output);
-        Assert.Contains("= suggestion: rename to PascalCase", output);
+        Assert.Contains("= Suggestion: rename to PascalCase", output);
         Assert.Contains("- var oldName = 10;", output);
         Assert.Contains("+ var NewName = 10;", output);
     }
@@ -232,6 +232,33 @@ public sealed class TerminalRendererTests
         Assert.Contains("   ...", output);
         Assert.Contains("20 | nice = }", output);
         Assert.Contains("   | ^^^^", output);
+    }
+
+    [Fact]
+    public void TerminalRenderer_WithHelpOrNotes_RendersEmptyGutterLineAfterDiagnosticCarets()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("sample.mh", "SomeOtherType val;");
+
+        var span = new TextSpanInfo(0, 13, 13, new TextLocation(1, 1), new TextLocation(1, 14));
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH0500",
+            Message: "Could not resolve type 'SomeOtherType'.",
+            Severity: DiagnosticSeverity.Error,
+            Span: span,
+            SourcePath: "sample.mh",
+            Labels: [
+                new DiagnosticLabelInfo(span, "type 'SomeOtherType' not found", DiagnosticLabelStyle.Primary, "sample.mh")
+            ],
+            HelpMessages: [
+                new DiagnosticHelpInfo("check for a missing import or declaration.", "sample.mh")
+            ]);
+
+        string output = renderer.Render(diagnostic);
+
+        Assert.Contains(
+            "   | ^^^^^^^^^^^^^ type 'SomeOtherType' not found\n   |\n   = Help: check for a missing import or declaration.",
+            output.Replace("\r\n", "\n"));
     }
 }
 
