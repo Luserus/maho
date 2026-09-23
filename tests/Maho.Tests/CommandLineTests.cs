@@ -311,7 +311,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--implicit-toplevel=false", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("MH0011", output);
+                Assert.Contains("MH0160", output);
             }
             finally
             {
@@ -476,7 +476,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--no-project", tempDir]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("MH0012", output);
+                Assert.Contains("MH0161", output);
             }
             finally
             {
@@ -507,7 +507,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--no-project", "--implicit-toplevel=false", tempDir]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("MH0011", output);
+                Assert.Contains("MH0160", output);
             }
             finally
             {

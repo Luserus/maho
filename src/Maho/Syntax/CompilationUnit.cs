@@ -12,7 +12,7 @@ internal sealed class CompilationUnit : SyntaxNode
     /// <summary> File-level using directives that import namespaces for this compilation unit. </summary>
     public IReadOnlyList<UsingDirective> Usings { get; }
     /// <summary> Top-level members contained in the file. </summary>
-    public IReadOnlyList<TopLevel> Members { get; }
+    public IReadOnlyList<TopLevel> Members { get; internal set; }
     /// <summary> Synthetic end-of-file token closing the unit. </summary>
     public Token EndToken { get; }
     /// <summary> Whether executable top-level statements are enabled for this unit. </summary>

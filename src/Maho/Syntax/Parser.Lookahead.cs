@@ -176,7 +176,7 @@ internal sealed partial class Parser
     /// <summary> Checks whether the speculative current token can begin an expression. </summary>
     private bool LookaheadCanStartExpression()
     {
-        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
+        if (LookaheadCurrentToken.Kind is TokenKind.Dollar or TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
             return true;
 
         if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))

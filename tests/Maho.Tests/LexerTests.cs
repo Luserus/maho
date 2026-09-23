@@ -39,10 +39,10 @@ public sealed class LexerTests
     [Fact]
     public void Lex_ReportsInvalidAndUnterminatedTokens()
     {
-        var (_, diagnostics, lexer) = CompilerTestBed.Lex("$\n\"unterminated");
+        var (_, diagnostics, lexer) = CompilerTestBed.Lex("§\n\"unterminated");
 
-        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0000");
-        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0001");
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0100");
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0101");
         Assert.Contains(lexer.Tokens, token => token.Kind is TokenKind.BadToken);
         Assert.Equal(TokenKind.EndToken, lexer.Tokens[^1].Kind);
     }
@@ -113,7 +113,7 @@ public sealed class LexerTests
 
         Assert.True(diagnostics.HasErrors);
         var diag = Assert.Single(diagnostics.Diagnostics);
-        Assert.Equal("MH0013", diag.DiagnosticCode);
+        Assert.Equal("MH0104", diag.DiagnosticCode);
         Assert.Equal("Unterminated multi-line comment.", diag.Message);
         Assert.Equal("/* unclosed comment", text.ToString(diag.Span));
 
@@ -129,7 +129,7 @@ public sealed class LexerTests
 
         Assert.True(diagnostics.HasErrors);
         var diag = Assert.Single(diagnostics.Diagnostics);
-        Assert.Equal("MH0013", diag.DiagnosticCode);
+        Assert.Equal("MH0104", diag.DiagnosticCode);
         Assert.Equal("Unterminated multi-line comment.", diag.Message);
         Assert.Equal("/* unclosed multi-line\ncomment", text.ToString(diag.Span));
 
@@ -153,7 +153,7 @@ public sealed class LexerTests
 
         Assert.True(diagnostics.HasErrors);
         var diag = Assert.Single(diagnostics.Diagnostics);
-        Assert.Equal("MH0013", diag.DiagnosticCode);
+        Assert.Equal("MH0104", diag.DiagnosticCode);
         Assert.Equal(expectedLength, diag.Span.Length);
         Assert.Equal(source, text.ToString(diag.Span));
         Assert.DoesNotContain(lexer.Tokens, t => t.Kind is TokenKind.BadToken);

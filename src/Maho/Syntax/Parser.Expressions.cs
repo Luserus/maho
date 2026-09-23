@@ -115,6 +115,7 @@ internal sealed partial class Parser
     /// <returns> The primary expression node. </returns>
     private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
     {
+        TokenKind.Dollar => ParseMacroInvocationExpression(),
         TokenKind.LeftParen => ParseParenthesizedOrCastExpression(),
         TokenKind.LeftBrace => ParseBlockExpression(),
         TokenKind.LeftBracket => ParseCollectionExpression(),

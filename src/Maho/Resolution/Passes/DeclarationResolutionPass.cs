@@ -528,6 +528,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 var varHandle = ResolutionContext.GetHandle(varSymbol);
                 context.ResolvedTree.AddReference(syntax, varHandle);
+
                 return TypeRef.Resolved(varHandle);
             }
 
@@ -538,29 +539,28 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             TypeRef genericTarget = ResolveTypeName(generic, scope);
             ResolveGenericArguments(generic, genericTarget.Handle, scope);
+
             return genericTarget;
         }
 
         if (syntax is QualifiedType qualified)
         {
-            ResolveType(qualified.Left, scope);
-
             if (qualified.Right is GenericType qualifiedGeneric)
             {
                 TypeRef target = ResolveTypeName(syntax, scope);
+
                 if (target.Handle is { } handle)
-                {
                     context.ResolvedTree.AddReference(qualifiedGeneric, handle);
-                }
+
                 ResolveGenericArguments(qualifiedGeneric, target.Handle, scope);
                 return target;
             }
 
             TypeRef result = ResolveTypeName(syntax, scope);
+
             if (result.Handle is { } rightHandle)
-            {
                 context.ResolvedTree.AddReference(qualified.Right, rightHandle);
-            }
+
             return result;
         }
 
@@ -582,7 +582,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
 
         if (ResolveSingle(scope, name) is not { } symbol)
+        {
+            var span = syntax.GetSpan() ?? default;
+            var source = syntax.GetSource();
+            context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToString() ?? string.Empty, source);
             return TypeRef.Error;
+        }
 
         var handle = ResolutionContext.GetHandle(symbol);
         context.ResolvedTree.AddReference(syntax, handle);

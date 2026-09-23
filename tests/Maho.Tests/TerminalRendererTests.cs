@@ -18,7 +18,7 @@ public sealed class TerminalRendererTests
             EndLocation: new TextLocation(2, 17));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "type 'Foo' is already declared in this scope",
             Severity: DiagnosticSeverity.Error,
             Span: spanInfo,
@@ -35,7 +35,7 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("Error [MH1002]: type 'Foo' is already declared in this scope", output);
+        Assert.Contains("Error [MH0530]: type 'Foo' is already declared in this scope", output);
         Assert.Contains("--> test.mh: (2:14)", output);
         Assert.Contains("2 | public class Foo;", output);
         Assert.Contains("^^^ duplicate declaration", output);
@@ -53,7 +53,7 @@ public sealed class TerminalRendererTests
         var secondarySpan = new TextSpanInfo(13, 3, 16, new TextLocation(1, 14), new TextLocation(1, 17));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "type 'Bar' is already declared in this scope",
             Severity: DiagnosticSeverity.Error,
             Span: primarySpan,
@@ -107,7 +107,7 @@ public sealed class TerminalRendererTests
 
         var span = new TextSpanInfo(0, 3, 3, new TextLocation(1, 1), new TextLocation(1, 4));
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0001",
+            Code: "MH0101",
             Message: "syntax error",
             Severity: DiagnosticSeverity.Error,
             Span: span,
@@ -129,7 +129,7 @@ public sealed class TerminalRendererTests
         // "int" starts at column 2 (after 1 tab)
         var span = new TextSpanInfo(1, 3, 4, new TextLocation(1, 2), new TextLocation(1, 5));
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0001",
+            Code: "MH0101",
             Message: "test message",
             Severity: DiagnosticSeverity.Error,
             Span: span,
@@ -153,7 +153,7 @@ public sealed class TerminalRendererTests
         var overlongSpan = new TextSpanInfo(0, 100, 100, new TextLocation(2, 1), new TextLocation(2, 101));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "error",
             Severity: DiagnosticSeverity.Error,
             Span: primarySpan,
@@ -182,7 +182,7 @@ public sealed class TerminalRendererTests
         var span2 = new TextSpanInfo(9, 4, 13, new TextLocation(2, 1), new TextLocation(2, 5));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0004",
+            Code: "MH0120",
             Message: "Expected ';' after the top-level variable declaration, found 'nice'.",
             Severity: DiagnosticSeverity.Error,
             Span: span2,
@@ -215,7 +215,7 @@ public sealed class TerminalRendererTests
         var span2 = new TextSpanInfo(100, 4, 104, new TextLocation(20, 1), new TextLocation(20, 5));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0004",
+            Code: "MH0120",
             Message: "Expected ';' after the top-level variable declaration, found 'nice'.",
             Severity: DiagnosticSeverity.Error,
             Span: span2,

@@ -105,7 +105,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateDeclaration("Type", "Foo", secondSpan, firstSpan, redeclSource: file2, firstSource: file1);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1002", diag.DiagnosticCode);
+        Assert.Equal("MH0530", diag.DiagnosticCode);
         Assert.Equal(DiagnosticKind.Error, diag.Kind);
         Assert.Equal(2, diag.Labels.Count);
 
@@ -134,7 +134,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateTypeDeclaration("Person", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1002", diag.DiagnosticCode);
+        Assert.Equal("MH0530", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -152,7 +152,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateFunctionDeclaration("Calc", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1003", diag.DiagnosticCode);
+        Assert.Equal("MH0532", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -170,7 +170,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateVariableDeclaration("val", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1005", diag.DiagnosticCode);
+        Assert.Equal("MH0535", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -188,7 +188,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicatePropertyDeclaration("Size", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1006", diag.DiagnosticCode);
+        Assert.Equal("MH0536", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -205,7 +205,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportCyclicTypeHierarchy(span, "Node");
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1004", diag.DiagnosticCode);
+        Assert.Equal("MH0538", diag.DiagnosticCode);
         Assert.Single(diag.Labels);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Contains("cycle", diag.Message);
@@ -221,7 +221,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportAmbiguousTypeReference(span, "Foo");
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1001", diag.DiagnosticCode);
+        Assert.Equal("MH0501", diag.DiagnosticCode);
         Assert.Single(diag.Labels);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Contains("Foo", diag.Message);

@@ -1,15 +1,18 @@
-#pragma toplevel enable
+using Std;
 
-namespace Sample;
+namespace Test;
 
-str8 str = "Hello";
-int64 len = str.Length;
+public macro $Test
+{
+    (@t: ident) => { var x = put SomeType<@t>(); }
+}
 
-some err
+public struct SomeType<T>
+{
+    public T Data;
+}
 
+$Test(Int32);
 
-
-
-
-nice = }
-foo.;
+x.Data = 10;
+SomeOtherType val;

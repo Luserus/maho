@@ -7,7 +7,7 @@ namespace Maho.Tests;
 public sealed class DeclarationDiagnosticsTests
 {
     [Fact]
-    public void DuplicateType_NonPartial_EmitsMH1002()
+    public void DuplicateType_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             public class Foo;
@@ -15,7 +15,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Type 'Foo' is already declared in this scope", diag.Message);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
@@ -23,7 +23,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void DuplicateType_InNamespace_NonPartial_EmitsMH1002()
+    public void DuplicateType_InNamespace_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             namespace Sample
@@ -34,12 +34,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Point", diag.Message);
     }
 
     [Fact]
-    public void DuplicateType_Nested_NonPartial_EmitsMH1002()
+    public void DuplicateType_Nested_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             public class Outer
@@ -50,12 +50,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Inner", diag.Message);
     }
 
     [Fact]
-    public void DuplicateType_MixedPartialAndNonPartial_EmitsMH1002()
+    public void DuplicateType_MixedPartialAndNonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             public partial class Bar;
@@ -63,12 +63,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Bar", diag.Message);
     }
 
     [Fact]
-    public void DuplicateType_AliasAndTypeSameName_EmitsMH1002()
+    public void DuplicateType_AliasAndTypeSameName_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             namespace Sample
@@ -80,7 +80,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Item", diag.Message);
     }
 
@@ -108,7 +108,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void PartialType_ConflictingKinds_EmitsMH1002()
+    public void PartialType_ConflictingKinds_EmitsMH0531()
     {
         var compilation = Compilation.FromSource("""
             public partial class Conflict;
@@ -116,7 +116,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0531");
         Assert.Contains("conflicting type kinds", diag.Message);
     }
 
@@ -124,6 +124,8 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialFunction_ZeroBodies_SucceedsWithoutWarningsOrErrors()
     {
         var compilation = Compilation.FromSource("""
+            public struct void;
+
             public partial void DoWork();
             public partial void DoWork();
             public partial void DoWork();
@@ -137,6 +139,9 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialFunction_OneBody_SucceedsWithoutErrors()
     {
         var compilation = Compilation.FromSource("""
+            public struct void;
+            public struct int;
+
             public partial void Calculate(int x);
             public partial void Calculate(int x)
             {
@@ -149,7 +154,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void PartialFunction_MultipleBodies_EmitsMH1003()
+    public void PartialFunction_MultipleBodies_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
             public partial void Action(int x)
@@ -164,7 +169,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1003");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0533");
         Assert.Contains("cannot have more than one defining declaration with a body", diag.Message);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
@@ -172,7 +177,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void PartialMethod_MultipleBodiesInType_EmitsMH1003()
+    public void PartialMethod_MultipleBodiesInType_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
             public partial class Service
@@ -192,7 +197,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1003");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0533");
         Assert.Contains("cannot have more than one defining declaration with a body", diag.Message);
     }
 
@@ -200,6 +205,7 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialFunction_Overloads_CanEachHaveBody()
     {
         var compilation = Compilation.FromSource("""
+            public struct void;
             public struct IntA;
             public struct IntB;
 
@@ -221,7 +227,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void PartialFunction_ConflictingReturnTypes_EmitsMH1003()
+    public void PartialFunction_ConflictingReturnTypes_EmitsMH0534()
     {
         var compilation = Compilation.FromSource("""
             public struct RetA;
@@ -232,12 +238,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1003");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0534");
         Assert.Contains("conflicting return types", diag.Message);
     }
 
     [Fact]
-    public void DuplicateFunction_NonPartial_EmitsMH1003()
+    public void DuplicateFunction_NonPartial_EmitsMH0532()
     {
         var compilation = Compilation.FromSource("""
             public struct Param;
@@ -247,24 +253,24 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1003");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0532");
         Assert.Contains("same parameter types is already declared", diag.Message);
     }
 
     [Fact]
-    public void CyclicTypeHierarchy_DirectSelfInheritance_EmitsMH1004()
+    public void CyclicTypeHierarchy_DirectSelfInheritance_EmitsMH0538()
     {
         var compilation = Compilation.FromSource("""
             public class Loop : Loop;
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1004");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0538");
         Assert.Contains("Type 'Loop' participates in a cycle", diag.Message);
     }
 
     [Fact]
-    public void CyclicTypeHierarchy_MutualCycle_EmitsMH1004()
+    public void CyclicTypeHierarchy_MutualCycle_EmitsMH0538()
     {
         var compilation = Compilation.FromSource("""
             public class First : Second;
@@ -272,11 +278,11 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1004");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0538");
     }
 
     [Fact]
-    public void DuplicateVariable_Global_EmitsMH1005()
+    public void DuplicateVariable_Global_EmitsMH0535()
     {
         var compilation = Compilation.FromSource("""
             public struct Val;
@@ -285,12 +291,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1005");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0535");
         Assert.Contains("Variable 'x' is already declared", diag.Message);
     }
 
     [Fact]
-    public void DuplicateVariable_Field_EmitsMH1005()
+    public void DuplicateVariable_Field_EmitsMH0535()
     {
         var compilation = Compilation.FromSource("""
             public struct Data
@@ -301,12 +307,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1005");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0535");
         Assert.Contains("Variable 'field' is already declared", diag.Message);
     }
 
     [Fact]
-    public void DuplicateProperty_EmitsMH1006()
+    public void DuplicateProperty_EmitsMH0536()
     {
         var compilation = Compilation.FromSource("""
             public class Widget
@@ -317,12 +323,12 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1006");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0536");
         Assert.Contains("Property 'Size' is already declared", diag.Message);
     }
 
     [Fact]
-    public void AmbiguousTypeReference_EmitsMH1001()
+    public void AmbiguousTypeReference_EmitsMH0501()
     {
         var compilation = Compilation.FromSource("""
             namespace N1
@@ -344,7 +350,7 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1001");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0501");
         Assert.Contains("Type 'Common' is ambiguous in the current scope", diag.Message);
     }
 
@@ -360,7 +366,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void DuplicateType_MultiFile_NonPartial_EmitsMH1002()
+    public void DuplicateType_MultiFile_NonPartial_EmitsMH0530()
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public class DupeMulti;");
         var (_, _, _, root2) = CompilerTestBed.Parse("public class DupeMulti;");
@@ -368,12 +374,12 @@ public sealed class DeclarationDiagnosticsTests
         var context = new Resolver().Resolve(syntaxTree);
 
         Assert.True(context.Diagnostics.HasErrors);
-        var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH1002");
+        var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0530");
         Assert.Contains("DupeMulti", diag.Message);
     }
 
     [Fact]
-    public void PartialFunction_MultiFile_MultipleBodies_EmitsMH1003()
+    public void PartialFunction_MultiFile_MultipleBodies_EmitsMH0533()
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public partial void Work() { return; }");
         var (_, _, _, root2) = CompilerTestBed.Parse("public partial void Work() { return; }");
@@ -381,7 +387,7 @@ public sealed class DeclarationDiagnosticsTests
         var context = new Resolver().Resolve(syntaxTree);
 
         Assert.True(context.Diagnostics.HasErrors);
-        var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH1003");
+        var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0533");
         Assert.Contains("cannot have more than one defining declaration with a body", diag.Message);
     }
 
@@ -398,7 +404,7 @@ public sealed class DeclarationDiagnosticsTests
     }
 
     [Fact]
-    public void DuplicateType_SameGenericArity_NonPartial_EmitsMH1002()
+    public void DuplicateType_SameGenericArity_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
             public class Holder<T>;
@@ -406,7 +412,19 @@ public sealed class DeclarationDiagnosticsTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH1002");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0530");
         Assert.Contains("Holder", diag.Message);
+    }
+
+    [Fact]
+    public void UnresolvedType_EmitsMH0500()
+    {
+        var compilation = Compilation.FromSource("""
+            public NonExistentType globalVar;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("Could not resolve type 'NonExistentType'", diag.Message);
     }
 }

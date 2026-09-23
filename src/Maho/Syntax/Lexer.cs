@@ -44,11 +44,12 @@ internal sealed partial class Lexer
                 return Tokens;
             }
 
+            bool isEscapedIdentifier = CurrentChar == '`' && (char.IsLetter(Peek()) || Peek() == '_');
             var (span, kind) = LexTokenData();
             var trailingTrivia = LexTrivia();
             var matching = MatchingKeywordKind.None;
 
-            if (kind is TokenKind.Identifier)
+            if (kind is TokenKind.Identifier && !isEscapedIdentifier)
                 matching = MatchKeywordKind(span);
 
             Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia, matching));
@@ -69,7 +70,28 @@ internal sealed partial class Lexer
     {
         var start = current;
 
-        if (char.IsLetter(CurrentChar) || CurrentChar == '_')
+        if (CurrentChar == '`' && (char.IsLetter(Peek()) || Peek() == '_'))
+        {
+            current++; // skip opening '`'
+            var idStart = current;
+            while (char.IsLetterOrDigit(CurrentChar) || CurrentChar == '_')
+                current++;
+
+            if (CurrentChar == '`')
+            {
+                var idSpan = new TextSpan(idStart, current - idStart);
+                current++; // skip closing '`'
+                kind = TokenKind.Identifier;
+                return (idSpan, kind);
+            }
+            else
+            {
+                ReportUnterminatedLiteral(start, TokenKind.Identifier);
+                kind = TokenKind.Identifier;
+                return (new TextSpan(idStart, current - idStart), kind);
+            }
+        }
+        else if (char.IsLetter(CurrentChar) || CurrentChar == '_')
         {
             kind = TokenKind.Identifier;
 
@@ -298,6 +320,10 @@ internal sealed partial class Lexer
             4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
             4 when identifier.SequenceEqual("enum") => MatchingKeywordKind.Enum,
             4 when identifier.SequenceEqual("with") => MatchingKeywordKind.With,
+            4 when identifier.SequenceEqual("expr") => MatchingKeywordKind.Expr,
+            4 when identifier.SequenceEqual("type") => MatchingKeywordKind.Type,
+            4 when identifier.SequenceEqual("stmt") => MatchingKeywordKind.Stmt,
+            5 when identifier.SequenceEqual("ident") => MatchingKeywordKind.Ident,
             5 when identifier.SequenceEqual("while") => MatchingKeywordKind.While,
             5 when identifier.SequenceEqual("using") => MatchingKeywordKind.Using,
             5 when identifier.SequenceEqual("float") => MatchingKeywordKind.Float,
@@ -305,6 +331,7 @@ internal sealed partial class Lexer
             5 when identifier.SequenceEqual("union") => MatchingKeywordKind.Union,
             5 when identifier.SequenceEqual("where") => MatchingKeywordKind.Where,
             5 when identifier.SequenceEqual("const") => MatchingKeywordKind.Const,
+            5 when identifier.SequenceEqual("macro") => MatchingKeywordKind.Macro,
             6 when identifier.SequenceEqual("global") => MatchingKeywordKind.Global,
             6 when identifier.SequenceEqual("return") => MatchingKeywordKind.Return,
             6 when identifier.SequenceEqual("public") => MatchingKeywordKind.Public,
@@ -360,6 +387,7 @@ internal sealed partial class Lexer
         '{' => (true, TokenKind.LeftBrace),
         '}' => (true, TokenKind.RightBrace),
         '~' => (true, TokenKind.Tilde),
+        '$' => (true, TokenKind.Dollar),
         _ => (false, TokenKind.NullToken)
     };
 

@@ -8,6 +8,7 @@ internal sealed class Resolver
 {
     private readonly ResolutionPass[] passes =
     [
+        new MacroExpansionPass(),
         new SymbolDiscoveryPass(),
         new DeclarationResolutionPass()
     ];
@@ -18,7 +19,8 @@ internal sealed class Resolver
         SyntaxTree syntaxTree,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
         ResolutionContext? baseContext = null,
-        DiagnosticsManager? diagnostics = null)
+        DiagnosticsManager? diagnostics = null,
+        CompilationOptions? options = null)
     {
         var resolved = baseContext?.ResolvedTree ?? resolvedTree;
         var globalNamespace = baseContext?.GlobalNamespace ?? new NamespaceTrieNode();
@@ -41,7 +43,8 @@ internal sealed class Resolver
                 baseContext.PropertySymbols,
                 baseContext.GenericParameterSymbols,
                 baseContext.LabelSymbols,
-                baseContext.AliasSymbols
+                baseContext.AliasSymbols,
+                baseContext.MacroSymbols
             );
             scopes = baseContext.Scopes;
         }
@@ -59,7 +62,8 @@ internal sealed class Resolver
             scopes,
             referencedProjects ?? baseContext?.ReferencedProjects,
             baseContext?.ImportedProjectSymbols,
-            diagnostics ?? baseContext?.Diagnostics);
+            diagnostics ?? baseContext?.Diagnostics,
+            options ?? baseContext?.Options);
 
         foreach (var pass in passes)
             pass.Resolve(context);

@@ -18,10 +18,12 @@ internal struct SymbolStore
     public List<GenericParameterSymbol> GenericParameterSymbols;
     public List<LabelSymbol> LabelSymbols;
     public List<AliasSymbol> AliasSymbols;
+    public List<MacroSymbol> MacroSymbols;
 
     public SymbolStore(List<AttributeSymbol> attributeSymbols, List<NestedAttributeSymbol> nestedAttributeSymbols, List<TypeSymbol> typeSymbols, List<NestedTypeSymbol> nestedTypeSymbols,
     List<FunctionSymbol> functionSymbols, List<MethodSymbol> methodSymbols, List<GlobalVariableSymbol> globalVariableSymbols, List<FieldSymbol> fieldSymbols, List<ParameterSymbol> parameterSymbols,
-    List<LocalVariableSymbol> localVariableSymbols, List<PropertySymbol> propertySymbols, List<GenericParameterSymbol> genericParameterSymbols, List<LabelSymbol> labelSymbols, List<AliasSymbol> aliasSymbols)
+    List<LocalVariableSymbol> localVariableSymbols, List<PropertySymbol> propertySymbols, List<GenericParameterSymbol> genericParameterSymbols, List<LabelSymbol> labelSymbols, List<AliasSymbol> aliasSymbols,
+    List<MacroSymbol>? macroSymbols = null)
     {
         AttributeSymbols = attributeSymbols;
         NestedAttributeSymbols = nestedAttributeSymbols;
@@ -37,10 +39,11 @@ internal struct SymbolStore
         GenericParameterSymbols = genericParameterSymbols;
         LabelSymbols = labelSymbols;
         AliasSymbols = aliasSymbols;
+        MacroSymbols = macroSymbols ?? [];
     }
 
     /// <summary>
     /// Creates an empty symbol store with fresh collections for every symbol category.
     /// </summary>
-    public static SymbolStore CreateEmpty() => new([], [], [], [], [], [], [], [], [], [], [], [], [], []);
+    public static SymbolStore CreateEmpty() => new([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
 }

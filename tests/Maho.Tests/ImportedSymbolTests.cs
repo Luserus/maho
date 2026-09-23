@@ -13,6 +13,7 @@ public sealed class ImportedSymbolTests
 
             public struct SharedWidget
             {
+                public struct int;
                 public int id;
             }
             """, "Lib.mh");
@@ -29,7 +30,7 @@ public sealed class ImportedSymbolTests
             {
                 public SharedWidget widget;
             }
-            """, "App.mh");
+            """, "App.mh", referencedCompilations: [libCompilation]);
 
         Assert.False(consumerCompilation.HasErrors);
         Assert.NotNull(consumerCompilation.Context);

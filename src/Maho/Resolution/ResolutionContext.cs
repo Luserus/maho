@@ -27,6 +27,7 @@ internal sealed class ResolutionContext
     public List<GenericParameterSymbol> GenericParameterSymbols { get; }
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
+    public List<MacroSymbol> MacroSymbols { get; }
 
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
@@ -37,6 +38,9 @@ internal sealed class ResolutionContext
 
     /// <summary> Symbol stores imported from external projects or prior compilation phases. </summary>
     public IReadOnlyList<SymbolStore> ImportedProjectSymbols { get; }
+
+    /// <summary> Compilation options governing recursion limits and diagnostics. </summary>
+    public CompilationOptions Options { get; }
 
     private int attributeID;
     private int nestedAttributeID;
@@ -52,6 +56,7 @@ internal sealed class ResolutionContext
     private int genericParameterID;
     private int labelID;
     private int aliasID;
+    private int macroID;
 
     public ResolutionContext(
         SyntaxTree syntaxTree,
@@ -61,11 +66,13 @@ internal sealed class ResolutionContext
         List<Scope> scopes,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
         IReadOnlyList<SymbolStore>? importedSymbols = null,
-        DiagnosticsManager? diagnostics = null)
+        DiagnosticsManager? diagnostics = null,
+        CompilationOptions? options = null)
     {
         SyntaxTree = syntaxTree;
         ResolvedTree = resolvedTree;
         Diagnostics = diagnostics ?? new DiagnosticsManager();
+        Options = options ?? new CompilationOptions();
 
         GlobalNamespace = globalNamespace;
         Scopes = scopes;
@@ -85,6 +92,7 @@ internal sealed class ResolutionContext
         GenericParameterSymbols = symbols.GenericParameterSymbols;
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
+        MacroSymbols = symbols.MacroSymbols;
 
         ReferencedProjects = referencedProjects ?? [];
         ImportedProjectSymbols = importedSymbols ?? [];
@@ -103,6 +111,7 @@ internal sealed class ResolutionContext
         genericParameterID = GenericParameterSymbols.Count;
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
+        macroID = MacroSymbols.Count;
 
         if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
             InitializeProjectReferences();
@@ -347,6 +356,22 @@ internal sealed class ResolutionContext
     {
         var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
         AliasSymbols.Add(symbol);
+        Register(enclosingScope, symbol, containingNamespace);
+        return symbol;
+    }
+
+    public MacroSymbol CreateMacroSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, MacroDeclaration syntax)
+    {
+        var symbol = new MacroSymbol(macroID++, enclosingScope, name, containingSymbol, syntax);
+        MacroSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public MacroSymbol CreateMacroSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, MacroDeclaration syntax)
+    {
+        var symbol = new MacroSymbol(macroID++, enclosingScope, name, containingNamespace, syntax);
+        MacroSymbols.Add(symbol);
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }

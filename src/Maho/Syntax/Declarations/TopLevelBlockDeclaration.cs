@@ -12,7 +12,7 @@ internal sealed class TopLevelBlockDeclaration : TopLevelDeclaration
     /// <summary> Opening brace token. </summary>
     public Token OpenBrace { get; }
     /// <summary> Top-level items contained in the block. </summary>
-    public IReadOnlyList<TopLevel> Members { get; }
+    public IReadOnlyList<TopLevel> Members { get; internal set; }
     /// <summary> Closing brace token. </summary>
     public Token CloseBrace { get; }
 

@@ -40,5 +40,10 @@ internal enum MatchingKeywordKind : byte
     Unsafe,
     Intrinsic,
     Var,
-    Dyn
+    Dyn,
+    Macro,
+    Expr,
+    Type,
+    Ident,
+    Stmt
 }

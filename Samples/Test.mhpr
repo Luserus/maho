@@ -1,13 +1,9 @@
 EntryFile : "Program.mh";
 GlobalUnsafeEnabled : false;
 ProjectsReferenced : [];
+ImplicitTopLevel: true;
 Sources : {
     Directory : "$",
-    SourceFiles : [ "Program.mh" ],
     ByName : "*.mh"
-};
-GlobalAliases : {
-    "int32" : "Std.Int32",
-    "float32" : "Std.Float32"
 };
 

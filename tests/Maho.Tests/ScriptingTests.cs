@@ -53,7 +53,7 @@ public sealed class ScriptingTests
             Assert.True(result.HasErrors);
             var fileResult = Assert.Single(result.Files);
             Assert.NotNull(fileResult.Analysis);
-            Assert.Contains(fileResult.Analysis.Diagnostics, d => d.Code == "MH0011");
+            Assert.Contains(fileResult.Analysis.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -86,7 +86,7 @@ public sealed class ScriptingTests
             Assert.True(result.HasErrors);
             var file1Result = Assert.Single(result.Files, f => f.SourcePath == file1);
             Assert.NotNull(file1Result.Analysis);
-            Assert.Contains(file1Result.Analysis.Diagnostics, d => d.Code == "MH0011");
+            Assert.Contains(file1Result.Analysis.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -111,6 +111,7 @@ public sealed class ScriptingTests
 
                     public struct Type_{{i:D2}}
                     {
+                        public struct int;
                         public int id;
                     }
                     """);

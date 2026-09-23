@@ -99,6 +99,7 @@ public sealed class BuildSystemTests
             File.WriteAllText(customFile, """
                 public struct NonMhWidget
                 {
+                    public struct int;
                     public int value;
                 }
                 """);
@@ -131,9 +132,9 @@ public sealed class BuildSystemTests
             // because directory builds represent structured projects, not terminal one-liners.
             var result = MahoBuildSystem.AnalyzeDirectory(tempDir);
 
-            // Expect MH0011 error because top-level is disabled by default for directory/project builds
+            // Expect MH0160 error because top-level is disabled by default for directory/project builds
             Assert.True(result.HasErrors);
-            Assert.Contains(result.Compilation!.Diagnostics, d => d.Code == "MH0011");
+            Assert.Contains(result.Compilation!.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {

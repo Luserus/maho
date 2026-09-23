@@ -10,7 +10,11 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return new TopLevelMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
+        else if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseTopLevelMacroInvocationDeclaration();
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock(attributes, modifiers, topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseTopLevelAttributeDeclaration(attributes, modifiers);
@@ -403,6 +407,8 @@ internal sealed partial class Parser
             return ParseLocalBlockStatement(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
         else

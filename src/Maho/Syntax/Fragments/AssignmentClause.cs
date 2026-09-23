@@ -6,7 +6,7 @@ internal sealed class AssignmentClause : SyntaxNode
     /// <summary> Assignment operator token. </summary>
     public Token AssignmentOperator { get; }
     /// <summary> Expression assigned on the right-hand side. </summary>
-    public Expression Initializer { get; }
+    public Expression Initializer { get; internal set; }
 
     /// <summary> Creates one assignment clause node. </summary>
     public AssignmentClause(Token assignmentOp, Expression initializer)

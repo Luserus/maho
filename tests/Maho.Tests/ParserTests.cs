@@ -376,7 +376,7 @@ public sealed class ParserTests
             """);
 
         Assert.False(PragmaDirective.EnablesTopLevelStatements(root.Pragmas));
-        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0011");
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0160");
         Assert.IsType<TopLevelExpressionStatement>(Assert.Single(root.Members));
     }
 
@@ -808,7 +808,7 @@ public sealed class ParserTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("Int32 first, second,;");
 
-        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0006");
+        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0122");
 
         VariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members)).Declaration;
         Assert.Equal(2, declaration.Declarators.Count);
@@ -1264,7 +1264,7 @@ public sealed class ParserTests
         Assert.Equal("err", Assert.IsType<SimpleName>(someErrMember.Declaration.Declarators[0].Identifier).Name.Value);
 
         // Diagnostic for missing ';' after "some err" points to unexpected token on line 5 (1-based line 5:1) with line 4 as Context
-        var missingSemiDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("variable declaration"));
+        var missingSemiDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120" && d.Message.Contains("variable declaration"));
         Assert.Equal(5, missingSemiDiag.Span.GetStartLine(text) + 1);
         Assert.Equal(1, missingSemiDiag.Span.GetStartColumn(text) + 1);
         Assert.Equal(2, missingSemiDiag.Labels.Count);
@@ -1281,12 +1281,12 @@ public sealed class ParserTests
         Assert.Equal("nice", Assert.IsType<IdentifierNameExpression>(assignExpr.LhsExpression).Identifier.Value);
 
         // Diagnostic for missing expression after '=' on the same line points to '}' (1-based line 5:8)
-        var missingExprDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0005");
+        var missingExprDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0121");
         Assert.Equal(5, missingExprDiag.Span.GetStartLine(text) + 1);
         Assert.Equal(8, missingExprDiag.Span.GetStartColumn(text) + 1);
 
         // Diagnostic for missing ';' after "nice = }" points to unexpected token on line 6 (1-based line 6:1) with line 5 as Context
-        var missingSemiNiceDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0004" && d.Message.Contains("top-level expression"));
+        var missingSemiNiceDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120" && d.Message.Contains("top-level expression"));
         Assert.Equal(6, missingSemiNiceDiag.Span.GetStartLine(text) + 1);
         Assert.Equal(1, missingSemiNiceDiag.Span.GetStartColumn(text) + 1);
         Assert.Equal(2, missingSemiNiceDiag.Labels.Count);
@@ -1298,8 +1298,126 @@ public sealed class ParserTests
         Assert.Equal(1, missingSemiNiceDiag.Labels[1].Span.GetStartColumn(text) + 1);
 
         // 3. "foo.;" should have diagnostic pointing to ';' (1-based line 6:5)
-        var missingIdentDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0006");
+        var missingIdentDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0122");
         Assert.Equal(6, missingIdentDiag.Span.GetStartLine(text) + 1);
         Assert.Equal(5, missingIdentDiag.Span.GetStartColumn(text) + 1);
+    }
+
+    [Fact]
+    public void Parse_MacroDeclaration_MultiArm()
+    {
+        var topLevel = ParseSingleTopLevel("""
+            public macro $fact {
+                (0) => 1;
+                (@n: expr) => @n * $fact(@n - 1);
+            }
+            """, typeof(TopLevelMacroDeclaration));
+
+        var macroDecl = Assert.IsType<TopLevelMacroDeclaration>(topLevel).Macro;
+        Assert.Equal("fact", macroDecl.Name.Value);
+        Assert.Equal(2, macroDecl.Arms.Count);
+
+        var arm0 = macroDecl.Arms[0];
+        Assert.NotNull(arm0.Pattern);
+        Assert.Single(arm0.Pattern.Parameters);
+        Assert.Equal(MacroParameterKind.Literal, arm0.Pattern.Parameters[0].Kind);
+
+        var arm1 = macroDecl.Arms[1];
+        Assert.NotNull(arm1.Pattern);
+        Assert.Single(arm1.Pattern.Parameters);
+        Assert.Equal("n", arm1.Pattern.Parameters[0].Name.Value);
+        Assert.Equal(MacroParameterKind.Expression, arm1.Pattern.Parameters[0].Kind);
+        Assert.False(arm1.Pattern.Parameters[0].IsVariadic);
+    }
+
+    [Fact]
+    public void Parse_MacroDeclaration_ShorthandBody()
+    {
+        var topLevel = ParseSingleTopLevel("""
+            public macro $Point2D {
+                int32 x;
+                int32 y;
+            }
+            """, typeof(TopLevelMacroDeclaration));
+
+        var macroDecl = Assert.IsType<TopLevelMacroDeclaration>(topLevel).Macro;
+        Assert.Equal("Point2D", macroDecl.Name.Value);
+        var arm = Assert.Single(macroDecl.Arms);
+        Assert.Null(arm.Pattern);
+        Assert.False(arm.Template.IsExpression);
+        Assert.NotEmpty(arm.Template.Tokens);
+    }
+
+    [Fact]
+    public void Parse_MacroDeclaration_ArrowExpression()
+    {
+        var topLevel = ParseSingleTopLevel("""
+            public macro $Answer => 42;
+            """, typeof(TopLevelMacroDeclaration));
+
+        var macroDecl = Assert.IsType<TopLevelMacroDeclaration>(topLevel).Macro;
+        Assert.Equal("Answer", macroDecl.Name.Value);
+        var arm = Assert.Single(macroDecl.Arms);
+        Assert.Null(arm.Pattern);
+        Assert.True(arm.Template.IsExpression);
+        Assert.Single(arm.Template.Tokens);
+        Assert.Equal("42", arm.Template.Tokens[0].Value);
+    }
+
+    [Fact]
+    public void Parse_MacroDeclaration_VariadicParameter()
+    {
+        var topLevel = ParseSingleTopLevel("""
+            public macro $ListInit {
+                (@items: expr...) => [@items...];
+            }
+            """, typeof(TopLevelMacroDeclaration));
+
+        var macroDecl = Assert.IsType<TopLevelMacroDeclaration>(topLevel).Macro;
+        var arm = Assert.Single(macroDecl.Arms);
+        Assert.NotNull(arm.Pattern);
+        var param = Assert.Single(arm.Pattern.Parameters);
+        Assert.Equal("items", param.Name.Value);
+        Assert.Equal(MacroParameterKind.Expression, param.Kind);
+        Assert.True(param.IsVariadic);
+    }
+
+    [Fact]
+    public void Parse_MemberMacroInvocation_AndDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Point
+            {
+                public macro $InnerMixin {
+                    int32 z;
+                }
+                $Point2D;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var typeDecl = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<TypeBlockBody>(typeDecl.Type.Body);
+        Assert.Equal(2, body.Members.Count);
+        Assert.IsType<MemberMacroDeclaration>(body.Members[0]);
+        var inv = Assert.IsType<MemberMacroInvocationDeclaration>(body.Members[1]);
+        Assert.Equal("Point2D", inv.Invocation.Name.Value);
+        Assert.Empty(inv.Invocation.Arguments);
+    }
+
+    [Fact]
+    public void Parse_BacktickEscapedIdentifier_TreatedAsIdentifier()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct `class`
+            {
+                public int32 `macro`;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var typeDecl = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(root.Members));
+        var simpleName = Assert.IsType<SimpleName>(typeDecl.Type.Name);
+        Assert.Equal("class", simpleName.Name.Value);
     }
 }

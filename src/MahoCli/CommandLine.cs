@@ -329,7 +329,7 @@ public static class CommandLine
         if (pipelineError is not null)
             output["pipelineDiagnostic"] = new JsonObject
             {
-                ["code"] = "MH9000",
+                ["code"] = "MH0003",
                 ["message"] = pipelineError
             };
 
