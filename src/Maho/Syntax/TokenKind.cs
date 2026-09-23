@@ -67,5 +67,7 @@ public enum TokenKind
     LessThanEquals, // '<='
     GreaterThanEquals, // '>='
     AmpersandAmpersand, // '&&'
-    VerticalBarVerticalBar // '||'
+    VerticalBarVerticalBar, // '||'
+    SingleLineComment, // //
+    MultiLineComment // /* */
 }

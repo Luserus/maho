@@ -39,11 +39,12 @@ Maho diagnostics support modern, Rustc-style terminal reporting with multi-span 
 
 All diagnostic codes and error templates are centralized in `DiagnosticsManager`. Semantic passes and front-end stages call domain-specific factory methods:
 
-### Lexer Diagnostics (`MH0001` - `MH0003`)
+### Lexer Diagnostics (`MH0000` - `MH0003`, `MH0013`)
 - `ReportBadToken`: illegal character in source.
 - `ReportUnterminatedString`: string literal reaching EOF without a closing quote.
 - `ReportUnterminatedCharacter`: character literal syntax error.
 - `ReportEmptyCharacterLiteral`: empty `''` character literal.
+- `ReportUnterminatedMultiLineComment` (`MH0013`): multi-line comment reaching EOF without a closing `*/`.
 
 ### Parser Diagnostics (`MH0004` - `MH0010`)
 - `ReportExpectedToken`: expected punctuation/keyword.

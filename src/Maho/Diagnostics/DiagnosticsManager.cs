@@ -179,6 +179,10 @@ internal sealed class DiagnosticsManager
     public void ReportEmptyCharacterLiteral(TextSpan span, SourceText? source = null) =>
         ReportError("MH0003", "Character literal cannot be empty.", span, source);
 
+    /// <summary> Reports a multi-line comment that was not closed before reaching the end of the source. </summary>
+    public void ReportUnterminatedMultiLineComment(TextSpan span, SourceText? source = null) =>
+        ReportError("MH0013", "Unterminated multi-line comment.", span, source);
+
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
     public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0004", expected, found, span, context, source, unexpectedSpan);
