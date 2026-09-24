@@ -58,9 +58,9 @@ public sealed class TerminalDiagnosticRenderer
         // 1. Header: error[MH1002]: message
         string severityName = diagnostic.Severity switch
         {
-            DiagnosticSeverity.Error => "Error",
-            DiagnosticSeverity.Warning => "Warning",
-            _ => "Info"
+            DiagnosticSeverity.Error => "error",
+            DiagnosticSeverity.Warning => "warning",
+            _ => "info"
         };
 
         string severityColor = diagnostic.Severity switch
@@ -75,45 +75,7 @@ public sealed class TerminalDiagnosticRenderer
         sb.AppendLine();
 
         // 2. Source file location: --> path:line:col
-        string? displayPath = diagnostic.SourcePath;
-        if (displayPath is not null)
-        {
-            if (pathStyle == DiagnosticPathStyle.Relative)
-            {
-                try
-                {
-                    displayPath = Path.GetRelativePath(rootDirectory, displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-            else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
-            {
-                try
-                {
-                    string targetRoot = projectDirectory ?? rootDirectory;
-                    displayPath = Path.GetRelativePath(targetRoot, displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-            else if (pathStyle == DiagnosticPathStyle.Full)
-            {
-                try
-                {
-                    displayPath = Path.GetFullPath(displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-        }
-
+        string? displayPath = FormatDisplayPath(diagnostic.SourcePath);
         int line = diagnostic.Span.StartLocation.Line;
         int col = diagnostic.Span.StartLocation.Column;
 
@@ -200,41 +162,177 @@ public sealed class TerminalDiagnosticRenderer
                     sb.Append(Colorize(Blue, $"{lineStr} | "));
                     sb.AppendLine(sourceLine);
 
-                    annotations.Sort((a, b) => a.StartCol.CompareTo(b.StartCol));
-
-                    foreach (var ann in annotations)
+                    var activeAnnotations = annotations.Where(a => a.Style != DiagnosticLabelStyle.Context).ToList();
+                    if (activeAnnotations.Count > 0)
                     {
-                        if (ann.Style is DiagnosticLabelStyle.Context)
-                            continue;
+                        activeAnnotations.Sort((a, b) => a.StartCol.CompareTo(b.StartCol));
 
-                        int startCol = Math.Max(1, ann.StartCol);
-                        int length = Math.Max(1, ann.Length);
-
-                        if (startCol - 1 + length > sourceLine.Length)
-                            length = Math.Max(1, sourceLine.Length - startCol + 1);
-
-                        var indentBuilder = new StringBuilder();
-                        for (int i = 0; i < startCol - 1 && i < sourceLine.Length; i++)
-                            indentBuilder.Append(sourceLine[i] == '\t' ? '\t' : ' ');
-                        if (startCol - 1 > sourceLine.Length)
-                            indentBuilder.Append(' ', startCol - 1 - sourceLine.Length);
-
-                        string indent = indentBuilder.ToString();
-                        char mark = ann.Style is DiagnosticLabelStyle.Secondary ? '-' : '^';
-                        string markColor = ann.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
-                        string underline = new string(mark, length);
-
-                        sb.Append(Colorize(Blue, $"{emptyGutter} | "));
-                        sb.Append(indent);
-                        sb.Append(Colorize(markColor, underline));
-
-                        if (!string.IsNullOrEmpty(ann.Message))
+                        // 1. Partition carets into non-overlapping layers
+                        var caretLayers = new List<List<LineAnnotation>>();
+                        foreach (var ann in activeAnnotations)
                         {
-                            sb.Append(' ');
-                            sb.Append(Colorize(markColor, ann.Message));
+                            int startCol = Math.Max(1, ann.StartCol);
+                            bool placed = false;
+                            foreach (var layer in caretLayers)
+                            {
+                                var last = layer[^1];
+                                int lastEndCol = Math.Max(1, last.StartCol) + Math.Max(1, last.Length);
+                                if (startCol >= lastEndCol)
+                                {
+                                    layer.Add(ann);
+                                    placed = true;
+                                    break;
+                                }
+                            }
+                            if (!placed)
+                            {
+                                caretLayers.Add([ann]);
+                            }
                         }
-                        sb.AppendLine();
+
+                        foreach (var layer in caretLayers)
+                        {
+                            sb.Append(Colorize(Blue, $"{emptyGutter} | "));
+                            int currentVisualCol = 1;
+
+                            foreach (var ann in layer)
+                            {
+                                int startCol = Math.Max(1, ann.StartCol);
+                                int length = Math.Max(1, ann.Length);
+                                if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
+                                    length = Math.Max(1, sourceLine.Length - startCol + 1);
+
+                                AppendWhitespace(sb, sourceLine, currentVisualCol, startCol);
+
+                                char mark = ann.Style is DiagnosticLabelStyle.Secondary ? '-' : '^';
+                                string markColor = ann.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                string underline = new string(mark, length);
+                                sb.Append(Colorize(markColor, underline));
+
+                                currentVisualCol = startCol + length;
+                            }
+                            sb.AppendLine();
+                        }
+
+                        // 2. Render labels below the carets using L-shaped connectors (└──)
+                        int GetConnectorCol(LineAnnotation ann)
+                        {
+                            int startCol = Math.Max(1, ann.StartCol);
+                            int length = Math.Max(1, ann.Length);
+                            if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
+                                length = Math.Max(1, sourceLine.Length - startCol + 1);
+                            return startCol + (length - 1) / 2;
+                        }
+
+                        var labeled = activeAnnotations.Where(a => !string.IsNullOrEmpty(a.Message)).ToList();
+                        labeled.Sort((a, b) => GetConnectorCol(a).CompareTo(GetConnectorCol(b)));
+
+                        for (int k = labeled.Count - 1; k >= 0; k--)
+                        {
+                            var targetAnn = labeled[k];
+                            int targetCol = GetConnectorCol(targetAnn);
+                            string targetColor = targetAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+
+                            sb.Append(Colorize(Blue, $"{emptyGutter} | "));
+                            int currentCol = 1;
+
+                            // Preceding vertical connector lines for pending labels below this line
+                            for (int j = 0; j < k; j++)
+                            {
+                                var branchAnn = labeled[j];
+                                int branchCol = GetConnectorCol(branchAnn);
+                                if (branchCol < currentCol)
+                                    continue;
+
+                                AppendWhitespace(sb, sourceLine, currentCol, branchCol);
+
+                                string branchColor = branchAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                sb.Append(Colorize(branchColor, "|"));
+                                currentCol = branchCol + 1;
+                            }
+
+                            if (targetCol >= currentCol)
+                            {
+                                AppendWhitespace(sb, sourceLine, currentCol, targetCol);
+                            }
+
+                            sb.Append(Colorize(targetColor, "└── "));
+                            sb.AppendLine(Colorize(targetColor, targetAnn.Message ?? ""));
+                        }
                     }
+                }
+
+                if (diagnostic.MacroTrace is not null)
+                {
+                    sb.Append(Colorize(Blue, $"{emptyGutter} |"));
+                    sb.AppendLine();
+
+                    var currentTrace = diagnostic.MacroTrace;
+                    while (currentTrace is not null)
+                    {
+                        string? invPath = currentTrace.InvocationFilePath;
+                        string? displayInvPath = FormatDisplayPath(invPath);
+                        int invLine = currentTrace.InvocationSpan.StartLocation.Line;
+                        int invCol = currentTrace.InvocationSpan.StartLocation.Column;
+
+                        sb.Append(Colorize(Blue, "  ::: "));
+                        sb.AppendLine($"{displayInvPath ?? "source"}: ({invLine}:{invCol})");
+
+                        string[]? invLines = GetSourceLines(invPath);
+                        if (invLines is not null && invLine >= 1 && invLine <= invLines.Length)
+                        {
+                            int invGutterWidth = Math.Max(invLine.ToString().Length, 2);
+                            string invEmptyGutter = new string(' ', invGutterWidth);
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} |"));
+                            sb.AppendLine();
+
+                            string invLineStr = invLine.ToString().PadLeft(invGutterWidth);
+                            string invSourceLine = invLines[invLine - 1];
+                            sb.Append(Colorize(Blue, $"{invLineStr} | "));
+                            sb.AppendLine(invSourceLine);
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} | "));
+                            AppendWhitespace(sb, invSourceLine, 1, invCol);
+
+                            int invLength = Math.Max(1, currentTrace.InvocationSpan.Length);
+                            if (invCol - 1 + invLength > invSourceLine.Length && invSourceLine.Length >= invCol)
+                                invLength = Math.Max(1, invSourceLine.Length - invCol + 1);
+
+                            string underline = new string('-', invLength);
+                            sb.Append(Colorize(Cyan, underline));
+                            sb.AppendLine(Colorize(Cyan, " from this macro invocation"));
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} |"));
+                            sb.AppendLine();
+                        }
+
+                        currentTrace = currentTrace.Parent;
+                    }
+
+                    string macroName = diagnostic.MacroTrace.MacroName;
+                    if (!macroName.StartsWith('$'))
+                        macroName = $"${macroName}";
+
+                    string? defLocation = null;
+                    if (diagnostic.MacroTrace.DefinitionSpan.HasValue)
+                    {
+                        string? defPath = FormatDisplayPath(diagnostic.MacroTrace.DefinitionFilePath);
+                        int defLine = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Line;
+                        int defCol = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Column;
+                        defLocation = defPath is not null ? $" at {defPath}: ({defLine}:{defCol})" : $" at line {defLine}";
+                    }
+
+                    sb.Append(Colorize(Blue, $"{emptyGutter} = "));
+                    sb.Append(Colorize(Bold, "note: "));
+                    sb.AppendLine($"in macro definition '{macroName}'{defLocation}");
+                }
+
+                bool hasAdditionalInfo = diagnostic.MacroTrace is null && (diagnostic.Notes.Count > 0 || diagnostic.HelpMessages.Count > 0 || diagnostic.Suggestions.Count > 0);
+                if (hasAdditionalInfo)
+                {
+                    sb.Append(Colorize(Blue, $"{emptyGutter} |"));
+                    sb.AppendLine();
                 }
 
                 // 4. Notes
@@ -344,8 +442,69 @@ public sealed class TerminalDiagnosticRenderer
         _ => false
     };
 
+    private string? FormatDisplayPath(string? rawPath)
+    {
+        if (rawPath is null)
+            return null;
+
+        if (pathStyle == DiagnosticPathStyle.Relative)
+        {
+            try
+            {
+                return Path.GetRelativePath(rootDirectory, rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+        else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
+        {
+            try
+            {
+                string targetRoot = projectDirectory ?? rootDirectory;
+                return Path.GetRelativePath(targetRoot, rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+        else if (pathStyle == DiagnosticPathStyle.Full)
+        {
+            try
+            {
+                return Path.GetFullPath(rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+
+        return rawPath;
+    }
+
     private void AppendFallback(StringBuilder sb, DiagnosticInfo diagnostic)
     {
+        if (diagnostic.MacroTrace is not null)
+        {
+            string macroName = diagnostic.MacroTrace.MacroName;
+            if (!macroName.StartsWith('$'))
+                macroName = $"${macroName}";
+
+            string? defLocation = null;
+            if (diagnostic.MacroTrace.DefinitionSpan.HasValue)
+            {
+                string? defPath = FormatDisplayPath(diagnostic.MacroTrace.DefinitionFilePath);
+                int defLine = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Line;
+                int defCol = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Column;
+                defLocation = defPath is not null ? $" at {defPath}: ({defLine}:{defCol})" : $" at line {defLine}";
+            }
+
+            sb.Append(Colorize(Bold, "  = note: "));
+            sb.AppendLine($"in macro definition '{macroName}'{defLocation}");
+        }
         foreach (var note in diagnostic.Notes)
         {
             sb.Append(Colorize(Bold, "  = note: "));
@@ -355,6 +514,17 @@ public sealed class TerminalDiagnosticRenderer
         {
             sb.Append(Colorize(Cyan, "  = help: "));
             sb.AppendLine(help.Message);
+        }
+    }
+
+    private static void AppendWhitespace(StringBuilder sb, string sourceLine, int fromCol, int toCol)
+    {
+        for (int i = fromCol - 1; i < toCol - 1; i++)
+        {
+            if (i >= 0 && i < sourceLine.Length && sourceLine[i] == '\t')
+                sb.Append('\t');
+            else
+                sb.Append(' ');
         }
     }
 

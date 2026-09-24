@@ -8,7 +8,7 @@ internal sealed class AssignmentExpression : Expression
     /// <summary> The assignment operator. </summary>
     public Token EqualsOperator { get; }
     /// <summary> The expression to be assigned. </summary>
-    public Expression RhsExpression { get; }
+    public Expression RhsExpression { get; internal set; }
 
     /// <summary> Initializes the AssignmentExpressionSyntax class. </summary>
     /// <param name="lhsExpression"> The expression to which the rhsExpression is being assigned to. </param>

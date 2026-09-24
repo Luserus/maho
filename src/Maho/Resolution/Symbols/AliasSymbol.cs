@@ -12,6 +12,7 @@ internal sealed class AliasSymbol : Symbol
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public TypeRef Target { get; internal set; } = TypeRef.Unresolved;
     public bool HasCompatibleConstraints { get; internal set; } = true;
+    public bool IsGlobalAlias { get; internal set; }
 
     public AliasDeclaration? Syntax { get; }
 

@@ -4,11 +4,11 @@ namespace Maho.Syntax;
 internal sealed class CallExpression : Expression
 {
     /// <summary> Expression being invoked. </summary>
-    public Expression Callee { get; }
+    public Expression Callee { get; internal set; }
     /// <summary> Opening parenthesis token. </summary>
     public Token OpenParen { get; }
     /// <summary> Argument list. </summary>
-    public SeparatedSyntaxList<Expression> Arguments { get; }
+    public SeparatedSyntaxList<Expression> Arguments { get; internal set; }
     /// <summary> Closing parenthesis token. </summary>
     public Token CloseParen { get; }
 

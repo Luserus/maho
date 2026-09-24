@@ -27,4 +27,11 @@ internal sealed partial class Lexer
         if (characterCount == 0)
             diagnostics.ReportEmptyCharacterLiteral(new TextSpan(start, current - start));
     }
+
+    /// <summary> Reports an unterminated multi-line comment. </summary>
+    private void ReportUnterminatedMultiLineComment(int start)
+    {
+        var span = new TextSpan(start, current - start);
+        diagnostics.ReportUnterminatedMultiLineComment(span);
+    }
 }

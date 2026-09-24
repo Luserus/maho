@@ -13,6 +13,7 @@ public sealed class UsingDirectiveTests
             {
                 public struct Int32
                 {
+                    public struct int;
                     public int value;
                 }
             }

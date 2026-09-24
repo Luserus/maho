@@ -61,6 +61,9 @@ internal static class SyntaxSpan
 
         foreach (PropertyInfo property in node.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).OrderBy(static property => property.MetadataToken))
         {
+            if (property.Name == nameof(SyntaxNode.ExpansionOrigin))
+                continue;
+
             object? value = property.GetValue(node);
 
             if (value is null or string)

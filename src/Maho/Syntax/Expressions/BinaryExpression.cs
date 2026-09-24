@@ -4,11 +4,11 @@ namespace Maho.Syntax;
 internal sealed class BinaryExpression : Expression
 {
     /// <summary> The Left-Hand-Side expression. </summary>
-    public Expression LeftExpression { get; }
+    public Expression LeftExpression { get; internal set; }
     /// <summary> The binary operator. </summary>
     public Token OperatorToken { get; }
     /// <summary> The Right-Hand-Side expression. </summary>
-    public Expression RightExpression { get; }
+    public Expression RightExpression { get; internal set; }
 
     /// <param name="leftExpression"> The Left-Hand-Side expression. </param>
     /// <param name="operatorToken"> The binary operator. </param>

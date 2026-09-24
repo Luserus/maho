@@ -13,10 +13,12 @@ Usage: ./build-maho [options]
 Build script for the Maho compiler (mahoc).
 
 Options:
-  --all, all           Build compiler for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
-  --single-file, -s    Produce a single self-contained binary (no loose DLLs, config, or PDBs)
-  --debug, -d          Build with debug configuration and emit PDB symbol files
-  -h, --help           Show this help message
+  --all, all                     Build compiler for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
+  --platform, -p <platform>      Build compiler for a specific platform (e.g. linux-arm64, win-x64, osx-arm64)
+  --single-file, -s              Produce a fast, single-file binary (framework-dependent, no loose DLLs)
+  --self-contained, -sc          Produce a standalone self-contained, single-file, trimmed executable (runs on any system without .NET runtime)
+  --debug, -d                    Build with debug configuration and emit PDB symbol files
+  -h, --help                     Show this help message
 
 Default behavior:
   Builds host platform compiler into dist/ with Release configuration,
@@ -40,33 +42,79 @@ detect_host_rid() {
     echo "${os}-${arch}"
 }
 
+normalize_rid() {
+    local input="$1"
+    case "$input" in
+        win|windows)             echo "win-x64" ;;
+        windows-x64|win64)       echo "win-x64" ;;
+        windows-arm64)           echo "win-arm64" ;;
+        linux)                   echo "linux-x64" ;;
+        linux-aarch64)           echo "linux-arm64" ;;
+        osx|mac|macos)           echo "osx-x64" ;;
+        macos-x64|mac-x64)       echo "osx-x64" ;;
+        macos-arm64|mac-arm64)   echo "osx-arm64" ;;
+        *)                       echo "$input" ;;
+    esac
+}
+
 build_all=false
+target_platform=""
 single_file=false
+self_contained=false
 debug_mode=false
 
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --all|all)
             build_all=true
+            shift
+            ;;
+        --platform|-p|platform)
+            if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+                echo "Error: --platform requires a platform argument (e.g. linux-arm64, win-x64, osx-arm64)" >&2
+                exit 1
+            fi
+            target_platform="$2"
+            shift 2
+            ;;
+        --platform=*|-p=*)
+            target_platform="${1#*=}"
+            shift
+            ;;
+        --self-contained|-sc|self-contained)
+            self_contained=true
+            single_file=true
+            shift
             ;;
         --single-file|-s|single)
             single_file=true
+            shift
             ;;
         --debug|-d|debug)
             debug_mode=true
+            shift
             ;;
         -h|--help|help)
             show_help
             exit 0
             ;;
         *)
-            echo "Error: Unknown argument '$arg'" >&2
+            echo "Error: Unknown argument '$1'" >&2
             echo "" >&2
             show_help >&2
             exit 1
             ;;
     esac
 done
+
+if [ "$build_all" = true ] && [ -n "$target_platform" ]; then
+    echo "Error: Cannot specify both --all and --platform" >&2
+    exit 1
+fi
+
+if [ -n "$target_platform" ]; then
+    target_platform="$(normalize_rid "$target_platform")"
+fi
 
 config="Release"
 debug_props=("-p:DebugType=None" "-p:GenerateDependencyFile=false")
@@ -81,7 +129,9 @@ publish_target() {
     local out_dir="$2"
     local extra_args=("${debug_props[@]}")
 
-    if [ "$single_file" = true ]; then
+    if [ "$self_contained" = true ]; then
+        extra_args+=("-r" "$rid" "--self-contained" "-p:PublishSingleFile=true" "-p:PublishTrimmed=true")
+    elif [ "$single_file" = true ]; then
         extra_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true")
     elif [ -n "$rid" ]; then
         extra_args+=("-r" "$rid" "--no-self-contained")
@@ -135,8 +185,24 @@ if [ "$build_all" = true ]; then
     echo ""
     echo "Execute host compiler via:"
     echo "  $host_bin [options] [source-path]"
+elif [ -n "$target_platform" ]; then
+    echo "==> Building Maho compiler (mahoc) for platform '$target_platform'..."
+    target_dir="$DIST_DIR/$target_platform"
+    mkdir -p "$target_dir"
+    publish_target "$target_platform" "$target_dir"
+
+    bin_path="$(find_binary "$target_dir")"
+
+    echo ""
+    echo "Maho compiler (mahoc) successfully built for $target_platform:"
+    echo "  $bin_path"
+    echo ""
+    if [ "$target_platform" = "$host_rid" ]; then
+        echo "Execute compiler via:"
+        echo "  $bin_path [options] [source-path]"
+    fi
 else
-    echo "==> Building Maho compiler (mahoc) for host platform..."
+    echo "==> Building Maho compiler (mahoc) for host platform ($host_rid)..."
     mkdir -p "$DIST_DIR"
 
     if [ "$single_file" = true ]; then

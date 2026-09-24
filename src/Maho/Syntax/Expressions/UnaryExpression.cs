@@ -6,7 +6,7 @@ internal sealed class UnaryExpression : Expression
     /// <summary> Represents a unary expression node. </summary>
     public Token OperatorToken { get; }
     /// <summary> The expression on which the unary operator acts on. </summary>
-    public Expression Operand { get; }
+    public Expression Operand { get; internal set; }
     public UnaryPosition Position { get; }
 
     /// <summary> Initializes the UnaryExpressionSyntax class. </summary>

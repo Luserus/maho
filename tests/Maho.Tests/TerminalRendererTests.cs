@@ -18,7 +18,7 @@ public sealed class TerminalRendererTests
             EndLocation: new TextLocation(2, 17));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "type 'Foo' is already declared in this scope",
             Severity: DiagnosticSeverity.Error,
             Span: spanInfo,
@@ -35,10 +35,11 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("Error [MH1002]: type 'Foo' is already declared in this scope", output);
+        Assert.Contains("error [MH0530]: type 'Foo' is already declared in this scope", output);
         Assert.Contains("--> test.mh: (2:14)", output);
         Assert.Contains("2 | public class Foo;", output);
-        Assert.Contains("^^^ duplicate declaration", output);
+        Assert.Contains("^^^", output);
+        Assert.Contains("└── duplicate declaration", output);
         Assert.Contains("= note: first declared on line 1", output);
         Assert.Contains("= help: consider renaming one of the types", output);
     }
@@ -53,7 +54,7 @@ public sealed class TerminalRendererTests
         var secondarySpan = new TextSpanInfo(13, 3, 16, new TextLocation(1, 14), new TextLocation(1, 17));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "type 'Bar' is already declared in this scope",
             Severity: DiagnosticSeverity.Error,
             Span: primarySpan,
@@ -65,9 +66,11 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("^^^ redeclared here", output);
+        Assert.Contains("^^^", output);
+        Assert.Contains("└── redeclared here", output);
         Assert.Contains("1 | public class Bar;", output);
-        Assert.Contains("--- previously declared here", output);
+        Assert.Contains("---", output);
+        Assert.Contains("└── previously declared here", output);
     }
 
     [Fact]
@@ -93,7 +96,7 @@ public sealed class TerminalRendererTests
 
         string output = renderer.Render(diagnostic);
 
-        Assert.Contains("Warning [MH2001]: naming convention violation", output);
+        Assert.Contains("warning [MH2001]: naming convention violation", output);
         Assert.Contains("= suggestion: rename to PascalCase", output);
         Assert.Contains("- var oldName = 10;", output);
         Assert.Contains("+ var NewName = 10;", output);
@@ -107,7 +110,7 @@ public sealed class TerminalRendererTests
 
         var span = new TextSpanInfo(0, 3, 3, new TextLocation(1, 1), new TextLocation(1, 4));
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0001",
+            Code: "MH0101",
             Message: "syntax error",
             Severity: DiagnosticSeverity.Error,
             Span: span,
@@ -129,7 +132,7 @@ public sealed class TerminalRendererTests
         // "int" starts at column 2 (after 1 tab)
         var span = new TextSpanInfo(1, 3, 4, new TextLocation(1, 2), new TextLocation(1, 5));
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0001",
+            Code: "MH0101",
             Message: "test message",
             Severity: DiagnosticSeverity.Error,
             Span: span,
@@ -153,7 +156,7 @@ public sealed class TerminalRendererTests
         var overlongSpan = new TextSpanInfo(0, 100, 100, new TextLocation(2, 1), new TextLocation(2, 101));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH1002",
+            Code: "MH0530",
             Message: "error",
             Severity: DiagnosticSeverity.Error,
             Span: primarySpan,
@@ -182,7 +185,7 @@ public sealed class TerminalRendererTests
         var span2 = new TextSpanInfo(9, 4, 13, new TextLocation(2, 1), new TextLocation(2, 5));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0004",
+            Code: "MH0120",
             Message: "Expected ';' after the top-level variable declaration, found 'nice'.",
             Severity: DiagnosticSeverity.Error,
             Span: span2,
@@ -215,7 +218,7 @@ public sealed class TerminalRendererTests
         var span2 = new TextSpanInfo(100, 4, 104, new TextLocation(20, 1), new TextLocation(20, 5));
 
         var diagnostic = new DiagnosticInfo(
-            Code: "MH0004",
+            Code: "MH0120",
             Message: "Expected ';' after the top-level variable declaration, found 'nice'.",
             Severity: DiagnosticSeverity.Error,
             Span: span2,
@@ -232,6 +235,109 @@ public sealed class TerminalRendererTests
         Assert.Contains("   ...", output);
         Assert.Contains("20 | nice = }", output);
         Assert.Contains("   | ^^^^", output);
+    }
+
+    [Fact]
+    public void TerminalRenderer_WithHelpOrNotes_RendersEmptyGutterLineAfterDiagnosticCarets()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("sample.mh", "SomeOtherType val;");
+
+        var span = new TextSpanInfo(0, 13, 13, new TextLocation(1, 1), new TextLocation(1, 14));
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH0500",
+            Message: "Could not resolve type 'SomeOtherType'.",
+            Severity: DiagnosticSeverity.Error,
+            Span: span,
+            SourcePath: "sample.mh",
+            Labels: [
+                new DiagnosticLabelInfo(span, "type 'SomeOtherType' not found", DiagnosticLabelStyle.Primary, "sample.mh")
+            ],
+            HelpMessages: [
+                new DiagnosticHelpInfo("Check for a missing import or declaration.", "sample.mh")
+            ]);
+
+        string output = renderer.Render(diagnostic);
+
+        Assert.Contains(
+            "   | ^^^^^^^^^^^^^\n   |       └── type 'SomeOtherType' not found\n   |\n   = help: Check for a missing import or declaration.",
+            output.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public void TerminalRenderer_MultipleLabelsOnSameLine_RendersHierarchicalTreeLevels()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("expr.mh", "1 + \"hello\"");
+
+        var lhsSpan = new TextSpanInfo(0, 1, 1, new TextLocation(1, 1), new TextLocation(1, 2));
+        var opSpan = new TextSpanInfo(2, 1, 3, new TextLocation(1, 3), new TextLocation(1, 4));
+        var rhsSpan = new TextSpanInfo(4, 7, 11, new TextLocation(1, 5), new TextLocation(1, 12));
+
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH2001",
+            Message: "cannot apply binary operator '+' to types 'Int32' and 'String8'",
+            Severity: DiagnosticSeverity.Error,
+            Span: opSpan,
+            SourcePath: "expr.mh",
+            Labels: [
+                new DiagnosticLabelInfo(opSpan, "cannot apply '+'", DiagnosticLabelStyle.Primary, "expr.mh"),
+                new DiagnosticLabelInfo(lhsSpan, "type is 'Int32'", DiagnosticLabelStyle.Secondary, "expr.mh"),
+                new DiagnosticLabelInfo(rhsSpan, "type is 'String8'", DiagnosticLabelStyle.Secondary, "expr.mh")
+            ]);
+
+        string output = renderer.Render(diagnostic).Replace("\r\n", "\n");
+
+        Assert.Contains("1 | 1 + \"hello\"", output);
+        Assert.Contains("  | - ^ -------", output);
+        Assert.Contains("  | | |    └── type is 'String8'", output);
+        Assert.Contains("  | | └── cannot apply '+'", output);
+        Assert.Contains("  | └── type is 'Int32'", output);
+    }
+
+    [Fact]
+    public void TerminalRenderer_WithMacroTrace_RendersInvocationSnippetAndDefinitionNote()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("StdLib.mh", "macro $DefineInt\n{\n    (@name: ident) => {\n        public struct @name {\n            public Result val;\n        }\n    }\n}\n\n$DefineInt(Foo);");
+
+        var errSpan = new TextSpanInfo(69, 6, 75, new TextLocation(5, 20), new TextLocation(5, 26));
+        var invSpan = new TextSpanInfo(100, 16, 116, new TextLocation(10, 1), new TextLocation(10, 17));
+        var defSpan = new TextSpanInfo(0, 16, 16, new TextLocation(1, 1), new TextLocation(1, 17));
+
+        var macroTrace = new MacroExpansionTraceInfo(
+            "$DefineInt",
+            invSpan,
+            "StdLib.mh",
+            defSpan,
+            "StdLib.mh");
+
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH0500",
+            Message: "could not resolve type 'Result'",
+            Severity: DiagnosticSeverity.Error,
+            Span: errSpan,
+            SourcePath: "StdLib.mh",
+            Labels: [
+                new DiagnosticLabelInfo(errSpan, "type 'Result' not found", DiagnosticLabelStyle.Primary, "StdLib.mh")
+            ],
+            HelpMessages: [
+                new DiagnosticHelpInfo("check for a missing import or declaration", "StdLib.mh")
+            ],
+            MacroTrace: macroTrace);
+
+        string output = renderer.Render(diagnostic).Replace("\r\n", "\n");
+
+        Assert.Contains("error [MH0500]: could not resolve type 'Result'", output);
+        Assert.Contains("--> StdLib.mh: (5:20)", output);
+        Assert.Contains("5 |             public Result val;", output);
+        Assert.Contains("  |                    ^^^^^^", output);
+        Assert.Contains("└── type 'Result' not found", output);
+        Assert.Contains("::: StdLib.mh: (10:1)", output);
+        Assert.Contains("10 | $DefineInt(Foo);", output);
+        Assert.Contains("---------------- from this macro invocation", output);
+        Assert.Contains("= note: in macro definition '$DefineInt' at StdLib.mh: (1:1)", output);
+        Assert.Contains("= help: check for a missing import or declaration", output);
     }
 }
 

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -12,8 +14,40 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         this.context = context;
 
+        if (context.Options?.GlobalAliases is { Count: > 0 } globalAliases)
+        {
+            RegisterGlobalAliases(globalAliases);
+        }
+
         foreach (var root in context.SyntaxTree.Roots)
             ResolveCompilationUnit(root);
+    }
+
+    private void RegisterGlobalAliases(IReadOnlyDictionary<string, string> globalAliases)
+    {
+        foreach (var (aliasName, target) in globalAliases)
+        {
+            string aliasSource = $"using {aliasName} = {target};";
+            var text = new SourceText(aliasSource, context.Options?.ProjectFilePath ?? "<global-aliases>");
+            var dm = new DiagnosticsManager(text);
+            var lexer = new Lexer(text, dm);
+            lexer.Lex();
+            var parser = new Parser(text, dm);
+            var unit = parser.Parse(lexer.Tokens);
+
+            if (dm.Diagnostics.Count > 0)
+            {
+                foreach (var diag in dm.Diagnostics)
+                    context.Diagnostics?.Report(diag);
+                continue;
+            }
+
+            if (unit.Members.Count > 0 && unit.Members[0] is TopLevelAliasDeclaration topAlias)
+            {
+                var symbol = ResolveTopLevelAliasDeclaration(topAlias.Alias, context.GlobalScope, context.GlobalNamespace);
+                symbol.IsGlobalAlias = true;
+            }
+        }
     }
 
     private void ResolveCompilationUnit(CompilationUnit unit)
@@ -70,6 +104,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 return containingNamespace;
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
+                return containingNamespace;
+            case TopLevelMacroDeclaration declaration:
+                ResolveTopLevelMacroDeclaration(declaration.Macro, scope, containingNamespace);
                 return containingNamespace;
             case TopLevelAliasDeclaration declaration:
                 ResolveTopLevelAliasDeclaration(declaration.Alias, scope, containingNamespace);
@@ -176,7 +213,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private void ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    private AliasSymbol ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
         Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var aliasScope = context.CreateScope(enclosingScope);
@@ -184,6 +221,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(ownerScope, symbol, aliasScope);
         context.RegisterSyntaxScope(declaration, aliasScope);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
+
+        return symbol;
     }
 
     private void ResolveMemberAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, SymbolHandle? containingType)
@@ -202,6 +241,25 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(enclosingScope, symbol, aliasScope);
         context.RegisterSyntaxScope(declaration, aliasScope);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
+    }
+
+    private void ResolveTopLevelMacroDeclaration(MacroDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
+        context.CreateMacroSymbol(ownerScope, new SymbolPart(declaration.Name), containingNamespace, declaration);
+        context.RegisterSyntaxScope(declaration, enclosingScope);
+    }
+
+    private void ResolveMemberMacroDeclaration(MacroDeclaration declaration, Scope enclosingScope, SymbolHandle? containingType)
+    {
+        context.CreateMacroSymbol(enclosingScope, new SymbolPart(declaration.Name), containingType, declaration);
+        context.RegisterSyntaxScope(declaration, enclosingScope);
+    }
+
+    private void ResolveLocalMacroDeclaration(MacroDeclaration declaration, Scope enclosingScope, SymbolHandle? containingMethod)
+    {
+        context.CreateMacroSymbol(enclosingScope, new SymbolPart(declaration.Name), containingMethod, declaration);
+        context.RegisterSyntaxScope(declaration, enclosingScope);
     }
 
     private void ResolveTopLevelAttributeDeclaration(AttributeSignature declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
@@ -311,6 +369,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 }
             case MemberAliasDeclaration declaration:
                 ResolveMemberAliasDeclaration(declaration.Alias, scope, containingType);
+                break;
+            case MemberMacroDeclaration declaration:
+                ResolveMemberMacroDeclaration(declaration.Macro, scope, containingType);
                 break;
             case MemberUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);
@@ -487,10 +548,88 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case LocalFunctionDeclaration declaration:
                 RegisterLocalFunction(containingSymbol, ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod));
                 break;
+            case LocalMacroDeclaration declaration:
+                ResolveLocalMacroDeclaration(declaration.Macro, scope, containingMethod);
+                break;
             case LocalVariableDeclarationStatement declaration:
+                foreach (var declarator in declaration.Declaration.Declarators)
+                {
+                    if (declarator.Initializer?.Initializer is { } initExpr)
+                        DiscoverBlockExpressions(initExpr, scope, containingSymbol, containingMethod);
+                }
                 foreach (var variable in ResolveLocalVariableDeclaration(declaration.Declaration, scope, containingSymbol))
                     RegisterLocalVariable(containingSymbol, variable);
                 break;
+            case LocalReturnStatement retStmt:
+                if (retStmt.Statement.Expression is not null)
+                    DiscoverBlockExpressions(retStmt.Statement.Expression, scope, containingSymbol, containingMethod);
+                break;
+            case LocalExpressionStatement exprStmt:
+                DiscoverBlockExpressions(exprStmt.Expression, scope, containingSymbol, containingMethod);
+                break;
+            case LocalIfStatement ifStmt:
+                DiscoverBlockExpressions(ifStmt.Condition, scope, containingSymbol, containingMethod);
+                ResolveLocal(ifStmt.ThenStatement, scope, containingSymbol, containingMethod);
+                if (ifStmt.ElseStatement is not null)
+                    ResolveLocal(ifStmt.ElseStatement.Statement, scope, containingSymbol, containingMethod);
+                break;
+            case LocalWhileStatement whileStmt:
+                DiscoverBlockExpressions(whileStmt.Condition, scope, containingSymbol, containingMethod);
+                ResolveLocal(whileStmt.Body, scope, containingSymbol, containingMethod);
+                break;
+        }
+    }
+
+    private void DiscoverBlockExpressions(Expression? expr, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
+    {
+        if (expr is null)
+            return;
+
+        if (expr is BlockExpression block)
+        {
+            Scope blockScope = context.CreateScope(scope);
+            context.RegisterSyntaxScope(block, blockScope);
+
+            foreach (var child in block.Locals)
+                ResolveLocal(child, blockScope, containingSymbol, containingMethod);
+
+            DiscoverBlockExpressions(block.FinalExpression, blockScope, containingSymbol, containingMethod);
+            return;
+        }
+
+        if (expr is BinaryExpression bin)
+        {
+            DiscoverBlockExpressions(bin.LeftExpression, scope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(bin.RightExpression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ParenthesizedExpression paren)
+        {
+            DiscoverBlockExpressions(paren.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is NameofExpression nameofExpr)
+        {
+            DiscoverBlockExpressions(nameofExpr.Argument, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is UnaryExpression unary)
+        {
+            DiscoverBlockExpressions(unary.Operand, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is CallExpression call)
+        {
+            DiscoverBlockExpressions(call.Callee, scope, containingSymbol, containingMethod);
+            foreach (var arg in call.Arguments)
+                DiscoverBlockExpressions(arg, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is AssignmentExpression assign)
+        {
+            DiscoverBlockExpressions(assign.LhsExpression, scope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(assign.RhsExpression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is IfExpression ifExpr)
+        {
+            DiscoverBlockExpressions(ifExpr.Condition, scope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(ifExpr.ThenExpression, scope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(ifExpr.ElseExpression, scope, containingSymbol, containingMethod);
         }
     }
 

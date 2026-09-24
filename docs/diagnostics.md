@@ -37,39 +37,52 @@ Maho diagnostics support modern, Rustc-style terminal reporting with multi-span 
 
 ## 3. Centralized Diagnostic Methods on `DiagnosticsManager`
 
-All diagnostic codes and error templates are centralized in `DiagnosticsManager`. Semantic passes and front-end stages call domain-specific factory methods:
+All diagnostic codes and error templates are centralized in `DiagnosticsManager` and formally cataloged in [docs/diagnostic-codes.md](file:///home/luserus/SoftwareDev/Systems/Compiler/maho/docs/diagnostic-codes.md). Semantic passes and front-end stages call domain-specific factory methods:
 
-### Lexer Diagnostics (`MH0001` - `MH0003`)
-- `ReportBadToken`: illegal character in source.
-- `ReportUnterminatedString`: string literal reaching EOF without a closing quote.
-- `ReportUnterminatedCharacter`: character literal syntax error.
-- `ReportEmptyCharacterLiteral`: empty `''` character literal.
+### Lexer Diagnostics (`MH0100` - `MH0104`)
+- `ReportBadToken` (`MH0100`): illegal character in source.
+- `ReportUnterminatedString` (`MH0101`): string literal reaching EOF without a closing quote.
+- `ReportUnterminatedCharacter` (`MH0102`): character literal syntax error.
+- `ReportEmptyCharacterLiteral` (`MH0103`): empty `''` character literal.
+- `ReportUnterminatedMultiLineComment` (`MH0104`): multi-line comment reaching EOF without a closing `*/`.
 
-### Parser Diagnostics (`MH0004` - `MH0010`)
-- `ReportExpectedToken`: expected punctuation/keyword.
-- `ReportExpectedExpression`: expected expression in statement/assignment context.
-- `ReportExpectedIdentifier`: expected identifier for name/declaration.
-- `ReportExpectedType`: expected type reference syntax.
-- `ReportExpectedBody`: expected method or type block body.
-- `ReportExpectedParameter`: expected parameter in parameter list.
-- `ReportExpectedGenericParameter`: expected generic parameter name.
-- `ReportUnexpectedToken`: token encountered that violates syntax grammar.
-- `ReportMissingToken`: synthetic token inserted during error recovery.
+### Parser Diagnostics (`MH0120` - `MH0128`)
+- `ReportExpectedToken` (`MH0120`): expected punctuation/keyword.
+- `ReportExpectedExpression` (`MH0121`): expected expression in statement/assignment context.
+- `ReportExpectedIdentifier` (`MH0122`): expected identifier for name/declaration.
+- `ReportExpectedType` (`MH0123`): expected type reference syntax.
+- `ReportExpectedBody` (`MH0124`): expected method or type block body.
+- `ReportExpectedParameter` (`MH0125`): expected parameter in parameter list.
+- `ReportExpectedGenericParameter` (`MH0126`): expected generic parameter name.
+- `ReportUnexpectedToken` (`MH0120`): token encountered that violates syntax grammar.
+- `ReportMissingToken` (`MH0120`): synthetic token inserted during error recovery.
 
-### Top-Level Statements (`MH0011` - `MH0012`)
-- `ReportTopLevelPragmaRequired` (`MH0011`): top-level statements in a file without `#pragma toplevel enable`.
-- `ReportMultipleTopLevelSources` (`MH0012`): multiple source files attempting to define top-level statements.
+### Top-Level Statements (`MH0160` - `MH0161`)
+- `ReportTopLevelPragmaRequired` (`MH0160`): top-level statements in a file without `#pragma toplevel enable`.
+- `ReportMultipleTopLevelSources` (`MH0161`): multiple source files attempting to define top-level statements.
 
-### Semantic Resolution Diagnostics (`MH1000` - `MH1006`)
-- `ReportUnresolvedTypeReference` (`MH1000`): type name cannot be resolved in lexical or imported scopes.
-- `ReportAmbiguousTypeReference` (`MH1001`): unqualified type reference matches multiple candidate types from different namespaces.
-- `ReportDuplicateTypeDeclaration` (`MH1002`): duplicate type declaration with matching arity where at least one declaration is not marked `partial`. Includes primary label on redeclaration, secondary label on original declaration, and `help:` suggestion.
-- `ReportDuplicateFunctionDeclaration` (`MH1003`):
-  - Duplicate non-partial function declarations matching in parameter signatures and generic arity.
-  - Partial function declaration violations: multiple declarations with implementation bodies (primary label on conflicting body, secondary label on first body).
-- `ReportCyclicTypeHierarchy` (`MH1004`): base type inheritance cycle detected.
-- `ReportDuplicateVariableDeclaration` (`MH1005`): duplicate global variable or member field declaration.
-- `ReportDuplicatePropertyDeclaration` (`MH1006`): duplicate property declaration in the same type.
+### Macro Syntax (`MH0200` - `MH0201`)
+- `ReportInvalidMacroDeclaration` (`MH0200`): malformed macro syntax.
+- `ReportInvalidMacroPattern` (`MH0201`): malformed parameter pattern.
+
+### Semantic Resolution Diagnostics (`MH0500` - `MH0538`)
+- `ReportUnresolvedTypeReference` (`MH0500`): type name cannot be resolved in lexical or imported scopes.
+- `ReportAmbiguousTypeReference` (`MH0501`): unqualified type reference matches multiple candidate types from different namespaces.
+- `ReportDuplicateTypeDeclaration` (`MH0530`): duplicate type declaration.
+- `ReportConflictingPartialTypeKinds` (`MH0531`): conflicting kinds on partial type.
+- `ReportDuplicateFunctionDeclaration` (`MH0532`): duplicate function declaration.
+- `ReportMultiplePartialFunctionBodies` (`MH0533`): multiple partial bodies.
+- `ReportConflictingPartialFunctionReturnTypes` (`MH0534`): conflicting partial return types.
+- `ReportDuplicateVariableDeclaration` (`MH0535`): duplicate variable declaration.
+- `ReportDuplicatePropertyDeclaration` (`MH0536`): duplicate property declaration.
+- `ReportCyclicTypeHierarchy` (`MH0538`): base type inheritance cycle detected.
+
+### Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
+- `ReportMacroRecursionLimitExceeded` (`MH0600`): macro recursion limit exceeded.
+- `ReportNoMatchingMacroArm` (`MH0601`): no matching pattern arm.
+- `ReportUnresolvedMacro` (`MH0602`): macro not found in scope.
+- `ReportInvalidMacroContext` (`MH0603`): macro invoked in invalid context.
+- `ReportMacroDependencyCycle` (`MH0604`): circular macro dependency.
 
 ---
 

@@ -10,7 +10,7 @@ internal sealed partial class Parser
     /// <summary> Checks whether the current token can start an expression. </summary>
     private bool CanStartExpression()
     {
-        if (CurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
+        if (CurrentToken.Kind is TokenKind.Dollar or TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
             return true;
 
         if (IsLiteralTokenKind(CurrentToken.Kind))

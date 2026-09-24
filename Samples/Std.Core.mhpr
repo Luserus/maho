@@ -1,0 +1,9 @@
+ImplicitTopLevel : false;
+GlobalAliases : {
+    "int8" : "Std.Int8",
+    "int16" : "Std.Int16",
+    "int32" : "Std.Int32",
+    "int64" : "Std.Int64",
+    "char8" : "Std.Char8",
+    "str8" : "Std.String8"
+};

@@ -10,7 +10,11 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return new TopLevelMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
+        else if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseTopLevelMacroInvocationDeclaration();
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock(attributes, modifiers, topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseTopLevelAttributeDeclaration(attributes, modifiers);
@@ -156,15 +160,19 @@ internal sealed partial class Parser
     /// <summary> Parses one attribute application, including any constructor arguments. </summary>
     private AttributeApplication ParseAttributeApplication()
     {
+        Token? dollarToken = null;
+        if (CurrentToken.Kind is TokenKind.Dollar)
+            dollarToken = Consume();
+
         NamedSyntax name = ParseNamedSyntax(allowQualified: true);
 
         if (CurrentToken.Kind is not TokenKind.LeftParen)
-            return new AttributeApplication(name, openParen: null, new SeparatedSyntaxList<Expression>([]), closeParen: null);
+            return new AttributeApplication(dollarToken, name, openParen: null, new SeparatedSyntaxList<Expression>([]), closeParen: null);
 
         Token openParen = Consume();
         SeparatedSyntaxList<Expression> arguments = ParseExpressionArgumentList();
         Token closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the attribute argument list");
-        return new AttributeApplication(name, openParen, arguments, closeParen);
+        return new AttributeApplication(dollarToken, name, openParen, arguments, closeParen);
     }
 
     private TypeBaseClause ParseTypeBaseClause()
@@ -403,6 +411,8 @@ internal sealed partial class Parser
             return ParseLocalBlockStatement(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
         else

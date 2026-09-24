@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -40,12 +41,15 @@ internal sealed class Diagnostic
     /// <summary> Arbitrary structured metadata for tooling or IDE extensions. </summary>
     public IReadOnlyDictionary<string, object?> CustomData { get; init; } = new Dictionary<string, object?>();
 
+    /// <summary> Macro expansion provenance if this diagnostic occurred within macro-expanded code. </summary>
+    public ExpansionOrigin? ExpansionOrigin { get; init; }
+
     /// <summary> Materializes the final diagnostic message at the presentation boundary. </summary>
     public string Message => MessageKind switch
     {
         DiagnosticMessageKind.Fixed => message ?? string.Empty,
         DiagnosticMessageKind.Expected => CreateExpectedMessage(ExpectedText ?? string.Empty, foundText, context),
-        DiagnosticMessageKind.BadToken => $"Invalid token {FormatTokenText(foundText)}.",
+        DiagnosticMessageKind.BadToken => $"invalid token {FormatTokenText(foundText)}",
         _ => string.Empty
     };
 
@@ -89,9 +93,9 @@ internal sealed class Diagnostic
     private static string CreateExpectedMessage(string expected, DiagnosticText found, string? context)
     {
         if (string.IsNullOrWhiteSpace(context))
-            return $"Expected {expected}, found {FormatTokenText(found)}.";
+            return $"expected {expected}, found {FormatTokenText(found)}";
 
-        return $"Expected {expected} {context}, found {FormatTokenText(found)}.";
+        return $"expected {expected} {context}, found {FormatTokenText(found)}";
     }
 
     private static string FormatTokenText(DiagnosticText tokenText)

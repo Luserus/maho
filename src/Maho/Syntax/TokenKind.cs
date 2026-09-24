@@ -57,15 +57,20 @@ public enum TokenKind
     VerticalBar, // '|'
     RightBrace, // '}'
     Tilde, // '~'
+    Dollar, // '$'
 
     // Combined operators
+    DotDotDot, // '...'
     EqualsEquals, // '=='
     ExclamationEquals, // '!='
+    EqualsGreaterThan, // '=>'
     LessThanLessThanSigns, // '<<'
     GreaterThanGreaterThanSigns, // '>>'
     LessThanLessThanLessThanSigns, // '<<<' Lmao.
     LessThanEquals, // '<='
     GreaterThanEquals, // '>='
     AmpersandAmpersand, // '&&'
-    VerticalBarVerticalBar // '||'
+    VerticalBarVerticalBar, // '||'
+    SingleLineComment, // //
+    MultiLineComment // /* */
 }

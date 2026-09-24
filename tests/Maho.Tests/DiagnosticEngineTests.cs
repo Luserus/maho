@@ -105,7 +105,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateDeclaration("Type", "Foo", secondSpan, firstSpan, redeclSource: file2, firstSource: file1);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1002", diag.DiagnosticCode);
+        Assert.Equal("MH0530", diag.DiagnosticCode);
         Assert.Equal(DiagnosticKind.Error, diag.Kind);
         Assert.Equal(2, diag.Labels.Count);
 
@@ -134,7 +134,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateTypeDeclaration("Person", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1002", diag.DiagnosticCode);
+        Assert.Equal("MH0530", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -152,7 +152,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateFunctionDeclaration("Calc", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1003", diag.DiagnosticCode);
+        Assert.Equal("MH0532", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -170,7 +170,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicateVariableDeclaration("val", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1005", diag.DiagnosticCode);
+        Assert.Equal("MH0535", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -188,7 +188,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportDuplicatePropertyDeclaration("Size", secondSpan, firstSpan);
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1006", diag.DiagnosticCode);
+        Assert.Equal("MH0536", diag.DiagnosticCode);
         Assert.Equal(2, diag.Labels.Count);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Equal(DiagnosticLabelStyle.Secondary, diag.Labels[1].Style);
@@ -205,7 +205,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportCyclicTypeHierarchy(span, "Node");
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1004", diag.DiagnosticCode);
+        Assert.Equal("MH0538", diag.DiagnosticCode);
         Assert.Single(diag.Labels);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Contains("cycle", diag.Message);
@@ -221,7 +221,7 @@ public sealed class DiagnosticEngineTests
         manager.ReportAmbiguousTypeReference(span, "Foo");
 
         Diagnostic diag = Assert.Single(manager.Diagnostics);
-        Assert.Equal("MH1001", diag.DiagnosticCode);
+        Assert.Equal("MH0501", diag.DiagnosticCode);
         Assert.Single(diag.Labels);
         Assert.Equal(DiagnosticLabelStyle.Primary, diag.Labels[0].Style);
         Assert.Contains("Foo", diag.Message);
@@ -262,4 +262,75 @@ public sealed class DiagnosticEngineTests
         Assert.Equal("renamedA", suggestion.Edits[0].NewText);
         Assert.Equal("renamedA", suggestion.Edits[1].NewText);
     }
+
+    [Fact]
+    public void OrderDiagnostics_OrdersByLineAscending()
+    {
+        var d1 = MakeDiagnostic("MH0500", line: 20, column: 1);
+        var d2 = MakeDiagnostic("MH0500", line: 10, column: 5);
+        var d3 = MakeDiagnostic("MH0500", line: 15, column: 2);
+
+        var sorted = DiagnosticInfo.OrderDiagnostics([d1, d2, d3]);
+
+        Assert.Equal(10, sorted[0].Span.StartLocation.Line);
+        Assert.Equal(15, sorted[1].Span.StartLocation.Line);
+        Assert.Equal(20, sorted[2].Span.StartLocation.Line);
+    }
+
+    [Fact]
+    public void OrderDiagnostics_OnSameLine_FollowsPipelinePriority_Lexer_Parser_Resolver()
+    {
+        // Line 12 has Lexer (MH0100), Parser (MH0122), and Resolver (MH0500) diagnostics
+        var resolverDiag = MakeDiagnostic("MH0500", line: 12, column: 1);  // Resolver (Priority 3)
+        var lexerDiag = MakeDiagnostic("MH0100", line: 12, column: 10);    // Lexer (Priority 1)
+        var parserDiag = MakeDiagnostic("MH0122", line: 12, column: 5);    // Parser (Priority 2)
+
+        var sorted = DiagnosticInfo.OrderDiagnostics([resolverDiag, parserDiag, lexerDiag]);
+
+        Assert.Equal("MH0100", sorted[0].Code); // Lexer first
+        Assert.Equal("MH0122", sorted[1].Code); // Parser second
+        Assert.Equal("MH0500", sorted[2].Code); // Resolver third
+    }
+
+    [Fact]
+    public void OrderDiagnostics_OnSameLineAndSameStage_OrdersByColumn()
+    {
+        var d1 = MakeDiagnostic("MH0500", line: 5, column: 20);
+        var d2 = MakeDiagnostic("MH0500", line: 5, column: 5);
+        var d3 = MakeDiagnostic("MH0500", line: 5, column: 12);
+
+        var sorted = DiagnosticInfo.OrderDiagnostics([d1, d2, d3]);
+
+        Assert.Equal(5, sorted[0].Span.StartLocation.Column);
+        Assert.Equal(12, sorted[1].Span.StartLocation.Column);
+        Assert.Equal(20, sorted[2].Span.StartLocation.Column);
+    }
+
+    [Fact]
+    public void OrderDiagnostics_GroupsByFilePreservingFileOrder()
+    {
+        var f1_d2 = MakeDiagnostic("MH0500", line: 20, column: 1, file: "file1.mh");
+        var f1_d1 = MakeDiagnostic("MH0500", line: 5, column: 1, file: "file1.mh");
+        var f2_d2 = MakeDiagnostic("MH0500", line: 15, column: 1, file: "file2.mh");
+        var f2_d1 = MakeDiagnostic("MH0500", line: 2, column: 1, file: "file2.mh");
+
+        var sorted = DiagnosticInfo.OrderDiagnostics([f1_d2, f2_d2, f1_d1, f2_d1]);
+
+        Assert.Equal("file1.mh", sorted[0].SourcePath);
+        Assert.Equal(5, sorted[0].Span.StartLocation.Line);
+
+        Assert.Equal("file1.mh", sorted[1].SourcePath);
+        Assert.Equal(20, sorted[1].Span.StartLocation.Line);
+
+        Assert.Equal("file2.mh", sorted[2].SourcePath);
+        Assert.Equal(2, sorted[2].Span.StartLocation.Line);
+
+        Assert.Equal("file2.mh", sorted[3].SourcePath);
+        Assert.Equal(15, sorted[3].Span.StartLocation.Line);
+    }
+
+    private static DiagnosticInfo MakeDiagnostic(string code, int line, int column, string file = "test.mh") =>
+        new(code, "test message", DiagnosticSeverity.Error,
+            new TextSpanInfo(0, 1, 1, new TextLocation(line, column), new TextLocation(line, column + 1)),
+            SourcePath: file);
 }

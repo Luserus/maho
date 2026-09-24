@@ -8,7 +8,7 @@ internal sealed class FunctionBlockBody : FunctionBody
     /// <summary> Opening brace token. </summary>
     public Token OpenBrace { get; }
     /// <summary> Local items inside the function body. </summary>
-    public IReadOnlyList<Local> Locals { get; }
+    public IReadOnlyList<Local> Locals { get; internal set; }
     /// <summary> Closing brace token. </summary>
     public Token CloseBrace { get; }
 

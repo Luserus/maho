@@ -8,7 +8,7 @@ internal sealed class TypeBlockBody : TypeBody
     /// <summary> Opening brace token. </summary>
     public Token OpenBrace { get; }
     /// <summary> Members declared inside the type body. </summary>
-    public IReadOnlyList<Member> Members { get; }
+    public IReadOnlyList<Member> Members { get; internal set; }
     /// <summary> Closing brace token. </summary>
     public Token CloseBrace { get; }
 

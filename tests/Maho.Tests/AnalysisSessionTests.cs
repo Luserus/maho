@@ -10,6 +10,7 @@ public sealed class AnalysisSessionTests
 
             public class Service
             {
+                public struct int;
                 public int Count;
             }
             """;
@@ -28,7 +29,7 @@ public sealed class AnalysisSessionTests
 
             public class Broken
             {
-                $;
+                §;
             }
             """;
 
@@ -36,7 +37,7 @@ public sealed class AnalysisSessionTests
 
         Assert.True(compilation.HasErrors);
         Assert.NotEmpty(compilation.Diagnostics);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0000");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0100");
     }
 
     [Fact]
@@ -69,7 +70,7 @@ public sealed class AnalysisSessionTests
         var session = new AnalysisSession();
 
         // Provide code with an invalid token on line 1
-        var snippet = session.AnalyzeSnippet("$ invalid");
+        var snippet = session.AnalyzeSnippet("§ invalid");
 
         Assert.False(snippet.Success);
         Assert.NotEmpty(snippet.Diagnostics);

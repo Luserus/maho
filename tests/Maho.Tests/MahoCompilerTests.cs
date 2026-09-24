@@ -37,15 +37,15 @@ public sealed class MahoCompilerTests
         DebugCompilationOutput result = MahoCompiler.AnalyzeText("""
             public static int Main()
             {
-                $;
+                §;
                 string text = "unterminated
                 return 0;
             }
             """, AnalysisOutput.None, "invalid.mh");
 
         Assert.True(result.HasErrors);
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0000");
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0001");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0100");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0101");
 
         using JsonDocument diagnosticsJson = JsonDocument.Parse(result.DiagnosticsJson);
         Assert.True(diagnosticsJson.RootElement.GetArrayLength() >= 2);
@@ -162,7 +162,7 @@ public sealed class MahoCompilerTests
             CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
+            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -190,7 +190,7 @@ public sealed class MahoCompilerTests
 
             Assert.True(result.HasErrors);
             Assert.Equal(Path.GetFullPath(firstPath), result.EntryFile);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
+            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -265,7 +265,7 @@ public sealed class MahoCompilerTests
             string secondPath = Path.Combine(tempDirectory, "Entry.mh");
 
             File.WriteAllText(projectPath, "ImplicitTopLevel : true;");
-            File.WriteAllText(firstPath, "public class Point { public int X; }");
+            File.WriteAllText(firstPath, "public class Point { public struct int; public int X; }");
             File.WriteAllText(secondPath, "run();");
 
             CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
@@ -298,7 +298,7 @@ public sealed class MahoCompilerTests
             CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0012"));
+            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -330,7 +330,90 @@ public sealed class MahoCompilerTests
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.True(program.HasErrors);
-            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0011");
+            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0160");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnalyzeProjectFile_GlobalAliases_ResolvesAliasesAcrossFiles()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-aliases-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string typesPath = Path.Combine(tempDirectory, "Types.mh");
+            string programPath = Path.Combine(tempDirectory, "Program.mh");
+
+            File.WriteAllText(projectPath, """
+                GlobalAliases : {
+                    "int32" : "Std.Int32",
+                    "str" : "Std.Text.String"
+                };
+                """);
+
+            File.WriteAllText(typesPath, """
+                namespace Std {
+                    public struct Int32;
+                    namespace Text {
+                        public struct String;
+                    }
+                }
+                """);
+
+            File.WriteAllText(programPath, """
+                namespace App;
+
+                public struct Consumer {
+                    internal int32 number;
+                    internal str message;
+                }
+                """);
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            Assert.False(result.HasErrors);
+            Assert.Equal(2, result.Files.Length);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnalyzeProjectFile_GlobalAliases_UnresolvedAliasUsage_ReportsDiagnostic()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-unresolved-alias-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            string projectPath = Path.Combine(tempDirectory, "Sample.mhpr");
+            string programPath = Path.Combine(tempDirectory, "Program.mh");
+
+            File.WriteAllText(projectPath, """
+                GlobalAliases : {
+                    "int32" : "Std.Int32"
+                };
+                """);
+
+            File.WriteAllText(programPath, """
+                public struct Consumer {
+                    internal int32 number;
+                }
+                """);
+
+            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+
+            Assert.True(result.HasErrors);
+            CompilerBatchFileResult program = Assert.Single(result.Files);
+            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0500" && diagnostic.Message.Contains("int32"));
         }
         finally
         {

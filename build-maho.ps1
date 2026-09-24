@@ -9,8 +9,14 @@
 .PARAMETER All
     Compiles for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64).
 
+.PARAMETER Platform
+    Compiles for a specific platform target (e.g. linux-arm64, win-x64, osx-arm64).
+
 .PARAMETER SingleFile
-    Packages the compiler into a single binary executable (no loose DLLs, config, or PDBs).
+    Packages the compiler into a fast, single-file binary (framework-dependent).
+
+.PARAMETER SelfContained
+    Packages the compiler into a standalone self-contained, single-file, trimmed executable.
 
 .PARAMETER Debug
     Builds with Debug configuration and emits PDB symbol files.
@@ -18,6 +24,10 @@
 .EXAMPLE
     .\build-maho.ps1
     Builds the host platform compiler into dist\mahoc.exe.
+
+.EXAMPLE
+    .\build-maho.ps1 -Platform win-x64
+    Builds the compiler for Windows x64 into dist\win-x64\mahoc.exe.
 
 .EXAMPLE
     .\build-maho.ps1 -SingleFile
@@ -32,6 +42,12 @@
 param(
     [Alias("a")]
     [switch]$All,
+
+    [Alias("p")]
+    [string]$Platform,
+
+    [Alias("sc", "SelfContained")]
+    [switch]$SelfContained,
 
     [Alias("s", "Single")]
     [switch]$SingleFile,
@@ -88,7 +104,9 @@ $debugProps = if ($Debug) {
 function Publish-Target([string]$rid, [string]$outDir) {
     $extraArgs = @($debugProps)
 
-    if ($SingleFile) {
+    if ($SelfContained) {
+        $extraArgs += @("-r", $rid, "--self-contained", "-p:PublishSingleFile=true", "-p:PublishTrimmed=true")
+    } elseif ($SingleFile) {
         $extraArgs += @("-r", $rid, "--no-self-contained", "-p:PublishSingleFile=true")
     } elseif (-not [string]::IsNullOrEmpty($rid)) {
         $extraArgs += @("-r", $rid, "--no-self-contained")
@@ -100,7 +118,25 @@ function Publish-Target([string]$rid, [string]$outDir) {
     }
 }
 
+function Normalize-Rid([string]$inputRid) {
+    switch ($inputRid) {
+        { $_ -in "win", "windows" } { return "win-x64" }
+        { $_ -in "windows-x64", "win64" } { return "win-x64" }
+        "windows-arm64" { return "win-arm64" }
+        "linux" { return "linux-x64" }
+        "linux-aarch64" { return "linux-arm64" }
+        { $_ -in "osx", "mac", "macos" } { return "osx-x64" }
+        { $_ -in "macos-x64", "mac-x64" } { return "osx-x64" }
+        { $_ -in "macos-arm64", "mac-arm64" } { return "osx-arm64" }
+        default { return $inputRid }
+    }
+}
+
 $hostRid = Get-HostRid
+
+if ($All -and $Platform) {
+    throw "Cannot specify both -All and -Platform"
+}
 
 if (-not (Test-Path $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
@@ -121,7 +157,7 @@ if ($All) {
     }
 
     Write-Host "  -> Publishing for host platform into $DistDir..."
-    if ($SingleFile) {
+    if ($SingleFile -or $SelfContained) {
         Publish-Target -rid $hostRid -outDir $DistDir
     } else {
         dotnet publish "$CliProject" -c $config -o "$DistDir" @debugProps --nologo -v q
@@ -140,10 +176,30 @@ if ($All) {
     Write-Host ""
     Write-Host "Execute host compiler via:"
     Write-Host "  $hostBin [options] [source-path]"
-} else {
-    Write-Host "==> Building Maho compiler (mahoc) for host platform..." -ForegroundColor Cyan
+} elseif ($Platform) {
+    $targetPlatform = Normalize-Rid $Platform
+    $targetDir = Join-Path $DistDir $targetPlatform
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
 
-    if ($SingleFile) {
+    Write-Host "==> Building Maho compiler (mahoc) for platform '$targetPlatform'..." -ForegroundColor Cyan
+    Publish-Target -rid $targetPlatform -outDir $targetDir
+
+    $binPath = Find-Binary $targetDir
+
+    Write-Host ""
+    Write-Host "Maho compiler (mahoc) successfully built for $targetPlatform:" -ForegroundColor Green
+    Write-Host "  $binPath"
+    Write-Host ""
+    if ($targetPlatform -eq $hostRid) {
+        Write-Host "Execute compiler via:"
+        Write-Host "  $binPath [options] [source-path]"
+    }
+} else {
+    Write-Host "==> Building Maho compiler (mahoc) for host platform ($hostRid)..." -ForegroundColor Cyan
+
+    if ($SingleFile -or $SelfContained) {
         Publish-Target -rid $hostRid -outDir $DistDir
     } else {
         dotnet publish "$CliProject" -c $config -o "$DistDir" @debugProps --nologo -v q

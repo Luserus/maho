@@ -49,7 +49,11 @@ public sealed class Compilation
     /// <summary>
     /// Creates a compilation from a single in-memory source string.
     /// </summary>
-    public static Compilation FromSource(string source, string filePath = "source.mh", CompilationOptions? options = null)
+    public static Compilation FromSource(
+        string source,
+        string filePath = "source.mh",
+        CompilationOptions? options = null,
+        IReadOnlyList<Compilation>? referencedCompilations = null)
     {
         options ??= CompilationOptions.Default;
         var sourceText = new SourceText(source);
@@ -63,7 +67,8 @@ public sealed class Compilation
 
         var syntaxTree = SyntaxTree.CreateSingleRoot(unit, filePath);
         var resolver = new Resolver();
-        var context = resolver.Resolve(syntaxTree, diagnostics: diagnosticsManager);
+        var refContexts = referencedCompilations?.Select(c => c.Context).OfType<ResolutionContext>().ToList();
+        var context = resolver.Resolve(syntaxTree, referencedProjects: refContexts, diagnostics: diagnosticsManager, options: options);
 
         var projectedDiagnostics = ProjectDiagnostics(diagnosticsManager.Diagnostics, sourceText, filePath);
 
@@ -72,7 +77,7 @@ public sealed class Compilation
             [syntaxTree],
             [sourceText],
             options,
-            [],
+            referencedCompilations ?? [],
             context,
             projectedDiagnostics);
     }
@@ -211,7 +216,7 @@ public sealed class Compilation
             .ToList();
 
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.Resolve(syntaxTree, referencedContexts, diagnostics: resolutionDm);
+        var context = resolver.Resolve(syntaxTree, referencedContexts, diagnostics: resolutionDm, options: options);
 
         foreach (var diag in resolutionDm.Diagnostics)
         {
@@ -224,6 +229,8 @@ public sealed class Compilation
         foreach (var (diag, text, path) in allInternalDiagnostics)
             projected.Add(DiagnosticInfo.FromDiagnostic(diag, text, path));
 
+        var orderedProjected = DiagnosticInfo.OrderDiagnostics(projected);
+
         return new Compilation(
             projectName,
             [syntaxTree],
@@ -231,7 +238,7 @@ public sealed class Compilation
             options,
             referencedCompilations,
             context,
-            projected);
+            orderedProjected);
     }
 
 
@@ -277,6 +284,6 @@ public sealed class Compilation
         var result = new List<DiagnosticInfo>(diagnostics.Count);
         foreach (var diag in diagnostics)
             result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
-        return result;
+        return DiagnosticInfo.OrderDiagnostics(result);
     }
 }

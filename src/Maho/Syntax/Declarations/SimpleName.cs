@@ -8,4 +8,6 @@ internal sealed class SimpleName : NamedSyntax
 
     /// <summary> Creates one simple name node. </summary>
     public SimpleName(Token name) => Name = name;
+
+    public override string ToString() => Name.Value;
 }

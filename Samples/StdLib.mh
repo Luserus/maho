@@ -1,0 +1,44 @@
+namespace Std;
+
+internal intrinsic attribute IntrinsicType(str8 name);
+
+[IntrinsicType("ValType")]
+public struct ValType;
+
+
+macro $DefineIntrinsicInteger
+{
+    (@name: ident, @size: expr) => {
+        [IntrinsicType(nameof(@name))]
+        public struct @name##@size : ValType
+        {
+            public static Result<@name##@size> Parse(str8 value)
+            {
+                return 0;
+            }
+        }
+    }
+}
+
+[IntrinsicType("Char8")]
+public struct Char8;
+
+[IntrinsicType("String8")]
+public struct String8
+{
+    internal char8* array;
+    internal int64 length;
+
+    public int64 Length { get { return length; } }
+}
+
+
+$DefineIntrinsicInteger(Int, 8);
+$DefineIntrinsicInteger(Int, 16);
+$DefineIntrinsicInteger(Int, 32);
+$DefineIntrinsicInteger(Int, 64);
+
+$DefineIntrinsicInteger(UInt, 8);
+$DefineIntrinsicInteger(UInt, 16);
+$DefineIntrinsicInteger(UInt, 32);
+$DefineIntrinsicInteger(UInt, 64);

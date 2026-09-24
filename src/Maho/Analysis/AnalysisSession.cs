@@ -122,7 +122,7 @@ public sealed class AnalysisSession
 
         var syntaxTree = SyntaxTree.CreateSingleRoot(root, snippetId);
         var resolver = new Resolver();
-        var newContext = resolver.Resolve(syntaxTree, baseContext: CurrentContext);
+        var newContext = resolver.Resolve(syntaxTree, baseContext: CurrentContext, options: Options);
 
         foreach (var diag in dm.Diagnostics)
             diagnostics.Add(AdjustDiagnostic(DiagnosticInfo.FromDiagnostic(diag, sourceText, snippetId), injectedPragma));

@@ -61,8 +61,10 @@ internal sealed partial class Parser
     /// <returns> The string value and TokenKind of the combined operators. </returns>
     private static readonly (string Value, TokenKind Kind)[] OperatorDefinitions = [
         ("<<<", TokenKind.LessThanLessThanLessThanSigns),
+        ("...", TokenKind.DotDotDot),
         ("==", TokenKind.EqualsEquals),
         ("!=", TokenKind.ExclamationEquals),
+        ("=>", TokenKind.EqualsGreaterThan),
         ("<<", TokenKind.LessThanLessThanSigns),
         (">>", TokenKind.GreaterThanGreaterThanSigns),
         ("<=", TokenKind.LessThanEquals),
@@ -217,6 +219,94 @@ internal sealed partial class Parser
         return filtered;
     }
 
+    private static List<Token> EnsureEndToken(List<Token> sourceTokens, SourceText text)
+    {
+        var filtered = FilterTokens(sourceTokens);
+        if (filtered.Count == 0 || filtered[^1].Kind is not TokenKind.EndToken)
+        {
+            var endSpan = filtered.Count > 0 ? new TextSpan(filtered[^1].Span.End, 0) : new TextSpan(text.Length, 0);
+            filtered.Add(new Token(text, endSpan, TokenKind.EndToken, [], []));
+        }
+        return filtered;
+    }
+
+    internal Expression ParseExpressionSnippet(List<Token> tokens)
+    {
+        this.tokens = EnsureEndToken(tokens, text);
+        current = default;
+        return ParseExpression();
+    }
+
+    internal BlockExpression ParseBlockExpressionSnippet(List<Token> tokens)
+    {
+        this.tokens = EnsureEndToken(tokens, text);
+        current = default;
+        var locals = new List<Local>();
+        Expression? finalExpression = null;
+
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            var start = current;
+            var local = ParseLocal(StatementParseMode.AllowFinalExpression);
+
+            if (local is LocalExpressionStatement expressionStatement && expressionStatement.IsFinalExpression)
+            {
+                finalExpression = expressionStatement.Expression;
+                break;
+            }
+
+            locals.Add(local);
+            RecoverLocalIfStalled(start);
+        }
+
+        var openBrace = new Token(text, default, TokenKind.LeftBrace, [], []);
+        var closeBrace = new Token(text, default, TokenKind.RightBrace, [], []);
+        return new BlockExpression(openBrace, locals, finalExpression, closeBrace);
+    }
+
+    internal List<Local> ParseStatementsSnippet(List<Token> tokens)
+    {
+        this.tokens = EnsureEndToken(tokens, text);
+        current = default;
+        List<Local> locals = [];
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            var start = current;
+            var local = ParseLocal(StatementParseMode.AllowFinalExpression);
+            locals.Add(local);
+            RecoverLocalIfStalled(start);
+        }
+        return locals;
+    }
+
+    internal List<Member> ParseMembersSnippet(List<Token> tokens)
+    {
+        this.tokens = EnsureEndToken(tokens, text);
+        current = default;
+        List<Member> members = [];
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            int start = current;
+            members.Add(ParseMember());
+            RecoverMemberIfStalled(start);
+        }
+        return members;
+    }
+
+    internal List<TopLevel> ParseTopLevelsSnippet(List<Token> tokens)
+    {
+        this.tokens = EnsureEndToken(tokens, text);
+        current = default;
+        List<TopLevel> topLevels = [];
+        while (CurrentToken.Kind is not TokenKind.EndToken)
+        {
+            int start = current;
+            topLevels.Add(ParseTopLevel(allowImplicitTopLevel));
+            RecoverTopLevelIfStalled(start);
+        }
+        return topLevels;
+    }
+
     /// <summary> Recognizes token kinds that can stand in for literal expressions during parsing. </summary>
     private static bool IsLiteralTokenKind(TokenKind kind) =>
         kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String;
@@ -283,6 +373,10 @@ internal sealed partial class Parser
         }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Namespace)
             return ParseNamespaceDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseTopLevelMacroInvocationDeclaration();
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
@@ -321,10 +415,17 @@ internal sealed partial class Parser
             return ParseMemberAliasDeclaration();
         }
 
+        if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseMemberMacroInvocationDeclaration();
+
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return new MemberMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
+        else if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseMemberMacroInvocationDeclaration();
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseMemberBlockDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseMemberAttributeDeclaration(attributes, modifiers);
@@ -343,6 +444,12 @@ internal sealed partial class Parser
                 return new LocalUsingDirective(ParseUsingDirective());
             return ParseLocalAliasDeclaration();
         }
+
+        if (CurrentToken.Kind is TokenKind.Dollar)
+            return ParseLocalMacroInvocationDeclaration();
+
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+            return ParseLocalMacroDeclaration([], []);
 
         if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
@@ -400,6 +507,8 @@ internal sealed partial class Parser
         int length = 0;
         TokenKind? foundKind = null;
 
+        Token? prevToken = null;
+
         // Read ahead using Peek(i), character by character
         for (int i = 0; ; i++)
         {
@@ -408,11 +517,17 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
+            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+                                          prevToken.TrailingTrivia.Length > 0 ||
+                                          token.LeadingTrivia.Length > 0))
+                break; // trivia between operator characters
+
             if (!node.Next.TryGetValue(text[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
             foundKind = node.Kind;
+            prevToken = token;
         }
 
         return (foundKind ?? TokenKind.NullToken, length);
@@ -427,7 +542,7 @@ internal sealed partial class Parser
         Token token = default!;
 
         if (length == 0)
-            return new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
+            return new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {

@@ -3,7 +3,7 @@ namespace Maho.Syntax;
 internal sealed class TopLevelExpressionStatement : TopLevelStatement
 {
     /// <summary> The expression. </summary>
-    public Expression Expression { get; }
+    public Expression Expression { get; internal set; }
     /// <summary> The semicolon to mark the end of the statement. </summary>
     public Token Semicolon { get; }
 

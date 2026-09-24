@@ -44,6 +44,15 @@ public static class CommandLine
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
     {
+        try
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+        catch
+        {
+            // Ignore if console output encoding cannot be changed
+        }
+
         if (args.Length == 0)
         {
             PrintUsage(Console.Out);
@@ -187,7 +196,7 @@ public static class CommandLine
             if (file.AnalysisError is string analysisError)
                 fileOutput["analysisError"] = analysisError;
 
-            files.Add(fileOutput);
+            files.Add((JsonNode)fileOutput);
         }
 
         return new JsonObject
@@ -310,14 +319,14 @@ public static class CommandLine
             {
                 ["filePath"] = file.SourcePath,
                 ["diagnostics"] = file.Output is { } fileAnalysis
-                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, JsonOptions)
+                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, MahoJsonContext.Default.IReadOnlyListDiagnosticInfo)
                     : new JsonArray()
             };
 
             if (file.AnalysisError is string analysisError)
                 fileOutput["analysisError"] = analysisError;
 
-            files.Add(fileOutput);
+            files.Add((JsonNode)fileOutput);
         }
 
         JsonObject output = new()
@@ -329,7 +338,7 @@ public static class CommandLine
         if (pipelineError is not null)
             output["pipelineDiagnostic"] = new JsonObject
             {
-                ["code"] = "MH9000",
+                ["code"] = "MH0003",
                 ["message"] = pipelineError
             };
 

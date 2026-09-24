@@ -6,7 +6,7 @@ internal sealed class ReturnStatement : SyntaxNode
     /// <summary> The return keyword token. </summary>
     public Token Keyword { get; }
     /// <summary> Optional returned expression. </summary>
-    public Expression? Expression { get; }
+    public Expression? Expression { get; internal set; }
     /// <summary> The terminating semicolon token. </summary>
     public Token Semicolon { get; }
 

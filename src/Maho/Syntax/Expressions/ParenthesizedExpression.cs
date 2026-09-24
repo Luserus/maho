@@ -5,7 +5,7 @@ internal sealed class ParenthesizedExpression : Expression
     /// <summary> The left parenthesis token. </summary>
     public Token LeftParen { get; }
     /// <summary> The expression inside the parentheses. </summary>
-    public Expression Expression { get; }
+    public Expression Expression { get; internal set; }
     /// <summary> The right parenthesis token. </summary>
     public Token RightParen { get; }
 

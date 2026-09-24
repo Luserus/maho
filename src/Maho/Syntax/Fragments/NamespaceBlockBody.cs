@@ -12,7 +12,7 @@ internal sealed class NamespaceBlockBody : NamespaceBody
     /// <summary> Using directives declared within this namespace block. </summary>
     public IReadOnlyList<UsingDirective> Usings { get; }
     /// <summary> Top-level members contained in the namespace block. </summary>
-    public IReadOnlyList<TopLevel> Members { get; }
+    public IReadOnlyList<TopLevel> Members { get; internal set; }
     /// <summary> Closing brace token. </summary>
     public Token CloseBrace { get; }
 

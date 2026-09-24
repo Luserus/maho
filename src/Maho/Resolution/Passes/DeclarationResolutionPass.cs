@@ -176,13 +176,20 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         var scope = GetOwnedScope(symbol);
+
+        if (scope.Parent == context.GlobalScope && scope.UsingNamespaces.Count == 0)
+        {
+            foreach (var childNs in context.GlobalNamespace.Next.Values)
+                scope.UsingNamespaces.Add(childNs);
+        }
+
         ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
-        var target = ResolveType(symbol.Syntax.Target, scope);
+        var target = ResolveType(symbol.Syntax.Target, scope, reportDiagnostics: !symbol.IsGlobalAlias);
 
         symbol.HasCompatibleConstraints = target.IsResolved && target.Handle is { } handle &&
             AliasConstraintsAreCompatible(handle, symbol.Syntax.Target, scope);
-        symbol.Target = symbol.HasCompatibleConstraints ? target : TypeRef.Error;
+        symbol.Target = symbol.HasCompatibleConstraints ? target : (symbol.IsGlobalAlias && !target.IsResolved ? TypeRef.Unresolved : TypeRef.Error);
     }
 
     private bool AliasConstraintsAreCompatible(SymbolHandle target, TypeSyntax targetSyntax, Scope scope)
@@ -520,7 +527,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return result;
     }
 
-    private TypeRef ResolveType(TypeSyntax syntax, Scope scope)
+    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
     {
         if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
         {
@@ -528,6 +535,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 var varHandle = ResolutionContext.GetHandle(varSymbol);
                 context.ResolvedTree.AddReference(syntax, varHandle);
+
                 return TypeRef.Resolved(varHandle);
             }
 
@@ -536,58 +544,118 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         if (syntax is GenericType generic)
         {
-            TypeRef genericTarget = ResolveTypeName(generic, scope);
+            TypeRef genericTarget = ResolveTypeName(generic, scope, reportDiagnostics);
             ResolveGenericArguments(generic, genericTarget.Handle, scope);
+
             return genericTarget;
         }
 
         if (syntax is QualifiedType qualified)
         {
-            ResolveType(qualified.Left, scope);
-
             if (qualified.Right is GenericType qualifiedGeneric)
             {
-                TypeRef target = ResolveTypeName(syntax, scope);
+                TypeRef target = ResolveTypeName(syntax, scope, reportDiagnostics);
+
                 if (target.Handle is { } handle)
-                {
                     context.ResolvedTree.AddReference(qualifiedGeneric, handle);
-                }
+
                 ResolveGenericArguments(qualifiedGeneric, target.Handle, scope);
                 return target;
             }
 
-            TypeRef result = ResolveTypeName(syntax, scope);
+            TypeRef result = ResolveTypeName(syntax, scope, reportDiagnostics);
+
             if (result.Handle is { } rightHandle)
-            {
                 context.ResolvedTree.AddReference(qualified.Right, rightHandle);
-            }
+
             return result;
         }
 
         ResolveTypeChildren(syntax, scope);
 
-        return ResolveTypeName(syntax, scope);
+        return ResolveTypeName(syntax, scope, reportDiagnostics);
     }
 
-    private TypeRef ResolveTypeName(TypeSyntax syntax, Scope scope)
+    private TypeRef ResolveTypeName(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
     {
         var name = ResolutionContext.GetSymbolName(syntax);
         var symbols = scope[name];
         if (symbols.Count > 1 && !AreSamePartialType(symbols))
         {
-            var span = syntax.GetSpan() ?? default;
-            var source = syntax.GetSource();
-            context.Diagnostics.ReportAmbiguousTypeReference(span, name.ToString() ?? string.Empty, source);
+            if (reportDiagnostics)
+            {
+                var span = syntax.GetSpan() ?? default;
+                var source = syntax.GetSource();
+                context.Diagnostics.ReportAmbiguousTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin);
+            }
+
             return TypeRef.Error;
         }
 
         if (ResolveSingle(scope, name) is not { } symbol)
+        {
+            if (reportDiagnostics)
+            {
+                var span = syntax.GetSpan() ?? default;
+                var source = syntax.GetSource();
+                string? arityNote = GetArityMismatchNote(scope, name);
+                context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+            }
+            
             return TypeRef.Error;
+        }
+
+        if (symbol is AliasSymbol aliasSymbol && aliasSymbol.IsGlobalAlias && !aliasSymbol.Target.IsResolved)
+        {
+            if (reportDiagnostics)
+            {
+                var span = syntax.GetSpan() ?? default;
+                var source = syntax.GetSource();
+                string? arityNote = GetArityMismatchNote(scope, name);
+                context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+            }
+
+            return TypeRef.Error;
+        }
 
         var handle = ResolutionContext.GetHandle(symbol);
         context.ResolvedTree.AddReference(syntax, handle);
 
         return TypeRef.Resolved(handle);
+    }
+
+    private string? GetArityMismatchNote(Scope scope, SymbolName name)
+    {
+        var targetPart = name.Last;
+        if (targetPart.Arity > 0)
+        {
+            var nonGenericPart = new SymbolPart(targetPart.Text, 0);
+            var nonGenericName = name.Count == 1
+                ? new SymbolName(nonGenericPart)
+                : new SymbolName([.. name.Parts.Take(name.Count - 1), nonGenericPart]);
+
+            if (ResolveSingle(scope, nonGenericName) is not null)
+            {
+                return $"non-generic type '{nonGenericName}' exists in this scope, but generic type '{name}' with {targetPart.Arity} type argument{(targetPart.Arity == 1 ? "" : "s")} was not found";
+            }
+        }
+        else
+        {
+            for (int a = 1; a <= 8; a++)
+            {
+                var genericPart = new SymbolPart(targetPart.Text, a);
+                var genericName = name.Count == 1
+                    ? new SymbolName(genericPart)
+                    : new SymbolName([.. name.Parts.Take(name.Count - 1), genericPart]);
+
+                if (ResolveSingle(scope, genericName) is not null)
+                {
+                    return $"generic type '{genericName}' exists in this scope with {a} type argument{(a == 1 ? "" : "s")}, but non-generic type '{name}' was not found";
+                }
+            }
+        }
+
+        return null;
     }
 
     private void ResolveGenericArguments(GenericType generic, SymbolHandle? target, Scope scope)
@@ -693,6 +761,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
             case MemberAccessExpression access:
                 ResolveExpression(access.Expression, scope, containingSymbol);
+                break;
+            case NameofExpression nameofExpr:
+                ResolveExpression(nameofExpr.Argument, scope, containingSymbol);
                 break;
             case NamedArgumentExpression argument:
                 ResolveExpression(argument.Value, scope, containingSymbol);
