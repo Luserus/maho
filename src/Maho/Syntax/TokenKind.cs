@@ -63,6 +63,7 @@ public enum TokenKind
     DotDotDot, // '...'
     EqualsEquals, // '=='
     ExclamationEquals, // '!='
+    EqualsGreaterThan, // '=>'
     LessThanLessThanSigns, // '<<'
     GreaterThanGreaterThanSigns, // '>>'
     LessThanLessThanLessThanSigns, // '<<<' Lmao.

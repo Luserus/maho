@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Resolution.Macros;
 using Maho.Syntax;
 using Maho.Text;
@@ -126,6 +127,17 @@ internal sealed class MacroExpansionPass : ResolutionPass
                     changed = true;
                 }
             }
+            else if (TryExtractMacroAttributeFromTopLevel(member, sourceText, out var syntheticInvocation))
+            {
+                var expanded = expander.ExpandTopLevel(syntheticInvocation!, currentDepth, null, sourceText);
+                if (expanded.Count == 1 && expanded[0] is TopLevelMacroInvocationDeclaration unexp && ReferenceEquals(unexp.Invocation, syntheticInvocation))
+                    newMembers.Add(member);
+                else
+                {
+                    newMembers.AddRange(expanded);
+                    changed = true;
+                }
+            }
             else if (member is NamespaceDeclaration ns && ns.Body is NamespaceBlockBody nsBody)
             {
                 if (ExpandTopLevels(nsBody.Members, expander, currentDepth, sourceText, out var expandedNsMembers))
@@ -186,6 +198,17 @@ internal sealed class MacroExpansionPass : ResolutionPass
                 var expanded = expander.ExpandMember(inv.Invocation, currentDepth, inv.ExpansionOrigin, sourceText);
 
                 if (expanded.Count == 1 && expanded[0] is MemberMacroInvocationDeclaration unexp && ReferenceEquals(unexp.Invocation, inv.Invocation))
+                    newMembers.Add(member);
+                else
+                {
+                    newMembers.AddRange(expanded);
+                    changed = true;
+                }
+            }
+            else if (TryExtractMacroAttributeFromMember(member, sourceText, out var syntheticInvocation))
+            {
+                var expanded = expander.ExpandMember(syntheticInvocation!, currentDepth, null, sourceText);
+                if (expanded.Count == 1 && expanded[0] is MemberMacroInvocationDeclaration unexp && ReferenceEquals(unexp.Invocation, syntheticInvocation))
                     newMembers.Add(member);
                 else
                 {
@@ -465,6 +488,16 @@ internal sealed class MacroExpansionPass : ResolutionPass
             return paren;
         }
 
+        if (expr is NameofExpression nameofExpr)
+        {
+            var inner = ExpandExpression(nameofExpr.Argument, expander, currentDepth, sourceText, ref changed);
+
+            if (!ReferenceEquals(inner, nameofExpr.Argument))
+                nameofExpr.Argument = inner;
+
+            return nameofExpr;
+        }
+
         if (expr is CallExpression call)
         {
             var callee = ExpandExpression(call.Callee, expander, currentDepth, sourceText, ref changed);
@@ -556,4 +589,124 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         return expr;
     }
+
+    private static bool TryExtractMacroAttributeFromTopLevel(TopLevel member, SourceText sourceText, out MacroInvocationExpression? invocation)
+    {
+        invocation = null;
+        IReadOnlyList<AttributeListSyntax>? attributeLists = null;
+
+        if (member is TopLevelTypeDeclaration typeDecl)
+            attributeLists = typeDecl.Type.Attributes;
+        else if (member is TopLevelFunctionDeclaration funcDecl)
+            attributeLists = funcDecl.Function.Attributes;
+        else if (member is TopLevelVariableDeclaration varDecl)
+            attributeLists = varDecl.Declaration.Attributes;
+
+        if (attributeLists is null || attributeLists.Count == 0)
+            return false;
+
+        return TryBuildMacroAttributeInvocation(member, attributeLists, sourceText, out invocation);
+    }
+
+    private static bool TryExtractMacroAttributeFromMember(Member member, SourceText sourceText, out MacroInvocationExpression? invocation)
+    {
+        invocation = null;
+        IReadOnlyList<AttributeListSyntax>? attributeLists = null;
+
+        if (member is MemberTypeDeclaration typeDecl)
+            attributeLists = typeDecl.Type.Attributes;
+        else if (member is MemberFunctionDeclaration funcDecl)
+            attributeLists = funcDecl.Function.Attributes;
+        else if (member is MemberFieldDeclaration fieldDecl)
+            attributeLists = fieldDecl.Declaration.Attributes;
+        else if (member is MemberPropertyDeclaration propDecl)
+            attributeLists = propDecl.Attributes;
+
+        if (attributeLists is null || attributeLists.Count == 0)
+            return false;
+
+        return TryBuildMacroAttributeInvocation(member, attributeLists, sourceText, out invocation);
+    }
+
+    private static bool TryBuildMacroAttributeInvocation(
+        SyntaxNode declNode,
+        IReadOnlyList<AttributeListSyntax> attributeLists,
+        SourceText sourceText,
+        out MacroInvocationExpression? invocation)
+    {
+        invocation = null;
+
+        for (int listIdx = 0; listIdx < attributeLists.Count; listIdx++)
+        {
+            var list = attributeLists[listIdx];
+            for (int appIdx = 0; appIdx < list.Attributes.Count; appIdx++)
+            {
+                var app = list.Attributes[appIdx];
+                if (app.IsMacroAttribute)
+                {
+                    var optDeclSpan = declNode.GetSpan();
+                    if (!optDeclSpan.HasValue)
+                        return false;
+
+                    TextSpan declSpan = optDeclSpan.Value;
+
+                    var optExcludeSpan = list.Attributes.Count == 1 ? list.GetSpan() : app.GetSpan();
+                    if (!optExcludeSpan.HasValue)
+                        return false;
+
+                    TextSpan excludeSpan = optExcludeSpan.Value;
+
+                    int beforeLength = Math.Max(0, excludeSpan.Start - declSpan.Start);
+                    string beforeText = beforeLength > 0 ? sourceText.ToString(new TextSpan(declSpan.Start, beforeLength)) : string.Empty;
+
+                    int afterStart = Math.Min(declSpan.End, excludeSpan.End);
+                    int afterLength = Math.Max(0, declSpan.End - afterStart);
+                    string afterText = afterLength > 0 ? sourceText.ToString(new TextSpan(afterStart, afterLength)) : string.Empty;
+
+                    string targetText = (beforeText + " " + afterText).Trim();
+
+                    var dummyDiags = new DiagnosticsManager();
+                    var targetLexer = new Lexer(new SourceText(targetText), dummyDiags);
+                    var targetTokens = targetLexer.Lex();
+                    if (targetTokens.Count > 0 && targetTokens[^1].Kind is TokenKind.EndToken)
+                        targetTokens.RemoveAt(targetTokens.Count - 1);
+
+                    var allArgs = new List<MacroArgumentSyntax>();
+
+                    foreach (var argExpr in app.Arguments)
+                    {
+                        var optArgSpan = argExpr.GetSpan();
+                        if (optArgSpan.HasValue)
+                        {
+                            var argTokens = new Lexer(new SourceText(sourceText.ToString(optArgSpan.Value)), dummyDiags).Lex();
+                            if (argTokens.Count > 0 && argTokens[^1].Kind is TokenKind.EndToken)
+                                argTokens.RemoveAt(argTokens.Count - 1);
+
+                            allArgs.Add(new MacroArgumentSyntax(argTokens));
+                        }
+                    }
+
+                    allArgs.Add(new MacroArgumentSyntax(targetTokens));
+
+                    var dollarToken = app.DollarToken ?? new Token(sourceText, app.Name.GetSpan() ?? default, TokenKind.Dollar, [], []);
+                    var nameToken = GetNameToken(app.Name);
+                    var leftParen = app.OpenParen ?? new Token(sourceText, default, TokenKind.LeftParen, [], []);
+                    var rightParen = app.CloseParen ?? new Token(sourceText, default, TokenKind.RightParen, [], []);
+
+                    invocation = new MacroInvocationExpression(dollarToken, nameToken, leftParen, allArgs, rightParen);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static Token GetNameToken(NamedSyntax name) => name switch
+    {
+        SimpleName s => s.Name,
+        GenericName g => g.Name,
+        QualifiedName q when q.Parts.Count > 0 => GetNameToken(q.Parts[q.Parts.Count - 1]),
+        _ => new Token(new SourceText(name.ToString() ?? string.Empty), default, TokenKind.Identifier, [], [])
+    };
 }

@@ -236,6 +236,7 @@ internal sealed partial class Parser
         var node = operatorTrie;
         int length = 0;
         TokenKind? foundKind = null;
+        Token? prevToken = null;
 
         // Read ahead using Peek(i), character by character
         for (int i = 0; ; i++)
@@ -245,11 +246,17 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
+            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+                                          prevToken.TrailingTrivia.Length > 0 ||
+                                          token.LeadingTrivia.Length > 0))
+                break; // trivia between operator characters
+
             if (!node.Next.TryGetValue(text[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
             foundKind = node.Kind;
+            prevToken = token;
         }
 
         return (foundKind ?? TokenKind.NullToken, length);

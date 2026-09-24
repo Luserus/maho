@@ -12,12 +12,25 @@ internal sealed partial class Parser
         kind is TokenKind.RightParen or TokenKind.RightBracket or TokenKind.RightBrace or TokenKind.GreaterThanSign;
 
     /// <summary> Converts the current token into a deferred diagnostic display value. </summary>
-    private DiagnosticText GetTokenDisplay(Token token) => token.Kind switch
+    private DiagnosticText GetTokenDisplay(Token token)
     {
-        TokenKind.EndToken => DiagnosticText.EndOfFile,
-        TokenKind.MissingToken => DiagnosticText.MissingToken,
-        _ => DiagnosticText.SourceSpan(text, token.Span)
-    };
+        if (token.Kind is TokenKind.EndToken)
+            return DiagnosticText.EndOfFile;
+        if (token.Kind is TokenKind.MissingToken)
+            return DiagnosticText.MissingToken;
+
+        if (current < tokens.Count && token == CurrentToken)
+        {
+            var (_, combinedLength) = GetCombinedOperatorData();
+            if (combinedLength > 1)
+            {
+                var lastToken = Peek(combinedLength - 1);
+                return DiagnosticText.SourceSpan(text, new TextSpan(token.Span.Start, lastToken.Span.End - token.Span.Start));
+            }
+        }
+
+        return DiagnosticText.SourceSpan(text, token.Span);
+    }
 
     /// <summary> Synthesizes a zero-width missing token at the current cursor position. </summary>
     private Token CreateMissingToken() => CreateMissingTokenAt(CurrentToken.Span.Start);

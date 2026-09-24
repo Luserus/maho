@@ -762,6 +762,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case MemberAccessExpression access:
                 ResolveExpression(access.Expression, scope, containingSymbol);
                 break;
+            case NameofExpression nameofExpr:
+                ResolveExpression(nameofExpr.Argument, scope, containingSymbol);
+                break;
             case NamedArgumentExpression argument:
                 ResolveExpression(argument.Value, scope, containingSymbol);
                 break;

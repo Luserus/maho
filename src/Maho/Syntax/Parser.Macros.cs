@@ -5,13 +5,14 @@ namespace Maho.Syntax;
 
 internal sealed partial class Parser
 {
-    private bool IsArrow() => CurrentToken.Kind is TokenKind.Equals && Peek().Kind is TokenKind.GreaterThanSign;
+    private bool IsArrow() => GetCombinedOperatorData().Kind is TokenKind.EqualsGreaterThan;
 
     private Token ConsumeArrow()
     {
-        var eq = ExpectToken(TokenKind.Equals, "'='", "in macro arm");
-        var gt = ExpectToken(TokenKind.GreaterThanSign, "'>'", "after '=' in '=>'");
-        return new Token(eq.Source, new TextSpan(eq.Span.Start, gt.Span.End - eq.Span.Start), TokenKind.Equals, eq.LeadingTrivia, gt.TrailingTrivia);
+        if (IsArrow())
+            return ConsumeOperator();
+
+        return ExpectToken(TokenKind.EqualsGreaterThan, "'=>'", "in macro arm");
     }
 
     private bool IsMultiArmMacroStart()
@@ -23,7 +24,11 @@ internal sealed partial class Parser
         if (next.Kind is TokenKind.LeftParen)
             return true;
 
-        if (next.Kind is TokenKind.Equals && Peek(2).Kind is TokenKind.GreaterThanSign)
+        var next2 = Peek(2);
+        if (next.Kind is TokenKind.Equals && next2.Kind is TokenKind.GreaterThanSign &&
+            next.Span.End == next2.Span.Start &&
+            next.TrailingTrivia.Length == 0 &&
+            next2.LeadingTrivia.Length == 0)
             return true;
 
         return false;
@@ -96,6 +101,8 @@ internal sealed partial class Parser
         Token? arrow = null;
         if (IsArrow())
             arrow = ConsumeArrow();
+        else if (CurrentToken.Kind is not TokenKind.LeftBrace)
+            arrow = ExpectToken(TokenKind.EqualsGreaterThan, "'=>'", "in macro arm");
 
         bool isExpression;
         List<Token> templateTokens;
@@ -139,22 +146,23 @@ internal sealed partial class Parser
                         MatchingKeywordKind.Type => MacroParameterKind.Type,
                         MatchingKeywordKind.Ident => MacroParameterKind.Identifier,
                         MatchingKeywordKind.Stmt => MacroParameterKind.Statement,
+                        MatchingKeywordKind.Tokens => MacroParameterKind.TokenStream,
+                        MatchingKeywordKind.Token => MacroParameterKind.SingleToken,
                         _ => ReportInvalidMacroPatternKind(CurrentToken)
                     };
                     Consume();
                 }
                 else
                 {
-                    diagnostics.ReportExpectedToken(CurrentToken.Span, "parameter kind (expr, type, ident, stmt)", GetTokenDisplay(CurrentToken), "after ':' in macro pattern", CurrentToken.Source);
+                    diagnostics.ReportExpectedToken(CurrentToken.Span, "parameter kind (expr, type, ident, stmt, tokens, token)", GetTokenDisplay(CurrentToken), "after ':' in macro pattern", CurrentToken.Source);
                 }
             }
 
             bool isVariadic = false;
-            if (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot)
+            var (opKind, opLen) = GetCombinedOperatorData();
+            if (opKind is TokenKind.DotDotDot && opLen == 3)
             {
-                Consume();
-                Consume();
-                Consume();
+                ConsumeOperator();
                 isVariadic = true;
             }
             else if (CurrentToken.Kind is TokenKind.DotDotDot)
@@ -175,7 +183,7 @@ internal sealed partial class Parser
 
     private MacroParameterKind ReportInvalidMacroPatternKind(Token token)
     {
-        diagnostics.ReportInvalidMacroPattern(token.Span, $"unknown parameter kind '{token.Value}', expected expr, type, ident, or stmt", token.Source);
+        diagnostics.ReportInvalidMacroPattern(token.Span, $"unknown parameter kind '{token.Value}', expected expr, type, ident, stmt, tokens, or token", token.Source);
         return MacroParameterKind.Expression;
     }
 

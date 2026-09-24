@@ -417,6 +417,12 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, message, source)
             .Report();
 
+    /// <summary> Reports an invalid token concatenation in a macro template. </summary>
+    public void ReportInvalidTokenConcatenation(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH0230", message, span, source)
+            .WithPrimaryLabel(span, message, source)
+            .Report();
+
     /// <summary> Reports that macro expansion exceeded the configured recursion depth limit. </summary>
     public void ReportMacroRecursionLimitExceeded(TextSpan span, string macroName, ulong limit, SourceText? source = null) =>
         BuildError("MH0600", $"recursion limit of {limit} exceeded while expanding macro '${macroName}'", span, source)

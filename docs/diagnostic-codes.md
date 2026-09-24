@@ -70,6 +70,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0201` | `InvalidMacroPattern` | Malformed parameter pattern in macro arm (e.g. invalid parameter kind). |
 | `MH0202` | `InvalidMacroRepetition` | Malformed variadic pack pattern or repetition syntax `$( ... )...`. |
 | `MH0203` | `InvalidMacroEscape` | Malformed or mispositioned macro parameter reference `@name`. |
+| `MH0230` | `InvalidTokenConcatenation` | Invalid token pasting with `##` operator in macro template. |
 
 ---
 

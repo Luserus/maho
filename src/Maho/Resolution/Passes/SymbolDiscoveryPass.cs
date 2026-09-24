@@ -606,6 +606,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         {
             DiscoverBlockExpressions(paren.Expression, scope, containingSymbol, containingMethod);
         }
+        else if (expr is NameofExpression nameofExpr)
+        {
+            DiscoverBlockExpressions(nameofExpr.Argument, scope, containingSymbol, containingMethod);
+        }
         else if (expr is UnaryExpression unary)
         {
             DiscoverBlockExpressions(unary.Operand, scope, containingSymbol, containingMethod);

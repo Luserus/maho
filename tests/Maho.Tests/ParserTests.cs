@@ -1420,4 +1420,80 @@ public sealed class ParserTests
         var simpleName = Assert.IsType<SimpleName>(typeDecl.Type.Name);
         Assert.Equal("class", simpleName.Name.Value);
     }
+
+    [Fact]
+    public void Parse_ContiguousCombinedOperator_ParsesAsCombined()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            var a = 1 == 2;
+            var b = 3 <= 4;
+            var c = 5 != 6;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_SeparatedCombinedOperator_DoesNotParseAsCombined()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            var a = 1 = = 2;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_SeparatedLessThanEquals_DoesNotParseAsCombined()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            var a = 1 < = 2;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_ContiguousArrow_ParsesInMacroArm()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            macro $test => 42;
+            macro $test2 {
+                () => 42;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.Equal(2, root.Members.Count);
+        var macro1 = Assert.IsType<TopLevelMacroDeclaration>(root.Members[0]);
+        Assert.Equal(TokenKind.EqualsGreaterThan, macro1.Macro.Arms[0].ArrowToken!.Kind);
+        var macro2 = Assert.IsType<TopLevelMacroDeclaration>(root.Members[1]);
+        Assert.Equal(TokenKind.EqualsGreaterThan, macro2.Macro.Arms[0].ArrowToken!.Kind);
+    }
+
+    [Fact]
+    public void Parse_SeparatedArrow_FailsInMacroArm()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            macro $test = > 42;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Contains(diagnostics.Diagnostics, d => d.Message.Contains("'=>'"));
+    }
+
+    [Fact]
+    public void Parse_ArrowInUnexpectedExpressionContext_ReportsArrowInDiagnostic()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            var a = 1 => 2;
+            """);
+
+        Assert.NotEmpty(diagnostics.Diagnostics);
+        Assert.Contains(diagnostics.Diagnostics, d => d.Message.Contains("'=>'"));
+    }
 }

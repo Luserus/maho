@@ -351,6 +351,12 @@ internal sealed class MacroExpander
         if (param.Kind is MacroParameterKind.Identifier)
             return arg.Tokens.Count == 1 && arg.Tokens[0].Kind is TokenKind.Identifier;
 
+        if (param.Kind is MacroParameterKind.SingleToken)
+            return arg.Tokens.Count == 1;
+
+        if (param.Kind is MacroParameterKind.TokenStream)
+            return arg.Tokens.Count > 0;
+
         return arg.Tokens.Count > 0;
     }
 
@@ -418,6 +424,36 @@ internal sealed class MacroExpander
                 }
             }
 
+            // 2.5 Check for nameof(@param) folding
+            if ((templateTokens[i].MatchingKind is MatchingKeywordKind.Nameof || templateTokens[i].Value == "nameof") &&
+                i + 1 < templateTokens.Count &&
+                templateTokens[i + 1].Kind is TokenKind.LeftParen)
+            {
+                int closeParenIdx = FindMatchingParen(templateTokens, i + 1);
+                if (closeParenIdx == i + 4 &&
+                    templateTokens[i + 2].Kind is TokenKind.AtSymbol &&
+                    templateTokens[i + 3].Kind is TokenKind.Identifier)
+                {
+                    var paramPart = new SymbolPart(templateTokens[i + 3]);
+                    if (bindings.TryGetValue(paramPart, out var argTokens) && argTokens.Count > 0)
+                    {
+                        var targetToken = argTokens[^1];
+                        string targetName = targetToken.Value;
+                        string quoted = $"\"{targetName}\"";
+                        var stringToken = new Token(
+                            new SourceText(quoted),
+                            new TextSpan(0, quoted.Length),
+                            TokenKind.String,
+                            templateTokens[i].LeadingTrivia,
+                            templateTokens[closeParenIdx].TrailingTrivia);
+
+                        result.Add(stringToken);
+                        i = closeParenIdx + 1;
+                        continue;
+                    }
+                }
+            }
+
             // 3. Check for scalar parameter substitution: @param
             if (templateTokens[i].Kind is TokenKind.AtSymbol && i + 1 < templateTokens.Count && templateTokens[i + 1].Kind is TokenKind.Identifier)
             {
@@ -436,10 +472,119 @@ internal sealed class MacroExpander
             i++;
         }
 
+        // Apply ## token concatenation
+        result = ProcessTokenConcatenation(result, sourceText);
+
         // Apply hygiene alpha-renaming
         ApplyHygiene(result, bindings, packBindings, sourceText);
 
         return result;
+    }
+
+    private List<Token> ProcessTokenConcatenation(List<Token> tokens, SourceText sourceText)
+    {
+        bool hasConcat = false;
+        for (int k = 0; k < tokens.Count - 1; k++)
+        {
+            if (IsConcatenationOperator(tokens, k))
+            {
+                hasConcat = true;
+                break;
+            }
+        }
+
+        if (!hasConcat)
+            return tokens;
+
+        var result = new List<Token>(tokens.Count);
+        int i = 0;
+        while (i < tokens.Count)
+        {
+            if (IsConcatenationOperator(tokens, i))
+            {
+                var hash1 = tokens[i];
+                var hash2 = tokens[i + 1];
+
+                if (result.Count == 0)
+                {
+                    diagnostics.ReportInvalidTokenConcatenation(hash1.Span, "'##' cannot appear at the start of a macro template", sourceText);
+                    i += 2;
+                    continue;
+                }
+
+                if (i + 2 >= tokens.Count)
+                {
+                    diagnostics.ReportInvalidTokenConcatenation(hash2.Span, "'##' cannot appear at the end of a macro template", sourceText);
+                    i += 2;
+                    continue;
+                }
+
+                var left = result[^1];
+                var right = tokens[i + 2];
+
+                if (TryConcatenateTokens(left, right, out var mergedToken))
+                {
+                    result[^1] = mergedToken!;
+                    i += 3;
+                }
+                else
+                {
+                    diagnostics.ReportInvalidTokenConcatenation(
+                        new TextSpan(left.Span.Start, Math.Max(0, right.Span.End - left.Span.Start)),
+                        $"pasting '{left.Value}' and '{right.Value}' does not result in a valid token",
+                        sourceText);
+                    i += 3;
+                }
+            }
+            else
+            {
+                result.Add(tokens[i]);
+                i++;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsConcatenationOperator(IReadOnlyList<Token> tokens, int index)
+    {
+        if (index + 1 >= tokens.Count)
+            return false;
+
+        var t1 = tokens[index];
+        var t2 = tokens[index + 1];
+
+        return t1.Kind is TokenKind.Octothorpe &&
+               t2.Kind is TokenKind.Octothorpe &&
+               t1.Span.End == t2.Span.Start &&
+               t1.TrailingTrivia.Length == 0 &&
+               t2.LeadingTrivia.Length == 0;
+    }
+
+    private static bool TryConcatenateTokens(Token a, Token b, out Token? mergedToken)
+    {
+        string combined = a.Value + b.Value;
+        var dummyDiagnostics = new DiagnosticsManager();
+        var lexer = new Lexer(new SourceText(combined), dummyDiagnostics);
+        var lexedTokens = lexer.Lex();
+
+        if (!dummyDiagnostics.HasErrors &&
+            lexedTokens.Count == 2 &&
+            lexedTokens[0].Kind != TokenKind.BadToken &&
+            lexedTokens[1].Kind == TokenKind.EndToken)
+        {
+            mergedToken = new Token(
+                lexedTokens[0].Source,
+                lexedTokens[0].Span,
+                lexedTokens[0].Kind,
+                a.LeadingTrivia,
+                b.TrailingTrivia,
+                lexedTokens[0].MatchingKind);
+            return true;
+        }
+
+        mergedToken = null;
+        return false;
     }
 
     private void ApplyHygiene(
@@ -507,7 +652,16 @@ internal sealed class MacroExpander
             return true;
         }
 
-        if (index + 2 < tokens.Count && tokens[index].Kind is TokenKind.Dot && tokens[index + 1].Kind is TokenKind.Dot && tokens[index + 2].Kind is TokenKind.Dot)
+        if (index + 2 < tokens.Count &&
+            tokens[index].Kind is TokenKind.Dot &&
+            tokens[index + 1].Kind is TokenKind.Dot &&
+            tokens[index + 2].Kind is TokenKind.Dot &&
+            tokens[index].Span.End == tokens[index + 1].Span.Start &&
+            tokens[index].TrailingTrivia.Length == 0 &&
+            tokens[index + 1].LeadingTrivia.Length == 0 &&
+            tokens[index + 1].Span.End == tokens[index + 2].Span.Start &&
+            tokens[index + 1].TrailingTrivia.Length == 0 &&
+            tokens[index + 2].LeadingTrivia.Length == 0)
         {
             length = 3;
             return true;

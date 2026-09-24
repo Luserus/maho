@@ -160,15 +160,19 @@ internal sealed partial class Parser
     /// <summary> Parses one attribute application, including any constructor arguments. </summary>
     private AttributeApplication ParseAttributeApplication()
     {
+        Token? dollarToken = null;
+        if (CurrentToken.Kind is TokenKind.Dollar)
+            dollarToken = Consume();
+
         NamedSyntax name = ParseNamedSyntax(allowQualified: true);
 
         if (CurrentToken.Kind is not TokenKind.LeftParen)
-            return new AttributeApplication(name, openParen: null, new SeparatedSyntaxList<Expression>([]), closeParen: null);
+            return new AttributeApplication(dollarToken, name, openParen: null, new SeparatedSyntaxList<Expression>([]), closeParen: null);
 
         Token openParen = Consume();
         SeparatedSyntaxList<Expression> arguments = ParseExpressionArgumentList();
         Token closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the attribute argument list");
-        return new AttributeApplication(name, openParen, arguments, closeParen);
+        return new AttributeApplication(dollarToken, name, openParen, arguments, closeParen);
     }
 
     private TypeBaseClause ParseTypeBaseClause()

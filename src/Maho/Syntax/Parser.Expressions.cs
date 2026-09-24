@@ -123,11 +123,21 @@ internal sealed partial class Parser
         {
             MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
             MatchingKeywordKind.If => ParseIfExpression(),
+            MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
             _ => ParseNamedExpression()
         },
         TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String => ParseLiteralExpression(),
         _ => CreateMissingExpression()
     };
+
+    private NameofExpression ParseNameofExpression()
+    {
+        var keyword = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'nameof'");
+        var argument = ParseExpression();
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'nameof' expression");
+        return new NameofExpression(keyword, openParen, argument, closeParen);
+    }
 
     /// <summary> Parses a literal expression. </summary>
     /// <returns> The literal expression node. </returns>

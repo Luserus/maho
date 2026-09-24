@@ -45,5 +45,8 @@ internal enum MatchingKeywordKind : byte
     Expr,
     Type,
     Ident,
-    Stmt
+    Stmt,
+    Tokens,
+    Token,
+    Nameof
 }

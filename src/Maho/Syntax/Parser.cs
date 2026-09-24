@@ -64,6 +64,7 @@ internal sealed partial class Parser
         ("...", TokenKind.DotDotDot),
         ("==", TokenKind.EqualsEquals),
         ("!=", TokenKind.ExclamationEquals),
+        ("=>", TokenKind.EqualsGreaterThan),
         ("<<", TokenKind.LessThanLessThanSigns),
         (">>", TokenKind.GreaterThanGreaterThanSigns),
         ("<=", TokenKind.LessThanEquals),
@@ -285,7 +286,9 @@ internal sealed partial class Parser
         List<Member> members = [];
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
+            int start = current;
             members.Add(ParseMember());
+            RecoverMemberIfStalled(start);
         }
         return members;
     }
@@ -297,7 +300,9 @@ internal sealed partial class Parser
         List<TopLevel> topLevels = [];
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
+            int start = current;
             topLevels.Add(ParseTopLevel(allowImplicitTopLevel));
+            RecoverTopLevelIfStalled(start);
         }
         return topLevels;
     }
@@ -502,6 +507,8 @@ internal sealed partial class Parser
         int length = 0;
         TokenKind? foundKind = null;
 
+        Token? prevToken = null;
+
         // Read ahead using Peek(i), character by character
         for (int i = 0; ; i++)
         {
@@ -510,11 +517,17 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
+            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+                                          prevToken.TrailingTrivia.Length > 0 ||
+                                          token.LeadingTrivia.Length > 0))
+                break; // trivia between operator characters
+
             if (!node.Next.TryGetValue(text[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
             foundKind = node.Kind;
+            prevToken = token;
         }
 
         return (foundKind ?? TokenKind.NullToken, length);
@@ -529,7 +542,7 @@ internal sealed partial class Parser
         Token token = default!;
 
         if (length == 0)
-            return new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
+            return new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {

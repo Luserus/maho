@@ -7,5 +7,7 @@ internal enum MacroParameterKind : byte
     Type,
     Identifier,
     Statement,
-    Literal
+    Literal,
+    TokenStream,
+    SingleToken
 }

@@ -579,4 +579,321 @@ public sealed class MacroTests
         Assert.NotNull(diag.MacroTrace.DefinitionSpan);
         Assert.Equal(1, diag.MacroTrace.DefinitionSpan.Value.StartLocation.Line);
     }
+
+    [Fact]
+    public void Macro_TokenStreamParameter_ExpandsArbitraryTokens()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $WrapStruct {
+                (@name: ident, @body: tokens) => {
+                    public struct @name {
+                        @body
+                    }
+                }
+            }
+
+            public struct int32;
+
+            $WrapStruct(Point, public int32 X; public int32 Y;);
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        var pointStruct = Assert.Single(structs, s => s.Type.Name.ToString() == "Point");
+        var body = Assert.IsType<TypeBlockBody>(pointStruct.Type.Body);
+        Assert.Equal(2, body.Members.OfType<MemberFieldDeclaration>().Count());
+    }
+
+    [Fact]
+    public void Macro_SingleTokenParameter_MatchesSingleToken()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $ApplyModifier {
+                (@mod: token, @name: ident) => {
+                    @mod struct @name;
+                }
+            }
+
+            $ApplyModifier(internal, MyInternal);
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        var myStruct = Assert.Single(structs, s => s.Type.Name.ToString() == "MyInternal");
+        Assert.Single(myStruct.Type.Modifiers);
+        Assert.Equal(MatchingKeywordKind.Internal, myStruct.Type.Modifiers[0].MatchingKind);
+    }
+
+    [Fact]
+    public void Macro_SingleTokenParameter_RejectsMultipleTokens()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $TakesSingle {
+                (@tok: token) => {
+                    public struct Ok;
+                }
+            }
+
+            $TakesSingle(a + b);
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0601"); // No matching arm found
+    }
+
+    [Fact]
+    public void Macro_VariadicTokenStream_ExpandsPacks()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $Chain {
+                (@fields: tokens...) => {
+                    public struct Entity {
+                        $(public @fields;)...
+                    }
+                }
+            }
+
+            public struct int32;
+            public struct string8;
+
+            $Chain(int32 id, string8 name);
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        var entity = Assert.Single(structs, s => s.Type.Name.ToString() == "Entity");
+        var body = Assert.IsType<TypeBlockBody>(entity.Type.Body);
+        Assert.Equal(2, body.Members.OfType<MemberFieldDeclaration>().Count());
+    }
+
+    [Fact]
+    public void Macro_TokenConcatenation_GluesIdentifiers()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $MakeMethod {
+                (@prefix: ident, @suffix: ident) => {
+                    public void @prefix##@suffix() {}
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                $MakeMethod(Try, Parse);
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var host = Assert.Single(compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>());
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
+        Assert.Equal("TryParse", method.Function.Signature.Identifier.ToString());
+    }
+
+    [Fact]
+    public void Macro_TokenConcatenation_ChainedAndWithNumbers()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $MakeType {
+                (@name: ident, @bits: token) => {
+                    public struct @name##_##@bits;
+                }
+            }
+
+            $MakeType(Int, 64);
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        var myStruct = Assert.Single(structs, s => s.Type.Name.ToString() == "Int_64");
+    }
+
+    [Fact]
+    public void Macro_TokenConcatenation_TriviaBetweenHashes_DoesNotConcatenate()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $NaiveHashes {
+                (@name: ident) => {
+                    public void Foo # # @name() {}
+                }
+            }
+
+            public class Host
+            {
+                $NaiveHashes(Bar);
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.DoesNotContain(compilation.Diagnostics, d => d.Code == "MH0230");
+    }
+
+    [Fact]
+    public void Macro_TokenConcatenation_InvalidPasting_ReportsDiagnostic()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $BadPaste {
+                (@a: token, @b: token) => {
+                    public void @a##@b() {}
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                $BadPaste(12, abc);
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0230");
+    }
+
+    [Fact]
+    public void Macro_Nameof_FoldsParameterToStringLiteral()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $DefineIntrinsic {
+                (@name: ident) => {
+                    [IntrinsicType(nameof(@name))]
+                    public struct @name;
+                }
+            }
+
+            $DefineIntrinsic(int32);
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        var myStruct = Assert.Single(structs, s => s.Type.Name.ToString() == "int32");
+        var attrList = Assert.Single(myStruct.Type.Attributes);
+        var attr = Assert.Single(attrList.Attributes);
+        Assert.Equal("IntrinsicType", attr.Name.ToString());
+        var arg = Assert.Single(attr.Arguments);
+        var lit = Assert.IsType<LiteralExpression>(arg);
+        Assert.Equal("\"int32\"", lit.Literal.Value);
+    }
+
+    [Fact]
+    public void Expression_Nameof_ParsesAndResolvesCorrectly()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Host
+            {
+                public struct int32;
+                public struct void;
+
+                public void Test()
+                {
+                    var x = 42;
+                    var name = nameof(x);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var host = Assert.Single(compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>());
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+        var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
+        var init = varStmt.Declaration.Declarators[0].Initializer!.Initializer;
+        var nameofExpr = Assert.IsType<NameofExpression>(init);
+        var arg = Assert.IsType<IdentifierNameExpression>(nameofExpr.Argument);
+        Assert.Equal("x", arg.Identifier.Value);
+    }
+
+    [Fact]
+    public void Macro_AttributeOnType_ExpandsAndDecoratesType()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $DeriveHelper {
+                (@target: tokens) => {
+                    @target
+                    public struct Helper;
+                }
+            }
+
+            [$DeriveHelper]
+            public struct Entity;
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        Assert.Equal(2, structs.Count);
+        Assert.Contains(structs, s => s.Type.Name.ToString() == "Entity");
+        Assert.Contains(structs, s => s.Type.Name.ToString() == "Helper");
+    }
+
+    [Fact]
+    public void Macro_AttributeWithArguments_PassesArgsAndTarget()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $AddSuffix {
+                (@suf: ident, @target: tokens) => {
+                    public struct Tag_##@suf;
+                    @target
+                }
+            }
+
+            [$AddSuffix(Special)]
+            public struct Original;
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var structs = compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>().ToList();
+        Assert.Equal(2, structs.Count);
+        Assert.Contains(structs, s => s.Type.Name.ToString() == "Tag_Special");
+        Assert.Contains(structs, s => s.Type.Name.ToString() == "Original");
+    }
+
+    [Fact]
+    public void Macro_AttributeOnMember_ExpandsInsideTypeBody()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $DuplicateField {
+                (@target: tokens) => {
+                    @target
+                    public int32 Backup;
+                }
+            }
+
+            public struct int32;
+
+            public struct Container {
+                [$DuplicateField]
+                public int32 Value;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var container = Assert.Single(compilation.SyntaxTrees[0].Roots[0].Members.OfType<TopLevelTypeDeclaration>(), s => s.Type.Name.ToString() == "Container");
+        var body = Assert.IsType<TypeBlockBody>(container.Type.Body);
+        var fields = body.Members.OfType<MemberFieldDeclaration>().ToList();
+        Assert.Equal(2, fields.Count);
+    }
+
+    [Fact]
+    public void Macro_DefinitionWithAttributes_ParsesSuccessfully()
+    {
+        var compilation = Compilation.FromSource("""
+            [Obsolete]
+            public macro $OldMacro {
+                () => 42;
+            }
+
+            public class Host
+            {
+                public struct int32;
+
+                public int32 Test()
+                {
+                    return $OldMacro();
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
 }
+
