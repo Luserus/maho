@@ -8,11 +8,11 @@ public struct ValType;
 
 macro $DefineIntrinsicInteger
 {
-    (@name: ident) => {
-        [IntrinsicType("@name")]
-        public struct @name : ValType
+    (@name: ident, @size: expr) => {
+        [IntrinsicType(nameof(@name))]
+        public struct @name##@size : ValType
         {
-            public static Result<@name> Parse(str8 value)
+            public static Result<@name##@size> Parse(str8 value)
             {
                 return 0;
             }
@@ -33,7 +33,12 @@ public struct String8
 }
 
 
-$DefineIntrinsicInteger(Int8);
-$DefineIntrinsicInteger(Int16);
-$DefineIntrinsicInteger(Int32);
-$DefineIntrinsicInteger(Int64);
+$DefineIntrinsicInteger(Int, 8);
+$DefineIntrinsicInteger(Int, 16);
+$DefineIntrinsicInteger(Int, 32);
+$DefineIntrinsicInteger(Int, 64);
+
+$DefineIntrinsicInteger(UInt, 8);
+$DefineIntrinsicInteger(UInt, 16);
+$DefineIntrinsicInteger(UInt, 32);
+$DefineIntrinsicInteger(UInt, 64);

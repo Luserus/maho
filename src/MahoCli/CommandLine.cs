@@ -196,7 +196,7 @@ public static class CommandLine
             if (file.AnalysisError is string analysisError)
                 fileOutput["analysisError"] = analysisError;
 
-            files.Add(fileOutput);
+            files.Add((JsonNode)fileOutput);
         }
 
         return new JsonObject
@@ -319,14 +319,14 @@ public static class CommandLine
             {
                 ["filePath"] = file.SourcePath,
                 ["diagnostics"] = file.Output is { } fileAnalysis
-                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, JsonOptions)
+                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, MahoJsonContext.Default.IReadOnlyListDiagnosticInfo)
                     : new JsonArray()
             };
 
             if (file.AnalysisError is string analysisError)
                 fileOutput["analysisError"] = analysisError;
 
-            files.Add(fileOutput);
+            files.Add((JsonNode)fileOutput);
         }
 
         JsonObject output = new()

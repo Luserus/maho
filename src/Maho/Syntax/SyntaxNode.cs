@@ -1,8 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary> Base class for all syntax nodes in the syntax tree. </summary>
+[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]
 internal abstract class SyntaxNode
 {
     /// <summary> Computes the source span covered by this node when one can be reconstructed. </summary>

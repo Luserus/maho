@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -13,15 +13,23 @@ namespace Maho;
 /// </summary>
 internal static class DebugJson
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true
-    };
-
     /// <summary> Serializes a debug payload using the compiler's shared JSON conventions for inspection data. </summary>
-    public static string Serialize<T>(T value) => JsonSerializer.Serialize(value, SerializerOptions);
+    public static string Serialize(DebugLexerInfo info) => JsonSerializer.Serialize(info, MahoJsonContext.Default.DebugLexerInfo);
+    public static string Serialize(DebugParserInfo info) => JsonSerializer.Serialize(info, MahoJsonContext.Default.DebugParserInfo);
+    public static string Serialize(IReadOnlyList<DiagnosticInfo> diagnostics) => JsonSerializer.Serialize(diagnostics, MahoJsonContext.Default.IReadOnlyListDiagnosticInfo);
+    public static string Serialize(List<DiagnosticInfo> diagnostics) => JsonSerializer.Serialize(diagnostics, MahoJsonContext.Default.ListDiagnosticInfo);
+
+    public static string Serialize<T>(T value)
+    {
+        if (value is DebugLexerInfo lexerInfo)
+            return Serialize(lexerInfo);
+        if (value is DebugParserInfo parserInfo)
+            return Serialize(parserInfo);
+        if (value is IReadOnlyList<DiagnosticInfo> diagList)
+            return Serialize(diagList);
+
+        throw new NotSupportedException($"Type {typeof(T).FullName} is not supported by trim-safe MahoJsonContext.");
+    }
 
     /// <summary>
     /// Converts an internal text span into the compact debug span schema used by lexer and parser
