@@ -427,4 +427,52 @@ public sealed class DeclarationDiagnosticsTests
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
         Assert.Contains("could not resolve type 'NonExistentType'", diag.Message);
     }
+
+    [Fact]
+    public void UnresolvedGenericType_ReportsTypeWithArity()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct int32;
+            public Result<int32> globalVar;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'Result<T>'", diag.Message);
+        var primaryLabel = Assert.Single(diag.Labels, l => l.Style == DiagnosticLabelStyle.Primary);
+        Assert.Contains("type 'Result<T>' not found", primaryLabel.Message);
+    }
+
+    [Fact]
+    public void UnresolvedGenericType_WhenNonGenericExistsInScope_ProvidesArityMismatchNote()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct int32;
+            public struct Result;
+
+            public Result<int32> globalVar;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'Result<T>'", diag.Message);
+        var note = Assert.Single(diag.Notes);
+        Assert.Contains("non-generic type 'Result' exists in this scope, but generic type 'Result<T>' with 1 type argument was not found", note.Message);
+    }
+
+    [Fact]
+    public void UnresolvedNonGenericType_WhenGenericExistsInScope_ProvidesArityMismatchNote()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Result<T>;
+
+            public Result globalVar;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'Result'", diag.Message);
+        var note = Assert.Single(diag.Notes);
+        Assert.Contains("generic type 'Result<T>' exists in this scope with 1 type argument, but non-generic type 'Result' was not found", note.Message);
+    }
 }

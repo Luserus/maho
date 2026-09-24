@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -39,6 +40,9 @@ internal sealed class Diagnostic
 
     /// <summary> Arbitrary structured metadata for tooling or IDE extensions. </summary>
     public IReadOnlyDictionary<string, object?> CustomData { get; init; } = new Dictionary<string, object?>();
+
+    /// <summary> Macro expansion provenance if this diagnostic occurred within macro-expanded code. </summary>
+    public ExpansionOrigin? ExpansionOrigin { get; init; }
 
     /// <summary> Materializes the final diagnostic message at the presentation boundary. </summary>
     public string Message => MessageKind switch

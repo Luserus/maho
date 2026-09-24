@@ -75,45 +75,7 @@ public sealed class TerminalDiagnosticRenderer
         sb.AppendLine();
 
         // 2. Source file location: --> path:line:col
-        string? displayPath = diagnostic.SourcePath;
-        if (displayPath is not null)
-        {
-            if (pathStyle == DiagnosticPathStyle.Relative)
-            {
-                try
-                {
-                    displayPath = Path.GetRelativePath(rootDirectory, displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-            else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
-            {
-                try
-                {
-                    string targetRoot = projectDirectory ?? rootDirectory;
-                    displayPath = Path.GetRelativePath(targetRoot, displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-            else if (pathStyle == DiagnosticPathStyle.Full)
-            {
-                try
-                {
-                    displayPath = Path.GetFullPath(displayPath);
-                }
-                catch
-                {
-                    // Fallback to original path
-                }
-            }
-        }
-
+        string? displayPath = FormatDisplayPath(diagnostic.SourcePath);
         int line = diagnostic.Span.StartLocation.Line;
         int col = diagnostic.Span.StartLocation.Column;
 
@@ -300,7 +262,73 @@ public sealed class TerminalDiagnosticRenderer
                     }
                 }
 
-                bool hasAdditionalInfo = diagnostic.Notes.Count > 0 || diagnostic.HelpMessages.Count > 0 || diagnostic.Suggestions.Count > 0;
+                if (diagnostic.MacroTrace is not null)
+                {
+                    sb.Append(Colorize(Blue, $"{emptyGutter} |"));
+                    sb.AppendLine();
+
+                    var currentTrace = diagnostic.MacroTrace;
+                    while (currentTrace is not null)
+                    {
+                        string? invPath = currentTrace.InvocationFilePath;
+                        string? displayInvPath = FormatDisplayPath(invPath);
+                        int invLine = currentTrace.InvocationSpan.StartLocation.Line;
+                        int invCol = currentTrace.InvocationSpan.StartLocation.Column;
+
+                        sb.Append(Colorize(Blue, "  ::: "));
+                        sb.AppendLine($"{displayInvPath ?? "source"}: ({invLine}:{invCol})");
+
+                        string[]? invLines = GetSourceLines(invPath);
+                        if (invLines is not null && invLine >= 1 && invLine <= invLines.Length)
+                        {
+                            int invGutterWidth = Math.Max(invLine.ToString().Length, 2);
+                            string invEmptyGutter = new string(' ', invGutterWidth);
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} |"));
+                            sb.AppendLine();
+
+                            string invLineStr = invLine.ToString().PadLeft(invGutterWidth);
+                            string invSourceLine = invLines[invLine - 1];
+                            sb.Append(Colorize(Blue, $"{invLineStr} | "));
+                            sb.AppendLine(invSourceLine);
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} | "));
+                            AppendWhitespace(sb, invSourceLine, 1, invCol);
+
+                            int invLength = Math.Max(1, currentTrace.InvocationSpan.Length);
+                            if (invCol - 1 + invLength > invSourceLine.Length && invSourceLine.Length >= invCol)
+                                invLength = Math.Max(1, invSourceLine.Length - invCol + 1);
+
+                            string underline = new string('-', invLength);
+                            sb.Append(Colorize(Cyan, underline));
+                            sb.AppendLine(Colorize(Cyan, " from this macro invocation"));
+
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} |"));
+                            sb.AppendLine();
+                        }
+
+                        currentTrace = currentTrace.Parent;
+                    }
+
+                    string macroName = diagnostic.MacroTrace.MacroName;
+                    if (!macroName.StartsWith('$'))
+                        macroName = $"${macroName}";
+
+                    string? defLocation = null;
+                    if (diagnostic.MacroTrace.DefinitionSpan.HasValue)
+                    {
+                        string? defPath = FormatDisplayPath(diagnostic.MacroTrace.DefinitionFilePath);
+                        int defLine = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Line;
+                        int defCol = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Column;
+                        defLocation = defPath is not null ? $" at {defPath}: ({defLine}:{defCol})" : $" at line {defLine}";
+                    }
+
+                    sb.Append(Colorize(Blue, $"{emptyGutter} = "));
+                    sb.Append(Colorize(Bold, "note: "));
+                    sb.AppendLine($"in macro definition '{macroName}'{defLocation}");
+                }
+
+                bool hasAdditionalInfo = diagnostic.MacroTrace is null && (diagnostic.Notes.Count > 0 || diagnostic.HelpMessages.Count > 0 || diagnostic.Suggestions.Count > 0);
                 if (hasAdditionalInfo)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} |"));
@@ -414,8 +442,69 @@ public sealed class TerminalDiagnosticRenderer
         _ => false
     };
 
+    private string? FormatDisplayPath(string? rawPath)
+    {
+        if (rawPath is null)
+            return null;
+
+        if (pathStyle == DiagnosticPathStyle.Relative)
+        {
+            try
+            {
+                return Path.GetRelativePath(rootDirectory, rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+        else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
+        {
+            try
+            {
+                string targetRoot = projectDirectory ?? rootDirectory;
+                return Path.GetRelativePath(targetRoot, rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+        else if (pathStyle == DiagnosticPathStyle.Full)
+        {
+            try
+            {
+                return Path.GetFullPath(rawPath);
+            }
+            catch
+            {
+                return rawPath;
+            }
+        }
+
+        return rawPath;
+    }
+
     private void AppendFallback(StringBuilder sb, DiagnosticInfo diagnostic)
     {
+        if (diagnostic.MacroTrace is not null)
+        {
+            string macroName = diagnostic.MacroTrace.MacroName;
+            if (!macroName.StartsWith('$'))
+                macroName = $"${macroName}";
+
+            string? defLocation = null;
+            if (diagnostic.MacroTrace.DefinitionSpan.HasValue)
+            {
+                string? defPath = FormatDisplayPath(diagnostic.MacroTrace.DefinitionFilePath);
+                int defLine = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Line;
+                int defCol = diagnostic.MacroTrace.DefinitionSpan.Value.StartLocation.Column;
+                defLocation = defPath is not null ? $" at {defPath}: ({defLine}:{defCol})" : $" at line {defLine}";
+            }
+
+            sb.Append(Colorize(Bold, "  = note: "));
+            sb.AppendLine($"in macro definition '{macroName}'{defLocation}");
+        }
         foreach (var note in diagnostic.Notes)
         {
             sb.Append(Colorize(Bold, "  = note: "));

@@ -40,6 +40,27 @@ internal sealed class MacroExpander
     private static TextSpan GetInvocationSpan(MacroInvocationExpression invocation) =>
         TextSpan.FromBounds(invocation.DollarToken.Span.Start, (invocation.RightParen ?? invocation.Name).Span.End);
 
+    private static ExpansionOrigin CreateOrigin(MacroDeclaration macro, MacroInvocationExpression invocation, SourceText sourceText, ExpansionOrigin? parentOrigin)
+    {
+        var invSpan = GetInvocationSpan(invocation);
+        var invSource = invocation.DollarToken.Source ?? sourceText;
+        var defSpan = TextSpan.FromBounds(macro.MacroKeyword.Span.Start, macro.Name.Span.End);
+        var defSource = macro.Name.Source ?? macro.GetSource();
+        return new ExpansionOrigin(invocation.Name, invSpan, invSource, defSpan, defSource, parentOrigin);
+    }
+
+    private static void AttachOrigin(SyntaxNode? node, ExpansionOrigin origin)
+    {
+        if (node is null)
+            return;
+
+        node.ExpansionOrigin = origin;
+        foreach ((_, SyntaxNode child) in SyntaxSpan.GetChildren(node))
+        {
+            AttachOrigin(child, origin);
+        }
+    }
+
     public MacroDeclaration? LookupMacro(SymbolPart name) =>
         macroTable.TryGetValue(name, out var macro) ? macro : null;
 
@@ -87,17 +108,15 @@ internal sealed class MacroExpander
                 return invocation;
             }
 
-            var origin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
-            blockExpr.ExpansionOrigin = origin;
-            foreach (var local in blockExpr.Locals)
-                local.ExpansionOrigin = origin;
-            blockExpr.FinalExpression.ExpansionOrigin = origin;
+            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+            AttachOrigin(blockExpr, origin);
 
             return blockExpr;
         }
 
         var expandedExpr = parser.ParseExpressionSnippet(substitutedTokens);
-        expandedExpr.ExpansionOrigin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
+        var exprOrigin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+        AttachOrigin(expandedExpr, exprOrigin);
 
         return expandedExpr;
     }
@@ -139,17 +158,18 @@ internal sealed class MacroExpander
         if (arm.Template.IsExpression)
         {
             var expr = parser.ParseExpressionSnippet(substitutedTokens);
-            expr.ExpansionOrigin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
+            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+            AttachOrigin(expr, origin);
             var stmt = new LocalExpressionStatement(expr, new Token(sourceText, default, TokenKind.Semicolon, [], []));
-            stmt.ExpansionOrigin = expr.ExpansionOrigin;
+            stmt.ExpansionOrigin = origin;
             statements = [stmt];
         }
         else
         {
             statements = parser.ParseStatementsSnippet(substitutedTokens);
-            var origin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
+            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
             foreach (var stmt in statements)
-                stmt.ExpansionOrigin = origin;
+                AttachOrigin(stmt, origin);
         }
 
         return statements;
@@ -187,10 +207,10 @@ internal sealed class MacroExpander
 
         var parser = new Parser(sourceText, diagnostics);
         var members = parser.ParseMembersSnippet(substitutedTokens);
-        var origin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
+        var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
 
         foreach (var member in members)
-            member.ExpansionOrigin = origin;
+            AttachOrigin(member, origin);
 
         return members;
     }
@@ -227,10 +247,10 @@ internal sealed class MacroExpander
 
         var parser = new Parser(sourceText, diagnostics);
         var topLevels = parser.ParseTopLevelsSnippet(substitutedTokens);
-        var origin = new ExpansionOrigin(invocation.Name, invocation.DollarToken.Span, invocation.DollarToken.Source ?? sourceText, parentOrigin);
+        var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
 
         foreach (var topLevel in topLevels)
-            topLevel.ExpansionOrigin = origin;
+            AttachOrigin(topLevel, origin);
 
         return topLevels;
     }

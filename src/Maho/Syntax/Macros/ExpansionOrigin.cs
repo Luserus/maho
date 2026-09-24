@@ -14,19 +14,57 @@ internal sealed class ExpansionOrigin : SyntaxNode
     /// <summary> The source text containing the invocation site. </summary>
     public SourceText? InvocationSource { get; }
 
+    /// <summary> The source span of the macro definition site (macro name / declaration). </summary>
+    public TextSpan? DefinitionSpan { get; }
+
+    /// <summary> The source text containing the macro definition. </summary>
+    public SourceText? DefinitionSource { get; }
+
     /// <summary> The enclosing macro expansion, if this was expanded during a nested macro expansion. </summary>
     public ExpansionOrigin? Parent { get; }
 
-    public ExpansionOrigin(NamedSyntax macroName, TextSpan invocationSpan, SourceText? invocationSource, ExpansionOrigin? parent = null)
+    public ExpansionOrigin(
+        NamedSyntax macroName,
+        TextSpan invocationSpan,
+        SourceText? invocationSource,
+        TextSpan? definitionSpan = null,
+        SourceText? definitionSource = null,
+        ExpansionOrigin? parent = null)
     {
         MacroName = macroName;
         InvocationSpan = invocationSpan;
         InvocationSource = invocationSource;
+        DefinitionSpan = definitionSpan;
+        DefinitionSource = definitionSource;
         Parent = parent;
     }
 
-    public ExpansionOrigin(Token macroNameToken, TextSpan invocationSpan, SourceText? invocationSource, ExpansionOrigin? parent = null)
-        : this(new SimpleName(macroNameToken), invocationSpan, invocationSource, parent)
+    public ExpansionOrigin(
+        Token macroNameToken,
+        TextSpan invocationSpan,
+        SourceText? invocationSource,
+        TextSpan? definitionSpan = null,
+        SourceText? definitionSource = null,
+        ExpansionOrigin? parent = null)
+        : this(new SimpleName(macroNameToken), invocationSpan, invocationSource, definitionSpan, definitionSource, parent)
+    {
+    }
+
+    public ExpansionOrigin(
+        NamedSyntax macroName,
+        TextSpan invocationSpan,
+        SourceText? invocationSource,
+        ExpansionOrigin? parent)
+        : this(macroName, invocationSpan, invocationSource, null, null, parent)
+    {
+    }
+
+    public ExpansionOrigin(
+        Token macroNameToken,
+        TextSpan invocationSpan,
+        SourceText? invocationSource,
+        ExpansionOrigin? parent)
+        : this(new SimpleName(macroNameToken), invocationSpan, invocationSource, null, null, parent)
     {
     }
 

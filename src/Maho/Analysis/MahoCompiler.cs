@@ -66,7 +66,7 @@ public static class MahoCompiler
 
         var syntaxTree = SyntaxTree.CreateSingleRoot(root, filePath);
         var resolver = new Resolver();
-        resolver.Resolve(syntaxTree, diagnostics: dm);
+        resolver.Resolve(syntaxTree, diagnostics: dm, options: options);
 
         string? lexerJson = output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null;
         string? parserJson = output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null;
@@ -241,7 +241,7 @@ public static class MahoCompiler
         var syntaxTree = new SyntaxTree(projectName, [.. validRoots]);
         var resolver = new Resolver();
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.Resolve(syntaxTree, diagnostics: resolutionDm);
+        var context = resolver.Resolve(syntaxTree, diagnostics: resolutionDm, options: options);
 
         foreach (var diag in resolutionDm.Diagnostics)
         {

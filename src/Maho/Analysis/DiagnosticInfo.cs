@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Maho.Diagnostics;
+using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho;
@@ -17,6 +18,7 @@ namespace Maho;
 /// <param name="HelpMessages">Help or hint messages.</param>
 /// <param name="Suggestions">Suggested code fixes.</param>
 /// <param name="CustomData">Arbitrary key-value metadata for tooling.</param>
+/// <param name="MacroTrace">Macro expansion provenance when the diagnostic occurs in expanded code.</param>
 public sealed record DiagnosticInfo(
     string Code,
     string Message,
@@ -28,13 +30,15 @@ public sealed record DiagnosticInfo(
     IReadOnlyList<DiagnosticNoteInfo>? Notes = null,
     IReadOnlyList<DiagnosticHelpInfo>? HelpMessages = null,
     IReadOnlyList<DiagnosticSuggestionInfo>? Suggestions = null,
-    IReadOnlyDictionary<string, object?>? CustomData = null)
+    IReadOnlyDictionary<string, object?>? CustomData = null,
+    MacroExpansionTraceInfo? MacroTrace = null)
 {
     public IReadOnlyList<DiagnosticLabelInfo> Labels { get; init; } = Labels ?? [];
     public IReadOnlyList<DiagnosticNoteInfo> Notes { get; init; } = Notes ?? [];
     public IReadOnlyList<DiagnosticHelpInfo> HelpMessages { get; init; } = HelpMessages ?? [];
     public IReadOnlyList<DiagnosticSuggestionInfo> Suggestions { get; init; } = Suggestions ?? [];
     public IReadOnlyDictionary<string, object?> CustomData { get; init; } = CustomData ?? EmptyCustomData;
+    public MacroExpansionTraceInfo? MacroTrace { get; init; } = MacroTrace;
 
     private static readonly IReadOnlyDictionary<string, object?> EmptyCustomData = new Dictionary<string, object?>();
 
@@ -48,9 +52,11 @@ public sealed record DiagnosticInfo(
         var primarySpanInfo = TextSpanInfo.FromSpan(diagnostic.PrimarySpan, primarySource);
 
         List<DiagnosticLabelInfo>? labels = null;
+
         if (diagnostic.Labels.Count > 0)
         {
             labels = new List<DiagnosticLabelInfo>(diagnostic.Labels.Count);
+
             foreach (var label in diagnostic.Labels)
             {
                 var labelSource = label.Source ?? primarySource;
@@ -64,9 +70,11 @@ public sealed record DiagnosticInfo(
         }
 
         List<DiagnosticNoteInfo>? notes = null;
+
         if (diagnostic.Notes.Count > 0)
         {
             notes = new List<DiagnosticNoteInfo>(diagnostic.Notes.Count);
+
             foreach (var note in diagnostic.Notes)
             {
                 var noteSource = note.Source ?? primarySource;
@@ -77,9 +85,11 @@ public sealed record DiagnosticInfo(
         }
 
         List<DiagnosticHelpInfo>? helpMessages = null;
+
         if (diagnostic.HelpMessages.Count > 0)
         {
             helpMessages = new List<DiagnosticHelpInfo>(diagnostic.HelpMessages.Count);
+
             foreach (var help in diagnostic.HelpMessages)
             {
                 var helpSource = help.Source ?? primarySource;
@@ -93,9 +103,11 @@ public sealed record DiagnosticInfo(
         if (diagnostic.Suggestions.Count > 0)
         {
             suggestions = new List<DiagnosticSuggestionInfo>(diagnostic.Suggestions.Count);
+
             foreach (var suggestion in diagnostic.Suggestions)
             {
                 var edits = new List<TextEditInfo>(suggestion.Edits.Count);
+
                 foreach (var edit in suggestion.Edits)
                 {
                     var editSource = edit.Source ?? primarySource;
@@ -105,9 +117,15 @@ public sealed record DiagnosticInfo(
                         edit.NewText,
                         editPath));
                 }
+
                 suggestions.Add(new DiagnosticSuggestionInfo(suggestion.Description, edits, suggestion.Applicability));
             }
         }
+
+        MacroExpansionTraceInfo? macroTrace = null;
+
+        if (diagnostic.ExpansionOrigin is not null)
+            macroTrace = CreateMacroTraceInfo(diagnostic.ExpansionOrigin, primarySource, primaryPath);
 
         return new DiagnosticInfo(
             diagnostic.DiagnosticCode,
@@ -120,7 +138,35 @@ public sealed record DiagnosticInfo(
             notes,
             helpMessages,
             suggestions,
-            diagnostic.CustomData.Count > 0 ? diagnostic.CustomData : null);
+            diagnostic.CustomData.Count > 0 ? diagnostic.CustomData : null,
+            macroTrace);
+    }
+
+    private static MacroExpansionTraceInfo CreateMacroTraceInfo(ExpansionOrigin origin, SourceText? fallbackSource, string? fallbackPath)
+    {
+        var invSource = origin.InvocationSource ?? fallbackSource;
+        var invPath = origin.InvocationSource?.FilePath ?? fallbackPath;
+        var invSpan = TextSpanInfo.FromSpan(origin.InvocationSpan, invSource);
+
+        TextSpanInfo? defSpan = null;
+        string? defPath = null;
+
+        if (origin.DefinitionSpan.HasValue)
+        {
+            var defSource = origin.DefinitionSource ?? fallbackSource;
+            defPath = origin.DefinitionSource?.FilePath ?? fallbackPath;
+            defSpan = TextSpanInfo.FromSpan(origin.DefinitionSpan.Value, defSource);
+        }
+
+        var parentTrace = origin.Parent is not null ? CreateMacroTraceInfo(origin.Parent, fallbackSource, fallbackPath) : null;
+
+        return new MacroExpansionTraceInfo(
+            origin.MacroName.ToString() ?? string.Empty,
+            invSpan,
+            invPath,
+            defSpan,
+            defPath,
+            parentTrace);
     }
 
     private static DiagnosticSeverity ToSeverity(DiagnosticKind kind) => kind switch
@@ -146,6 +192,7 @@ public sealed record DiagnosticInfo(
             if (num >= 500)
                 return 3; // Resolver
         }
+
         return 4;
     }
 
@@ -158,6 +205,7 @@ public sealed record DiagnosticInfo(
     {
         // 1. Line number ascending
         int lineCmp = a.Span.StartLocation.Line.CompareTo(b.Span.StartLocation.Line);
+
         if (lineCmp != 0)
             return lineCmp;
 
@@ -165,11 +213,13 @@ public sealed record DiagnosticInfo(
         int prioA = GetPipelineStagePriority(a.Code);
         int prioB = GetPipelineStagePriority(b.Code);
         int prioCmp = prioA.CompareTo(prioB);
+
         if (prioCmp != 0)
             return prioCmp;
 
         // 3. Column number ascending
         int colCmp = a.Span.StartLocation.Column.CompareTo(b.Span.StartLocation.Column);
+
         if (colCmp != 0)
             return colCmp;
 
@@ -190,12 +240,14 @@ public sealed record DiagnosticInfo(
         foreach (var diag in diagnostics)
         {
             string key = diag.SourcePath ?? string.Empty;
+
             if (!groupedByFile.TryGetValue(key, out var list))
             {
                 list = new List<DiagnosticInfo>();
                 groupedByFile[key] = list;
                 fileOrder.Add(key);
             }
+
             list.Add(diag);
         }
 

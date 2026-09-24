@@ -294,5 +294,50 @@ public sealed class TerminalRendererTests
         Assert.Contains("  | | └── cannot apply '+'", output);
         Assert.Contains("  | └── type is 'Int32'", output);
     }
+
+    [Fact]
+    public void TerminalRenderer_WithMacroTrace_RendersInvocationSnippetAndDefinitionNote()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        renderer.RegisterSource("StdLib.mh", "macro $DefineInt\n{\n    (@name: ident) => {\n        public struct @name {\n            public Result val;\n        }\n    }\n}\n\n$DefineInt(Foo);");
+
+        var errSpan = new TextSpanInfo(69, 6, 75, new TextLocation(5, 20), new TextLocation(5, 26));
+        var invSpan = new TextSpanInfo(100, 16, 116, new TextLocation(10, 1), new TextLocation(10, 17));
+        var defSpan = new TextSpanInfo(0, 16, 16, new TextLocation(1, 1), new TextLocation(1, 17));
+
+        var macroTrace = new MacroExpansionTraceInfo(
+            "$DefineInt",
+            invSpan,
+            "StdLib.mh",
+            defSpan,
+            "StdLib.mh");
+
+        var diagnostic = new DiagnosticInfo(
+            Code: "MH0500",
+            Message: "could not resolve type 'Result'",
+            Severity: DiagnosticSeverity.Error,
+            Span: errSpan,
+            SourcePath: "StdLib.mh",
+            Labels: [
+                new DiagnosticLabelInfo(errSpan, "type 'Result' not found", DiagnosticLabelStyle.Primary, "StdLib.mh")
+            ],
+            HelpMessages: [
+                new DiagnosticHelpInfo("check for a missing import or declaration", "StdLib.mh")
+            ],
+            MacroTrace: macroTrace);
+
+        string output = renderer.Render(diagnostic).Replace("\r\n", "\n");
+
+        Assert.Contains("error [MH0500]: could not resolve type 'Result'", output);
+        Assert.Contains("--> StdLib.mh: (5:20)", output);
+        Assert.Contains("5 |             public Result val;", output);
+        Assert.Contains("  |                    ^^^^^^", output);
+        Assert.Contains("└── type 'Result' not found", output);
+        Assert.Contains("::: StdLib.mh: (10:1)", output);
+        Assert.Contains("10 | $DefineInt(Foo);", output);
+        Assert.Contains("---------------- from this macro invocation", output);
+        Assert.Contains("= note: in macro definition '$DefineInt' at StdLib.mh: (1:1)", output);
+        Assert.Contains("= help: check for a missing import or declaration", output);
+    }
 }
 

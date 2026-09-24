@@ -110,7 +110,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
     private static bool ExpandTopLevels(IReadOnlyList<TopLevel> members, MacroExpander expander, ulong currentDepth, SourceText sourceText, out List<TopLevel> newMembers)
     {
         bool changed = false;
-        newMembers = new List<TopLevel>();
+        newMembers = [];
 
         foreach (var member in members)
         {

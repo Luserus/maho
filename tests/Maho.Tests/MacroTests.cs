@@ -555,4 +555,28 @@ public sealed class MacroTests
         Assert.Equal("declare_variables", varA.ExpansionOrigin?.MacroName.ToString());
         Assert.Equal("declare_variables", varB.ExpansionOrigin?.MacroName.ToString());
     }
+
+    [Fact]
+    public void MacroExpansion_DiagnosticInExpandedCode_IncludesMacroTrace()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $DefineType {
+                (@name: ident) => {
+                    public struct @name {
+                        public UnknownType val;
+                    }
+                }
+            }
+
+            $DefineType(MyStruct);
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.NotNull(diag.MacroTrace);
+        Assert.Equal("DefineType", diag.MacroTrace.MacroName);
+        Assert.True(diag.MacroTrace.InvocationSpan.StartLocation.Line > 1);
+        Assert.NotNull(diag.MacroTrace.DefinitionSpan);
+        Assert.Equal(1, diag.MacroTrace.DefinitionSpan.Value.StartLocation.Line);
+    }
 }

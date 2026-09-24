@@ -1,9 +1,0 @@
-EntryFile : "Program.mh";
-GlobalUnsafeEnabled : false;
-ProjectsReferenced : [];
-ImplicitTopLevel: true;
-Sources : {
-    Directory : "$",
-    ByName : "*.mh"
-};
-

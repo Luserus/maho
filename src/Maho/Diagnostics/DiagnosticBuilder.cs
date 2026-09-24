@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -20,6 +21,7 @@ internal sealed class DiagnosticBuilder
     private List<DiagnosticHelp>? helpMessages;
     private List<DiagnosticSuggestion>? suggestions;
     private Dictionary<string, object?>? customData;
+    private ExpansionOrigin? expansionOrigin;
 
     public DiagnosticBuilder(
         DiagnosticsManager manager,
@@ -108,6 +110,13 @@ internal sealed class DiagnosticBuilder
         return this;
     }
 
+    /// <summary> Attaches macro expansion provenance if this diagnostic occurred within expanded code. </summary>
+    public DiagnosticBuilder WithExpansionOrigin(ExpansionOrigin? origin)
+    {
+        expansionOrigin = origin;
+        return this;
+    }
+
     /// <summary> Materializes the configured <see cref="Diagnostic"/> instance. </summary>
     public Diagnostic Build()
     {
@@ -117,7 +126,8 @@ internal sealed class DiagnosticBuilder
             Notes = notes ?? (IReadOnlyList<DiagnosticNote>)[],
             HelpMessages = helpMessages ?? (IReadOnlyList<DiagnosticHelp>)[],
             Suggestions = suggestions ?? (IReadOnlyList<DiagnosticSuggestion>)[],
-            CustomData = customData ?? (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>()
+            CustomData = customData ?? (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(),
+            ExpansionOrigin = expansionOrigin
         };
     }
 

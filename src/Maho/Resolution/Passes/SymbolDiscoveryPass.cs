@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Maho.Diagnostics;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -12,8 +14,40 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         this.context = context;
 
+        if (context.Options?.GlobalAliases is { Count: > 0 } globalAliases)
+        {
+            RegisterGlobalAliases(globalAliases);
+        }
+
         foreach (var root in context.SyntaxTree.Roots)
             ResolveCompilationUnit(root);
+    }
+
+    private void RegisterGlobalAliases(IReadOnlyDictionary<string, string> globalAliases)
+    {
+        foreach (var (aliasName, target) in globalAliases)
+        {
+            string aliasSource = $"using {aliasName} = {target};";
+            var text = new SourceText(aliasSource, context.Options?.ProjectFilePath ?? "<global-aliases>");
+            var dm = new DiagnosticsManager(text);
+            var lexer = new Lexer(text, dm);
+            lexer.Lex();
+            var parser = new Parser(text, dm);
+            var unit = parser.Parse(lexer.Tokens);
+
+            if (dm.Diagnostics.Count > 0)
+            {
+                foreach (var diag in dm.Diagnostics)
+                    context.Diagnostics?.Report(diag);
+                continue;
+            }
+
+            if (unit.Members.Count > 0 && unit.Members[0] is TopLevelAliasDeclaration topAlias)
+            {
+                var symbol = ResolveTopLevelAliasDeclaration(topAlias.Alias, context.GlobalScope, context.GlobalNamespace);
+                symbol.IsGlobalAlias = true;
+            }
+        }
     }
 
     private void ResolveCompilationUnit(CompilationUnit unit)
@@ -179,7 +213,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private void ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    private AliasSymbol ResolveTopLevelAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
     {
         Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var aliasScope = context.CreateScope(enclosingScope);
@@ -187,6 +221,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         ResolutionContext.BindChildScope(ownerScope, symbol, aliasScope);
         context.RegisterSyntaxScope(declaration, aliasScope);
         symbol.GenericParameters = ResolveGenericParameters(declaration.Name, aliasScope, symbol);
+
+        return symbol;
     }
 
     private void ResolveMemberAliasDeclaration(AliasDeclaration declaration, Scope enclosingScope, SymbolHandle? containingType)

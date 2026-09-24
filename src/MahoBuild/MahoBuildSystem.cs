@@ -176,7 +176,8 @@ public static class MahoBuildSystem
             ImplicitTopLevel = config.ImplicitTopLevel || options.ImplicitTopLevel,
             RootDirectory = projectDir,
             ReferencedProjects = config.ProjectsReferenced,
-            GlobalAliases = config.GlobalAliases
+            GlobalAliases = config.GlobalAliases,
+            ProjectFilePath = fullProjectPath
         };
 
         return new MahoProject(projectName, projectDir, fullProjectPath, config, sourceFiles, combinedOptions);

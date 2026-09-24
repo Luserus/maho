@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -11,7 +12,7 @@ internal readonly struct SymbolPart : IEquatable<SymbolPart>
     private readonly string? literal;
 
     public int Length => literal?.Length ?? span.Length;
-    
+
     public int Arity { get; }
 
     private SymbolPart(SourceText? source, TextSpan span, string? literal, int arity)
@@ -45,7 +46,22 @@ internal readonly struct SymbolPart : IEquatable<SymbolPart>
         return hash.ToHashCode();
     }
 
-    public override string ToString() => literal ?? source!.ToString(span);
+    public string Text => literal ?? source!.ToString(span);
+
+    public string ToDisplayString()
+    {
+        string text = Text;
+        if (Arity == 0)
+            return text;
+
+        if (Arity == 1)
+            return $"{text}<T>";
+
+        var args = Enumerable.Range(1, Arity).Select(i => $"T{i}");
+        return $"{text}<{string.Join(", ", args)}>";
+    }
+
+    public override string ToString() => Text;
 
     public static bool operator ==(SymbolPart syname, SymbolPart other) => syname.Equals(other);
 

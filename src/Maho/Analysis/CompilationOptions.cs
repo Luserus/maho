@@ -64,6 +64,9 @@ public sealed record CompilationOptions
     /// <summary> Project-wide alias definitions. </summary>
     public IReadOnlyDictionary<string, string> GlobalAliases { get; init; } = new Dictionary<string, string>();
 
+    /// <summary> Full path to the project file if loaded from disk. </summary>
+    public string? ProjectFilePath { get; init; }
+
     /// <summary>
     /// Maximum recursion depth allowed during macro expansion.
     /// Defaults to 128. A value of 0 indicates unbounded recursion.

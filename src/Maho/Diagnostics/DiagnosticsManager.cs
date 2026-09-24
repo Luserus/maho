@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Threading;
+using Maho.Syntax;
 using Maho.Text;
 
 namespace Maho.Diagnostics;
@@ -239,16 +240,29 @@ internal sealed class DiagnosticsManager
     /// <summary>
     /// Reports a type reference that could not be matched to any visible declaration.
     /// </summary>
-    public void ReportUnresolvedTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0500", $"could not resolve type '{typeName}'", span, source)
+    public void ReportUnresolvedTypeReference(
+        TextSpan span,
+        string typeName,
+        SourceText? source = null,
+        ExpansionOrigin? origin = null,
+        string? arityNote = null)
+    {
+        var builder = BuildError("MH0500", $"could not resolve type '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"type '{typeName}' not found", source)
-            .WithHelp("check for a missing import or declaration")
+            .WithExpansionOrigin(origin);
+
+        if (arityNote is not null)
+            builder.WithNote(arityNote);
+
+        builder.WithHelp("check for a missing import or declaration")
             .Report();
+    }
 
     /// <summary> Reports a type reference that matched more than one visible declaration. </summary>
-    public void ReportAmbiguousTypeReference(TextSpan span, string typeName, SourceText? source = null) =>
+    public void ReportAmbiguousTypeReference(TextSpan span, string typeName, SourceText? source = null, ExpansionOrigin? origin = null) =>
         BuildError("MH0501", $"type '{typeName}' is ambiguous in the current scope", span, source)
             .WithPrimaryLabel(span, $"ambiguous reference to '{typeName}'", source)
+            .WithExpansionOrigin(origin)
             .WithHelp($"qualify '{typeName}' with its namespace or use an alias")
             .Report();
 
