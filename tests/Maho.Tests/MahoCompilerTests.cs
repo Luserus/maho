@@ -1,10 +1,26 @@
+using System.Collections.Generic;
 using System.Text.Json;
-using Maho.Build;
+using Miryo.Build;
 
 namespace Maho.Tests;
 
 public sealed class MahoCompilerTests
 {
+    private static CompilerProjectAnalysisResult AnalyzeProject(string projectPath)
+    {
+        var project = MiryoBuildSystem.LoadProject(projectPath);
+        var options = new CompilationOptions
+        {
+            EntryFile = project.EntryFile,
+            ImplicitTopLevel = project.ImplicitTopLevel,
+            RootDirectory = project.ProjectDirectory,
+            ReferencedProjects = [.. project.ProjectsReferenced],
+            GlobalAliases = new Dictionary<string, string>((Dictionary<string, string>)project.GlobalAliases),
+            ProjectFilePath = project.ProjectFilePath
+        };
+        return MahoCompiler.AnalyzeFiles(project.SourceFiles, AnalysisOutput.None, project.ProjectDirectory, options);
+    }
+
     [Fact]
     public void AnalyzeText_WithDebugOutputs_ReturnsStructuredPayloads()
     {
@@ -119,7 +135,7 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
@@ -159,7 +175,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
@@ -186,7 +202,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.Equal(Path.GetFullPath(firstPath), result.EntryFile);
@@ -212,7 +228,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(projectPath, string.Empty);
             File.WriteAllText(programPath, "#pragma toplevel enable\nrun();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
@@ -240,7 +256,7 @@ public sealed class MahoCompilerTests
                 """);
             File.WriteAllText(programPath, "call();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
@@ -268,7 +284,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "public class Point { public struct int; public int X; }");
             File.WriteAllText(secondPath, "run();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
@@ -295,7 +311,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "first();");
             File.WriteAllText(secondPath, "second();");
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
@@ -326,7 +342,7 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             CompilerBatchFileResult program = Assert.Single(result.Files);
             Assert.True(program.HasErrors);
@@ -375,7 +391,7 @@ public sealed class MahoCompilerTests
                 }
                 """);
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(2, result.Files.Length);
@@ -409,7 +425,7 @@ public sealed class MahoCompilerTests
                 }
                 """);
 
-            CompilerProjectAnalysisResult result = MahoBuildSystem.AnalyzeProject(projectPath);
+            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             CompilerBatchFileResult program = Assert.Single(result.Files);
@@ -419,5 +435,16 @@ public sealed class MahoCompilerTests
         {
             Directory.Delete(tempDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void MahoCompiler_ReportsPhaseTimers_ForSyntaxAndSemanticPhases()
+    {
+        var output = MahoCompiler.CompileSource("public struct Sample;");
+        Assert.NotNull(output.PhaseTimers);
+        Assert.True(output.PhaseTimers.Syntax >= TimeSpan.Zero);
+        Assert.True(output.PhaseTimers.SemanticAnalysis >= TimeSpan.Zero);
+        Assert.Equal(output.PhaseTimers.Syntax + output.PhaseTimers.SemanticAnalysis + output.PhaseTimers.Lowering, output.PhaseTimers.Total);
+        Assert.Equal(output.PhaseTimers.Total, output.Elapsed);
     }
 }

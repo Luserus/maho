@@ -13,9 +13,10 @@ This folder matters because it defines what leaves the compiler:
 - `MahoCompiler.cs`: public compiler entrypoint and orchestration for single-file and batch analysis.
 - `Compilation.cs`: root compilation coordination object managing source units, referenced compilations, and resolution passes.
 - `AnalysisSession.cs`: stateful incremental compilation session for interactive evaluation and REPL environments.
+- `CompilationPhaseTimers.cs`: measures duration across compilation pipeline phases (`Syntax`, `SemanticAnalysis`, `Lowering`, `Total`).
 - `CompilerAnalysisResult.cs`: immutable single-file result payload.
 - `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
-- `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)`.
+- `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)` and `CompileFiles(...)`.
 - `AnalysisOutput.cs`: flags that decide which debug payloads are included.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
@@ -23,7 +24,7 @@ This folder matters because it defines what leaves the compiler:
 - `TextSpanInfo.cs`: public span with both absolute offsets and line/column endpoints.
 - `DebugJson.cs`: internal serializer helpers plus debug DTOs for lexer/parser output.
 
-*(Note: Domain-specific `.mhpr` project loading, source file discovery, and project-graph dependency resolution are owned by the decoupled `MahoBuild` library in `src/MahoBuild`.)*
+*(Note: Domain-specific `.mhpr` project loading, workspace orchestration, and multi-project dependency resolution are owned by `Miryo` in `src/Miryo/Build`, documented in [`miryo.md`](miryo.md). The core compiler operates purely on source text and files.)*
 
 ## `MahoCompiler` function guide
 
@@ -44,45 +45,30 @@ The in-memory companion to `AnalyzeFile(...)`. It is the primary API for unit te
 
 The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel parsing and front-end work across multiple source files:
 - input paths are normalized up front,
-- parsed compilation units are united under a single `SyntaxTree`,
+- parallel syntax phase parses compilation units under `Parallel.For`,
+- parsed units are united under a single `SyntaxTree`,
 - runs the multi-pass `Resolver` across all compilation units,
+- measures and records execution duration in `CompilationPhaseTimers`,
 - returns a `CompilerProjectAnalysisResult` keeping file results in input order.
 
 ### `CompileFiles(...)` and `CompileSource(...)`
 
 These are the compiler entry points used for full compilation runs. They execute front-end lexing, parsing, and semantic resolution passes (`SymbolDiscoveryPass` and `DeclarationResolutionPass`). If front-end analysis succeeds with zero errors, execution reaches the lowering/codegen boundary (currently throwing `CompilerPipelineNotImplementedException` with error code `MH9000`).
 
-### Build System Facade (`MahoBuild.MahoBuildSystem`)
-
-When compiling or analyzing `.mhpr` project files or whole directories, the separate `MahoBuild` library provides:
-- `MahoBuildSystem.AnalyzeProject(projectFilePath, output, options)`
-- `MahoBuildSystem.CompileProject(projectFilePath, output, options)`
-- `MahoBuildSystem.CreateCompilation(projectFilePath, options)`
-
-Project files define entry-point selection, global unsafe configuration, project references, and file discovery patterns:
-
-```mhpr
-EntryFile : "Program.mh";
-ImplicitTopLevel : true;
-GlobalUnsafeEnabled : false;
-ProjectsReferenced : [];
-Sources : {
-	Directory : "$",
-	SourceFiles : [ "Program.mh" ],
-	ByName : "*.mh"
-};
-GlobalAliases : {
-	"int32" : "Std.Int32",
-	"float32" : "Std.Float32"
-};
-```
+Both methods record phase durations in `CompilationPhaseTimers` and expose `Elapsed` representing total core compilation time.
 
 ### `AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)`
 
 This is the orchestration seam inside the library:
 
 1. create one `DiagnosticsManager`,
-2. run the lexer,
+2. run the lexer and parser, measuring `Syntax` duration,
+3. wrap the parsed root in a `SyntaxTree`,
+4. start resolution, measuring `SemanticAnalysis` duration,
+5. project diagnostics,
+6. record phase timers,
+7. optionally serialize lexer/parser debug views,
+8. return a `CompilerAnalysisResult`.
 3. run the parser,
 4. wrap the parsed root in a `SyntaxTree`,
 5. start resolution only after that syntax-tree boundary exists,
@@ -150,18 +136,29 @@ Fields:
 
 ### `CompilerProjectAnalysisResult`
 
-Top-level immutable batch result returned by `AnalyzeFiles(...)`.
+Top-level immutable batch result returned by `AnalyzeFiles(...)` and `CompileFiles(...)`.
 
 Fields:
 
 - `ProjectName`: friendly identity for the analyzed batch.
 - `Files`: ordered file outcomes.
 - `EntryFile`: configured or unambiguous implicit entry source, when one was selected.
+- `PhaseTimers`: breakdown of duration across pipeline phases (`CompilationPhaseTimers`).
+- `Elapsed`: total core compilation duration across all phases (`PhaseTimers.Total`).
 
 #### `HasErrors`
 
 Scans file outcomes for any failing file so callers can branch on batch success without
 re-implementing error aggregation.
+
+### `CompilationPhaseTimers`
+
+Record measuring execution duration across distinct compiler phases:
+
+- `Syntax`: combined duration of lexing and parsing across all input source files (multithreaded).
+- `SemanticAnalysis`: duration of symbol discovery and declaration resolution passes.
+- `Lowering`: duration of lowering and code generation.
+- `Total`: combined duration across all core compilation phases (`Syntax + SemanticAnalysis + Lowering`).
 
 ### `DiagnosticInfo`
 

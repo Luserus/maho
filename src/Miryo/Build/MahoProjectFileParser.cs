@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Maho.Build;
+namespace Miryo.Build;
 
 /// <summary> Parses the compiler's domain-specific, JSON-inspired <c>.mhpr</c> format. </summary>
 public sealed class MahoProjectFileParser

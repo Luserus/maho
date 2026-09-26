@@ -13,7 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Maho\Maho.csproj" />
-    <ProjectReference Include="..\MahoBuild\MahoBuild.csproj" />
   </ItemGroup>
 
 </Project>

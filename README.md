@@ -4,12 +4,12 @@ An experimental programming language and compiler project inspired by C#.
 
 ## Current Status
 
-The repository is organized into four projects:
+The repository is organized into focused projects:
 
-- `src/Maho/Maho.csproj`: the reusable core compiler library (source text, lexing, parsing, AST, diagnostics, and semantic resolution passes).
-- `src/MahoBuild/MahoBuild.csproj`: the build system library (domain-specific `.mhpr` project file parsing, source file discovery, multi-project reference graph resolution).
+- `src/Maho/Maho.csproj`: the reusable core compiler library (source text, lexing, parsing, AST, diagnostics, phase timers, and semantic resolution passes).
+- `src/Miryo/Miryo.csproj`: the project manager and build tool (`miryo`), including `Miryo.Build` for project configuration, source discovery, and pipeline orchestration.
 - `src/MahoCli/MahoCli.csproj`: the command-line compiler driver (`mahoc`) and terminal diagnostic renderer.
-- `tests/Maho.Tests/Maho.Tests.csproj`: unit and integration test suite (213+ automated tests).
+- `tests/Maho.Tests/Maho.Tests.csproj`: unit and integration test suite (313 automated tests).
 - `maho.sln`: Visual Studio / OmniSharp solution file connecting all projects.
 
 ### Compiler Pipeline Capabilities
@@ -25,10 +25,10 @@ Today the compiler executes a complete front-end pipeline up through declaration
 3. **Parsing**:
    - Recursive descent parser with operator-precedence Pratt climbing.
    - Comprehensive AST nodes: declarations (classes, structs, interfaces, enums, functions, properties, fields, aliases), statements (control flow, assignments, local blocks, labels, gotos), and expressions.
-   - Full opt-in top-level statement support via `#pragma toplevel enable` or project-level configuration.
-4. **Build System & Project Graph (`MahoBuild`)**:
-   - Parses domain-specific `.mhpr` project files with recursive source discovery patterns (`Directory`, `SourceFiles`, `ByName`).
-   - Project-reference graph resolution allowing dependencies to be imported without polluting declaration scopes.
+   - Full opt-in top-level statement support via `#pragma toplevel enable` or CLI/project-level configuration.
+4. **Build System & Project Graph (`Miryo.Build` & `Miryo`)**:
+   - Independent build orchestrator parsing `.mhpr` project files and configuring builds via `miryo.config`.
+   - Discovers sources, builds project dependency graphs, and spawns `mahoc` compiler processes.
    - Completely decoupled from the core compiler library.
 5. **Semantic Resolution Pipeline (`Resolver`)**:
    - **Symbol Discovery Pass (`SymbolDiscoveryPass`)**:
@@ -39,26 +39,28 @@ Today the compiler executes a complete front-end pipeline up through declaration
    - **Declaration Resolution Pass (`DeclarationResolutionPass`)**:
      - **Non-Partial Duplicate Types**: Detects and reports duplicate type declarations with matching arities when at least one declaration is non-partial.
      - **Partial Types**: Merges matching partial declarations into canonical symbols; verifies `TypeKind` consistency across partial definitions.
-     - **Partial Functions**: Allows unlimited bodyless partial declarations (supporting future macro implementations without spurious warnings); allows at most one declaration with an implementation body; enforces return type consistency.
+     - **Partial Functions**: Allows unlimited bodyless partial declarations; allows at most one declaration with an implementation body; enforces return type consistency.
      - **Duplicate Functions**: Detects duplicate non-partial function declarations matching in parameter types and generic arity.
      - **Duplicate Variables & Fields**: Flags duplicate global variables and struct/class fields.
      - **Duplicate Properties**: Flags duplicate property declarations within product types.
      - **Type Hierarchy & Cycles**: Resolves base types and detects cyclic inheritance chains via graph depth-first traversal.
      - **Ambiguous Type References**: Identifies collisions between imported/unqualified types from multiple namespaces.
      - **Type Constraints & Aliases**: Resolves generic parameter constraints, unwraps global and local aliases, and validates constraint compatibility.
-6. **Diagnostics Engine**:
+6. **Diagnostics Engine & Phase Timing**:
    - Rich two-span diagnostics with primary carets (`^^^^`), secondary context labels (`----`), informational notes, remediation advice, and suggestions.
-   - ANSI color rendering in terminal output; structured JSON diagnostics format for IDEs and tooling.
+   - Core compiler tracks pipeline phase durations (`Syntax`, `SemanticAnalysis`, `Lowering`, and `Total`), returning them in analysis results.
+   - ANSI color rendering in terminal output with formatted status lines (`Build succeeded in <time>`, `Build failed with <n> error(s)`).
 7. **Lowering & Codegen**:
-   - Intentionally terminates after declaration resolution with `MH9000` until semantic statement/expression type-checking and lowering passes are implemented.
+   - Intentionally terminates after declaration resolution with `MH9000` until semantic statement/expression lowering passes are implemented.
 
 ## Documentation
 
 Detailed subsystem guides are collected in [`docs/repository-guide.md`](docs/repository-guide.md):
 
-- [`docs/cli.md`](docs/cli.md): command-line options and driver workflows.
+- [`docs/miryo.md`](docs/miryo.md): build tool, `.mhpr` project files, and `miryo.config`.
+- [`docs/cli.md`](docs/cli.md): `mahoc` compiler CLI options and driver workflows.
 - [`docs/compiler-library.md`](docs/compiler-library.md): architecture of the core `Maho` library and resolution passes.
-- [`docs/analysis.md`](docs/analysis.md): public compilation, session, and diagnostic APIs.
+- [`docs/analysis.md`](docs/analysis.md): public compilation, session, phase timers, and diagnostic APIs.
 - [`docs/diagnostics.md`](docs/diagnostics.md): internal diagnostics model and reporters.
 - [`docs/language-theory.md`](docs/language-theory.md): grammar specifications, AST taxonomy, and resolution semantics.
 - [`docs/source-tree.md`](docs/source-tree.md): repository directory and project layout.
@@ -79,9 +81,9 @@ Build the entire solution with `dotnet`:
 dotnet build maho.sln
 ```
 
-## Building & CLI
+## Toolchain & CLI
 
-Build the CLI compiler (`mahoc`) using the cross-platform build scripts:
+Build the toolchain binaries (`mahoc` and `miryo`) using the cross-platform build scripts:
 
 ```bash
 # Linux / macOS / WSL / Git Bash
@@ -97,52 +99,38 @@ build-maho
 ### Build Options
 
 - `./build-maho`: clean release build for host platform into `dist/` (omits `.pdb` and `.deps.json` files).
-- `./build-maho --single-file` (or `-s`): packages into a single binary executable (`mahoc` or `mahoc.exe`) with no loose DLLs, config JSON, or PDBs.
+- `./build-maho --single-file` (or `-s`): packages into single binary executables (`mahoc`, `miryo`) with no loose DLLs or config files.
 - `./build-maho --debug` (or `-d`): builds Debug configuration including PDB symbols and dependency JSON files.
-- `./build-maho --all`: compiles for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `dist/<platform>/`. Can be combined with `--single-file` or `--debug`.
+- `./build-maho --all`: compiles for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `dist/<platform>/`.
 
-Run the compiled CLI with:
-
-```bash
-./dist/mahoc [options] [source-path]
-```
-
-### Examples
+### Running the Project Manager (`miryo`)
 
 ```bash
-# Compile a project file (.mhpr) with pretty diagnostics
-./dist/mahoc Samples/Test.mhpr
+# Create a new binary or library project
+./dist/miryo new MyApp
+./dist/miryo new --lib MyLib
 
-# Inspect lexer tokens as JSON
-./dist/mahoc --debug lex --output output/tokens.json Samples/Program.mh
+# Build or type-check a project
+./dist/miryo build
+./dist/miryo build --check
 
-# Inspect parser AST as JSON and output to stdout
-./dist/mahoc --debug parse --output - Samples/Program.mh
-
-# Output diagnostics in JSON format to stderr or file
-./dist/mahoc --diagnostics json --output diagnostics.json Samples/Test.mhpr
-
-# Enforce warnings as errors and full file paths
-./dist/mahoc -Werror --diagnostic-paths full Samples/Test.mhpr
-
-# Check compiler version or help
-./dist/mahoc --version
-./dist/mahoc --help
+# Run a project (passes runtime args after --)
+./dist/miryo run -- arg1 arg2
 ```
 
-### Supported Flags
+### Running the Direct Compiler (`mahoc`)
 
-- `--debug (lex|parse)+ --output <path|->`: emit selected debug AST/token payloads to a file or `stdout`.
-- `--diagnostics [pretty|text|json] --output <path|->`: emit diagnostics in rich pretty-printed format (default), short text format, or JSON to a file or `stderr`.
-- `--color [auto|always|never]`: control ANSI colored terminal output.
-- `--diagnostic-paths (relative|project|full)`: choose between relative paths (CWD, standard compiler default), project-relative paths, or full absolute paths in diagnostics.
-- `--implicit-toplevel[=true|false]`: allow or disallow implicit top-level statements for entry files (defaults to true for single files, false for projects unless configured).
-- `--no-project`: allow compiling directory sources directly when no `.mhpr` project file is present.
-- `-Werror`, `--warnings-as-errors`: treat compiler warnings as errors.
-- `-v`, `--version`: print the compiler version and exit.
-- `-h`, `--help`: print usage information and exit.
+```bash
+# Compile or type-check source files directly
+./dist/mahoc --check src/Program.mh
+./dist/mahoc --check src/
 
-When a directory path (or `.`) is provided, the CLI looks for a unique `.mhpr` project file in that directory. If no project file is found, `--no-project` must be supplied to analyze directory sources without a project file.
+# Pass global type aliases
+./dist/mahoc --check --alias int32=Std.Int32 src/
+
+# Inspect AST or tokens as JSON
+./dist/mahoc --debug parse -o - src/Program.mh
+```
 
 ## Project Files (`.mhpr`)
 
@@ -185,18 +173,16 @@ GlobalAliases : {
   - `session.CommitSnippet(result)`: incorporates successful declarations into the active session scope.
 - `MahoCompiler`: high-level facade for analyzing single files, in-memory strings, or file batches.
 
-### Build System Library (`MahoBuild`)
-
-- `MahoBuildSystem`: facade for project loading, compilation creation, source discovery, and build orchestration.
-  - `MahoBuildSystem.LoadProject(projectFilePath, options)`
-  - `MahoBuildSystem.CreateCompilation(projectFilePath, options)`
-  - `MahoBuildSystem.AnalyzeProject(projectFilePath, output, options)`
-  - `MahoBuildSystem.CompileProject(projectFilePath, output, options)`
-  - `MahoBuildSystem.ResolveSourceFiles(path, config)`
-  - `MahoBuildSystem.FindProjectFile(directoryPath)`
+### Build System & Toolchain (`Miryo` & `Miryo.Build`)
+ 
+- `MiryoBuildSystem`: project loading, source discovery, and pipeline orchestration.
+  - `MiryoBuildSystem.LoadProject(projectFilePath)`
+  - `MiryoBuildSystem.ResolveSourceFiles(path, config)`
+  - `MiryoBuildSystem.FindProjectFile(directoryPath)`
 - `MahoProjectFileParser`: parses domain-specific `.mhpr` project configuration.
+- `MiryoConfiguration`: parses `miryo.config` INI configuration and resolves tool paths (`mahoc`, etc.).
 
-### CLI Library (`MahoCli`)
+### CLI Compiler (`MahoCli` / `mahoc`)
 
 - `TerminalDiagnosticRenderer`: client-side terminal diagnostic renderer in `MahoCli.Diagnostics` producing ANSI reports with carets, line gutters, secondary labels, and suggestions.
-- `CommandLine`: command-line parser and orchestration driver.
+- `CommandLine`: command-line parser and compiler frontend driver.

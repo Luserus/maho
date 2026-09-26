@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace Maho.Build;
+namespace Miryo.Build;
 
 /// <summary>
-/// Represents a loaded project with its configuration, discovered source files, and compilation options.
+/// Represents a loaded project with its configuration and discovered source files.
 /// </summary>
 public sealed class MahoProject
 {
@@ -15,7 +15,11 @@ public sealed class MahoProject
     public string ProjectFilePath { get; }
     public MahoProjectConfiguration Configuration { get; }
     public IReadOnlyList<string> SourceFiles { get; }
-    public CompilationOptions Options { get; }
+    public string? EntryFile { get; }
+    public bool ImplicitTopLevel { get; }
+    public bool GlobalUnsafeEnabled { get; }
+    public IReadOnlyList<string> ProjectsReferenced { get; }
+    public IReadOnlyDictionary<string, string> GlobalAliases { get; }
 
     public MahoProject(
         string projectName,
@@ -23,21 +27,30 @@ public sealed class MahoProject
         string projectFilePath,
         MahoProjectConfiguration configuration,
         IReadOnlyList<string> sourceFiles,
-        CompilationOptions options)
+        string? entryFile,
+        bool implicitTopLevel,
+        bool globalUnsafeEnabled,
+        IReadOnlyList<string> projectsReferenced,
+        IReadOnlyDictionary<string, string> globalAliases)
     {
         ProjectName = projectName;
         ProjectDirectory = projectDirectory;
         ProjectFilePath = projectFilePath;
         Configuration = configuration;
         SourceFiles = sourceFiles;
-        Options = options;
+        EntryFile = entryFile;
+        ImplicitTopLevel = implicitTopLevel;
+        GlobalUnsafeEnabled = globalUnsafeEnabled;
+        ProjectsReferenced = projectsReferenced;
+        GlobalAliases = globalAliases;
     }
 }
 
 /// <summary>
-/// Facade build system providing isolated project-file loading, source discovery, and build orchestration.
+/// Build system services for project loading, source discovery, and dependency management.
+/// Fully decoupled from the compiler library; compilation execution is performed via the CLI compiler.
 /// </summary>
-public static class MahoBuildSystem
+public static class MiryoBuildSystem
 {
     /// <summary>
     /// Resolves source files for compilation from a file or directory path.
@@ -149,16 +162,11 @@ public static class MahoBuildSystem
     }
 
     /// <summary>
-    /// Loads a domain-specific <c>.mhpr</c> project file, parses its configuration, discovers source files, and prepares compilation options.
+    /// Loads a domain-specific <c>.mhpr</c> project file, parses its configuration, and discovers source files.
     /// </summary>
-    public static MahoProject LoadProject(string projectFilePath, CompilationOptions? options = null)
+    public static MahoProject LoadProject(string projectFilePath)
     {
-        options ??= CompilationOptions.Default;
         string fullProjectPath = Path.GetFullPath(projectFilePath);
-
-        if (!string.Equals(Path.GetExtension(fullProjectPath), ".mhpr", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Project files must use the '.mhpr' extension.", nameof(projectFilePath));
-
         string projectJson = File.ReadAllText(fullProjectPath);
         var config = MahoProjectFileParser.Parse(projectJson);
 
@@ -168,105 +176,31 @@ public static class MahoBuildSystem
 
         string? resolvedEntry = config.EntryFile is not null
             ? (Path.IsPathRooted(config.EntryFile) ? config.EntryFile : Path.GetFullPath(Path.Combine(projectDir, config.EntryFile)))
-            : options.EntryFile;
+            : null;
 
-        var combinedOptions = options with
-        {
-            EntryFile = resolvedEntry,
-            ImplicitTopLevel = config.ImplicitTopLevel || options.ImplicitTopLevel,
-            RootDirectory = projectDir,
-            ReferencedProjects = config.ProjectsReferenced,
-            GlobalAliases = config.GlobalAliases,
-            ProjectFilePath = fullProjectPath
-        };
-
-        return new MahoProject(projectName, projectDir, fullProjectPath, config, sourceFiles, combinedOptions);
+        return new MahoProject(
+            projectName,
+            projectDir,
+            fullProjectPath,
+            config,
+            sourceFiles,
+            resolvedEntry,
+            config.ImplicitTopLevel,
+            config.GlobalUnsafeEnabled,
+            config.ProjectsReferenced,
+            config.GlobalAliases);
     }
+}
 
-    /// <summary>
-    /// Creates a Compilation instance representing a project file, including its referenced project compilations.
-    /// </summary>
-    public static Compilation CreateCompilation(string projectFilePath, CompilationOptions? options = null)
-    {
-        var project = LoadProject(projectFilePath, options);
-        var referencedCompilations = new List<Compilation>();
-        foreach (var refProj in project.Configuration.ProjectsReferenced)
-        {
-            string refPath = Path.IsPathRooted(refProj) ? refProj : Path.Combine(project.ProjectDirectory, refProj);
-            if (File.Exists(refPath))
-                referencedCompilations.Add(CreateCompilation(refPath, options));
-        }
+/// <summary> Backward-compatible alias for <see cref="MiryoBuildSystem"/>. </summary>
+public static class MahoBuildSystem
+{
+    public static string[] ResolveSourceFiles(string path, MahoProjectConfiguration? config = null) =>
+        MiryoBuildSystem.ResolveSourceFiles(path, config);
 
-        return Compilation.FromFiles(project.SourceFiles, project.ProjectName, project.Options, referencedCompilations);
-    }
+    public static string? FindProjectFile(string directoryPath) =>
+        MiryoBuildSystem.FindProjectFile(directoryPath);
 
-    /// <summary>
-    /// Analyzes a domain-specific <c>.mhpr</c> project file using the build system.
-    /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeProject(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        var project = LoadProject(projectFilePath, options);
-        return MahoCompiler.AnalyzeFiles(project.SourceFiles, output, project.ProjectDirectory, project.Options);
-    }
-
-    /// <summary>
-    /// Analyzes a domain-specific <c>.mhpr</c> project file using the build system. Alias for <see cref="AnalyzeProject"/>.
-    /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeProjectFile(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-        => AnalyzeProject(projectFilePath, output, options);
-
-    /// <summary>
-    /// Compiles a domain-specific <c>.mhpr</c> project file using the build system.
-    /// </summary>
-    public static CompilerProjectAnalysisResult CompileProject(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        var project = LoadProject(projectFilePath, options);
-        return MahoCompiler.CompileFiles(project.SourceFiles, output, project.ProjectDirectory, project.Options);
-    }
-
-    /// <summary>
-    /// Compiles a domain-specific <c>.mhpr</c> project file using the build system. Alias for <see cref="CompileProject"/>.
-    /// </summary>
-    public static CompilerProjectAnalysisResult CompileProjectFile(
-        string projectFilePath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-        => CompileProject(projectFilePath, output, options);
-
-    /// <summary>
-    /// Compiles all source files in a directory using default project directory options.
-    /// </summary>
-    public static CompilerProjectAnalysisResult CompileDirectory(
-        string directoryPath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        string fullDirPath = Path.GetFullPath(directoryPath);
-        string[] files = ResolveSourceFiles(fullDirPath);
-        var dirOptions = (options ?? CompilationOptions.Default) with { RootDirectory = options?.RootDirectory ?? fullDirPath };
-        return MahoCompiler.CompileFiles(files, output, fullDirPath, dirOptions);
-    }
-
-    /// <summary>
-    /// Analyzes all source files in a directory using default project directory options.
-    /// </summary>
-    public static CompilerProjectAnalysisResult AnalyzeDirectory(
-        string directoryPath,
-        AnalysisOutput output = AnalysisOutput.None,
-        CompilationOptions? options = null)
-    {
-        string fullDirPath = Path.GetFullPath(directoryPath);
-        string[] files = ResolveSourceFiles(fullDirPath);
-        var dirOptions = (options ?? CompilationOptions.Default) with { RootDirectory = options?.RootDirectory ?? fullDirPath };
-        return MahoCompiler.AnalyzeFiles(files, output, fullDirPath, dirOptions);
-    }
+    public static MahoProject LoadProject(string projectFilePath) =>
+        MiryoBuildSystem.LoadProject(projectFilePath);
 }
