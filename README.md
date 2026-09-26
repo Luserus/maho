@@ -4,6 +4,8 @@ An experimental programming language and compiler project inspired by C#.
 
 ## Current Status
 
+![Build Status](https://github.com)
+
 The repository is organized into focused projects:
 
 - `src/Maho/Maho.csproj`: the reusable core compiler library (source text, lexing, parsing, AST, diagnostics, phase timers, and semantic resolution passes).
