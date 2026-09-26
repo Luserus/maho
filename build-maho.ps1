@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Build script for the Maho compiler (mahoc) for Windows and cross-platform PowerShell.
+    Build script for the Maho toolchain (miryo, mahoc, Maho) for Windows and cross-platform PowerShell.
 
 .DESCRIPTION
-    Compiles the Maho compiler CLI into the dist/ directory.
+    Compiles the Maho toolchain into the dist/ directory.
     Supports host platform builds, single-file packaging, debug builds, and multi-platform compilation.
 
 .PARAMETER All
@@ -13,29 +13,29 @@
     Compiles for a specific platform target (e.g. linux-arm64, win-x64, osx-arm64).
 
 .PARAMETER SingleFile
-    Packages the compiler into a fast, single-file binary (framework-dependent).
+    Packages the toolchain into fast, single-file decoupled binaries (framework-dependent).
 
 .PARAMETER SelfContained
-    Packages the compiler into a standalone self-contained, single-file, trimmed executable.
+    Packages the toolchain into standalone self-contained, single-file, trimmed executables.
 
 .PARAMETER Debug
     Builds with Debug configuration and emits PDB symbol files.
 
 .EXAMPLE
     .\build-maho.ps1
-    Builds the host platform compiler into dist\mahoc.exe.
+    Builds the host platform toolchain into dist\.
 
 .EXAMPLE
     .\build-maho.ps1 -Platform win-x64
-    Builds the compiler for Windows x64 into dist\win-x64\mahoc.exe.
+    Builds the toolchain for Windows x64 into dist\win-x64\.
 
 .EXAMPLE
     .\build-maho.ps1 -SingleFile
-    Builds a single-file executable into dist\mahoc.exe.
+    Builds single-file executables into dist\.
 
 .EXAMPLE
     .\build-maho.ps1 -All
-    Builds the compiler for all major platforms into dist\<platform>\.
+    Builds the toolchain for all major platforms into dist\<platform>\.
 #>
 
 [CmdletBinding()]
@@ -63,6 +63,8 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 $CliProject = Join-Path $RepoRoot "src\MahoCli\MahoCli.csproj"
+$MiryoProject = Join-Path $RepoRoot "src\Miryo\Miryo.csproj"
+$MahoProject = Join-Path $RepoRoot "src\Maho\Maho.csproj"
 $DistDir = Join-Path $RepoRoot "dist"
 
 if ($Help) {
@@ -85,9 +87,9 @@ function Get-HostRid {
     }
 }
 
-function Find-Binary([string]$dir) {
-    $exePath = Join-Path $dir "mahoc.exe"
-    $unixPath = Join-Path $dir "mahoc"
+function Find-Binary([string]$dir, [string]$name = "mahoc") {
+    $exePath = Join-Path $dir "$name.exe"
+    $unixPath = Join-Path $dir $name
 
     if (Test-Path $exePath) { return $exePath }
     if (Test-Path $unixPath) { return $unixPath }
@@ -112,10 +114,44 @@ function Publish-Target([string]$rid, [string]$outDir) {
         $extraArgs += @("-r", $rid, "--no-self-contained")
     }
 
+    # 1. Publish mahoc
     dotnet publish "$CliProject" -c $config -o "$outDir" @extraArgs --nologo -v q
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed with exit code $LASTEXITCODE"
+        throw "dotnet publish mahoc failed with exit code $LASTEXITCODE"
     }
+
+    # 2. Publish miryo
+    dotnet publish "$MiryoProject" -c $config -o "$outDir" @extraArgs --nologo -v q
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish miryo failed with exit code $LASTEXITCODE"
+    }
+
+    # 3. Publish Maho library
+    dotnet publish "$MahoProject" -c $config -o "$outDir" @debugProps --nologo -v q
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish Maho failed with exit code $LASTEXITCODE"
+    }
+
+    # 4. Generate miryo.config
+    $configContent = @"
+# Miryo Toolchain Configuration
+
+[tools]
+mahoc = ["./mahoc", "mahoc"]
+il2llvmir = ["./il2llvmir", "il2llvmir"]
+llvm_opt = ["opt", "/usr/bin/opt"]
+llvm_clang = ["clang", "/usr/bin/clang"]
+
+[templates]
+bin_template = "EntryFile : `"src/Program.mh`";\nImplicitTopLevel : true;\n"
+lib_template = "EntryFile : `"src/Lib.mh`";\nImplicitTopLevel : false;\n"
+bin_source_path = "src/Program.mh"
+bin_source = "println(`"Hello from Maho!`");\n"
+lib_source_path = "src/Lib.mh"
+lib_source = "public struct Lib;\n"
+gitignore = "target/\nbin/\nobj/\ndist/\n"
+"@
+    Set-Content -Path (Join-Path $outDir "miryo.config") -Value $configContent
 }
 
 function Normalize-Rid([string]$inputRid) {
@@ -145,7 +181,7 @@ if (-not (Test-Path $DistDir)) {
 if ($All) {
     $platforms = @("linux-x64", "linux-arm64", "win-x64", "osx-x64", "osx-arm64")
 
-    Write-Host "==> Building Maho compiler (mahoc) for all major platforms..." -ForegroundColor Cyan
+    Write-Host "==> Building Maho toolchain for all major platforms..." -ForegroundColor Cyan
 
     foreach ($rid in $platforms) {
         Write-Host "  -> Publishing for $rid..."
@@ -157,25 +193,19 @@ if ($All) {
     }
 
     Write-Host "  -> Publishing for host platform into $DistDir..."
-    if ($SingleFile -or $SelfContained) {
-        Publish-Target -rid $hostRid -outDir $DistDir
-    } else {
-        dotnet publish "$CliProject" -c $config -o "$DistDir" @debugProps --nologo -v q
-    }
+    Publish-Target -rid $hostRid -outDir $DistDir
 
-    $hostBin = Find-Binary $DistDir
+    $hostMahoc = Find-Binary $DistDir "mahoc"
+    $hostMiryo = Find-Binary $DistDir "miryo"
 
     Write-Host ""
-    Write-Host "Maho compiler (mahoc) successfully built for all major platforms:" -ForegroundColor Green
-    Write-Host "  Host:         $hostBin"
-    Write-Host "  linux-x64:    $(Find-Binary (Join-Path $DistDir 'linux-x64'))"
-    Write-Host "  linux-arm64:  $(Find-Binary (Join-Path $DistDir 'linux-arm64'))"
-    Write-Host "  win-x64:      $(Find-Binary (Join-Path $DistDir 'win-x64'))"
-    Write-Host "  osx-x64:      $(Find-Binary (Join-Path $DistDir 'osx-x64'))"
-    Write-Host "  osx-arm64:    $(Find-Binary (Join-Path $DistDir 'osx-arm64'))"
+    Write-Host "Maho toolchain successfully built for all major platforms:" -ForegroundColor Green
+    Write-Host "  Host Compiler (mahoc): $hostMahoc"
+    Write-Host "  Host Project (miryo):  $hostMiryo"
     Write-Host ""
-    Write-Host "Execute host compiler via:"
-    Write-Host "  $hostBin [options] [source-path]"
+    Write-Host "Execute host toolchain via:"
+    Write-Host "  $hostMiryo [command] [options]"
+    Write-Host "  $hostMahoc [options] [source-paths...]"
 } elseif ($Platform) {
     $targetPlatform = Normalize-Rid $Platform
     $targetDir = Join-Path $DistDir $targetPlatform
@@ -183,34 +213,38 @@ if ($All) {
         New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     }
 
-    Write-Host "==> Building Maho compiler (mahoc) for platform '$targetPlatform'..." -ForegroundColor Cyan
+    Write-Host "==> Building Maho toolchain for platform '$targetPlatform'..." -ForegroundColor Cyan
     Publish-Target -rid $targetPlatform -outDir $targetDir
 
-    $binPath = Find-Binary $targetDir
+    $mahocBin = Find-Binary $targetDir "mahoc"
+    $miryoBin = Find-Binary $targetDir "miryo"
 
     Write-Host ""
-    Write-Host "Maho compiler (mahoc) successfully built for $targetPlatform:" -ForegroundColor Green
-    Write-Host "  $binPath"
+    Write-Host "Maho toolchain successfully built for $targetPlatform:" -ForegroundColor Green
+    Write-Host "  mahoc: $mahocBin"
+    Write-Host "  miryo: $miryoBin"
     Write-Host ""
     if ($targetPlatform -eq $hostRid) {
-        Write-Host "Execute compiler via:"
-        Write-Host "  $binPath [options] [source-path]"
+        Write-Host "Execute toolchain via:"
+        Write-Host "  $miryoBin [command] [options]"
+        Write-Host "  $mahocBin [options] [source-paths...]"
     }
 } else {
-    Write-Host "==> Building Maho compiler (mahoc) for host platform ($hostRid)..." -ForegroundColor Cyan
+    Write-Host "==> Building Maho toolchain for host platform ($hostRid)..." -ForegroundColor Cyan
 
-    if ($SingleFile -or $SelfContained) {
-        Publish-Target -rid $hostRid -outDir $DistDir
-    } else {
-        dotnet publish "$CliProject" -c $config -o "$DistDir" @debugProps --nologo -v q
-    }
+    Publish-Target -rid $hostRid -outDir $DistDir
 
-    $binPath = Find-Binary $DistDir
+    $mahocBin = Find-Binary $DistDir "mahoc"
+    $miryoBin = Find-Binary $DistDir "miryo"
 
     Write-Host ""
-    Write-Host "Maho compiler (mahoc) successfully built:" -ForegroundColor Green
-    Write-Host "  $binPath"
+    Write-Host "Maho toolchain successfully built:" -ForegroundColor Green
+    Write-Host "  mahoc:         $mahocBin"
+    Write-Host "  miryo:         $miryoBin"
+    Write-Host "  Core Library:  $(Join-Path $DistDir 'Maho.dll')"
+    Write-Host "  Configuration: $(Join-Path $DistDir 'miryo.config')"
     Write-Host ""
-    Write-Host "Execute compiler via:"
-    Write-Host "  $binPath [options] [source-path]"
+    Write-Host "Execute toolchain via:"
+    Write-Host "  $miryoBin [command] [options]"
+    Write-Host "  $mahocBin [options] [source-paths...]"
 }

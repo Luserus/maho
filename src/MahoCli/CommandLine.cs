@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Maho.Build;
 
 namespace Maho;
 
@@ -37,9 +36,14 @@ public static class CommandLine
         bool ShowHelp,
         bool ShowVersion,
         string? OutputDestination,
-        string? SourcePath,
+        IReadOnlyList<string> SourceInputs,
+        string? Pattern,
+        string? EntryFile,
         bool? ImplicitTopLevel = null,
-        bool NoProject = false);
+        bool EmitIl = false,
+        bool CheckOnly = false,
+        bool NoRecurse = false,
+        IReadOnlyDictionary<string, string>? GlobalAliases = null);
 
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
@@ -79,18 +83,13 @@ public static class CommandLine
             return 0;
         }
 
-        if (!TryGetSourcePath(options.SourcePath, out string sourcePath, out string? sourcePathError))
-        {
-            Console.Error.WriteLine(sourcePathError);
-            return 1;
-        }
-
+        string primaryInput = options.SourceInputs.Count > 0 ? options.SourceInputs[0] : Directory.GetCurrentDirectory();
         CompilerProjectAnalysisResult analysis;
         string? pipelineError = null;
 
         try
         {
-            analysis = Compile(sourcePath, options);
+            analysis = Compile(options);
         }
         catch (CompilerPipelineNotImplementedException ex)
         {
@@ -99,7 +98,7 @@ public static class CommandLine
         }
         catch (Exception ex) when (IsUserFacingError(ex))
         {
-            Console.Error.WriteLine($"Failed to compile '{sourcePath}': {FormatPathOrIoError(ex, sourcePath, "compile the input")}");
+            Console.Error.WriteLine($"Failed to compile '{primaryInput}': {FormatPathOrIoError(ex, primaryInput, "compile the input")}");
             return 1;
         }
 
@@ -107,15 +106,15 @@ public static class CommandLine
 
         if (options.DebugOutput is not AnalysisOutput.None)
         {
-            string debugOutput = BuildDebugOutput(sourcePath, analysis);
+            string debugOutput = BuildDebugOutput(primaryInput, analysis);
             writeFailed |= !WriteOutput(options.DebugDestination, debugOutput, Console.Out, "debug output");
         }
 
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
-            DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(sourcePath, analysis, pipelineError),
-            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(sourcePath, analysis, pipelineError, options.PathStyle),
-            _ => BuildDiagnosticsPrettyOutput(sourcePath, analysis, pipelineError, options.ColorMode, options.PathStyle)
+            DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, pipelineError),
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, pipelineError, options.PathStyle),
+            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, pipelineError, options.ColorMode, options.PathStyle)
         };
 
         if (options.DiagnosticsRequested || !string.IsNullOrEmpty(diagnosticsOutput))
@@ -127,8 +126,61 @@ public static class CommandLine
         return hasErrors || pipelineError is not null || writeFailed ? 1 : 0;
     }
 
-    private static CompilerProjectAnalysisResult Compile(string sourcePath, CliOptions cliOptions)
+    private static (List<string> Files, string RootPath) ResolveFiles(IReadOnlyList<string> inputs, string pattern, bool noRecurse)
     {
+        var inputList = inputs.Count == 0 ? ["."] : inputs;
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? rootDir = null;
+        var searchOption = noRecurse ? SearchOption.TopDirectoryOnly : SearchOption.AllDirectories;
+
+        foreach (string input in inputList)
+        {
+            if (Directory.Exists(input))
+            {
+                string fullDir = Path.GetFullPath(input);
+                rootDir ??= fullDir;
+                string[] matching = Directory.GetFiles(fullDir, pattern, searchOption);
+                if (matching.Length == 0)
+                    throw new FileNotFoundException($"No source files found in directory: {input}");
+
+                foreach (string m in matching)
+                    files.Add(Path.GetFullPath(m));
+            }
+            else if (File.Exists(input))
+            {
+                string fullFile = Path.GetFullPath(input);
+                rootDir ??= Path.GetDirectoryName(fullFile);
+                files.Add(fullFile);
+            }
+            else
+            {
+                throw new FileNotFoundException($"Input path not found: {input}", input);
+            }
+        }
+
+        if (files.Count == 0)
+            throw new FileNotFoundException("No source files found to compile.");
+
+        var sortedFiles = files.ToList();
+        sortedFiles.Sort(StringComparer.Ordinal);
+        return (sortedFiles, rootDir ?? Directory.GetCurrentDirectory());
+    }
+
+    private static CompilerProjectAnalysisResult Compile(CliOptions cliOptions)
+    {
+        var (files, rootPath) = ResolveFiles(cliOptions.SourceInputs, cliOptions.Pattern ?? "*.mh", cliOptions.NoRecurse);
+
+        string? resolvedEntry = null;
+        if (cliOptions.EntryFile is not null)
+        {
+            resolvedEntry = Path.IsPathRooted(cliOptions.EntryFile)
+                ? Path.GetFullPath(cliOptions.EntryFile)
+                : Path.GetFullPath(Path.Combine(rootPath, cliOptions.EntryFile));
+
+            if (!File.Exists(resolvedEntry))
+                throw new FileNotFoundException($"Configured EntryFile not found: {resolvedEntry}", resolvedEntry);
+        }
+
         var compOptions = new CompilationOptions
         {
             ColorMode = cliOptions.ColorMode,
@@ -140,37 +192,18 @@ public static class CommandLine
                 DiagnosticsFormat.Text => DiagnosticFormat.Short,
                 _ => DiagnosticFormat.Pretty
             },
-            ImplicitTopLevel = cliOptions.ImplicitTopLevel ?? false
+            ImplicitTopLevel = cliOptions.ImplicitTopLevel ?? true,
+            EntryFile = resolvedEntry,
+            RootDirectory = rootPath,
+            GlobalAliases = cliOptions.GlobalAliases ?? new Dictionary<string, string>()
         };
 
-        if (string.Equals(Path.GetExtension(sourcePath), ".mhpr", StringComparison.OrdinalIgnoreCase))
-            return MahoBuildSystem.CompileProject(sourcePath, cliOptions.DebugOutput, compOptions);
-
-        if (File.Exists(sourcePath))
+        if (cliOptions.CheckOnly)
         {
-            string fullPath = Path.GetFullPath(sourcePath);
-            bool implicitTopLevel = cliOptions.ImplicitTopLevel ?? true;
-            compOptions = compOptions with { ImplicitTopLevel = implicitTopLevel, EntryFile = fullPath };
-            return MahoCompiler.CompileFiles([fullPath], cliOptions.DebugOutput, fullPath, compOptions);
+            return MahoCompiler.AnalyzeFiles(files, cliOptions.DebugOutput, rootPath, compOptions);
         }
 
-        if (Directory.Exists(sourcePath))
-        {
-            if (!cliOptions.NoProject)
-            {
-                string? projectFile = MahoBuildSystem.FindProjectFile(sourcePath);
-                if (projectFile is not null)
-                    return MahoBuildSystem.CompileProject(projectFile, cliOptions.DebugOutput, compOptions);
-
-                throw new ArgumentException($"No project file ('.mhpr') found in '{sourcePath}'. Use --no-project to compile directory sources without a project file.");
-            }
-
-            bool implicitTopLevel = cliOptions.ImplicitTopLevel ?? true;
-            compOptions = compOptions with { ImplicitTopLevel = implicitTopLevel };
-            return MahoBuildSystem.CompileDirectory(sourcePath, cliOptions.DebugOutput, compOptions);
-        }
-
-        throw new ArgumentException($"Input path not found: {sourcePath}", nameof(sourcePath));
+        return MahoCompiler.CompileFiles(files, cliOptions.DebugOutput, rootPath, compOptions);
     }
 
     private static string BuildDebugOutput(string inputPath, CompilerProjectAnalysisResult analysis)
@@ -240,6 +273,9 @@ public static class CommandLine
             _ => Directory.GetCurrentDirectory()
         };
 
+        int errorCount = 0;
+        int warningCount = 0;
+
         foreach (CompilerBatchFileResult file in analysis.Files)
         {
             string displayPath = pathStyle switch
@@ -252,6 +288,11 @@ public static class CommandLine
             {
                 foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
                 {
+                    if (diagnostic.Severity == DiagnosticSeverity.Error)
+                        errorCount++;
+                    else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                        warningCount++;
+
                     output.Append(displayPath);
                     output.Append('(');
                     output.Append(diagnostic.Span.StartLocation.Line);
@@ -267,6 +308,7 @@ public static class CommandLine
             }
             else if (file.AnalysisError is string analysisError)
             {
+                errorCount++;
                 output.Append(displayPath);
                 output.Append(": error MH9001: ");
                 output.AppendLine(analysisError);
@@ -274,7 +316,21 @@ public static class CommandLine
         }
 
         if (pipelineError is not null)
+        {
+            errorCount++;
             output.AppendLine($"error MH9000: {pipelineError}");
+        }
+
+        string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
+
+        if (errorCount == 0 && warningCount == 0)
+            output.AppendLine($"Build succeeded in {timeStr}");
+        else if (errorCount > 0 && warningCount > 0)
+            output.AppendLine($"Build failed with {errorCount} error(s) and {warningCount} warning(s)");
+        else if (errorCount > 0)
+            output.AppendLine($"Build failed with {errorCount} error(s)");
+        else
+            output.AppendLine($"Build succeeded with {warningCount} warning(s) in {timeStr}");
 
         return output.ToString();
     }
@@ -294,17 +350,37 @@ public static class CommandLine
             projectDirectory: projectRoot);
         var sb = new StringBuilder();
 
+        int errorCount = 0;
+        int warningCount = 0;
+
         foreach (CompilerBatchFileResult file in analysis.Files)
         {
             if (file.Output is { } fileAnalysis)
+            {
                 foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
+                {
+                    if (diagnostic.Severity == DiagnosticSeverity.Error)
+                        errorCount++;
+                    else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                        warningCount++;
+
                     sb.Append(renderer.Render(diagnostic));
+                }
+            }
             else if (file.AnalysisError is string analysisError)
+            {
+                errorCount++;
                 sb.AppendLine($"error[MH9001]: {analysisError}");
+            }
         }
 
         if (pipelineError is not null)
+        {
+            errorCount++;
             sb.AppendLine($"error[MH9000]: {pipelineError}");
+        }
+
+        sb.Append(renderer.RenderStatus(errorCount, warningCount, analysis.Elapsed));
 
         return sb.ToString();
     }
@@ -372,23 +448,6 @@ public static class CommandLine
     }
 
 
-    private static bool TryGetSourcePath(string? sourcePathArgument, out string sourcePath, out string? errorMessage)
-    {
-        try
-        {
-            sourcePath = sourcePathArgument is null
-                ? Path.GetFullPath(Directory.GetCurrentDirectory())
-                : Path.GetFullPath(sourcePathArgument);
-            errorMessage = null;
-            return true;
-        }
-        catch (Exception ex) when (IsUserFacingError(ex))
-        {
-            sourcePath = string.Empty;
-            errorMessage = $"Invalid source path '{sourcePathArgument}': {FormatPathOrIoError(ex, sourcePathArgument, "resolve the source path")}";
-            return false;
-        }
-    }
 
     private static bool IsOutputOption(string arg) => arg is "-o" or "--output";
 
@@ -405,9 +464,14 @@ public static class CommandLine
         bool showHelp = false;
         bool showVersion = false;
         string? generalOutput = null;
-        string? sourcePath = null;
+        var sourceInputs = new List<string>();
+        string? pattern = null;
+        string? entryFile = null;
         bool? implicitTopLevel = null;
-        bool noProject = false;
+        bool emitIl = false;
+        bool checkOnly = false;
+        bool noRecurse = false;
+        var globalAliases = new Dictionary<string, string>(StringComparer.Ordinal);
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -525,9 +589,44 @@ public static class CommandLine
                     warningsAsErrors = true;
                     break;
 
+                case "--pattern":
+                    if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
+                    {
+                        options = default;
+                        errorMessage = "The --pattern option requires a search pattern (e.g. '*.mh').";
+                        return false;
+                    }
+                    index++;
+                    pattern = args[index];
+                    break;
+
+                case "--entry":
+                    if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
+                    {
+                        options = default;
+                        errorMessage = "The --entry option requires a source file path.";
+                        return false;
+                    }
+                    index++;
+                    entryFile = args[index];
+                    break;
+
+                case "--emit-il":
+                    emitIl = true;
+                    break;
+
+                case "--check":
+                    checkOnly = true;
+                    break;
+
+                case "--no-recurse":
+                    noRecurse = true;
+                    break;
+
+                case "-np":
                 case "--no-project":
                 case "--allow-no-project":
-                    noProject = true;
+                    // Accepted for backwards compatibility
                     break;
 
                 case string arg when arg.StartsWith("--implicit-toplevel=", StringComparison.OrdinalIgnoreCase):
@@ -544,6 +643,36 @@ public static class CommandLine
                     }
                     break;
 
+                case "--implicit-toplevel":
+                    implicitTopLevel = true;
+                    break;
+
+                case "--alias":
+                case "--global-alias":
+                    if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
+                    {
+                        options = default;
+                        errorMessage = $"The {argument} option requires an alias declaration in the format 'alias=target' (e.g. 'int32=Std.Int32').";
+                        return false;
+                    }
+                    index++;
+                    if (!TryParseAlias(args[index], globalAliases, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
+                case string arg when arg.StartsWith("--alias=", StringComparison.OrdinalIgnoreCase) ||
+                                     arg.StartsWith("--global-alias=", StringComparison.OrdinalIgnoreCase):
+                    string aliasVal = arg[(arg.IndexOf('=') + 1)..];
+                    if (!TryParseAlias(aliasVal, globalAliases, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
                 default:
                     if (argument.Length > 0 && argument[0] == '-')
                     {
@@ -552,14 +681,7 @@ public static class CommandLine
                         return false;
                     }
 
-                    if (sourcePath is not null)
-                    {
-                        options = default;
-                        errorMessage = "Only one source file, project file, or directory can be provided.";
-                        return false;
-                    }
-
-                    sourcePath = argument;
+                    sourceInputs.Add(argument);
                     break;
             }
         }
@@ -567,8 +689,62 @@ public static class CommandLine
         debugDestination ??= generalOutput;
         diagnosticsDestination ??= generalOutput;
 
-        options = new CliOptions(debugOutput, debugDestination, diagnosticsRequested, diagnosticsFormat, diagnosticsDestination, colorMode, pathStyle, warningsAsErrors, showHelp, showVersion, generalOutput, sourcePath, implicitTopLevel, noProject);
+        options = new CliOptions(
+            debugOutput,
+            debugDestination,
+            diagnosticsRequested,
+            diagnosticsFormat,
+            diagnosticsDestination,
+            colorMode,
+            pathStyle,
+            warningsAsErrors,
+            showHelp,
+            showVersion,
+            generalOutput,
+            sourceInputs,
+            pattern,
+            entryFile,
+            implicitTopLevel,
+            emitIl,
+            checkOnly,
+            noRecurse,
+            globalAliases.Count > 0 ? globalAliases : null);
+
         errorMessage = null;
+        return true;
+    }
+
+    private static bool TryParseAlias(string input, Dictionary<string, string> target, out string? errorMessage)
+    {
+        errorMessage = null;
+        string[] entries = input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (entries.Length == 0)
+        {
+            errorMessage = "Expected an alias in the format 'alias=target' (e.g. 'int32=Std.Int32').";
+            return false;
+        }
+
+        foreach (string entry in entries)
+        {
+            int sepIdx = entry.IndexOfAny(['=', ':']);
+            if (sepIdx <= 0 || sepIdx == entry.Length - 1)
+            {
+                errorMessage = $"Invalid alias format '{entry}'. Expected 'alias=target' (e.g. 'int32=Std.Int32').";
+                return false;
+            }
+
+            string aliasName = entry[..sepIdx].Trim();
+            string targetType = entry[(sepIdx + 1)..].Trim();
+
+            if (string.IsNullOrWhiteSpace(aliasName) || string.IsNullOrWhiteSpace(targetType))
+            {
+                errorMessage = $"Invalid alias format '{entry}'. Alias name and target type cannot be empty.";
+                return false;
+            }
+
+            target[aliasName] = targetType;
+        }
+
         return true;
     }
 
@@ -668,13 +844,16 @@ public static class CommandLine
             or DirectoryNotFoundException
             or FileNotFoundException
             or IOException
-            or NotSupportedException;
+            or NotSupportedException
+            or InvalidOperationException;
 
     private static string FormatPathOrIoError(Exception exception, string? path, string action)
     {
         return exception switch
         {
+            FileNotFoundException fnf when !string.IsNullOrWhiteSpace(fnf.Message) && !fnf.Message.StartsWith("Could not find file", StringComparison.OrdinalIgnoreCase) => fnf.Message,
             FileNotFoundException => $"source file not found: {path}.",
+            DirectoryNotFoundException dnf when !string.IsNullOrWhiteSpace(dnf.Message) && !dnf.Message.StartsWith("Could not find a part of the path", StringComparison.OrdinalIgnoreCase) => dnf.Message,
             DirectoryNotFoundException => $"directory not found: {path}.",
             UnauthorizedAccessException => $"access denied while trying to {action}: {path}.",
             PathTooLongException => $"path is too long: {path}.",
@@ -690,23 +869,28 @@ public static class CommandLine
     private static void PrintUsage(TextWriter writer)
     {
         PrintVersion(writer);
-        writer.WriteLine("A compiler for the Maho programming language.");
+        writer.WriteLine("A compiler frontend for the Maho programming language.");
         writer.WriteLine();
-        writer.WriteLine("Usage: maho [options] [source-path]");
+        writer.WriteLine("Usage: mahoc [options] [source-paths...]");
         writer.WriteLine();
         writer.WriteLine("Options:");
+        writer.WriteLine("  --emit-il                                                   Compile and emit Maho Intermediate Language (IL).");
+        writer.WriteLine("  --check                                                     Verify syntax and semantics without code generation.");
+        writer.WriteLine("  --pattern <pattern>                                         File search pattern for directory inputs (default: '*.mh').");
+        writer.WriteLine("  --no-recurse                                                Do not search subdirectories recursively when directory is passed.");
+        writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
+        writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");
         writer.WriteLine("  --debug (lex|parse)+ (-o|--output) <file|->                 Write selected debug JSON to a file or stdout.");
         writer.WriteLine("  --diagnostics [pretty|text|json] (-o|--output) <file|->     Write diagnostics to a file or stderr (default: pretty).");
         writer.WriteLine("  -o, --output <file|->                                       Output destination path (or '-' for stdout).");
         writer.WriteLine("  --color [auto|always|never]                                 Control ANSI colored diagnostics.");
         writer.WriteLine("  --diagnostic-paths (relative|project|full)                  Choose relative (CWD), project-relative, or full paths in diagnostics.");
         writer.WriteLine("  --implicit-toplevel[=true|false]                            Allow implicit top-level statements for entry files.");
-        writer.WriteLine("  --no-project                                                Allow compiling directory sources without a project file (.mhpr).");
         writer.WriteLine("  -Werror, --warnings-as-errors                               Treat compiler warnings as errors.");
         writer.WriteLine("  -v, --version                                               Show compiler version.");
         writer.WriteLine("  -h, --help                                                  Show this help text.");
         writer.WriteLine();
-        writer.WriteLine("The source path may be a '.mh' file, a '.mhpr' project file, or a directory.");
-        writer.WriteLine("Directories are searched recursively for '.mh' files. '-' selects stdout for debug and stderr for diagnostics.");
+        writer.WriteLine("Source paths can be one or more '.mh' files or directories.");
+        writer.WriteLine("Directories are searched recursively for matching files. '-' selects stdout for debug and stderr for diagnostics.");
     }
 }

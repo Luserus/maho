@@ -43,10 +43,7 @@ public sealed class TerminalDiagnosticRenderer
     /// <summary>
     /// Registers in-memory source lines for a source path so virtual or memory files can be rendered.
     /// </summary>
-    public void RegisterSource(string path, string content)
-    {
-        fileCache[path] = content.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
-    }
+    public void RegisterSource(string path, string content) => fileCache[path] = content.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
 
     /// <summary>
     /// Formats a single diagnostic into a rich Rust-style terminal string.
@@ -87,6 +84,7 @@ public sealed class TerminalDiagnosticRenderer
 
         // 3. Source snippet with gutter and carets
         string[]? lines = GetSourceLines(diagnostic.SourcePath);
+
         if (lines is not null)
         {
             var lineAnnotations = new SortedDictionary<int, List<LineAnnotation>>();
@@ -111,6 +109,7 @@ public sealed class TerminalDiagnosticRenderer
             if (diagnostic.Labels.Count > 0)
             {
                 bool primaryCovered = false;
+
                 foreach (var label in diagnostic.Labels)
                 {
                     if (label.FilePath is not null && diagnostic.SourcePath is not null &&
@@ -121,6 +120,7 @@ public sealed class TerminalDiagnosticRenderer
 
                     int lLine = label.Span.StartLocation.Line;
                     int lCol = label.Span.StartLocation.Column;
+
                     if (lLine == line && lCol == col)
                         primaryCovered = true;
 
@@ -128,14 +128,10 @@ public sealed class TerminalDiagnosticRenderer
                 }
 
                 if (!primaryCovered && line >= 1 && line <= lines.Length)
-                {
                     AddAnnotation(line, col, diagnostic.Span.Length, DiagnosticLabelStyle.Primary, null);
-                }
             }
             else if (line >= 1 && line <= lines.Length)
-            {
                 AddAnnotation(line, col, diagnostic.Span.Length, DiagnosticLabelStyle.Primary, null);
-            }
 
             if (lineAnnotations.Count > 0)
             {
@@ -148,6 +144,7 @@ public sealed class TerminalDiagnosticRenderer
                 sb.AppendLine();
 
                 int previousLine = -1;
+
                 foreach (var (curLine, annotations) in lineAnnotations)
                 {
                     if (previousLine != -1 && curLine > previousLine + 1)
@@ -155,6 +152,7 @@ public sealed class TerminalDiagnosticRenderer
                         sb.Append(Colorize(Blue, $"{emptyGutter} ..."));
                         sb.AppendLine();
                     }
+
                     previousLine = curLine;
 
                     string lineStr = curLine.ToString().PadLeft(gutterWidth);
@@ -163,20 +161,24 @@ public sealed class TerminalDiagnosticRenderer
                     sb.AppendLine(sourceLine);
 
                     var activeAnnotations = annotations.Where(a => a.Style != DiagnosticLabelStyle.Context).ToList();
+
                     if (activeAnnotations.Count > 0)
                     {
                         activeAnnotations.Sort((a, b) => a.StartCol.CompareTo(b.StartCol));
 
                         // 1. Partition carets into non-overlapping layers
                         var caretLayers = new List<List<LineAnnotation>>();
+
                         foreach (var ann in activeAnnotations)
                         {
                             int startCol = Math.Max(1, ann.StartCol);
                             bool placed = false;
+
                             foreach (var layer in caretLayers)
                             {
                                 var last = layer[^1];
                                 int lastEndCol = Math.Max(1, last.StartCol) + Math.Max(1, last.Length);
+
                                 if (startCol >= lastEndCol)
                                 {
                                     layer.Add(ann);
@@ -184,10 +186,9 @@ public sealed class TerminalDiagnosticRenderer
                                     break;
                                 }
                             }
+
                             if (!placed)
-                            {
                                 caretLayers.Add([ann]);
-                            }
                         }
 
                         foreach (var layer in caretLayers)
@@ -211,6 +212,7 @@ public sealed class TerminalDiagnosticRenderer
 
                                 currentVisualCol = startCol + length;
                             }
+
                             sb.AppendLine();
                         }
 
@@ -219,8 +221,10 @@ public sealed class TerminalDiagnosticRenderer
                         {
                             int startCol = Math.Max(1, ann.StartCol);
                             int length = Math.Max(1, ann.Length);
+
                             if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
                                 length = Math.Max(1, sourceLine.Length - startCol + 1);
+
                             return startCol + (length - 1) / 2;
                         }
 
@@ -241,6 +245,7 @@ public sealed class TerminalDiagnosticRenderer
                             {
                                 var branchAnn = labeled[j];
                                 int branchCol = GetConnectorCol(branchAnn);
+
                                 if (branchCol < currentCol)
                                     continue;
 
@@ -252,9 +257,7 @@ public sealed class TerminalDiagnosticRenderer
                             }
 
                             if (targetCol >= currentCol)
-                            {
                                 AppendWhitespace(sb, sourceLine, currentCol, targetCol);
-                            }
 
                             sb.Append(Colorize(targetColor, "└── "));
                             sb.AppendLine(Colorize(targetColor, targetAnn.Message ?? ""));
@@ -268,6 +271,7 @@ public sealed class TerminalDiagnosticRenderer
                     sb.AppendLine();
 
                     var currentTrace = diagnostic.MacroTrace;
+
                     while (currentTrace is not null)
                     {
                         string? invPath = currentTrace.InvocationFilePath;
@@ -279,6 +283,7 @@ public sealed class TerminalDiagnosticRenderer
                         sb.AppendLine($"{displayInvPath ?? "source"}: ({invLine}:{invCol})");
 
                         string[]? invLines = GetSourceLines(invPath);
+
                         if (invLines is not null && invLine >= 1 && invLine <= invLines.Length)
                         {
                             int invGutterWidth = Math.Max(invLine.ToString().Length, 2);
@@ -300,8 +305,13 @@ public sealed class TerminalDiagnosticRenderer
                                 invLength = Math.Max(1, invSourceLine.Length - invCol + 1);
 
                             string underline = new string('-', invLength);
-                            sb.Append(Colorize(Cyan, underline));
-                            sb.AppendLine(Colorize(Cyan, " from this macro invocation"));
+                            sb.AppendLine(Colorize(Cyan, underline));
+
+                            int invConnectorCol = invCol + (invLength - 1) / 2;
+                            sb.Append(Colorize(Blue, $"{invEmptyGutter} | "));
+                            AppendWhitespace(sb, invSourceLine, 1, invConnectorCol);
+                            sb.Append(Colorize(Cyan, "└── "));
+                            sb.AppendLine(Colorize(Cyan, "from this macro invocation"));
 
                             sb.Append(Colorize(Blue, $"{invEmptyGutter} |"));
                             sb.AppendLine();
@@ -311,10 +321,12 @@ public sealed class TerminalDiagnosticRenderer
                     }
 
                     string macroName = diagnostic.MacroTrace.MacroName;
+
                     if (!macroName.StartsWith('$'))
                         macroName = $"${macroName}";
 
                     string? defLocation = null;
+
                     if (diagnostic.MacroTrace.DefinitionSpan.HasValue)
                     {
                         string? defPath = FormatDisplayPath(diagnostic.MacroTrace.DefinitionFilePath);
@@ -329,6 +341,7 @@ public sealed class TerminalDiagnosticRenderer
                 }
 
                 bool hasAdditionalInfo = diagnostic.MacroTrace is null && (diagnostic.Notes.Count > 0 || diagnostic.HelpMessages.Count > 0 || diagnostic.Suggestions.Count > 0);
+
                 if (hasAdditionalInfo)
                 {
                     sb.Append(Colorize(Blue, $"{emptyGutter} |"));
@@ -371,18 +384,19 @@ public sealed class TerminalDiagnosticRenderer
                     }
                 }
 
-                // Final empty gutter line
-                sb.Append(Colorize(Blue, $"{emptyGutter} |"));
+                // Final separating newline
                 sb.AppendLine();
             }
             else
             {
                 AppendFallback(sb, diagnostic);
+                sb.AppendLine();
             }
         }
         else
         {
             AppendFallback(sb, diagnostic);
+            sb.AppendLine();
         }
 
         return sb.ToString();
@@ -394,8 +408,64 @@ public sealed class TerminalDiagnosticRenderer
     public string RenderAll(IEnumerable<DiagnosticInfo> diagnostics)
     {
         var sb = new StringBuilder();
+
         foreach (var diag in diagnostics)
-            sb.AppendLine(Render(diag));
+            sb.Append(Render(diag));
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a time span into human-readable seconds, milliseconds, or nanoseconds.
+    /// </summary>
+    public static string FormatTime(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds >= 1.0)
+            return $"{elapsed.TotalSeconds:0.##}s";
+        if (elapsed.TotalMilliseconds >= 1.0)
+            return $"{elapsed.TotalMilliseconds:0.##}ms";
+        if (elapsed.TotalNanoseconds > 0)
+            return $"{(long)elapsed.TotalNanoseconds}ns";
+        return "0ms";
+    }
+
+    /// <summary>
+    /// Renders a compilation status line (e.g. "Build succeeded in 45ms", "Build failed with 2 error(s)", etc.).
+    /// </summary>
+    public string RenderStatus(int errorCount, int warningCount, TimeSpan? elapsed = null)
+    {
+        var sb = new StringBuilder();
+        string timeStr = FormatTime(elapsed ?? TimeSpan.Zero);
+
+        if (errorCount == 0 && warningCount == 0)
+        {
+            sb.Append("Build ");
+            sb.Append(Colorize(Green, "succeeded"));
+            sb.Append(" in ");
+            sb.AppendLine(timeStr);
+        }
+        else if (errorCount > 0 && warningCount > 0)
+        {
+            sb.Append("Build failed with ");
+            sb.Append(Colorize(Red, $"{errorCount} error(s)"));
+            sb.Append(" and ");
+            sb.AppendLine(Colorize(Yellow, $"{warningCount} warning(s)"));
+        }
+        else if (errorCount > 0)
+        {
+            sb.Append("Build failed with ");
+            sb.AppendLine(Colorize(Red, $"{errorCount} error(s)"));
+        }
+        else
+        {
+            sb.Append("Build ");
+            sb.Append(Colorize(Green, "succeeded"));
+            sb.Append(" with ");
+            sb.Append(Colorize(Yellow, $"{warningCount} warning(s)"));
+            sb.Append(" in ");
+            sb.AppendLine(timeStr);
+        }
+
         return sb.ToString();
     }
 
@@ -505,11 +575,13 @@ public sealed class TerminalDiagnosticRenderer
             sb.Append(Colorize(Bold, "  = note: "));
             sb.AppendLine($"in macro definition '{macroName}'{defLocation}");
         }
+
         foreach (var note in diagnostic.Notes)
         {
             sb.Append(Colorize(Bold, "  = note: "));
             sb.AppendLine(note.Message);
         }
+
         foreach (var help in diagnostic.HelpMessages)
         {
             sb.Append(Colorize(Cyan, "  = help: "));

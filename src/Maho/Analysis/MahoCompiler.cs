@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -58,22 +59,30 @@ public static class MahoCompiler
         var text = new SourceText(source);
         var dm = new DiagnosticsManager(text);
 
+        var syntaxSw = Stopwatch.StartNew();
         var lexer = new Lexer(text, dm);
         lexer.Lex();
 
         var parser = new Parser(text, dm, options.ImplicitTopLevel);
         var root = parser.Parse(lexer.Tokens);
+        syntaxSw.Stop();
 
+        var semSw = Stopwatch.StartNew();
         var syntaxTree = SyntaxTree.CreateSingleRoot(root, filePath);
         var resolver = new Resolver();
         resolver.Resolve(syntaxTree, diagnostics: dm, options: options);
+        semSw.Stop();
 
         string? lexerJson = output.HasFlag(AnalysisOutput.Lexer) ? lexer.ToString() : null;
         string? parserJson = output.HasFlag(AnalysisOutput.Parser) ? parser.ToString() : null;
 
         var projectedDiagnostics = ProjectDiagnostics(dm.Diagnostics, text, filePath);
+        var phaseTimers = new CompilationPhaseTimers(syntaxSw.Elapsed, semSw.Elapsed, TimeSpan.Zero);
 
-        return new DebugCompilationOutput(filePath, lexerJson, parserJson, projectedDiagnostics);
+        return new DebugCompilationOutput(filePath, lexerJson, parserJson, projectedDiagnostics)
+        {
+            PhaseTimers = phaseTimers
+        };
     }
 
     /// <summary> Backward-compatible alias for <see cref="CompileSource"/>. </summary>
@@ -100,7 +109,7 @@ public static class MahoCompiler
         string projectName = rootPath is not null ? Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : "Project";
 
         if (pathsList.Count == 0)
-            return new CompilerProjectAnalysisResult(projectName, []);
+            return new CompilerProjectAnalysisResult(projectName, []) { PhaseTimers = CompilationPhaseTimers.Zero };
 
         var fileResults = new CompilerBatchFileResult?[pathsList.Count];
         var sourceTexts = new SourceText?[pathsList.Count];
@@ -109,6 +118,7 @@ public static class MahoCompiler
         var fileLexers = new Lexer?[pathsList.Count];
         var fileParsers = new Parser?[pathsList.Count];
 
+        var syntaxSw = Stopwatch.StartNew();
         Parallel.For(0, pathsList.Count, i =>
         {
             string path = pathsList[i];
@@ -140,7 +150,9 @@ public static class MahoCompiler
                 fileResults[i] = new CompilerBatchFileResult(path, null, FormatFileError(path, ex), isInternalError: !IsUserFacingError(ex));
             }
         });
+        syntaxSw.Stop();
 
+        var semSw = Stopwatch.StartNew();
         var validPaths = new List<string>(pathsList.Count);
         var validSourceTexts = new List<SourceText>(pathsList.Count);
         var validRoots = new List<CompilationUnit>(pathsList.Count);
@@ -259,6 +271,7 @@ public static class MahoCompiler
             else if (validFileDms.Count > 0)
                 validFileDms[0].Report(diag);
         }
+        semSw.Stop();
 
         var finalResults = new List<CompilerBatchFileResult>(pathsList.Count);
         int validIdx = 0;
@@ -298,10 +311,13 @@ public static class MahoCompiler
             ImplicitTopLevel = options.ImplicitTopLevel || (pathsList.Count == 1 && options.RootDirectory == null)
         });
 
+        var phaseTimers = new CompilationPhaseTimers(syntaxSw.Elapsed, semSw.Elapsed, TimeSpan.Zero);
+
         return new CompilerProjectAnalysisResult(projectName, [.. finalResults])
         {
             EntryFile = effectiveEntryFile,
-            Compilation = compilation
+            Compilation = compilation,
+            PhaseTimers = phaseTimers
         };
     }
 
@@ -312,8 +328,7 @@ public static class MahoCompiler
         CompilationOptions? options = null) => CompileFilesCore(filePaths, output, rootPath, options);
 
     /// <summary>
-    /// Compiles a collection of source files and reaches the lowering/codegen stage.
-    /// Throws <see cref="CompilerPipelineNotImplementedException"/> after successful front-end analysis.
+    /// Compiles a collection of source files and returns a structured <see cref="CompilerProjectAnalysisResult"/>.
     /// </summary>
     public static CompilerProjectAnalysisResult CompileFiles(IEnumerable<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string? rootPath = null, CompilationOptions? options = null)
     {

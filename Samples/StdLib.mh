@@ -34,11 +34,4 @@ public struct String8
 
 
 $DefineIntrinsicInteger(Int, 8);
-$DefineIntrinsicInteger(Int, 16);
-$DefineIntrinsicInteger(Int, 32);
 $DefineIntrinsicInteger(Int, 64);
-
-$DefineIntrinsicInteger(UInt, 8);
-$DefineIntrinsicInteger(UInt, 16);
-$DefineIntrinsicInteger(UInt, 32);
-$DefineIntrinsicInteger(UInt, 64);

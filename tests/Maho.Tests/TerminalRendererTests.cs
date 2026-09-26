@@ -335,9 +335,70 @@ public sealed class TerminalRendererTests
         Assert.Contains("└── type 'Result' not found", output);
         Assert.Contains("::: StdLib.mh: (10:1)", output);
         Assert.Contains("10 | $DefineInt(Foo);", output);
-        Assert.Contains("---------------- from this macro invocation", output);
+        Assert.Contains("----------------", output);
+        Assert.Contains("└── from this macro invocation", output);
         Assert.Contains("= note: in macro definition '$DefineInt' at StdLib.mh: (1:1)", output);
         Assert.Contains("= help: check for a missing import or declaration", output);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_BuildSuccess_WithoutColors()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(0, 0, TimeSpan.FromMilliseconds(42)).Replace("\r\n", "\n");
+        Assert.Equal("Build succeeded in 42ms\n", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_BuildSuccess_WithColors()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Always, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(0, 0, TimeSpan.FromMilliseconds(42));
+        Assert.Contains("\u001b[32;1msucceeded\u001b[0m", status);
+        Assert.Contains("42ms", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_ErrorsAndWarnings_WithoutColors()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(2, 1).Replace("\r\n", "\n");
+        Assert.Equal("Build failed with 2 error(s) and 1 warning(s)\n", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_ErrorsAndWarnings_WithColors()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Always, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(2, 1);
+        Assert.Contains("\u001b[31;1m2 error(s)\u001b[0m", status);
+        Assert.Contains(" and ", status);
+        Assert.Contains("\u001b[33;1m1 warning(s)\u001b[0m", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_ErrorsOnly()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(1, 0).Replace("\r\n", "\n");
+        Assert.Equal("Build failed with 1 error(s)\n", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_RenderStatus_WarningsOnly()
+    {
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        string status = renderer.RenderStatus(0, 3, TimeSpan.FromMilliseconds(15)).Replace("\r\n", "\n");
+        Assert.Equal("Build succeeded with 3 warning(s) in 15ms\n", status);
+    }
+
+    [Fact]
+    public void TerminalRenderer_FormatTime_FormatsCorrectUnits()
+    {
+        Assert.Equal("0ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.Zero));
+        Assert.Equal("1.23s", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromSeconds(1.234)));
+        Assert.Equal("45.67ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromMilliseconds(45.67)));
+        Assert.Equal("500ns", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromTicks(5)));
     }
 }
 

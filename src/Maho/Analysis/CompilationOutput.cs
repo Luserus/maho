@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -57,6 +58,12 @@ public sealed class DebugCompilationOutput : CompilationOutput
 
     public override bool HasErrors { get; }
     public override IReadOnlyList<DiagnosticInfo> Diagnostics { get; }
+
+    /// <summary> Breakdown of elapsed time across compiler pipeline phases. </summary>
+    public CompilationPhaseTimers? PhaseTimers { get; init; }
+
+    /// <summary> Combined elapsed time across core compilation phases. </summary>
+    public TimeSpan Elapsed => PhaseTimers?.Total ?? TimeSpan.Zero;
 
     public DebugCompilationOutput(
         string sourcePath,

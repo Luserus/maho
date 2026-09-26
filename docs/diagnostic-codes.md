@@ -113,3 +113,13 @@ These diagnostics represent system-level issues outside the program's source tex
 ## 4. Sequential Extensions (`MH1000`+)
 
 Reserved for future type checking, control flow analysis, and lifetime/borrow rules as the compiler expands.
+
+---
+
+## 5. Pipeline & Driver Codes (`MH9000` - `MH9001`)
+
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH9000` | `CompilerPipelineNotImplemented` | Emitted when compilation front-end analysis succeeds but reaches the unfinished lowering / code generation backend. |
+| `MH9001` | `BatchFileAnalysisError` | Emitted when an individual file fails batch analysis due to unhandled I/O or internal read errors. |
+

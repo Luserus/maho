@@ -52,34 +52,38 @@ The declaration resolution pass validates and binds declarations across the disc
 Source Files (.mh)
        │
        ▼
-  SourceText (line indexing & UTF-8 span tracking)
+ [Syntax Phase] (measured by CompilationPhaseTimers.Syntax)
+   ├── SourceText (line indexing & UTF-8 span tracking)
+   ├── Parallel.For
+   │    ├── Lexer (tokens with trivia)
+   │    └── Parser (recursive descent + Pratt precedence climbing)
+   └── SyntaxTree (unified compilation units & AST)
        │
        ▼
-     Lexer (tokens with trivia)
+ [Semantic Analysis Phase] (measured by CompilationPhaseTimers.SemanticAnalysis)
+   └── Resolver (shared DiagnosticsManager)
+        ├── SymbolDiscoveryPass (scopes, trie, symbols, flags, global aliases)
+        └── DeclarationResolutionPass (type binding, duplicate/partial checks, cycles, constraints)
        │
        ▼
-    Parser (recursive descent + Pratt precedence climbing)
+ [Lowering & Codegen Phase] (measured by CompilationPhaseTimers.Lowering)
+   └── Backend lowering (placeholder stage throwing MH9000 until implemented)
        │
        ▼
-  SyntaxTree (compilation units & AST)
-       │
-       ▼
-  Resolver (shared DiagnosticsManager)
-   ├── SymbolDiscoveryPass (scopes, trie, symbols, flags)
-   └── DeclarationResolutionPass (type binding, duplicate/partial checks, cycles, constraints)
-       │
-       ▼
-  Compilation / AnalysisSession (resolved symbol tables & diagnostic projections)
-       │
-       ▼
-  Lowering & Codegen (placeholder stage throwing MH9000 until implemented)
+ Compilation / Analysis Result
+   └── CompilerProjectAnalysisResult / DebugCompilationOutput
+        ├── Diagnostic projections
+        ├── CompilationPhaseTimers (Syntax, SemanticAnalysis, Lowering, Total)
+        └── Elapsed (total core compilation time)
 ```
 
 ---
 
 ## 4. Subsystem Guides
 
-- For public compilation and session APIs: [`analysis.md`](analysis.md)
+- For project orchestration and `.mhpr` builds: [`miryo.md`](miryo.md)
+- For the compiler driver CLI (`mahoc`): [`cli.md`](cli.md)
+- For public compilation APIs and phase timers: [`analysis.md`](analysis.md)
 - For span arithmetic and line/column projection: [`source-text.md`](source-text.md)
 - For diagnostic creation and error codes: [`diagnostics.md`](diagnostics.md)
 - For formal syntax grammar and AST definitions: [`language-theory.md`](language-theory.md)

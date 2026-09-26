@@ -89,7 +89,7 @@ public sealed class CommandLineTests
             File.WriteAllText(sourceFile, "var x = 1;");
 
             string diagFile = Path.Combine(tempDir, "diag.json");
-            CommandLine.Run(["--diagnostics", "json", "-o", diagFile, sourceFile]);
+            CommandLine.Run(["-np", "--diagnostics", "json", "-o", diagFile, sourceFile]);
 
             Assert.True(File.Exists(diagFile));
             string json = File.ReadAllText(diagFile);
@@ -112,7 +112,7 @@ public sealed class CommandLineTests
             File.WriteAllText(sourceFile, "public struct Widget;");
 
             string debugFile = Path.Combine(tempDir, "debug.json");
-            CommandLine.Run(["--debug", "parse", "-o", debugFile, sourceFile]);
+            CommandLine.Run(["-np", "--debug", "parse", "-o", debugFile, sourceFile]);
 
             Assert.True(File.Exists(debugFile));
             string json = File.ReadAllText(debugFile);
@@ -138,7 +138,7 @@ public sealed class CommandLineTests
             string diagFile = Path.Combine(tempDir, "diag.json");
 
             // Put source first to verify positional independence
-            CommandLine.Run([sourceFile, "--debug", "parse", "-o", debugFile, "--diagnostics", "json", "-o", diagFile]);
+            CommandLine.Run(["-np", sourceFile, "--debug", "parse", "-o", debugFile, "--diagnostics", "json", "-o", diagFile]);
 
             Assert.True(File.Exists(debugFile));
             Assert.True(File.Exists(diagFile));
@@ -174,7 +174,7 @@ public sealed class CommandLineTests
             using var sw = new StringWriter();
             Console.SetError(sw);
 
-            int exitCode = CommandLine.Run([Path.Combine("SubDir", "Test.mhpr")]);
+            int exitCode = CommandLine.Run([Path.Combine("SubDir", "Program.mh")]);
             string output = sw.ToString();
 
             // Default relative path should be relative to CWD, which includes SubDir/Program.mh
@@ -212,7 +212,7 @@ public sealed class CommandLineTests
             using var sw = new StringWriter();
             Console.SetError(sw);
 
-            int exitCode = CommandLine.Run(["--diagnostic-paths", "project", Path.Combine("SubDir", "Test.mhpr")]);
+            int exitCode = CommandLine.Run(["--diagnostic-paths", "project", "SubDir"]);
             string output = sw.ToString();
 
             // Should be relative to project root (Program.mh), NOT SubDir/Program.mh
@@ -250,7 +250,7 @@ public sealed class CommandLineTests
             using var sw = new StringWriter();
             Console.SetError(sw);
 
-            int exitCode = CommandLine.Run(["--diagnostic-paths", "full", Path.Combine("SubDir", "Test.mhpr")]);
+            int exitCode = CommandLine.Run(["--diagnostic-paths", "full", Path.Combine("SubDir", "Program.mh")]);
             string output = sw.ToString();
 
             Assert.Contains(Path.GetFullPath(sourceFile), output);
@@ -278,7 +278,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                CommandLine.Run([sourceFile]);
+                CommandLine.Run(["-np", sourceFile]);
                 string output = sw.ToString();
                 Assert.DoesNotContain("MH0011", output);
             }
@@ -308,7 +308,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["--implicit-toplevel=false", sourceFile]);
+                int exitCode = CommandLine.Run(["-np", "--implicit-toplevel=false", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("MH0160", output);
@@ -346,38 +346,6 @@ public sealed class CommandLineTests
                 string output = sw.ToString();
                 // Should compile the project without reporting missing project file
                 Assert.DoesNotContain("No project file", output);
-            }
-            finally
-            {
-                Console.SetError(originalError);
-            }
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
-    }
-
-    [Fact]
-    public void CommandLine_DirectoryWithoutProjectFile_ErrorsWithoutNoProjectFlag()
-    {
-        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliDirNoProjErr_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            string programFile = Path.Combine(tempDir, "Program.mh");
-            File.WriteAllText(programFile, "call();");
-
-            using var sw = new StringWriter();
-            var originalError = Console.Error;
-            try
-            {
-                Console.SetError(sw);
-                int exitCode = CommandLine.Run([tempDir]);
-                Assert.Equal(1, exitCode);
-                string output = sw.ToString();
-                Assert.Contains("No project file ('.mhpr') found", output);
-                Assert.Contains("--no-project", output);
             }
             finally
             {
@@ -519,4 +487,388 @@ public sealed class CommandLineTests
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public void CommandLine_CompileFailure_PrintsErrorsCountStatus()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliErrorStatus_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, "public struct Widget;\npublic struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["-np", "--color", "never", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("Build failed with 1 error(s)", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_MacroTraceback_RendersBoxConnectorBelowUnderline()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliMacroTrace_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, """
+                public macro $DefineType {
+                    (@name: ident) => {
+                        public struct @name {
+                            public UnknownType val;
+                        }
+                    }
+                }
+
+                $DefineType(MyStruct);
+                """);
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["-np", "--color", "never", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("└── from this macro invocation", output);
+                Assert.Contains("Build failed with 1 error(s)", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_FileWithoutNoProject_AssumesProjectFile_AllowsAnyExtension()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliProjectCustomExt_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string programFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(programFile, "call();");
+
+            string projectFile = Path.Combine(tempDir, "CustomBuild.proj");
+            File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nSources : [\"Program.mh\"];\nImplicitTopLevel : true;\n");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                CommandLine.Run([projectFile]);
+                string output = sw.ToString();
+                Assert.DoesNotContain("No project file", output);
+                Assert.DoesNotContain("MH0011", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_SingleFile_FailsWithPipelineNotImplementedMH9000()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliSingleFile_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, "public struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run([sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("MH9000", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_CheckFlag_SucceedsWithExitCodeZero()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliCheckOk_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, "public struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--check", sourceFile]);
+                Assert.Equal(0, exitCode);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_MultipleSourceFiles_CompilesTogether()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliMultiFiles_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string file1 = Path.Combine(tempDir, "A.mh");
+            string file2 = Path.Combine(tempDir, "B.mh");
+            File.WriteAllText(file1, "public struct Alpha;");
+            File.WriteAllText(file2, "public struct Beta { Alpha A; }");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--check", file1, file2]);
+                Assert.Equal(0, exitCode);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_EmitIlFlag_ExplicitlyFailsWithMH9000()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliEmitIl_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, "public struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--emit-il", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("MH9000", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_ShortNoProjectFlag_CompilesScriptWithArbitraryExtension()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliNpAnyExt_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string scriptFile = Path.Combine(tempDir, "Script.txt");
+            File.WriteAllText(scriptFile, "public struct Widget;\npublic struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["-np", "--color", "never", scriptFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("Build failed with 1 error(s)", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_DirectoryScanning_WithCustomPattern_DiscoversMatchingFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliDirPattern_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string matchingFile = Path.Combine(tempDir, "Widget.custom");
+            File.WriteAllText(matchingFile, "public struct CustomWidget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--check", "--pattern", "*.custom", tempDir]);
+                Assert.Equal(0, exitCode);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_DirectoryWithoutFiles_FailsWithHelpfulError()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliDirEmpty_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run([tempDir]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("No source files found in directory", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_NoRecurse_DoesNotScanSubdirectories()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliNoRecurse_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string subDir = Path.Combine(tempDir, "Sub");
+        Directory.CreateDirectory(subDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "Root.mh"), "public struct RootWidget;");
+            File.WriteAllText(Path.Combine(subDir, "Invalid.mh"), "syntax error here ;;;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--check", "--no-recurse", tempDir]);
+                Assert.Equal(0, exitCode);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void CommandLine_GlobalAlias_ResolvesAliasesAcrossFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliAlias_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceA = Path.Combine(tempDir, "A.mh");
+            string sourceB = Path.Combine(tempDir, "B.mh");
+
+            File.WriteAllText(sourceA, "namespace Lib { public struct Foo; }");
+            File.WriteAllText(sourceB, "namespace App; public struct Bar { internal MyFoo f; }");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--check", "-np", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
+                Assert.Equal(0, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("Build succeeded", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 }
+
+

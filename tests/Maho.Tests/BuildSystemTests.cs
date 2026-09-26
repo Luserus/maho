@@ -1,4 +1,4 @@
-using Maho.Build;
+using Miryo.Build;
 using Maho.Syntax;
 
 namespace Maho.Tests;
@@ -79,8 +79,8 @@ public sealed class BuildSystemTests
             Assert.Equal("App", project.ProjectName);
             Assert.Equal(tempDir, project.ProjectDirectory);
             Assert.Equal(2, project.SourceFiles.Count);
-            Assert.True(project.Options.ImplicitTopLevel);
-            Assert.Equal(Path.GetFullPath(mainFile), project.Options.EntryFile);
+            Assert.True(project.ImplicitTopLevel);
+            Assert.Equal(Path.GetFullPath(mainFile), project.EntryFile);
         }
         finally
         {
@@ -130,7 +130,8 @@ public sealed class BuildSystemTests
 
             // Analyzing a directory (even if it has only 1 file) should NOT implicitly enable top-level statements
             // because directory builds represent structured projects, not terminal one-liners.
-            var result = MahoBuildSystem.AnalyzeDirectory(tempDir);
+            string[] files = MiryoBuildSystem.ResolveSourceFiles(tempDir);
+            var result = MahoCompiler.AnalyzeFiles(files, rootPath: tempDir);
 
             // Expect MH0160 error because top-level is disabled by default for directory/project builds
             Assert.True(result.HasErrors);

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Maho.Build;
+namespace Miryo.Build;
 
 /// <summary> Configuration read from one domain-specific <c>.mhpr</c> project file. </summary>
 public sealed class MahoProjectConfiguration

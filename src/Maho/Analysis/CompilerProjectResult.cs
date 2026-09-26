@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -50,6 +51,12 @@ public sealed record CompilerProjectAnalysisResult(
     /// <summary> Aggregated diagnostics across all files in the project. </summary>
     public IReadOnlyList<DiagnosticInfo> Diagnostics =>
         Compilation?.Diagnostics ?? Files.SelectMany(f => f.Output?.Diagnostics ?? []).ToList();
+
+    /// <summary> Breakdown of elapsed time across compiler pipeline phases. </summary>
+    public CompilationPhaseTimers PhaseTimers { get; init; } = CompilationPhaseTimers.Zero;
+
+    /// <summary> Combined elapsed time across core compilation phases. </summary>
+    public TimeSpan Elapsed => PhaseTimers.Total;
 
     /// <summary> Indicates whether any file in the batch reported errors or analysis failure. </summary>
     public bool HasErrors => Files.Any(f => f.HasErrors);

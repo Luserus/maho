@@ -1,4 +1,4 @@
-namespace Maho.Build;
+namespace Miryo.Build;
 
 /// <summary>
 /// Configuration specifying how source files are discovered and selected for a project.

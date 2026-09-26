@@ -6,15 +6,18 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 ## Repository shape
 
-- [`source-tree.md`](source-tree.md): project-level split between the reusable compiler library and the CLI.
-- [`compiler-library.md`](compiler-library.md): map of the core library.
-- [`cli.md`](cli.md): CLI control flow, including argument parsing, file batching, status output, and rendering.
+- [`source-tree.md`](source-tree.md): project-level split between the reusable compiler library (`Maho`), the project/build manager (`Miryo`), and the compiler CLI (`MahoCli`).
+- [`miryo.md`](miryo.md): project manager and build tool CLI (`miryo`), `.mhpr` project files, and `miryo.config`.
+- [`compiler-library.md`](compiler-library.md): map of the core compiler library.
+- [`cli.md`](cli.md): CLI control flow for `mahoc`, including argument parsing, file batching, status output, and diagnostic rendering.
 
 ## Go here when...
 
-- You want to see how `./dist/mahoc` becomes actual work:
+- You want to understand project scaffolding, `.mhpr` configuration, dependencies, or high-level build commands:
+  [`miryo.md`](miryo.md)
+- You want to see how `./dist/mahoc` compiles source files and formats output:
   [`cli.md`](cli.md)
-- You want the public analysis API or the result payload contract:
+- You want the public analysis API, phase timers, or the result payload contract:
   [`analysis.md`](analysis.md)
 - You want to trace diagnostics from creation to final text/json output:
   [`diagnostics.md`](diagnostics.md)
@@ -38,19 +41,35 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 ## Current pipeline
 
-The compiler currently executes a complete front-end pipeline up through declaration resolution:
+The compiler executes a complete front-end pipeline up through declaration resolution:
 
-1. The CLI (`MahoCli` / `mahoc`) parses command-line arguments and configuration options.
-2. If compiling a `.mhpr` project file or directory, `MahoBuild.MahoBuildSystem` discovers source files, parses configuration, and prepares the compilation.
-3. `MahoCompiler.AnalyzeFiles(...)` coordinates multi-file front-end analysis (or `AnalyzeFile(...)` / `AnalyzeText(...)` for single inputs).
-4. `SourceText` indexes line offsets and enables absolute and line/column span tracking.
-5. `Lexer` and `Parser` generate a strongly-typed `SyntaxTree` with leading and trailing trivia.
-6. `Resolver` executes the semantic resolution pipeline:
-   - `SymbolDiscoveryPass`: discovers namespaces, builds the namespace trie, registers types/functions/variables/properties/aliases, assigns modifier flags (including `TypeFlags.Partial` and `FunctionFlags.Partial`), and constructs lexical scopes.
-   - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH1004`), checks duplicate non-partial types (`MH1002`), performs partial type canonical merging and kind consistency, enforces partial function body limits and signature matching (`MH1003`), checks duplicate variables (`MH1005`), duplicate properties (`MH1006`), and ambiguous type references (`MH1001`).
-7. Diagnostics are enriched with primary carets, secondary context spans, notes, and remediation help, then projected into `DiagnosticInfo` payloads.
-8. The CLI renders either rich ANSI-colored reports or JSON envelopes for diagnostics and optional debug JSON.
-9. Upon successful front-end resolution, the pipeline reaches the lowering/codegen boundary (currently throwing `MH9000`).
+1. **Build Orchestration (`Miryo` / `miryo`)**:
+   - If managing a project, `miryo` parses the `.mhpr` configuration, resolves inter-project dependencies, determines source files, reads `miryo.config`, and spawns `mahoc` with appropriate flags (e.g. `--entry`, `--unsafe`, `--implicit-toplevel`, `--alias`).
+2. **Compiler Driver (`MahoCli` / `mahoc`)**:
+   - Direct compiler CLI that accepts `.mh` source files and directories (zero awareness of `.mhpr` project files).
+   - Resolves input files and invokes `MahoCompiler.CompileFiles(...)` (or `AnalyzeFiles(...)`).
+3. **Syntax Phase (Lexing + Parsing)**:
+   - Source files are parsed in parallel via `Parallel.For`.
+   - `SourceText` indexes line offsets and enables absolute and line/column span tracking.
+   - `Lexer` tokenizes source into tokens with trivia.
+   - `Parser` constructs strongly-typed `CompilationUnit` ASTs.
+   - Phase duration is measured and recorded in `CompilationPhaseTimers.Syntax`.
+4. **Semantic Analysis Phase**:
+   - `Resolver` runs semantic passes across the unified `SyntaxTree`:
+     - `SymbolDiscoveryPass`: discovers namespaces, builds the namespace trie, registers types/functions/variables/properties/aliases, assigns modifier flags (including `TypeFlags.Partial` and `FunctionFlags.Partial`), and constructs lexical scopes.
+     - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH1004`), checks duplicate non-partial types (`MH1002`), performs partial type canonical merging and kind consistency, enforces partial function body limits and signature matching (`MH1003`), checks duplicate variables (`MH1005`), duplicate properties (`MH1006`), and ambiguous type references (`MH1001`).
+   - Phase duration is measured and recorded in `CompilationPhaseTimers.SemanticAnalysis`.
+5. **Lowering & Codegen Phase**:
+   - Currently serves as the lowering boundary (throwing `MH9000` until backend code generation is hooked up).
+   - Phase duration is tracked under `CompilationPhaseTimers.Lowering`.
+6. **Diagnostics & Status Output**:
+   - Diagnostics are enriched with primary carets, secondary context spans, notes, and remediation help, then projected into `DiagnosticInfo` payloads.
+   - The CLI renders either rich ANSI-colored reports or JSON envelopes for diagnostics.
+   - The compiler calculates and returns `analysis.Elapsed` directly, and the CLI prints the status line:
+     - `Build succeeded in <time>` (word `succeeded` in green)
+     - `Build succeeded with <n> warning(s) in <time>` (word `succeeded` in green, `warning(s)` in yellow)
+     - `Build failed with <n> error(s)` (word `error(s)` in red)
+     - `Build failed with <n> error(s) and <m> warning(s)` (word `error(s)` in red, `warning(s)` in yellow)
 
 ## Reading strategy
 

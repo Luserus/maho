@@ -4,24 +4,26 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLI_PROJECT="$REPO_ROOT/src/MahoCli/MahoCli.csproj"
+MIRYO_PROJECT="$REPO_ROOT/src/Miryo/Miryo.csproj"
+MAHO_PROJECT="$REPO_ROOT/src/Maho/Maho.csproj"
 DIST_DIR="$REPO_ROOT/dist"
 
 show_help() {
     cat <<EOF
 Usage: ./build-maho [options]
 
-Build script for the Maho compiler (mahoc).
+Build script for the Maho toolchain (miryo, mahoc, Maho).
 
 Options:
-  --all, all                     Build compiler for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
-  --platform, -p <platform>      Build compiler for a specific platform (e.g. linux-arm64, win-x64, osx-arm64)
-  --single-file, -s              Produce a fast, single-file binary (framework-dependent, no loose DLLs)
-  --self-contained, -sc          Produce a standalone self-contained, single-file, trimmed executable (runs on any system without .NET runtime)
+  --all, all                     Build toolchain for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
+  --platform, -p <platform>      Build toolchain for a specific platform (e.g. linux-arm64, win-x64, osx-arm64)
+  --single-file, -s              Produce fast, single-file decoupled binaries (framework-dependent, no loose DLLs)
+  --self-contained, -sc          Produce standalone self-contained, single-file, trimmed executables
   --debug, -d                    Build with debug configuration and emit PDB symbol files
   -h, --help                     Show this help message
 
 Default behavior:
-  Builds host platform compiler into dist/ with Release configuration,
+  Builds host platform toolchain into dist/ with Release configuration,
   omitting PDB symbols and dependency JSON files.
 EOF
 }
@@ -127,27 +129,55 @@ fi
 publish_target() {
     local rid="$1"
     local out_dir="$2"
-    local extra_args=("${debug_props[@]}")
+    local exe_args=("${debug_props[@]}")
 
     if [ "$self_contained" = true ]; then
-        extra_args+=("-r" "$rid" "--self-contained" "-p:PublishSingleFile=true" "-p:PublishTrimmed=true")
+        exe_args+=("-r" "$rid" "--self-contained" "-p:PublishSingleFile=true" "-p:PublishTrimmed=true")
     elif [ "$single_file" = true ]; then
-        extra_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true")
+        exe_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true")
     elif [ -n "$rid" ]; then
-        extra_args+=("-r" "$rid" "--no-self-contained")
+        exe_args+=("-r" "$rid" "--no-self-contained")
     fi
 
-    dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${extra_args[@]}" --nologo -v q
+    # 1. Publish mahoc
+    dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
+
+    # 2. Publish miryo
+    dotnet publish "$MIRYO_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
+
+    # 3. Publish Maho library
+    dotnet publish "$MAHO_PROJECT" -c "$config" -o "$out_dir" "${debug_props[@]}" --nologo -v q
+
+    # 4. Generate miryo.config
+    cat > "$out_dir/miryo.config" <<'EOF'
+# Miryo Toolchain Configuration
+
+[tools]
+mahoc = ["./mahoc", "mahoc"]
+il2llvmir = ["./il2llvmir", "il2llvmir"]
+llvm_opt = ["opt", "/usr/bin/opt"]
+llvm_clang = ["clang", "/usr/bin/clang"]
+
+[templates]
+bin_template = "EntryFile : \"src/Program.mh\";\nImplicitTopLevel : true;\n"
+lib_template = "EntryFile : \"src/Lib.mh\";\nImplicitTopLevel : false;\n"
+bin_source_path = "src/Program.mh"
+bin_source = "println(\"Hello from Maho!\");\n"
+lib_source_path = "src/Lib.mh"
+lib_source = "public struct Lib;\n"
+gitignore = "target/\nbin/\nobj/\ndist/\n"
+EOF
 }
 
 find_binary() {
     local dir="$1"
-    if [[ -f "$dir/mahoc" ]]; then
-        echo "$dir/mahoc"
-    elif [[ -f "$dir/mahoc.exe" ]]; then
-        echo "$dir/mahoc.exe"
+    local name="$2"
+    if [[ -f "$dir/$name" ]]; then
+        echo "$dir/$name"
+    elif [[ -f "$dir/$name.exe" ]]; then
+        echo "$dir/$name.exe"
     else
-        echo "$dir/mahoc"
+        echo "$dir/$name"
     fi
 }
 
@@ -156,7 +186,7 @@ host_rid="$(detect_host_rid)"
 if [ "$build_all" = true ]; then
     platforms=("linux-x64" "linux-arm64" "win-x64" "osx-x64" "osx-arm64")
 
-    echo "==> Building Maho compiler (mahoc) for all major platforms..."
+    echo "==> Building Maho toolchain for all major platforms..."
     mkdir -p "$DIST_DIR"
 
     for rid in "${platforms[@]}"; do
@@ -169,54 +199,56 @@ if [ "$build_all" = true ]; then
     if [ "$single_file" = true ]; then
         publish_target "$host_rid" "$DIST_DIR"
     else
-        dotnet publish "$CLI_PROJECT" -c "$config" -o "$DIST_DIR" "${debug_props[@]}" --nologo -v q
+        publish_target "$host_rid" "$DIST_DIR"
     fi
 
-    host_bin="$(find_binary "$DIST_DIR")"
+    host_mahoc="$(find_binary "$DIST_DIR" "mahoc")"
+    host_miryo="$(find_binary "$DIST_DIR" "miryo")"
 
     echo ""
-    echo "Maho compiler (mahoc) successfully built for all major platforms:"
-    echo "  Host:         $host_bin"
-    echo "  linux-x64:    $(find_binary "$DIST_DIR/linux-x64")"
-    echo "  linux-arm64:  $(find_binary "$DIST_DIR/linux-arm64")"
-    echo "  win-x64:      $(find_binary "$DIST_DIR/win-x64")"
-    echo "  osx-x64:      $(find_binary "$DIST_DIR/osx-x64")"
-    echo "  osx-arm64:    $(find_binary "$DIST_DIR/osx-arm64")"
+    echo "Maho toolchain successfully built for all major platforms:"
+    echo "  Host Compiler (mahoc): $host_mahoc"
+    echo "  Host Project (miryo):  $host_miryo"
     echo ""
-    echo "Execute host compiler via:"
-    echo "  $host_bin [options] [source-path]"
+    echo "Execute host toolchain via:"
+    echo "  $host_miryo [command] [options]"
+    echo "  $host_mahoc [options] [source-paths...]"
 elif [ -n "$target_platform" ]; then
-    echo "==> Building Maho compiler (mahoc) for platform '$target_platform'..."
+    echo "==> Building Maho toolchain for platform '$target_platform'..."
     target_dir="$DIST_DIR/$target_platform"
     mkdir -p "$target_dir"
     publish_target "$target_platform" "$target_dir"
 
-    bin_path="$(find_binary "$target_dir")"
+    mahoc_bin="$(find_binary "$target_dir" "mahoc")"
+    miryo_bin="$(find_binary "$target_dir" "miryo")"
 
     echo ""
-    echo "Maho compiler (mahoc) successfully built for $target_platform:"
-    echo "  $bin_path"
+    echo "Maho toolchain successfully built for $target_platform:"
+    echo "  mahoc: $mahoc_bin"
+    echo "  miryo: $miryo_bin"
     echo ""
     if [ "$target_platform" = "$host_rid" ]; then
-        echo "Execute compiler via:"
-        echo "  $bin_path [options] [source-path]"
+        echo "Execute toolchain via:"
+        echo "  $miryo_bin [command] [options]"
+        echo "  $mahoc_bin [options] [source-paths...]"
     fi
 else
-    echo "==> Building Maho compiler (mahoc) for host platform ($host_rid)..."
+    echo "==> Building Maho toolchain for host platform ($host_rid)..."
     mkdir -p "$DIST_DIR"
 
-    if [ "$single_file" = true ]; then
-        publish_target "$host_rid" "$DIST_DIR"
-    else
-        dotnet publish "$CLI_PROJECT" -c "$config" -o "$DIST_DIR" "${debug_props[@]}" --nologo -v q
-    fi
+    publish_target "$host_rid" "$DIST_DIR"
 
-    bin_path="$(find_binary "$DIST_DIR")"
+    mahoc_bin="$(find_binary "$DIST_DIR" "mahoc")"
+    miryo_bin="$(find_binary "$DIST_DIR" "miryo")"
 
     echo ""
-    echo "Maho compiler (mahoc) successfully built:"
-    echo "  $bin_path"
+    echo "Maho toolchain successfully built:"
+    echo "  mahoc:         $mahoc_bin"
+    echo "  miryo:         $miryo_bin"
+    echo "  Core Library:  $DIST_DIR/Maho.dll"
+    echo "  Configuration: $DIST_DIR/miryo.config"
     echo ""
-    echo "Execute compiler via:"
-    echo "  $bin_path [options] [source-path]"
+    echo "Execute toolchain via:"
+    echo "  $miryo_bin [command] [options]"
+    echo "  $mahoc_bin [options] [source-paths...]"
 fi
