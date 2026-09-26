@@ -4,7 +4,7 @@ An experimental programming language and compiler project inspired by C#.
 
 ## Current Status
 
-![Build Status](https://github.com)
+[![.NET](https://github.com/Luserus/maho/actions/workflows/dotnet.yml/badge.svg?branch=develop)](https://github.com/Luserus/maho/actions/workflows/dotnet.yml)
 
 The repository is organized into focused projects:
 
