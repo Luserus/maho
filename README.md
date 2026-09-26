@@ -4,6 +4,8 @@ An experimental programming language and compiler project inspired by C#.
 
 ## Current Status
 
+[![.NET](https://github.com/Luserus/maho/actions/workflows/dotnet.yml/badge.svg?branch=develop)](https://github.com/Luserus/maho/actions/workflows/dotnet.yml)
+
 The repository is organized into focused projects:
 
 - `src/Maho/Maho.csproj`: the reusable core compiler library (source text, lexing, parsing, AST, diagnostics, phase timers, and semantic resolution passes).
