@@ -204,7 +204,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         foreach (var declarator in declaration.Declarators)
         {
-            LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, ResolutionContext.GetSymbolName(declarator.Identifier).Last,
+            LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, context.GetScopedSymbolName(declarator.Identifier).Last,
                                                                          ResolutionContext.GetHandle(topLevelMain), declaration);
 
             symbol.Flags = flags;
@@ -509,7 +509,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbols = new List<LocalVariableSymbol>(declaration.Declarators.Count);
         foreach (var declarator in declaration.Declarators)
         {
-            var symbol = context.CreateLocalVariableSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier).Last, containingSymbol, declaration);
+            var symbol = context.CreateLocalVariableSymbol(scope, context.GetScopedSymbolName(declarator.Identifier).Last, containingSymbol, declaration);
             symbol.Flags = ResolveVariableFlags(declaration.Modifiers);
             symbols.Add(symbol);
         }

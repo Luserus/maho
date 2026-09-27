@@ -351,7 +351,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         setType(ResolveType(syntax.Type, symbol.EnclosingScope));
 
         foreach (var declarator in syntax.Declarators)
-            if (ResolutionContext.GetSymbolName(declarator.Identifier).Last == symbol.Name)
+            if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
                 ResolveExpression(declarator.Initializer?.Initializer, symbol.EnclosingScope, GetContainingFunction(symbol));
     }
 
@@ -461,7 +461,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var clause in clauses)
         {
-            var parameter = FindGenericParameter(parameters, ResolutionContext.GetSymbolName(clause.GenericParameter).Last);
+            var parameter = FindGenericParameter(parameters, context.GetScopedSymbolName(clause.GenericParameter).Last);
             if (parameter is null)
                 continue;
 
@@ -507,7 +507,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 ResolveNamed(attribute.Name, scope, attribute);
 
-                if (ResolveSingle(scope, ResolutionContext.GetSymbolName(attribute.Name)) is { } symbol)
+                if (ResolveSingle(scope, context.GetScopedSymbolName(attribute.Name)) is { } symbol)
                     result.Add(ResolutionContext.GetHandle(symbol));
 
                 foreach (var argument in attribute.Arguments)
@@ -819,7 +819,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveNamedExpression(NamedExpression syntax, Scope scope)
     {
-        var name = syntax is GenericNameExpression generic ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count) : new SymbolPart(syntax.Identifier);
+        var hygiene = context.GetHygiene(syntax);
+        var name = syntax is GenericNameExpression generic
+            ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count, hygiene)
+            : new SymbolPart(syntax.Identifier, 0, hygiene);
 
         if (ResolveSingle(scope, new SymbolName(name)) is { } symbol)
             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(symbol));
@@ -831,7 +834,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveNamed(NamedSyntax syntax, Scope scope, SyntaxNode reference)
     {
-        if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is { } symbol)
+        if (ResolveSingle(scope, context.GetScopedSymbolName(syntax)) is { } symbol)
             context.ResolvedTree.AddReference(reference, ResolutionContext.GetHandle(symbol));
     }
 
@@ -1455,12 +1458,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
-    private static TextSpan GetVariableIdentifierSpan(VariableDeclaration? syntax, SymbolPart name)
+    private TextSpan GetVariableIdentifierSpan(VariableDeclaration? syntax, SymbolPart name)
     {
         if (syntax != null)
         {
             foreach (var declarator in syntax.Declarators)
-                if (ResolutionContext.GetSymbolName(declarator.Identifier).Last == name)
+                if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
                     return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
 
             return syntax.GetSpan() ?? default;

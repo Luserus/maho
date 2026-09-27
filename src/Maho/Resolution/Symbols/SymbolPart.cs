@@ -15,21 +15,24 @@ internal readonly struct SymbolPart : IEquatable<SymbolPart>
 
     public int Arity { get; }
 
-    private SymbolPart(SourceText? source, TextSpan span, string? literal, int arity)
+    public HygieneId Hygiene { get; }
+
+    private SymbolPart(SourceText? source, TextSpan span, string? literal, int arity, HygieneId hygiene)
     {
         this.source = source;
         this.span = span;
         this.literal = literal;
         Arity = arity;
+        Hygiene = hygiene;
     }
 
-    public SymbolPart(Token token, int arity = 0) : this(token.Source, token.Span, null, arity) { }
+    public SymbolPart(Token token, int arity = 0, HygieneId hygiene = default) : this(token.Source, token.Span, null, arity, hygiene) { }
 
-    public SymbolPart(string literal, int arity = 0) : this(null, default, literal, arity) { }
+    public SymbolPart(string literal, int arity = 0, HygieneId hygiene = default) : this(null, default, literal, arity, hygiene) { }
 
     public ReadOnlySpan<char> AsSpan() => literal is not null ? literal.AsSpan() : source!.AsSpan(span);
 
-    public bool Equals(SymbolPart other) => Arity == other.Arity && AsSpan().SequenceEqual(other.AsSpan());
+    public bool Equals(SymbolPart other) => Arity == other.Arity && Hygiene == other.Hygiene && AsSpan().SequenceEqual(other.AsSpan());
 
     public override bool Equals(object? obj) => obj is SymbolPart other && Equals(other);
 
@@ -39,6 +42,7 @@ internal readonly struct SymbolPart : IEquatable<SymbolPart>
         var value = AsSpan();
 
         hash.Add(Arity);
+        hash.Add(Hygiene);
 
         foreach (char ch in value)
             hash.Add(ch);

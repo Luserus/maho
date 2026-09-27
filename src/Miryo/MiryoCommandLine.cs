@@ -70,13 +70,15 @@ public static class MiryoCommandLine
                 if (command.StartsWith('-'))
                 {
                     stderr.WriteLine($"Unknown option '{command}'.");
-                    stderr.WriteLine();
-                    PrintUsage(stderr);
-                    return 1;
+                }
+                else
+                {
+                    stderr.WriteLine($"Unknown command '{args[0]}'. Expected a command keyword.");
                 }
 
-                // If path passed directly without command, treat as 'build <path>'
-                return ExecuteBuild(args, stdout, stderr);
+                stderr.WriteLine();
+                PrintUsage(stderr);
+                return 1;
         }
     }
 

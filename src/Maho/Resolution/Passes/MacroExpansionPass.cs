@@ -28,7 +28,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             CollectMacros(root.Members, macroTable);
 
         ulong recursionLimit = context.Options?.MacroRecursionLimit ?? 128;
-        var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable);
+        var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable, context);
 
         ulong currentDepth = 0;
         bool anyExpanded;

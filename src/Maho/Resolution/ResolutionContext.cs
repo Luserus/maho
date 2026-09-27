@@ -32,6 +32,26 @@ internal sealed class ResolutionContext
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
+    private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
+
+    public void RegisterHygiene(SyntaxNode node, HygieneId hygiene) => nodeHygiene[node] = hygiene;
+
+    public HygieneId GetHygiene(SyntaxNode? node)
+    {
+        if (node is null)
+            return HygieneId.Root;
+
+        if (nodeHygiene.TryGetValue(node, out var hygiene))
+            return hygiene;
+
+        if (node is NamedExpression named && nodeHygiene.TryGetValue(named.Identifier, out var idHygiene))
+            return idHygiene;
+
+        if (node is SimpleName simple && nodeHygiene.TryGetValue(simple.Name, out var nameHygiene))
+            return nameHygiene;
+
+        return HygieneId.Root;
+    }
 
     /// <summary> Other projects or modules referenced by this compilation unit. </summary>
     public IReadOnlyList<ResolutionContext> ReferencedProjects { get; }
@@ -468,27 +488,30 @@ internal sealed class ResolutionContext
         return new SymbolName(parts);
     }
 
-    public static SymbolName GetSymbolName(NamedSyntax name) => name switch
+    public SymbolName GetScopedSymbolName(NamedSyntax name) =>
+        GetSymbolName(name, GetHygiene(name));
+
+    public static SymbolName GetSymbolName(NamedSyntax name, HygieneId hygiene = default) => name switch
     {
-        SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name)),
-        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count)),
-        QualifiedName qualifiedName => GetQualifiedName(qualifiedName),
+        SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name, 0, hygiene)),
+        GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene)),
+        QualifiedName qualifiedName => GetQualifiedName(qualifiedName, hygiene),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 
-    private static SymbolPart GetSymbolPart(NamedSyntax name) => name switch
+    private static SymbolPart GetSymbolPart(NamedSyntax name, HygieneId hygiene = default) => name switch
     {
-        SimpleName simpleName => new SymbolPart(simpleName.Name),
-        GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count),
+        SimpleName simpleName => new SymbolPart(simpleName.Name, 0, hygiene),
+        GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 
-    private static SymbolName GetQualifiedName(QualifiedName qualifiedName)
+    private static SymbolName GetQualifiedName(QualifiedName qualifiedName, HygieneId hygiene = default)
     {
         var parts = new SymbolPart[qualifiedName.Parts.Count];
 
         for (int i = 0; i < parts.Length; i++)
-            parts[i] = GetSymbolPart(qualifiedName.Parts[i]);
+            parts[i] = GetSymbolPart(qualifiedName.Parts[i], hygiene);
 
         return new SymbolName(parts);
     }

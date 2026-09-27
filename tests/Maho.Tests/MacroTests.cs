@@ -99,10 +99,127 @@ public sealed class MacroTests
         // Original 2 variable declarations + 3 expanded statements from $swap
         Assert.Equal(5, funcBody.Locals.Count);
 
-        // Third statement is 'var temp__m1 = x;'
+        // Third statement is 'var temp = x;' with uncollidable HygieneId (no name mangling)
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[2]);
         var declarator = Assert.Single(varDecl.Declaration.Declarators);
-        Assert.StartsWith("temp__m", declarator.Identifier.ToString());
+        Assert.Equal("temp", declarator.Identifier.ToString());
+        Assert.True(compilation.Context!.GetHygiene(declarator.Identifier).IsMacroGenerated);
+
+        var tempSymbol = Assert.Single(compilation.Context.LocalVariableSymbols, s => s.Name.ToString() == "temp");
+        Assert.True(tempSymbol.IsMacroGenerated);
+        Assert.True(tempSymbol.Hygiene.IsMacroGenerated);
+    }
+
+    [Fact]
+    public void MacroHygiene_UncollidableWithUserSymbols_NoClash()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $swap {
+                (@a: ident, @b: ident) => {
+                    var temp = @a;
+                    @a = @b;
+                    @b = temp;
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                public struct int32;
+
+                public void Test()
+                {
+                    int32 x = 1;
+                    int32 y = 2;
+                    int32 temp = 999;
+                    $swap(x, y);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var tempSymbols = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        Assert.Equal(2, tempSymbols.Count);
+
+        var userTemp = Assert.Single(tempSymbols, s => !s.IsMacroGenerated);
+        var macroTemp = Assert.Single(tempSymbols, s => s.IsMacroGenerated);
+
+        Assert.True(userTemp.Hygiene.IsRoot);
+        Assert.True(macroTemp.Hygiene.IsMacroGenerated);
+        Assert.NotEqual(userTemp.Hygiene, macroTemp.Hygiene);
+    }
+
+    [Fact]
+    public void MacroHygiene_PreventsVariableCapture()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $swap {
+                (@a: ident, @b: ident) => {
+                    var temp = @a;
+                    @a = @b;
+                    @b = temp;
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                public struct int32;
+
+                public void Test()
+                {
+                    int32 temp = 1;
+                    int32 other = 2;
+                    $swap(temp, other);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var tempSymbols = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        Assert.Equal(2, tempSymbols.Count);
+
+        var callerTemp = Assert.Single(tempSymbols, s => !s.IsMacroGenerated);
+        var macroTemp = Assert.Single(tempSymbols, s => s.IsMacroGenerated);
+
+        Assert.True(callerTemp.Hygiene.IsRoot);
+        Assert.True(macroTemp.Hygiene.IsMacroGenerated);
+    }
+
+    [Fact]
+    public void MacroHygiene_MultipleExpansionsHaveDistinctHygieneIds()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $swap {
+                (@a: ident, @b: ident) => {
+                    var temp = @a;
+                    @a = @b;
+                    @b = temp;
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                public struct int32;
+
+                public void Test()
+                {
+                    int32 x = 1;
+                    int32 y = 2;
+                    int32 a = 3;
+                    int32 b = 4;
+                    $swap(x, y);
+                    $swap(a, b);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var macroTemps = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        Assert.Equal(2, macroTemps.Count);
+        Assert.All(macroTemps, s => Assert.True(s.IsMacroGenerated));
+        Assert.NotEqual(macroTemps[0].Hygiene, macroTemps[1].Hygiene);
     }
 
     [Fact]
