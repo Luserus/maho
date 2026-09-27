@@ -14,9 +14,9 @@ These files are intentionally declarative: they define the tree that the parser 
 - Name/reference forms:
   `IdentifierNameExpression`, `GenericNameExpression`
 - Literal/grouping forms:
-  `LiteralExpression`, `ParenthesizedExpression`
+  `LiteralExpression`, `ParenthesizedExpression`, `TupleExpression`
 - Operator forms:
-  `UnaryExpression`, `BinaryExpression`, `AssignmentExpression`, `CastExpression`
+  `UnaryExpression`, `BinaryExpression`, `AssignmentExpression`, `AsExpression`
 - Access/call forms:
   `MemberAccessExpression`, `CallExpression`, `IndexExpression`, `NamedArgumentExpression`
 - Control-flow-like forms:

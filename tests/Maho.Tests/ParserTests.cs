@@ -408,37 +408,91 @@ public sealed class ParserTests
     }
 
     [Theory]
-    [InlineData("PointerType * value;", typeof(TopLevelAmbiguousPointerDeclaration), typeof(AmbiguousPointerDeclaration))]
-    [InlineData("ReferenceType & value;", typeof(TopLevelAmbiguousReferenceDeclaration), typeof(AmbiguousReferenceDeclaration))]
-    public void Parse_TopLevelAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    [InlineData("PointerType * value;")]
+    [InlineData("ReferenceType & value;")]
+    public void Parse_TopLevelPointerAndReferenceDeclarations(string source)
     {
-        TopLevel topLevel = ParseSingleTopLevel(source, expectedType);
+        TopLevel topLevel = ParseSingleTopLevel(source, typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
+        Assert.Single(variable.Declaration.Declarators);
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
 
-        object declaration = topLevel switch
-        {
-            TopLevelAmbiguousPointerDeclaration pointer => pointer.Declaration,
-            TopLevelAmbiguousReferenceDeclaration reference => reference.Declaration,
-            _ => throw new Xunit.Sdk.XunitException($"Top-level node '{topLevel.GetType().Name}' does not expose an ambiguous declaration.")
-        };
-
-        Assert.IsType(expectedDeclarationType, declaration);
+    [Fact]
+    public void Parse_TopLevelMultipleDeclarators()
+    {
+        TopLevel topLevel = ParseSingleTopLevel("PointerType * a, b;", typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
+        Assert.Equal(2, variable.Declaration.Declarators.Count);
+        Assert.Equal("a", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("b", Assert.IsType<SimpleName>(variable.Declaration.Declarators[1].Identifier).Name.Value);
     }
 
     [Theory]
-    [InlineData("PointerType * value;", typeof(LocalAmbiguousPointerDeclarationStatement), typeof(AmbiguousPointerDeclaration))]
-    [InlineData("ReferenceType & value;", typeof(LocalAmbiguousReferenceDeclarationStatement), typeof(AmbiguousReferenceDeclaration))]
-    public void Parse_LocalAmbiguousDeclarationKinds(string source, Type expectedType, Type expectedDeclarationType)
+    [InlineData("PointerType * value;")]
+    [InlineData("ReferenceType & value;")]
+    public void Parse_LocalPointerAndReferenceDeclarations(string source)
     {
-        Local local = ParseSingleLocal(source, expectedType);
+        Local local = ParseSingleLocal(source, typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        Assert.Single(variable.Declaration.Declarators);
+        Assert.IsType<ModifiedType>(variable.Declaration.Type);
+    }
 
-        object declaration = local switch
-        {
-            LocalAmbiguousPointerDeclarationStatement pointer => pointer.Declaration,
-            LocalAmbiguousReferenceDeclarationStatement reference => reference.Declaration,
-            _ => throw new Xunit.Sdk.XunitException($"Local node '{local.GetType().Name}' does not expose an ambiguous declaration.")
-        };
+    [Fact]
+    public void Parse_LocalMultipleDeclarators()
+    {
+        Local local = ParseSingleLocal("PointerType * a, b;", typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        Assert.Equal(2, variable.Declaration.Declarators.Count);
+        Assert.Equal("a", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("b", Assert.IsType<SimpleName>(variable.Declaration.Declarators[1].Identifier).Name.Value);
+    }
 
-        Assert.IsType(expectedDeclarationType, declaration);
+    [Fact]
+    public void Parse_StatementParenthesizedExpression_EscapeHatch()
+    {
+        Local local = ParseSingleLocal("(A * B);", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt = Assert.IsType<LocalExpressionStatement>(local);
+        ParenthesizedExpression paren = Assert.IsType<ParenthesizedExpression>(exprStmt.Expression);
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(paren.Expression);
+        Assert.Equal(TokenKind.Asterisk, binary.OperatorToken.Kind);
+    }
+
+    [Fact]
+    public void Parse_StatementTupleExpression()
+    {
+        Local local = ParseSingleLocal("(A * B, C);", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt = Assert.IsType<LocalExpressionStatement>(local);
+        TupleExpression tuple = Assert.IsType<TupleExpression>(exprStmt.Expression);
+        Assert.Equal(2, tuple.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_StatementTupleDeclaration()
+    {
+        Local local = ParseSingleLocal("(int, string) pair = (1, \"hello\");", typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement varStmt = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        TupleType tupleType = Assert.IsType<TupleType>(varStmt.Declaration.Type);
+        Assert.Equal(2, tupleType.Elements.Count);
+        Assert.Single(varStmt.Declaration.Declarators);
+        Assert.IsType<TupleExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+    }
+
+    [Fact]
+    public void Parse_ConditionalWithDeclarationAndExpression()
+    {
+        Local localIf = ParseSingleLocal("if (int x = 1; x > 0) return;", typeof(LocalIfStatement));
+        LocalIfStatement ifStmt = Assert.IsType<LocalIfStatement>(localIf);
+        Assert.NotNull(ifStmt.Declaration);
+        Assert.NotNull(ifStmt.Semicolon);
+        Assert.IsType<BinaryExpression>(ifStmt.Condition);
+
+        Local localWhile = ParseSingleLocal("while (int x = 1; x > 0) ;", typeof(LocalWhileStatement));
+        LocalWhileStatement whileStmt = Assert.IsType<LocalWhileStatement>(localWhile);
+        Assert.NotNull(whileStmt.Declaration);
+        Assert.NotNull(whileStmt.Semicolon);
+        Assert.IsType<BinaryExpression>(whileStmt.Condition);
     }
 
     [Theory]
@@ -630,28 +684,25 @@ public sealed class ParserTests
     [Theory]
     [InlineData("return (A) - B;", TokenKind.Minus)]
     [InlineData("return (A) * B;", TokenKind.Asterisk)]
-    public void Parse_CastFollowedByPrefixInfixOperator_IsAmbiguous(string source, TokenKind expectedOperator)
+    public void Parse_ParenthesizedExpressionFollowedByInfixOperator_IsUnambiguousBinary(string source, TokenKind expectedOperator)
     {
         LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal(source, typeof(LocalReturnStatement)));
 
-        AmbiguousCastOrParenthesizedExpression ambiguous = Assert.IsType<AmbiguousCastOrParenthesizedExpression>(local.Statement.Expression);
-        UnaryExpression castOperand = Assert.IsType<UnaryExpression>(ambiguous.CastExpression.Expression);
-        BinaryExpression parenthesizedAlternative = Assert.IsType<BinaryExpression>(ambiguous.ParenthesizedExpression);
-
-        Assert.Equal(expectedOperator, castOperand.OperatorToken.Kind);
-        Assert.Equal(expectedOperator, parenthesizedAlternative.OperatorToken.Kind);
-        Assert.IsType<ParenthesizedExpression>(parenthesizedAlternative.LeftExpression);
+        BinaryExpression binary = Assert.IsType<BinaryExpression>(local.Statement.Expression);
+        Assert.Equal(expectedOperator, binary.OperatorToken.Kind);
+        Assert.IsType<ParenthesizedExpression>(binary.LeftExpression);
     }
 
     [Fact]
-    public void Parse_CastFollowedByIdentifier_IsUnambiguousCast()
+    public void Parse_AsExpression_IsUnambiguousAsExpression()
     {
         LocalReturnStatement local = Assert.IsType<LocalReturnStatement>(ParseSingleLocal("""
-            return (A)B;
+            return B as A;
             """, typeof(LocalReturnStatement)));
 
-        CastExpression cast = Assert.IsType<CastExpression>(local.Statement.Expression);
-        Assert.IsType<IdentifierNameExpression>(cast.Expression);
+        AsExpression asExpr = Assert.IsType<AsExpression>(local.Statement.Expression);
+        Assert.IsType<IdentifierNameExpression>(asExpr.Expression);
+        Assert.Equal("A", Assert.IsType<SimpleType>(asExpr.Type).Name.Value);
     }
 
     [Fact]
@@ -973,9 +1024,10 @@ public sealed class ParserTests
 
                     int local = 1;
                     int[] numbers = new int[3] { 1, 2, 3 };
+                    (int, int) pair = (1, 2);
                     PointerLocal * localPointer;
                     ReferenceLocal & localReference;
-                    local = -(local + 1) + (int)items[0];
+                    local = -(local + 1) + (items[0] as int);
                     local = (local) - local;
                     local = { int last = 2; 3 };
                     local = [1, 2, 3] with(capacity: 10)[0];
@@ -985,8 +1037,8 @@ public sealed class ParserTests
                     local = if (local) local else 0;
                     local = identity<int>(value: local);
 
-                    if (local) return local; else ;
-                    while (local) ;
+                    if (int testCond = local; testCond) return local; else ;
+                    while (int testLoop = local; testLoop) ;
                     { int scoped = 0; scoped = local; }
                     return local;
                 }
@@ -1039,8 +1091,6 @@ public sealed class ParserTests
             typeof(TopLevelTypeDeclaration),
             typeof(TopLevelFunctionDeclaration),
             typeof(TopLevelVariableDeclaration),
-            typeof(TopLevelAmbiguousPointerDeclaration),
-            typeof(TopLevelAmbiguousReferenceDeclaration),
             typeof(TypeDeclaration),
             typeof(TypeBlockBody),
             typeof(TypeEmptyBody),
@@ -1054,8 +1104,6 @@ public sealed class ParserTests
             typeof(LocalTypeDeclaration),
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),
-            typeof(LocalAmbiguousPointerDeclarationStatement),
-            typeof(LocalAmbiguousReferenceDeclarationStatement),
             typeof(TopLevelExpressionStatement),
             typeof(TopLevelIfStatement),
             typeof(TopLevelElseStatement),
@@ -1071,8 +1119,6 @@ public sealed class ParserTests
             typeof(LocalReturnStatement),
             typeof(LocalEmptyStatement),
             typeof(VariableDeclaration),
-            typeof(AmbiguousPointerDeclaration),
-            typeof(AmbiguousReferenceDeclaration),
             typeof(AssignmentClause),
             typeof(Parameter),
             typeof(ParameterVariableDeclarator),
@@ -1082,6 +1128,7 @@ public sealed class ParserTests
             typeof(GenericType),
             typeof(QualifiedType),
             typeof(ModifiedType),
+            typeof(TupleType),
             typeof(TypeBaseClause),
             typeof(TypeConstraintClause),
             typeof(TypeTypeConstraint),
@@ -1099,8 +1146,8 @@ public sealed class ParserTests
             typeof(BinaryExpression),
             typeof(AssignmentExpression),
             typeof(ParenthesizedExpression),
-            typeof(CastExpression),
-            typeof(AmbiguousCastOrParenthesizedExpression),
+            typeof(TupleExpression),
+            typeof(AsExpression),
             typeof(BlockExpression),
             typeof(CollectionExpression),
             typeof(CollectionConstructorModifier),

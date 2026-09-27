@@ -537,6 +537,10 @@ internal sealed class ResolutionContext
                 AddTypeNameParts(modified.Type, parts);
                 break;
 
+            case TupleType:
+                parts.Add(new SymbolPart(string.Empty));
+                break;
+
             default:
                 throw new System.ArgumentOutOfRangeException(nameof(type));
         }

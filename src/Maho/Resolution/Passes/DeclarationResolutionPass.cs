@@ -113,15 +113,25 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);
                 break;
             case TopLevelIfStatement statement:
-                ResolveExpression(statement.Condition, scope, containingFunction);
-                ResolveTopLevel(statement.ThenStatement, scope, containingFunction);
+                Scope ifScope = statement.Declaration is not null ? context.CreateScope(scope) : scope;
+                if (statement.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(statement.Declaration, ifScope, containingFunction);
+                }
+                ResolveExpression(statement.Condition, ifScope, containingFunction);
+                ResolveTopLevel(statement.ThenStatement, ifScope, containingFunction);
 
                 if (statement.ElseStatement is not null)
-                    ResolveTopLevel(statement.ElseStatement.Statement, scope, containingFunction);
+                    ResolveTopLevel(statement.ElseStatement.Statement, ifScope, containingFunction);
                 break;
             case TopLevelWhileStatement statement:
-                ResolveExpression(statement.Condition, scope, containingFunction);
-                ResolveTopLevel(statement.Statement, scope, containingFunction);
+                Scope whileScope = statement.Declaration is not null ? context.CreateScope(scope) : scope;
+                if (statement.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(statement.Declaration, whileScope, containingFunction);
+                }
+                ResolveExpression(statement.Condition, whileScope, containingFunction);
+                ResolveTopLevel(statement.Statement, whileScope, containingFunction);
                 break;
         }
     }
@@ -405,14 +415,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveExpression(statement.Statement.Expression, scope, containingFunction);
                 break;
             case LocalIfStatement statement:
-                ResolveExpression(statement.Condition, scope, containingFunction);
-                ResolveLocal(statement.ThenStatement, scope, containingFunction);
+                Scope ifScope = statement.Declaration is not null ? context.GetSyntaxScope(statement, scope) : scope;
+                if (statement.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(statement.Declaration, ifScope, containingFunction);
+                }
+                ResolveExpression(statement.Condition, ifScope, containingFunction);
+                ResolveLocal(statement.ThenStatement, ifScope, containingFunction);
                 if (statement.ElseStatement is not null)
-                    ResolveLocal(statement.ElseStatement.Statement, scope, containingFunction);
+                    ResolveLocal(statement.ElseStatement.Statement, ifScope, containingFunction);
                 break;
             case LocalWhileStatement statement:
-                ResolveExpression(statement.Condition, scope, containingFunction);
-                ResolveLocal(statement.Body, scope, containingFunction);
+                Scope whileScope = statement.Declaration is not null ? context.GetSyntaxScope(statement, scope) : scope;
+                if (statement.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(statement.Declaration, whileScope, containingFunction);
+                }
+                ResolveExpression(statement.Condition, whileScope, containingFunction);
+                ResolveLocal(statement.Body, whileScope, containingFunction);
                 break;
             case LocalGotoStatement statement:
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);
@@ -540,6 +560,20 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             }
 
             return TypeRef.Inferred;
+        }
+
+        if (syntax is TupleType tuple)
+        {
+            foreach (var elem in tuple.Elements)
+                ResolveType(elem, scope, reportDiagnostics);
+            return TypeRef.Unresolved;
+        }
+
+        if (syntax is ModifiedType modified && modified.Type is TupleType modifiedTuple)
+        {
+            foreach (var elem in modifiedTuple.Elements)
+                ResolveType(elem, scope, reportDiagnostics);
+            return TypeRef.Unresolved;
         }
 
         if (syntax is GenericType generic)
@@ -743,13 +777,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case ParenthesizedExpression parenthesized:
                 ResolveExpression(parenthesized.Expression, scope, containingSymbol);
                 break;
-            case CastExpression cast:
-                ResolveType(cast.Type, scope);
-                ResolveExpression(cast.Expression, scope, containingSymbol);
+            case AsExpression asExpr:
+                ResolveType(asExpr.Type, scope);
+                ResolveExpression(asExpr.Expression, scope, containingSymbol);
                 break;
-            case AmbiguousCastOrParenthesizedExpression ambiguous:
-                ResolveExpression(ambiguous.CastExpression, scope, containingSymbol);
-                ResolveExpression(ambiguous.ParenthesizedExpression, scope, containingSymbol);
+            case TupleExpression tuple:
+                foreach (var argument in tuple.Arguments)
+                    ResolveExpression(argument, scope, containingSymbol);
                 break;
             case CallExpression call:
                 ResolveExpression(call.Callee, scope, containingSymbol);

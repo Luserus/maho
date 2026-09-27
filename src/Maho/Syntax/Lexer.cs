@@ -308,6 +308,7 @@ internal sealed partial class Lexer
         return identifier.Length switch
         {
             2 when identifier.SequenceEqual("if") => MatchingKeywordKind.If,
+            2 when identifier.SequenceEqual("as") => MatchingKeywordKind.As,
             3 when identifier.SequenceEqual("for") => MatchingKeywordKind.For,
             3 when identifier.SequenceEqual("get") => MatchingKeywordKind.Get,
             3 when identifier.SequenceEqual("new") => MatchingKeywordKind.New,

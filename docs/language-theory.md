@@ -185,6 +185,8 @@ The generic parameter forms mean:
 ```text
 type                    ::= primary-type { type-modifier } [ "." type ]
 primary-type            ::= identifier [ generic-argument-clause ]
+                          | tuple-type
+tuple-type              ::= "(" type "," type { "," type } [","] ")"
 type-modifier           ::= array-modifier | "?" | "*" | "&"
 array-modifier          ::= "[" [ expression ] "]"
 
@@ -248,6 +250,7 @@ Expressions are parsed with a Pratt parser. The concrete binding powers, from hi
 | ---: | --- | --- |
 | 70 | unary `+`, unary `-`, binary `+`, binary `-` | prefix and infix |
 | 60 | `*`, `/`, `%` | infix |
+| 45 | `as` | infix |
 | 40 | `<`, `<=`, `>`, `>=` | infix |
 | 35 | `==`, `!=` | infix |
 | 25 | `&&` | infix |
@@ -266,12 +269,13 @@ continuation            ::= "(" argument-list ")"
 primary-expression      ::= literal
                           | named-expression
                           | "(" expression ")"
-                          | "(" type ")" expression
+                          | tuple-expression
                           | if-expression
                           | block-expression
                           | collection-expression
                           | creation-expression
 
+tuple-expression        ::= "(" expression "," expression { "," expression } [","] ")"
 named-expression        ::= identifier [ generic-argument-clause ]
 if-expression           ::= "if" "(" expression ")" expression
                           [ "else" expression ]
@@ -287,7 +291,7 @@ argument-list           ::= [ argument { "," argument } [","] ]
 argument                ::= expression | identifier ":" expression
 ```
 
-The cast-versus-parenthesized-expression ambiguity is preserved in a dedicated syntax node when both readings remain plausible. `[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration; that ambiguity is not yet resolved in favour of a standalone collection-expression statement.
+Casting uses the explicit binary `as` expression (`expr as Type`), eliminating prefix-cast ambiguities. Type modifiers bind tighter than expression operators in declaration contexts; standalone constructs like `A * B;` or `A & B;` are parsed directly and unambiguously as variable declarations, while parenthesization `(A * B);` provides the expression-statement escape hatch. `[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration.
 
 ## 5. Statements and placement
 
@@ -300,8 +304,8 @@ local-statement         ::= expression ";" | ";" | return-statement
                           | "{" { local } "}"
 
 return-statement        ::= "return" [ expression ] ";"
-if-statement            ::= "if" "(" expression ")" statement [ "else" statement ]
-while-statement         ::= "while" "(" expression ")" statement
+if-statement            ::= "if" "(" [ variable-declaration ";" ] expression ")" statement [ "else" statement ]
+while-statement         ::= "while" "(" [ variable-declaration ";" ] expression ")" statement
 label                   ::= identifier ":"
 goto-statement          ::= "goto" identifier ";"
 ```

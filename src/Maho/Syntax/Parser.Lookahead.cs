@@ -19,10 +19,7 @@ internal sealed partial class Parser
         MissingSeparator,
         FailedParseTypeSyntax,
         FailedParseNamedSyntax,
-        IsBinaryOperator,
-        AmbiguousCastOrParenthesizedExpression,
-        AmbiguousPointerDeclaration,
-        AmbiguousReferenceDeclaration
+        IsBinaryOperator
     }
 
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
@@ -142,66 +139,12 @@ internal sealed partial class Parser
         return (true, LookaheadResultContext.Success);
     }
 
-    /// <summary> Checks whether the upcoming tokens look like a cast expression rather than grouping parentheses. </summary>
-    private (bool Success, LookaheadResultContext Context) LooksLikeCastExpression()
-    {
-        lookaheadCurrent = current;
-
-        LookaheadConsume(); // Left paren
-        var (_, success, result) = LookaheadParseTypeSyntax();
-
-        if (!success)
-            return (false, LookaheadResultContext.FailedParseTypeSyntax);
-
-        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
-            return (false, LookaheadResultContext.MissingDelimeter);
-
-        LookaheadConsume(); // Right paren
-
-        bool castExpressionIsViable = LookaheadCanStartExpression();
-        bool parenthesizedExpressionIsViable = LookaheadCanContinueExpression();
-
-        if (castExpressionIsViable && parenthesizedExpressionIsViable)
-            return (true, LookaheadResultContext.AmbiguousCastOrParenthesizedExpression);
-
-        if (castExpressionIsViable)
-            return (true, LookaheadResultContext.Success);
-
-        if (parenthesizedExpressionIsViable)
-            return (false, LookaheadResultContext.IsBinaryOperator);
-
-        return (false, LookaheadResultContext.MissingDelimeter);
-    }
-
-    /// <summary> Checks whether the speculative current token can begin an expression. </summary>
-    private bool LookaheadCanStartExpression()
-    {
-        if (LookaheadCurrentToken.Kind is TokenKind.Dollar or TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
-            return true;
-
-        if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
-            return true;
-
-        var (kind, length) = LookaheadGetCombinedOperatorData();
-        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix;
-    }
-
-    /// <summary> Checks whether the speculative current token can continue an already-parsed expression. </summary>
-    private bool LookaheadCanContinueExpression()
-    {
-        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Dot)
-            return true;
-
-        var (kind, length) = LookaheadGetCombinedOperatorData();
-        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && (entry.IsInfix || entry.IsPostfix);
-    }
-
     /// <summary> Checks whether the upcoming tokens look like a variable declaration. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeVariableDeclaration()
     {
         lookaheadCurrent = current;
 
-        var (_, success, result) = LookaheadParseTypeSyntax();
+        var (_, success, _) = LookaheadParseTypeSyntax();
 
         if (!success)
             return (false, LookaheadResultContext.FailedParseTypeSyntax);
@@ -211,10 +154,8 @@ internal sealed partial class Parser
         if (!success)
             return (false, LookaheadResultContext.FailedParseNamedSyntax);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Equals)
+        if (LookaheadCurrentToken.Kind is TokenKind.Equals or TokenKind.Semicolon or TokenKind.Comma)
             return (true, LookaheadResultContext.Success);
-        else if (LookaheadCurrentToken.Kind is TokenKind.Semicolon or TokenKind.Comma)
-            return (true, result);
 
         return (false, LookaheadResultContext.MissingDelimeter);
     }
@@ -363,20 +304,15 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        if (type is ModifiedType modifiedType)
-        {
-            if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Pointer)
-                return (type, true, LookaheadResultContext.AmbiguousPointerDeclaration);
-            else if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Reference)
-                return (type, true, LookaheadResultContext.AmbiguousReferenceDeclaration);
-        }
-
         return (type, true, LookaheadResultContext.Success);
     }
 
     /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
     {
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
+            return LookaheadParseTupleType();
+
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
 
@@ -393,6 +329,59 @@ internal sealed partial class Parser
         }
         else
             return (new SimpleType(identifier), true);
+    }
+
+    /// <summary> Speculatively parses a tuple type enclosed in parentheses. </summary>
+    private (TypeSyntax Type, bool Success) LookaheadParseTupleType()
+    {
+        int saved = lookaheadCurrent;
+        var openParen = LookaheadConsume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+        bool hasComma = false;
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            var (kind, length) = LookaheadGetCombinedOperatorData();
+
+            if (length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix)
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            var (elemType, success, _) = LookaheadParseTypeSyntax();
+
+            if (!success)
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            nodesAndSeparators.Add(elemType);
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(LookaheadConsume());
+                hasComma = true;
+            }
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen || !hasComma)
+        {
+            lookaheadCurrent = saved;
+            return (new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+        }
+
+        var closeParen = LookaheadConsume();
+        return (new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen), true);
     }
 
     /// <summary> Speculatively parses a qualified type chain such as <c>A.B</c>. </summary>

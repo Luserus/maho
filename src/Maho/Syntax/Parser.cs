@@ -386,20 +386,8 @@ internal sealed partial class Parser
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
-            if (!success && context is LookaheadResultContext.MissingDelimeter)
+            if (success || context is LookaheadResultContext.MissingDelimeter)
                 return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-
-            if (success)
-            {
-                if (context is LookaheadResultContext.AmbiguousPointerDeclaration)
-                    return ParseTopLevelAmbiguousPointerDeclaration();
-
-                if (context is LookaheadResultContext.AmbiguousReferenceDeclaration)
-                    return ParseTopLevelAmbiguousReferenceDeclaration();
-
-                return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-            }
-
         }
 
         return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);

@@ -60,6 +60,17 @@ internal sealed partial class Parser
                 left = new MemberAccessExpression(left, dot, identifier);
                 continue;
             }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
+            {
+                const int asBindingPower = 45;
+                if (asBindingPower < minBindingPower)
+                    break;
+
+                var asKeyword = Consume();
+                var targetType = ParseTypeSyntax();
+                left = new AsExpression(left, asKeyword, targetType);
+                continue;
+            }
 
             var (kind, length) = GetCombinedOperatorData();
 
@@ -116,7 +127,7 @@ internal sealed partial class Parser
     private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
     {
         TokenKind.Dollar => ParseMacroInvocationExpression(),
-        TokenKind.LeftParen => ParseParenthesizedOrCastExpression(),
+        TokenKind.LeftParen => ParseParenthesizedOrTupleExpression(),
         TokenKind.LeftBrace => ParseBlockExpression(),
         TokenKind.LeftBracket => ParseCollectionExpression(),
         TokenKind.Identifier => CurrentToken.MatchingKind switch
@@ -157,53 +168,41 @@ internal sealed partial class Parser
         return new IdentifierNameExpression(identifier);
     }
 
-    private Expression ParseParenthesizedOrCastExpression()
+    private Expression ParseParenthesizedOrTupleExpression()
     {
-        var (success, context) = LooksLikeCastExpression();
+        var openParen = Consume(); // consume '('
 
-        if (success && context is LookaheadResultContext.AmbiguousCastOrParenthesizedExpression)
-            return ParseAmbiguousCastOrParenthesizedExpression();
-
-        if (success)
+        if (CurrentToken.Kind is TokenKind.RightParen)
         {
-            return ParseCastExpression();
+            var closeParen = Consume();
+            return new TupleExpression(openParen, new SeparatedSyntaxList<Expression>([]), closeParen);
         }
 
-        return ParseParenthesizedExpression();
-    }
+        var firstExpr = ParseExpectedExpression("inside parentheses", MissingTokenAnchor.AfterPrevious);
 
-    private AmbiguousCastOrParenthesizedExpression ParseAmbiguousCastOrParenthesizedExpression()
-    {
-        var start = current;
-        var castExpression = ParseCastExpression();
-        var castEnd = current;
+        if (CurrentToken.Kind is TokenKind.Comma)
+        {
+            var nodesAndSeparators = new List<SyntaxNode> { firstExpr, Consume() };
 
-        current = start;
-        var parenthesizedExpression = ParseParenthesizedExpression();
-        var parenthesizedAlternative = ParseExpressionContinuation(parenthesizedExpression);
-        var parenthesizedEnd = current;
+            while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+            {
+                var nextExpr = ParseExpectedExpression("in the tuple expression", MissingTokenAnchor.AfterPrevious);
+                nodesAndSeparators.Add(nextExpr);
 
-        current = castEnd >= parenthesizedEnd ? castEnd : parenthesizedEnd;
-        return new AmbiguousCastOrParenthesizedExpression(castExpression, parenthesizedAlternative);
-    }
+                if (CurrentToken.Kind is TokenKind.Comma)
+                {
+                    nodesAndSeparators.Add(Consume());
+                }
+                else
+                    break;
+            }
 
-    private ParenthesizedExpression ParseParenthesizedExpression()
-    {
-        var leftParen = Consume(); // consume '('
-        var expression = ParseExpectedExpression("inside the parenthesized expression", MissingTokenAnchor.AfterPrevious);
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple expression");
+            return new TupleExpression(openParen, new SeparatedSyntaxList<Expression>(nodesAndSeparators), closeParen);
+        }
+
         var rightParen = ExpectToken(TokenKind.RightParen, "')'", "to close the parenthesized expression");
-
-        return new ParenthesizedExpression(leftParen, expression, rightParen);
-    }
-
-    private CastExpression ParseCastExpression()
-    {
-        var leftParen = Consume();
-        var type = ParseTypeSyntax();
-        var rightParen = ExpectToken(TokenKind.RightParen, "')'", "to close the cast type");
-        var expression = ParseExpectedExpression("after the cast", MissingTokenAnchor.AfterPrevious);
-
-        return new CastExpression(leftParen, type, rightParen, expression);
+        return new ParenthesizedExpression(openParen, firstExpr, rightParen);
     }
 
     private IfExpression ParseIfExpression()

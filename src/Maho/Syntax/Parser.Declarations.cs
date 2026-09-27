@@ -306,21 +306,6 @@ internal sealed partial class Parser
         return new TopLevelVariableDeclaration(declaration, semicolon);
     }
 
-    private TopLevelAmbiguousPointerDeclaration ParseTopLevelAmbiguousPointerDeclaration()
-    {
-        var declaration = ParseAmbiguousPointerDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous pointer declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new TopLevelAmbiguousPointerDeclaration(declaration, semicolon);
-    }
-
-    private TopLevelAmbiguousReferenceDeclaration ParseTopLevelAmbiguousReferenceDeclaration()
-    {
-        var declaration = ParseAmbiguousReferenceDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous reference declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new TopLevelAmbiguousReferenceDeclaration(declaration, semicolon);
-    }
 
     private TopLevelFunctionDeclaration ParseTopLevelFunctionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
@@ -541,21 +526,6 @@ internal sealed partial class Parser
         return new VariableDeclaration(attributes, modifiers, type, declarators);
     }
 
-    private AmbiguousPointerDeclaration ParseAmbiguousPointerDeclaration()
-    {
-        var type = ParseTypeSyntax();
-        var identifier = ParseNamedSyntax();
-
-        return new AmbiguousPointerDeclaration(type, identifier);
-    }
-
-    private AmbiguousReferenceDeclaration ParseAmbiguousReferenceDeclaration()
-    {
-        var type = ParseTypeSyntax();
-        var identifier = ParseNamedSyntax();
-
-        return new AmbiguousReferenceDeclaration(type, identifier);
-    }
 
     private SeparatedSyntaxList<Parameter> ParseParameterList()
     {
@@ -721,6 +691,9 @@ internal sealed partial class Parser
 
     private TypeSyntax ParsePrimaryType()
     {
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+            return ParseTupleType();
+
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
             diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type name");
@@ -733,6 +706,28 @@ internal sealed partial class Parser
             return ParseGenericType(identifier);
         else
             return new SimpleType(identifier);
+    }
+
+    private TupleType ParseTupleType()
+    {
+        var openParen = Consume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var element = ParseTypeSyntax();
+            nodesAndSeparators.Add(element);
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+            }
+            else
+                break;
+        }
+
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple type");
+        return new TupleType(openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen);
     }
 
     private QualifiedType ParseQualifiedType(TypeSyntax firstPart)
