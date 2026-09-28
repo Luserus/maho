@@ -1543,4 +1543,144 @@ public sealed class ParserTests
         Assert.NotEmpty(diagnostics.Diagnostics);
         Assert.Contains(diagnostics.Diagnostics, d => d.Message.Contains("'=>'"));
     }
+
+    [Fact]
+    public void Parse_GenericDeclarationInStatementContext_ParsesAsDeclaration()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                A<B> C;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+        var decl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
+        var genType = Assert.IsType<GenericType>(decl.Declaration.Type);
+        Assert.Equal("A", genType.Name.Value);
+        Assert.Equal("C", Assert.IsType<SimpleName>(decl.Declaration.Declarators[0].Identifier).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_ExpressionGenericsComparison_ParsesAsBinaryExpressions()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                var r1 = A<B>(x);
+                var r2 = A<B>(x, y);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+
+        var stmt1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
+        var bin1 = Assert.IsType<BinaryExpression>(stmt1.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.Equal(TokenKind.GreaterThanSign, bin1.OperatorToken.Kind);
+        var leftBin1 = Assert.IsType<BinaryExpression>(bin1.LeftExpression);
+        Assert.Equal(TokenKind.LessThanSign, leftBin1.OperatorToken.Kind);
+
+        var stmt2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+        var bin2 = Assert.IsType<BinaryExpression>(stmt2.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.Equal(TokenKind.GreaterThanSign, bin2.OperatorToken.Kind);
+        Assert.IsType<TupleExpression>(bin2.RightExpression);
+    }
+
+    [Fact]
+    public void Parse_ExpressionGenericsCall_ParsesAsCallExpression()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                var r1 = A<B, C>(x);
+                var r2 = A<B>(p: x);
+                var r3 = A::<B>(x);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+
+        var stmt1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
+        var call1 = Assert.IsType<CallExpression>(stmt1.Declaration.Declarators[0].Initializer!.Initializer);
+        var gen1 = Assert.IsType<GenericNameExpression>(call1.Callee);
+        Assert.Null(gen1.ColonColonToken);
+
+        var stmt2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+        var call2 = Assert.IsType<CallExpression>(stmt2.Declaration.Declarators[0].Initializer!.Initializer);
+        var gen2 = Assert.IsType<GenericNameExpression>(call2.Callee);
+        Assert.Null(gen2.ColonColonToken);
+
+        var stmt3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
+        var call3 = Assert.IsType<CallExpression>(stmt3.Declaration.Declarators[0].Initializer!.Initializer);
+        var gen3 = Assert.IsType<GenericNameExpression>(call3.Callee);
+        Assert.NotNull(gen3.ColonColonToken);
+    }
+
+    [Fact]
+    public void Parse_TurbofishOnVariableInstance_ParsesAsGenericNameExpression()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                var v = A::<B>;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+        var stmt = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
+        var gen = Assert.IsType<GenericNameExpression>(stmt.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.NotNull(gen.ColonColonToken);
+        Assert.Equal("A", gen.Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_TupleSyntax_SupportsNamedElementsAndUniformTuple()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                (Type a, Type2 b, Type3 c) var1;
+                Type (a, b, c) var2;
+                Type (a, b, c) = (1, 2, 3);
+                (Type a, Type2 b, Type3 c) = (1, 2, 3);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+
+        var s1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
+        var tupleType = Assert.IsType<TupleType>(s1.Declaration.Type);
+        Assert.Equal(3, tupleType.Elements.Count);
+        Assert.Equal("a", tupleType.Elements[0].Name!.Value);
+        Assert.Equal("b", tupleType.Elements[1].Name!.Value);
+        Assert.Equal("c", tupleType.Elements[2].Name!.Value);
+
+        var s2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+        var uniformTupleType = Assert.IsType<UniformTupleType>(s2.Declaration.Type);
+        Assert.Equal(3, uniformTupleType.Elements.Count);
+
+        var s3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
+        var tupleName = Assert.IsType<TupleName>(s3.Declaration.Declarators[0].Identifier);
+        Assert.Equal(3, tupleName.Elements.Count);
+
+        var s4 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
+        var s4Type = Assert.IsType<TupleType>(s4.Declaration.Type);
+        Assert.Equal(3, s4Type.Elements.Count);
+        var s4TupleName = Assert.IsType<TupleName>(s4.Declaration.Declarators[0].Identifier);
+        Assert.Equal(3, s4TupleName.Elements.Count);
+        Assert.Equal("a", Assert.IsType<SimpleName>(s4TupleName.Elements[0]).Name.Value);
+        Assert.Equal("b", Assert.IsType<SimpleName>(s4TupleName.Elements[1]).Name.Value);
+        Assert.Equal("c", Assert.IsType<SimpleName>(s4TupleName.Elements[2]).Name.Value);
+        Assert.NotNull(s4.Declaration.Declarators[0].Initializer);
+    }
 }

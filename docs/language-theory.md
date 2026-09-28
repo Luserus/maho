@@ -184,9 +184,11 @@ The generic parameter forms mean:
 
 ```text
 type                    ::= primary-type { type-modifier } [ "." type ]
-primary-type            ::= identifier [ generic-argument-clause ]
+primary-type            ::= identifier [ generic-argument-clause ] [ uniform-tuple-suffix ]
                           | tuple-type
-tuple-type              ::= "(" type "," type { "," type } [","] ")"
+tuple-type              ::= "(" tuple-type-element { "," tuple-type-element } [","] ")"
+tuple-type-element      ::= type [ identifier ]
+uniform-tuple-suffix    ::= "(" identifier { "," identifier } [","] ")"
 type-modifier           ::= array-modifier | "?" | "*" | "&"
 array-modifier          ::= "[" [ expression ] "]"
 
@@ -276,7 +278,7 @@ primary-expression      ::= literal
                           | creation-expression
 
 tuple-expression        ::= "(" expression "," expression { "," expression } [","] ")"
-named-expression        ::= identifier [ generic-argument-clause ]
+named-expression        ::= identifier [ ( "::" | ε ) generic-argument-clause ]
 if-expression           ::= "if" "(" expression ")" expression
                           [ "else" expression ]
 block-expression        ::= "{" { local } [ expression ] "}"
@@ -291,7 +293,19 @@ argument-list           ::= [ argument { "," argument } [","] ]
 argument                ::= expression | identifier ":" expression
 ```
 
-Casting uses the explicit binary `as` expression (`expr as Type`), eliminating prefix-cast ambiguities. Type modifiers bind tighter than expression operators in declaration contexts; standalone constructs like `A * B;` or `A & B;` are parsed directly and unambiguously as variable declarations, while parenthesization `(A * B);` provides the expression-statement escape hatch. `[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration.
+Casting uses the explicit binary `as` expression (`expr as Type`), eliminating prefix-cast ambiguities. Type modifiers bind tighter than expression operators in declaration contexts; standalone constructs like `A * B;` or `A & B;` are parsed directly and unambiguously as variable declarations, while parenthesization `(A * B);` provides the expression-statement escape hatch. Similarly, generic forms like `A<B> C;` are unambiguously recognized as declarations in statement context.
+
+In expression contexts, generic application versus relational comparisons is disambiguated cleanly:
+- `A<B>(x)` and `A<B>(x, y)` parse as binary comparison expressions (`(A < B) > (x)`).
+- `A<B, C>(x)` and `A<B>(p: x)` parse as call expressions on generic names because multiple generic arguments or named argument syntax (`p: x`) distinguish them syntactically from binary expressions.
+- `A::<B>(x)` and `A::<B>` support the explicit turbofish `::` operator on named expressions for disambiguating generic specialization on functions, variables, and instances.
+
+Tuple types and declarations support extended forms:
+- `(Type a, Type2 b, Type3 c) var;`: tuple types with explicit element names.
+- `(Type a, Type2 b, Type3 c) = expr;`: tuple destructuring variable declarations with individual types per element, allowing heterogeneous types and implicit conversions.
+- `Type (a, b, c) var;`: uniform tuple types where elements share a single base type, as well as `Type (a, b, c) = expr;` for uniform tuple destructuring variable declarations.
+
+`[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration.
 
 ## 5. Statements and placement
 

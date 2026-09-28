@@ -358,11 +358,28 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         setAttributes(ResolveAttributes(syntax.Attributes, symbol.EnclosingScope));
-        setType(ResolveType(syntax.Type, symbol.EnclosingScope));
+
+        TypeRef? resolvedType = null;
+        bool isTupleDestructuring = syntax.Declarators.Any(d => d.Identifier is TupleName);
+        if (isTupleDestructuring && syntax.Type is TupleType tupleType)
+        {
+            var matchedElement = tupleType.Elements.FirstOrDefault(e => e.Name != null && context.GetScopedSymbolName(new SimpleName(e.Name)).Last == symbol.Name);
+            if (matchedElement != null)
+                resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope);
+        }
+
+        setType(resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope));
 
         foreach (var declarator in syntax.Declarators)
-            if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
+        {
+            if (declarator.Identifier is TupleName tupleName)
+            {
+                if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
+                    ResolveExpression(declarator.Initializer?.Initializer, symbol.EnclosingScope, GetContainingFunction(symbol));
+            }
+            else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
                 ResolveExpression(declarator.Initializer?.Initializer, symbol.EnclosingScope, GetContainingFunction(symbol));
+        }
     }
 
     private void ResolveProperty(PropertySymbol symbol)
@@ -565,14 +582,20 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax is TupleType tuple)
         {
             foreach (var elem in tuple.Elements)
-                ResolveType(elem, scope, reportDiagnostics);
+                ResolveType(elem.Type, scope, reportDiagnostics);
             return TypeRef.Unresolved;
         }
 
         if (syntax is ModifiedType modified && modified.Type is TupleType modifiedTuple)
         {
             foreach (var elem in modifiedTuple.Elements)
-                ResolveType(elem, scope, reportDiagnostics);
+                ResolveType(elem.Type, scope, reportDiagnostics);
+            return TypeRef.Unresolved;
+        }
+
+        if (syntax is UniformTupleType uniform)
+        {
+            ResolveType(uniform.ElementType, scope, reportDiagnostics);
             return TypeRef.Unresolved;
         }
 
@@ -1497,8 +1520,18 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax != null)
         {
             foreach (var declarator in syntax.Declarators)
-                if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
+            {
+                if (declarator.Identifier is TupleName tupleName)
+                {
+                    foreach (var elem in tupleName.Elements)
+                    {
+                        if (context.GetScopedSymbolName(elem).Last == name)
+                            return elem.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
+                    }
+                }
+                else if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
                     return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
+            }
 
             return syntax.GetSpan() ?? default;
         }

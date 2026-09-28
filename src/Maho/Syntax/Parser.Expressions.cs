@@ -21,7 +21,7 @@ internal sealed partial class Parser
             // consume the prefix operator (combined)
             var opToken = ConsumeOperator();
             int rbp = prefixEntry.RightBindingPower;
-            var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
+            var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
             left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
         }
         else
@@ -58,17 +58,20 @@ internal sealed partial class Parser
                 var dot = Consume();
                 var identifier = ExpectIdentifierToken("after '.'");
                 left = new MemberAccessExpression(left, dot, identifier);
+
                 continue;
             }
             else if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
             {
                 const int asBindingPower = 45;
+
                 if (asBindingPower < minBindingPower)
                     break;
 
                 var asKeyword = Consume();
                 var targetType = ParseTypeSyntax();
                 left = new AsExpression(left, asKeyword, targetType);
+
                 continue;
             }
 
@@ -106,7 +109,7 @@ internal sealed partial class Parser
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
                 string? context = opTok.Kind is TokenKind.Equals ? "after '=' in the assignment expression" : $"after '{opTok.Value}' in the binary expression";
-                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious);
+                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
 
                 if (opTok.Kind is TokenKind.Equals)
                     left = new AssignmentExpression(left, opTok, right);
@@ -155,11 +158,41 @@ internal sealed partial class Parser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
 
+    private bool LooksLikeTurbofish()
+    {
+        if (CurrentToken.Kind is TokenKind.ColonColon)
+            return Peek().Kind is TokenKind.LessThanSign;
+
+        return CurrentToken.Kind is TokenKind.Colon &&
+               Peek().Kind is TokenKind.Colon &&
+               CurrentToken.Span.End == Peek().Span.Start &&
+               CurrentToken.TrailingTrivia.Length == 0 &&
+               Peek().LeadingTrivia.Length == 0 &&
+               Peek(2).Kind is TokenKind.LessThanSign;
+    }
+
+    private Token ConsumeColonColon()
+    {
+        if (CurrentToken.Kind is TokenKind.ColonColon)
+            return Consume();
+
+        var first = Consume();
+        var second = Consume();
+        return new Token(text, new TextSpan(first.Span.Start, second.Span.End - first.Span.Start), TokenKind.ColonColon, first.LeadingTrivia, second.TrailingTrivia);
+    }
+
     private NamedExpression ParseNamedExpression()
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
+        if (LooksLikeTurbofish())
+        {
+            var colonColon = ConsumeColonColon();
+            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
+            return new GenericNameExpression(identifier, colonColon, lessThan, genericArguments, greaterThan);
+        }
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeExpressionGenerics().ShouldParseAsGenerics)
         {
             var (lessThan, genericArguments, greaterThan) = ParseGenerics();
             return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);

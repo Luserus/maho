@@ -496,6 +496,7 @@ internal sealed class ResolutionContext
         SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name, 0, hygiene)),
         GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene)),
         QualifiedName qualifiedName => GetQualifiedName(qualifiedName, hygiene),
+        TupleName => new SymbolName(new SymbolPart(string.Empty, 0, hygiene)),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 
@@ -503,6 +504,7 @@ internal sealed class ResolutionContext
     {
         SimpleName simpleName => new SymbolPart(simpleName.Name, 0, hygiene),
         GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene),
+        TupleName => new SymbolPart(string.Empty, 0, hygiene),
         _ => throw new System.ArgumentOutOfRangeException(nameof(name))
     };
 
@@ -538,6 +540,7 @@ internal sealed class ResolutionContext
                 break;
 
             case TupleType:
+            case UniformTupleType:
                 parts.Add(new SymbolPart(string.Empty));
                 break;
 

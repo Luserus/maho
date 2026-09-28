@@ -60,6 +60,7 @@ public enum TokenKind
     Dollar, // '$'
 
     // Combined operators
+    ColonColon, // '::'
     DotDotDot, // '...'
     EqualsEquals, // '=='
     ExclamationEquals, // '!='

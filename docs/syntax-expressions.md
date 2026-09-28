@@ -12,7 +12,7 @@ These files are intentionally declarative: they define the tree that the parser 
 ## Expression families in this folder
 
 - Name/reference forms:
-  `IdentifierNameExpression`, `GenericNameExpression`
+  `IdentifierNameExpression`, `GenericNameExpression` (supports standard `<...>` as well as explicit turbofish `::<...>`)
 - Literal/grouping forms:
   `LiteralExpression`, `ParenthesizedExpression`, `TupleExpression`
 - Operator forms:

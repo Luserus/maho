@@ -60,6 +60,7 @@ internal sealed partial class Parser
     /// <summary> Returns the value and combined form of combined operator token types. </summary>
     /// <returns> The string value and TokenKind of the combined operators. </returns>
     private static readonly (string Value, TokenKind Kind)[] OperatorDefinitions = [
+        ("::", TokenKind.ColonColon),
         ("<<<", TokenKind.LessThanLessThanLessThanSigns),
         ("...", TokenKind.DotDotDot),
         ("==", TokenKind.EqualsEquals),
@@ -86,20 +87,20 @@ internal sealed partial class Parser
 
     private static readonly Dictionary<TokenKind, OperatorEntry> operatorTable = new()
     {
-        { TokenKind.Plus, new OperatorEntry(TokenKind.Plus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
-        { TokenKind.Minus, new OperatorEntry(TokenKind.Minus, OperatorRole.Prefix | OperatorRole.Infix, 70, 70) },
-        { TokenKind.Asterisk, new OperatorEntry(TokenKind.Asterisk, OperatorRole.Prefix |OperatorRole.Infix, 60, 60) },
-        { TokenKind.ForwardSlash, new OperatorEntry(TokenKind.ForwardSlash, OperatorRole.Infix, 60, 60) },
-        { TokenKind.Percentage, new OperatorEntry(TokenKind.Percentage, OperatorRole.Infix, 60, 60) },
-        { TokenKind.EqualsEquals, new OperatorEntry(TokenKind.EqualsEquals, OperatorRole.Infix, 35, 35) },
-        { TokenKind.ExclamationEquals, new OperatorEntry(TokenKind.ExclamationEquals, OperatorRole.Infix, 35, 35) },
-        { TokenKind.LessThanSign, new OperatorEntry(TokenKind.LessThanSign, OperatorRole.Infix, 40, 40) },
-        { TokenKind.LessThanEquals, new OperatorEntry(TokenKind.LessThanEquals, OperatorRole.Infix, 40, 40) },
-        { TokenKind.GreaterThanSign, new OperatorEntry(TokenKind.GreaterThanSign, OperatorRole.Infix, 40, 40) },
-        { TokenKind.GreaterThanEquals, new OperatorEntry(TokenKind.GreaterThanEquals, OperatorRole.Infix, 40, 40) },
-        { TokenKind.AmpersandAmpersand, new OperatorEntry(TokenKind.AmpersandAmpersand, OperatorRole.Infix, 25, 25) },
-        { TokenKind.VerticalBarVerticalBar, new OperatorEntry(TokenKind.VerticalBarVerticalBar, OperatorRole.Infix, 20, 20) },
-        { TokenKind.Equals, new OperatorEntry(TokenKind.Equals, OperatorRole.Infix, 9, 10) } // Right associative
+        { TokenKind.Plus, new OperatorEntry(TokenKind.Plus, OperatorRole.Prefix | OperatorRole.Infix, 70, 71) },
+        { TokenKind.Minus, new OperatorEntry(TokenKind.Minus, OperatorRole.Prefix | OperatorRole.Infix, 70, 71) },
+        { TokenKind.Asterisk, new OperatorEntry(TokenKind.Asterisk, OperatorRole.Prefix | OperatorRole.Infix, 60, 61) },
+        { TokenKind.ForwardSlash, new OperatorEntry(TokenKind.ForwardSlash, OperatorRole.Infix, 60, 61) },
+        { TokenKind.Percentage, new OperatorEntry(TokenKind.Percentage, OperatorRole.Infix, 60, 61) },
+        { TokenKind.EqualsEquals, new OperatorEntry(TokenKind.EqualsEquals, OperatorRole.Infix, 35, 36) },
+        { TokenKind.ExclamationEquals, new OperatorEntry(TokenKind.ExclamationEquals, OperatorRole.Infix, 35, 36) },
+        { TokenKind.LessThanSign, new OperatorEntry(TokenKind.LessThanSign, OperatorRole.Infix, 40, 41) },
+        { TokenKind.LessThanEquals, new OperatorEntry(TokenKind.LessThanEquals, OperatorRole.Infix, 40, 41) },
+        { TokenKind.GreaterThanSign, new OperatorEntry(TokenKind.GreaterThanSign, OperatorRole.Infix, 40, 41) },
+        { TokenKind.GreaterThanEquals, new OperatorEntry(TokenKind.GreaterThanEquals, OperatorRole.Infix, 40, 41) },
+        { TokenKind.AmpersandAmpersand, new OperatorEntry(TokenKind.AmpersandAmpersand, OperatorRole.Infix, 25, 26) },
+        { TokenKind.VerticalBarVerticalBar, new OperatorEntry(TokenKind.VerticalBarVerticalBar, OperatorRole.Infix, 20, 21) },
+        { TokenKind.Equals, new OperatorEntry(TokenKind.Equals, OperatorRole.Infix, 10, 9) } // Right associative
     };
 
     private static readonly OperatorTrieNode operatorTrie;

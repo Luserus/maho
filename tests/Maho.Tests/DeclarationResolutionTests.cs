@@ -752,6 +752,36 @@ public sealed class DeclarationResolutionTests
         Assert.Null(TypeRef.Resolved(cyclicHandleA).GetType(context));
     }
 
+    [Fact]
+    public void Resolve_TupleDestructuringDeclaration_ResolvesIndividualElementTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct TypeA;
+            public struct TypeB;
+            public struct TypeC;
+
+            public void Test()
+            {
+                (TypeA a, TypeB b, TypeC c) = (1, 2, 3);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        TypeSymbol typeA = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "TypeA");
+        TypeSymbol typeB = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "TypeB");
+        TypeSymbol typeC = Assert.Single(context.TypeSymbols, symbol => symbol.Name.ToString() == "TypeC");
+
+        var localA = Assert.Single(context.LocalVariableSymbols, symbol => symbol.Name.ToString() == "a");
+        var localB = Assert.Single(context.LocalVariableSymbols, symbol => symbol.Name.ToString() == "b");
+        var localC = Assert.Single(context.LocalVariableSymbols, symbol => symbol.Name.ToString() == "c");
+
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeA)), localA.Type);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeB)), localB.Type);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeC)), localC.Type);
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));
