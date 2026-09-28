@@ -271,8 +271,15 @@ public sealed class DeclarationResolutionTests
 
         Assert.Equal(["firstGlobal", "secondGlobal"], context.GlobalVariableSymbols.Select(symbol => symbol.Name.ToString()).Order());
         Assert.Equal(["firstField", "secondField"], context.FieldSymbols.Select(symbol => symbol.Name.ToString()).Order());
-        Assert.Equal(["firstLocal", "secondLocal"], context.LocalVariableSymbols.Select(symbol => symbol.Name.ToString()).Order());
-        Assert.Equal(2, Assert.Single(context.MethodSymbols).LocalVariables.Count);
+        var method = Assert.Single(context.MethodSymbols);
+        Assert.Equal(2, method.LocalVariables.Count);
+        Assert.Equal("firstLocal", method[0].Name.ToString());
+        Assert.Equal("secondLocal", method[1].Name.ToString());
+        Assert.Equal((SymbolID)0, method[0].ID);
+        Assert.Equal((SymbolID)1, method[1].ID);
+        Assert.Same(method.LocalVariables[0], method[0]);
+        Assert.Same(method.LocalVariables[1], method[1]);
+        Assert.Same(method[0], method[method[0].ID]);
     }
 
     [Fact]
@@ -780,6 +787,59 @@ public sealed class DeclarationResolutionTests
         Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeA)), localA.Type);
         Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeB)), localB.Type);
         Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(typeC)), localC.Type);
+    }
+
+    [Fact]
+    public void Resolve_MultipleFunctionsHaveIndependentLocalVariableIdsAndIndexers()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void First()
+            {
+                int a = 1;
+                int b = 2;
+            }
+
+            public void Second()
+            {
+                int x = 10;
+                int y = 20;
+                int z = 30;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        var first = Assert.Single(context.FunctionSymbols, f => f.Name.ToString() == "First");
+        var second = Assert.Single(context.FunctionSymbols, f => f.Name.ToString() == "Second");
+
+        Assert.Equal(2, first.LocalVariables.Count);
+        Assert.Equal(3, second.LocalVariables.Count);
+
+        // Independent ID spaces starting from 0
+        Assert.Equal((SymbolID)0, first[0].ID);
+        Assert.Equal((SymbolID)1, first[1].ID);
+        Assert.Equal("a", first[0].Name.ToString());
+        Assert.Equal("b", first[1].Name.ToString());
+
+        Assert.Equal((SymbolID)0, second[0].ID);
+        Assert.Equal((SymbolID)1, second[1].ID);
+        Assert.Equal((SymbolID)2, second[2].ID);
+        Assert.Equal("x", second[0].Name.ToString());
+        Assert.Equal("y", second[1].Name.ToString());
+        Assert.Equal("z", second[2].Name.ToString());
+
+        // Indexer with SymbolID and SymbolHandle
+        Assert.Same(first.LocalVariables[0], first[first[0].ID]);
+        Assert.Same(first.LocalVariables[1], first[ResolutionContext.GetHandle(first[1])]);
+        Assert.Same(second.LocalVariables[0], second[second[0].ID]);
+        Assert.Same(second.LocalVariables[2], second[ResolutionContext.GetHandle(second[2])]);
+
+        // TryGetLocalVariable
+        Assert.True(first.TryGetLocalVariable(0, out var symA));
+        Assert.Same(first[0], symA);
+        Assert.False(first.TryGetLocalVariable(5, out _));
     }
 
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)

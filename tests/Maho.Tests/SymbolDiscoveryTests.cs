@@ -26,7 +26,9 @@ public sealed class SymbolDiscoveryTests
         LocalVariableSymbol scriptValue = Assert.Single(context.LocalVariableSymbols);
         Assert.Equal("scriptValue", scriptValue.Name.ToString());
         Assert.Equal(ResolutionContext.GetHandle(main), scriptValue.Parent);
-        Assert.Equal(ResolutionContext.GetHandle(scriptValue), Assert.Single(main.LocalVariables));
+        Assert.Same(scriptValue, Assert.Single(main.LocalVariables));
+        Assert.Same(scriptValue, main[0]);
+        Assert.Same(scriptValue, main[scriptValue.ID]);
     }
 
     [Fact]

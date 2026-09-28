@@ -222,7 +222,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                     LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, context.GetScopedSymbolName(elem).Last,
                                                                                  ResolutionContext.GetHandle(topLevelMain), declaration);
                     symbol.Flags = flags;
-                    topLevelMain.LocalVariables.Add(ResolutionContext.GetHandle(symbol));
                 }
             }
             else
@@ -230,7 +229,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 LocalVariableSymbol symbol = context.CreateLocalVariableSymbol(topLevelMainScope, context.GetScopedSymbolName(declarator.Identifier).Last,
                                                                              ResolutionContext.GetHandle(topLevelMain), declaration);
                 symbol.Flags = flags;
-                topLevelMain.LocalVariables.Add(ResolutionContext.GetHandle(symbol));
             }
         }
     }
@@ -602,8 +600,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                     if (declarator.Initializer?.Initializer is { } initExpr)
                         DiscoverBlockExpressions(initExpr, scope, containingSymbol, containingMethod);
                 }
-                foreach (var variable in ResolveLocalVariableDeclaration(declaration.Declaration, scope, containingSymbol))
-                    RegisterLocalVariable(containingSymbol, variable);
+                ResolveLocalVariableDeclaration(declaration.Declaration, scope, containingSymbol);
                 break;
             case LocalReturnStatement retStmt:
                 if (retStmt.Statement.Expression is not null)
@@ -622,8 +619,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                         if (declarator.Initializer?.Initializer is { } initExpr)
                             DiscoverBlockExpressions(initExpr, ifScope, containingSymbol, containingMethod);
                     }
-                    foreach (var variable in ResolveLocalVariableDeclaration(ifStmt.Declaration, ifScope, containingSymbol))
-                        RegisterLocalVariable(containingSymbol, variable);
+                    ResolveLocalVariableDeclaration(ifStmt.Declaration, ifScope, containingSymbol);
                 }
 
                 DiscoverBlockExpressions(ifStmt.Condition, ifScope, containingSymbol, containingMethod);
@@ -641,8 +637,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                         if (declarator.Initializer?.Initializer is { } initExpr)
                             DiscoverBlockExpressions(initExpr, whileScope, containingSymbol, containingMethod);
                     }
-                    foreach (var variable in ResolveLocalVariableDeclaration(whileStmt.Declaration, whileScope, containingSymbol))
-                        RegisterLocalVariable(containingSymbol, variable);
+                    ResolveLocalVariableDeclaration(whileStmt.Declaration, whileScope, containingSymbol);
                 }
 
                 DiscoverBlockExpressions(whileStmt.Condition, whileScope, containingSymbol, containingMethod);
@@ -713,13 +708,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private void RegisterLocalVariable(SymbolHandle owner, LocalVariableSymbol local)
-    {
-        if (owner.Kind is SymbolKind.Function)
-            context.FunctionSymbols[owner.ID].LocalVariables.Add(ResolutionContext.GetHandle(local));
-        else if (owner.Kind is SymbolKind.Method)
-            context.MethodSymbols[owner.ID].LocalVariables.Add(ResolutionContext.GetHandle(local));
-    }
+
 
     private void RegisterLocalFunction(SymbolHandle owner, LocalFunctionSymbol local)
     {

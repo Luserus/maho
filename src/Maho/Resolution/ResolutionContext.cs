@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Maho.Diagnostics;
 using Maho.Syntax;
@@ -22,7 +23,8 @@ internal sealed class ResolutionContext
     public List<GlobalVariableSymbol> GlobalVariableSymbols { get; }
     public List<FieldSymbol> FieldSymbols { get; }
     public List<ParameterSymbol> ParameterSymbols { get; }
-    public List<LocalVariableSymbol> LocalVariableSymbols { get; }
+    public IEnumerable<LocalVariableSymbol> LocalVariableSymbols =>
+        FunctionSymbols.SelectMany(f => f.LocalVariables).Concat(MethodSymbols.SelectMany(m => m.LocalVariables));
     public List<PropertySymbol> PropertySymbols { get; }
     public List<GenericParameterSymbol> GenericParameterSymbols { get; }
     public List<LabelSymbol> LabelSymbols { get; }
@@ -71,7 +73,6 @@ internal sealed class ResolutionContext
     private int globalVariableID;
     private int fieldID;
     private int parameterID;
-    private int localVariableID;
     private int propertyID;
     private int genericParameterID;
     private int labelID;
@@ -107,7 +108,6 @@ internal sealed class ResolutionContext
         GlobalVariableSymbols = symbols.GlobalVariableSymbols;
         FieldSymbols = symbols.FieldSymbols;
         ParameterSymbols = symbols.ParameterSymbols;
-        LocalVariableSymbols = symbols.LocalVariableSymbols;
         PropertySymbols = symbols.PropertySymbols;
         GenericParameterSymbols = symbols.GenericParameterSymbols;
         LabelSymbols = symbols.LabelSymbols;
@@ -126,7 +126,6 @@ internal sealed class ResolutionContext
         globalVariableID = GlobalVariableSymbols.Count;
         fieldID = FieldSymbols.Count;
         parameterID = ParameterSymbols.Count;
-        localVariableID = LocalVariableSymbols.Count;
         propertyID = PropertySymbols.Count;
         genericParameterID = GenericParameterSymbols.Count;
         labelID = LabelSymbols.Count;
@@ -334,10 +333,31 @@ internal sealed class ResolutionContext
 
     public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
     {
-        var symbol = new LocalVariableSymbol(localVariableID++, enclosingScope, name, parent, syntax);
-        LocalVariableSymbols.Add(symbol);
-        Register(enclosingScope, symbol);
-        return symbol;
+        SymbolID id = 0;
+        if (parent is { Kind: SymbolKind.Function, ID: var funcId } && (int)funcId < FunctionSymbols.Count)
+        {
+            var func = FunctionSymbols[funcId];
+            id = func.LocalVariables.Count;
+            var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
+            func.LocalVariables.Add(symbol);
+            Register(enclosingScope, symbol);
+            return symbol;
+        }
+        else if (parent is { Kind: SymbolKind.Method, ID: var methodId } && (int)methodId < MethodSymbols.Count)
+        {
+            var method = MethodSymbols[methodId];
+            id = method.LocalVariables.Count;
+            var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
+            method.LocalVariables.Add(symbol);
+            Register(enclosingScope, symbol);
+            return symbol;
+        }
+        else
+        {
+            var symbol = new LocalVariableSymbol(0, enclosingScope, name, parent, syntax);
+            Register(enclosingScope, symbol);
+            return symbol;
+        }
     }
 
     public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)

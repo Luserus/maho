@@ -13,7 +13,6 @@ internal struct SymbolStore
     public List<GlobalVariableSymbol> GlobalVariableSymbols;
     public List<FieldSymbol> FieldSymbols;
     public List<ParameterSymbol> ParameterSymbols;
-    public List<LocalVariableSymbol> LocalVariableSymbols;
     public List<PropertySymbol> PropertySymbols;
     public List<GenericParameterSymbol> GenericParameterSymbols;
     public List<LabelSymbol> LabelSymbols;
@@ -22,7 +21,7 @@ internal struct SymbolStore
 
     public SymbolStore(List<AttributeSymbol> attributeSymbols, List<NestedAttributeSymbol> nestedAttributeSymbols, List<TypeSymbol> typeSymbols, List<NestedTypeSymbol> nestedTypeSymbols,
     List<FunctionSymbol> functionSymbols, List<MethodSymbol> methodSymbols, List<GlobalVariableSymbol> globalVariableSymbols, List<FieldSymbol> fieldSymbols, List<ParameterSymbol> parameterSymbols,
-    List<LocalVariableSymbol> localVariableSymbols, List<PropertySymbol> propertySymbols, List<GenericParameterSymbol> genericParameterSymbols, List<LabelSymbol> labelSymbols, List<AliasSymbol> aliasSymbols,
+    List<PropertySymbol> propertySymbols, List<GenericParameterSymbol> genericParameterSymbols, List<LabelSymbol> labelSymbols, List<AliasSymbol> aliasSymbols,
     List<MacroSymbol>? macroSymbols = null)
     {
         AttributeSymbols = attributeSymbols;
@@ -34,7 +33,6 @@ internal struct SymbolStore
         GlobalVariableSymbols = globalVariableSymbols;
         FieldSymbols = fieldSymbols;
         ParameterSymbols = parameterSymbols;
-        LocalVariableSymbols = localVariableSymbols;
         PropertySymbols = propertySymbols;
         GenericParameterSymbols = genericParameterSymbols;
         LabelSymbols = labelSymbols;
@@ -45,5 +43,5 @@ internal struct SymbolStore
     /// <summary>
     /// Creates an empty symbol store with fresh collections for every symbol category.
     /// </summary>
-    public static SymbolStore CreateEmpty() => new([], [], [], [], [], [], [], [], [], [], [], [], [], [], []);
+    public static SymbolStore CreateEmpty() => new([], [], [], [], [], [], [], [], [], [], [], [], [], []);
 }
