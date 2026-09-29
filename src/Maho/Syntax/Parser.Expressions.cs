@@ -337,21 +337,21 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
 
-    private CollectionInitializer ParseCollectionInitializer()
+    private TypeInitializer ParseTypeInitializer()
     {
         var leftBrace = Consume();
         var expressions = ParseExpressionList(TokenKind.RightBrace);
-        var rightBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the collection initializer");
+        var rightBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the type initializer");
 
-        return new CollectionInitializer(leftBrace, expressions, rightBrace);
+        return new TypeInitializer(leftBrace, expressions, rightBrace);
     }
 
     private ObjectWithClause ParseObjectWithClause()
     {
         var withKeyword = Consume();
         var initializer = CurrentToken.Kind is TokenKind.LeftBrace
-            ? ParseCollectionInitializer()
-            : new CollectionInitializer(
+            ? ParseTypeInitializer()
+            : new TypeInitializer(
                 ExpectToken(TokenKind.LeftBrace, "'{'", "after 'with'"),
                 new SeparatedSyntaxList<Expression>([]),
                 ExpectToken(TokenKind.RightBrace, "'}'", "to close the with clause"));
@@ -395,10 +395,10 @@ internal sealed partial class Parser
         if (type is ModifiedType { Modifier: ArrayTypeModifier arrayModifier } arrayType && CurrentToken.Kind is not TokenKind.LeftParen)
         {
             var elementType = arrayType.Type;
-            CollectionInitializer? initializer = null;
+            TypeInitializer? initializer = null;
 
             if (CurrentToken.Kind is TokenKind.LeftBrace)
-                initializer = ParseCollectionInitializer();
+                initializer = ParseTypeInitializer();
 
             ObjectWithClause? withClause = null;
 

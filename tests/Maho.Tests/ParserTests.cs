@@ -460,6 +460,182 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_StatementParenthesizedCollectionExpression_EscapeHatch()
+    {
+        Local local = ParseSingleLocal("([x]);", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt = Assert.IsType<LocalExpressionStatement>(local);
+        ParenthesizedExpression paren = Assert.IsType<ParenthesizedExpression>(exprStmt.Expression);
+        CollectionExpression coll = Assert.IsType<CollectionExpression>(paren.Expression);
+        Assert.Single(coll.Expressions);
+
+        Local multiLocal = ParseSingleLocal("([1, 2, 3]);", typeof(LocalExpressionStatement));
+        LocalExpressionStatement multiExprStmt = Assert.IsType<LocalExpressionStatement>(multiLocal);
+        ParenthesizedExpression multiParen = Assert.IsType<ParenthesizedExpression>(multiExprStmt.Expression);
+        CollectionExpression multiColl = Assert.IsType<CollectionExpression>(multiParen.Expression);
+        Assert.Equal(3, multiColl.Expressions.Count);
+    }
+
+    [Fact]
+    public void Parse_TopLevelParenthesizedCollectionExpression_EscapeHatch()
+    {
+        TopLevel topLevel = ParseSingleTopLevel("""
+            #pragma toplevel enable
+            ([x]);
+            """, typeof(TopLevelExpressionStatement));
+
+        TopLevelExpressionStatement exprStmt = Assert.IsType<TopLevelExpressionStatement>(topLevel);
+        ParenthesizedExpression paren = Assert.IsType<ParenthesizedExpression>(exprStmt.Expression);
+        CollectionExpression coll = Assert.IsType<CollectionExpression>(paren.Expression);
+        Assert.Single(coll.Expressions);
+    }
+
+    [Fact]
+    public void Parse_StatementBracketDisambiguation_ParsesExpressionsWhenFollowedByDotOperatorSemicolon()
+    {
+        // [x]; parses as a collection expression statement
+        Local local1 = ParseSingleLocal("[x];", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt1 = Assert.IsType<LocalExpressionStatement>(local1);
+        CollectionExpression colExpr1 = Assert.IsType<CollectionExpression>(exprStmt1.Expression);
+        Assert.Single(colExpr1.Expressions);
+
+        // []; empty collection expression statement
+        Local localEmpty = ParseSingleLocal("[];", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmtEmpty = Assert.IsType<LocalExpressionStatement>(localEmpty);
+        CollectionExpression colExprEmpty = Assert.IsType<CollectionExpression>(exprStmtEmpty.Expression);
+        Assert.Empty(colExprEmpty.Expressions);
+
+        // [1, 2, 3];
+        Local local2 = ParseSingleLocal("[1, 2, 3];", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt2 = Assert.IsType<LocalExpressionStatement>(local2);
+        CollectionExpression colExpr2 = Assert.IsType<CollectionExpression>(exprStmt2.Expression);
+        Assert.Equal(3, colExpr2.Expressions.Count);
+
+        // [x].foo;
+        Local local3 = ParseSingleLocal("[x].foo;", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt3 = Assert.IsType<LocalExpressionStatement>(local3);
+        Assert.IsType<MemberAccessExpression>(exprStmt3.Expression);
+
+        // [x] + 1;
+        Local local4 = ParseSingleLocal("[x] + 1;", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt4 = Assert.IsType<LocalExpressionStatement>(local4);
+        Assert.IsType<BinaryExpression>(exprStmt4.Expression);
+
+        // [1, 2][0];
+        Local local5 = ParseSingleLocal("[1, 2][0];", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt5 = Assert.IsType<LocalExpressionStatement>(local5);
+        Assert.IsType<IndexExpression>(exprStmt5.Expression);
+
+        // [][0];
+        Local local6 = ParseSingleLocal("[][0];", typeof(LocalExpressionStatement));
+        LocalExpressionStatement exprStmt6 = Assert.IsType<LocalExpressionStatement>(local6);
+        Assert.IsType<IndexExpression>(exprStmt6.Expression);
+
+        // No diagnostics for [x]; inside a function
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            void Foo()
+            {
+                [x];
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_StatementBracketDisambiguation_ParsesAttributeUsageWhenFollowedByIdentifierOrBrace()
+    {
+        // [Marker] int x = 1;
+        Local local1 = ParseSingleLocal("[Marker] int x = 1;", typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement varStmt1 = Assert.IsType<LocalVariableDeclarationStatement>(local1);
+        Assert.Single(varStmt1.Declaration.Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(varStmt1.Declaration.Attributes[0].Attributes).Name).Name.Value);
+
+        // [] int x = 1; parses as empty attribute list annotation on that identifier
+        Local localEmpty = ParseSingleLocal("[] int x = 1;", typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement varStmtEmpty = Assert.IsType<LocalVariableDeclarationStatement>(localEmpty);
+        Assert.Single(varStmtEmpty.Declaration.Attributes);
+        Assert.Empty(varStmtEmpty.Declaration.Attributes[0].Attributes);
+
+        // [][] int x = 1; parses as two empty attribute lists
+        Local localDoubleEmpty = ParseSingleLocal("[][] int x = 1;", typeof(LocalVariableDeclarationStatement));
+        LocalVariableDeclarationStatement varStmtDoubleEmpty = Assert.IsType<LocalVariableDeclarationStatement>(localDoubleEmpty);
+        Assert.Equal(2, varStmtDoubleEmpty.Declaration.Attributes.Count);
+        Assert.Empty(varStmtDoubleEmpty.Declaration.Attributes[0].Attributes);
+        Assert.Empty(varStmtDoubleEmpty.Declaration.Attributes[1].Attributes);
+
+        // [Marker] { } parses as attributed block statement
+        Local localBlock = ParseSingleLocal("[Marker] { int x = 1; }", typeof(LocalBlockStatement));
+        LocalBlockStatement blockStmt = Assert.IsType<LocalBlockStatement>(localBlock);
+        Assert.Single(blockStmt.Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(blockStmt.Attributes[0].Attributes).Name).Name.Value);
+
+        // [] { } parses as block statement with empty attribute list
+        Local localEmptyBlock = ParseSingleLocal("[] { int x = 1; }", typeof(LocalBlockStatement));
+        LocalBlockStatement emptyBlockStmt = Assert.IsType<LocalBlockStatement>(localEmptyBlock);
+        Assert.Single(emptyBlockStmt.Attributes);
+        Assert.Empty(emptyBlockStmt.Attributes[0].Attributes);
+
+        // [][] { } parses as block statement with two empty attribute lists
+        Local localDoubleEmptyBlock = ParseSingleLocal("[][] { int x = 1; }", typeof(LocalBlockStatement));
+        LocalBlockStatement doubleEmptyBlockStmt = Assert.IsType<LocalBlockStatement>(localDoubleEmptyBlock);
+        Assert.Equal(2, doubleEmptyBlockStmt.Attributes.Count);
+        Assert.Empty(doubleEmptyBlockStmt.Attributes[0].Attributes);
+        Assert.Empty(doubleEmptyBlockStmt.Attributes[1].Attributes);
+    }
+
+    [Fact]
+    public void Parse_StatementBracketDisambiguation_UnclosedBracketReportsError()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            void Foo()
+            {
+                [x][;
+            }
+            """);
+
+        Assert.Contains(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120");
+    }
+
+    [Fact]
+    public void Parse_TopLevelBracketDisambiguation()
+    {
+        // Top-level [x]; with pragma parses as top-level expression statement
+        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            [x];
+            """);
+        Assert.Empty(diag1.Diagnostics);
+        Assert.Single(root1.Members);
+        var topLevelStmt = Assert.IsType<TopLevelExpressionStatement>(root1.Members[0]);
+        Assert.IsType<CollectionExpression>(topLevelStmt.Expression);
+
+        // Top-level [] int x = 1; parses as variable declaration with empty attribute list
+        TopLevel topLevel1 = ParseSingleTopLevel("[] int x = 1;", typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration topVar = Assert.IsType<TopLevelVariableDeclaration>(topLevel1);
+        Assert.Single(topVar.Declaration.Attributes);
+        Assert.Empty(topVar.Declaration.Attributes[0].Attributes);
+
+        // Top-level [][] int x = 1; parses as variable declaration with two empty attribute lists
+        TopLevel topLevel2 = ParseSingleTopLevel("[][] int x = 1;", typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration topVar2 = Assert.IsType<TopLevelVariableDeclaration>(topLevel2);
+        Assert.Equal(2, topVar2.Declaration.Attributes.Count);
+        Assert.Empty(topVar2.Declaration.Attributes[0].Attributes);
+        Assert.Empty(topVar2.Declaration.Attributes[1].Attributes);
+
+        // Top-level [Marker] { int x = 1; } parses as top-level block
+        TopLevel topLevelBlock = ParseSingleTopLevel("[Marker] { int x = 1; }", typeof(TopLevelBlockDeclaration));
+        TopLevelBlockDeclaration blockDecl = Assert.IsType<TopLevelBlockDeclaration>(topLevelBlock);
+        Assert.Single(blockDecl.Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(blockDecl.Attributes[0].Attributes).Name).Name.Value);
+
+        // Top-level [] { int x = 1; } parses as top-level block with empty attribute list
+        TopLevel topLevelEmptyBlock = ParseSingleTopLevel("[] { int x = 1; }", typeof(TopLevelBlockDeclaration));
+        TopLevelBlockDeclaration emptyBlockDecl = Assert.IsType<TopLevelBlockDeclaration>(topLevelEmptyBlock);
+        Assert.Single(emptyBlockDecl.Attributes);
+        Assert.Empty(emptyBlockDecl.Attributes[0].Attributes);
+    }
+
+    [Fact]
     public void Parse_StatementTupleExpression()
     {
         Local local = ParseSingleLocal("(A * B, C);", typeof(LocalExpressionStatement));
@@ -915,6 +1091,30 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_FunctionParameter_WithAttributes()
+    {
+        FunctionDeclaration function = ParseSingleTopLevelFunction("""
+            void Foo([NotNull] int x, [First][Second(1)] string y = "default");
+            """);
+
+        Assert.Equal(2, function.Signature.Parameters.Count);
+
+        Parameter param1 = function.Signature.Parameters[0];
+        Assert.Single(param1.Attributes);
+        AttributeApplication attr1 = Assert.Single(param1.Attributes[0].Attributes);
+        Assert.Equal("NotNull", Assert.IsType<SimpleName>(attr1.Name).Name.Value);
+        Assert.Equal("x", Assert.IsType<SimpleName>(param1.Declarator.Identifier).Name.Value);
+
+        Parameter param2 = function.Signature.Parameters[1];
+        Assert.Equal(2, param2.Attributes.Count);
+        Assert.Equal("First", Assert.IsType<SimpleName>(Assert.Single(param2.Attributes[0].Attributes).Name).Name.Value);
+        AttributeApplication second = Assert.Single(param2.Attributes[1].Attributes);
+        Assert.Equal("Second", Assert.IsType<SimpleName>(second.Name).Name.Value);
+        Assert.Single(second.Arguments);
+        Assert.NotNull(param2.Initializer);
+    }
+
+    [Fact]
     public void Parse_IntrinsicModifier_IsValidOnlyForAttributeDeclarations()
     {
         AttributeSignature intrinsicAttribute = ParseSingleTopLevelAttribute("""
@@ -1156,7 +1356,7 @@ public sealed class ParserTests
             typeof(ConstructorCallExpression),
             typeof(ArrayCreationExpression),
             typeof(ObjectWithClause),
-            typeof(CollectionInitializer),
+            typeof(TypeInitializer),
             typeof(NamedArgumentExpression));
     }
 

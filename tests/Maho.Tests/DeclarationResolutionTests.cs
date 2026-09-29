@@ -842,6 +842,38 @@ public sealed class DeclarationResolutionTests
         Assert.False(first.TryGetLocalVariable(5, out _));
     }
 
+    [Fact]
+    public void Resolve_ParameterAttributes_AreResolvedToSymbolHandles()
+    {
+        var (sourceText, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public attribute Marker;
+            public attribute Config(int value);
+
+            public void Foo([Marker] int a, [Config(42)] string b, int c)
+            {
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        var markerAttr = Assert.Single(context.AttributeSymbols, a => a.Name.ToString() == "Marker");
+        var configAttr = Assert.Single(context.AttributeSymbols, a => a.Name.ToString() == "Config");
+
+        var paramA = Assert.Single(context.ParameterSymbols, p => p.Name.ToString() == "a");
+        var paramB = Assert.Single(context.ParameterSymbols, p => p.Name.ToString() == "b");
+        var paramC = Assert.Single(context.ParameterSymbols, p => p.Name.ToString() == "c");
+
+        var handleA = Assert.Single(paramA.Attributes);
+        Assert.Equal(ResolutionContext.GetHandle(markerAttr), handleA);
+
+        var handleB = Assert.Single(paramB.Attributes);
+        Assert.Equal(ResolutionContext.GetHandle(configAttr), handleB);
+
+        Assert.Empty(paramC.Attributes);
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));

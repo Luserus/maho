@@ -25,11 +25,12 @@ internal abstract class MethodSymbol : Symbol
 
     public bool TryGetLocalVariable(int index, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out LocalVariableSymbol? symbol)
     {
-        if ((uint)index < (uint)LocalVariables.Count)
+        if (index >= 0 && index < LocalVariables.Count)
         {
             symbol = LocalVariables[index];
             return true;
         }
+
         symbol = null;
         return false;
     }

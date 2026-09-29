@@ -338,6 +338,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
+        symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
+
         symbol.Type = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope);
 
         ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol ?? default);
@@ -867,7 +869,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
-    private void ResolveInitializer(CollectionInitializer? initializer, Scope scope, SymbolHandle containingFunction)
+    private void ResolveInitializer(TypeInitializer? initializer, Scope scope, SymbolHandle containingFunction)
     {
         if (initializer is not null)
             foreach (var expression in initializer.Expressions)

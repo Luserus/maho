@@ -380,7 +380,7 @@ internal sealed partial class Parser
             return ParseTopLevelMacroInvocationDeclaration();
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
-        else if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
+        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
@@ -440,7 +440,7 @@ internal sealed partial class Parser
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration([], []);
 
-        if (IsCurrentTokenAttributeListStart || IsCurrentTokenModifier)
+        if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier)
             return ParseLocalDeclaration();
 
         return ParseLocalStatement(parseMode);

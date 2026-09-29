@@ -557,6 +557,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
+            var attributes = ParseAttributeLists();
             var modifiers = ParseModifiers();
 
             var type = ParseTypeSyntax();
@@ -583,7 +584,7 @@ internal sealed partial class Parser
             }
 
             var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
-            var variableDecl = new Parameter(declarator, initializer);
+            var variableDecl = new Parameter(attributes, declarator, initializer);
 
             nodesAndSeparators.Add(variableDecl);
 

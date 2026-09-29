@@ -219,7 +219,7 @@ type-body               ::= ";" | "{" { member } "}"
 function-declaration    ::= type declaration-name "(" parameter-list ")"
                           { type-constraint-clause } function-body
 parameter-list          ::= [ parameter { "," parameter } [","] ]
-parameter               ::= modifiers type declaration-name [ "=" expression ]
+parameter               ::= { attribute-list } modifiers type declaration-name [ "=" expression ]
 function-body           ::= ";" | "{" { local } "}"
 
 variable-declaration    ::= type variable-declarator
@@ -285,9 +285,9 @@ block-expression        ::= "{" { local } [ expression ] "}"
 collection-expression   ::= "[" expression-list "]" [ "with" "(" argument-list ")" ]
 creation-expression     ::= ( "new" | "put" ) type "(" argument-list ")" [ object-with-clause ]
                           | ( "new" | "put" ) type array-modifier
-                            [ collection-initializer ] [ object-with-clause ]
-object-with-clause      ::= "with" collection-initializer
-collection-initializer  ::= "{" expression-list "}"
+                            [ type-initializer ] [ object-with-clause ]
+object-with-clause      ::= "with" type-initializer
+type-initializer        ::= "{" expression-list "}"
 expression-list         ::= [ expression { "," expression } [","] ]
 argument-list           ::= [ argument { "," argument } [","] ]
 argument                ::= expression | identifier ":" expression
@@ -304,8 +304,10 @@ Tuple types and declarations support extended forms:
 - `(Type a, Type2 b, Type3 c) var;`: tuple types with explicit element names.
 - `(Type a, Type2 b, Type3 c) = expr;`: tuple destructuring variable declarations with individual types per element, allowing heterogeneous types and implicit conversions.
 - `Type (a, b, c) var;`: uniform tuple types where elements share a single base type, as well as `Type (a, b, c) = expr;` for uniform tuple destructuring variable declarations.
-
-`[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration.
+In statement context, a construct beginning with `[` disambiguates between attribute annotations and expressions by looking at the token following the closing `]` of the bracket list (or after the last list when chained, e.g. `[][]`):
+- It parses as attribute annotation(s) if followed by an identifier (e.g. `[attr] ident`, `[] ident`, `[][] ident`), modifier, declaration keyword, or `{` (e.g. `[attr] { }`, `[] { }` on an attributed block statement, since type initializers require `with`). Note that `[] ident` parses as an empty attribute annotation on that identifier rather than an expression, because `[] ident` is nonsense syntax in expressions.
+- It parses as an expression if followed by a semicolon `;` (e.g. `[x];`, `[];`, `[1, 2, 3];`), dot `.`, operator (`+`, `-`, `=`, `as`, etc.), or indexer (e.g. `[1, 2][0];`, `[][];`).
+- An unclosed `[` where `]` is not found at the top nested level reports a syntax error.
 
 ## 5. Statements and placement
 

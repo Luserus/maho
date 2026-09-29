@@ -785,4 +785,74 @@ internal sealed partial class Parser
 
         return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), true);
     }
+
+    /// <summary> Checks whether a bracketed construct at statement or top-level position looks like an attribute list rather than an expression. </summary>
+    private bool LooksLikeAttributeListInStatement()
+    {
+        if (CurrentToken.Kind is not TokenKind.LeftBracket)
+            return false;
+
+        int index = current;
+
+        while (index < tokens.Count && tokens[index].Kind is TokenKind.LeftBracket)
+        {
+            int depth = 0;
+            int braceDepth = 0;
+            bool foundClose = false;
+
+            while (index < tokens.Count)
+            {
+                var kind = tokens[index].Kind;
+                if (kind is TokenKind.LeftBracket)
+                {
+                    depth++;
+                }
+                else if (kind is TokenKind.RightBracket)
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        index++;
+                        foundClose = true;
+                        break;
+                    }
+                }
+                else if (kind is TokenKind.LeftBrace)
+                {
+                    braceDepth++;
+                }
+                else if (kind is TokenKind.RightBrace)
+                {
+                    if (braceDepth > 0)
+                        braceDepth--;
+                }
+                else if (kind is TokenKind.Semicolon && braceDepth == 0)
+                {
+                    break;
+                }
+                else if (kind is TokenKind.EndToken)
+                {
+                    break;
+                }
+
+                index++;
+            }
+
+            if (!foundClose)
+                return false;
+        }
+
+        if (index >= tokens.Count)
+            return false;
+
+        var nextToken = tokens[index];
+
+        if (nextToken.Kind is TokenKind.Identifier && nextToken.MatchingKind is not MatchingKeywordKind.As and not MatchingKeywordKind.With)
+            return true;
+
+        if (nextToken.Kind is TokenKind.LeftBrace)
+            return true;
+
+        return false;
+    }
 }
