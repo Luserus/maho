@@ -47,18 +47,31 @@ There is currently no comment lexical production. A slash is tokenized as `/`, n
 The regular-expression notation below is an implementation-level approximation of the .NET character predicates used by the lexer.
 
 ```text
-identifier  ::= [\p{L}_][\p{L}\p{Nd}_]*
-integer     ::= [0-9]+
-float       ::= [0-9]+\.[0-9]+ | \.[0-9]+
-char        ::= ' ( escaped-char | non-quote-non-newline )* '
-string      ::= " ( escaped-char | non-quote-non-newline )* "
-escaped-char ::= "\\" any-non-newline-character
+identifier       ::= <ID_Start | '_'> <ID_Continue>*
+suffix           ::= <ID_Start | '_'> <ID_Continue>*
+dec-digits       ::= [0-9][0-9_]*
+bin-digits       ::= [01][01_]*
+hex-digits       ::= [0-9a-fA-F][0-9a-fA-F_]*
+exponent         ::= [eE] [+-]? dec-digits
+integer          ::= ( "0" [bB] bin-digits | "0" [xX] hex-digits | dec-digits )
+float            ::= ( dec-digits \. dec-digits? | \. dec-digits ) exponent? | dec-digits exponent
+suffixed-integer ::= integer suffix
+suffixed-float   ::= float suffix
+char             ::= ' ( escaped-char | non-quote-non-newline )* '
+suffixed-char    ::= char suffix
+string           ::= " ( escaped-char | non-quote-non-newline )* "
+suffixed-string  ::= string suffix
+escaped-char     ::= "\\" any-non-newline-character
 ```
 
 Notes:
 
-- Identifiers may begin with a Unicode letter or `_`; later characters may also be Unicode digits.
-- Integer and float literals currently have no sign, exponent, radix prefix, separator, or suffix syntax. A sign is parsed as an operator.
+- Identifiers and suffixes conform to Unicode Standard Annex #31 (UAX #31): starting characters include Unicode categories `Lu`, `Ll`, `Lt`, `Lm`, `Lo`, `Nl`, and connector punctuation `_` (`Pc`); continuation characters additionally include `Nd` (decimal digits), `Mn` (non-spacing marks), `Mc` (spacing combining marks), and `Cf` (formatting characters).
+- Numeric literals support decimal, binary (`0b`, `0B`), and hexadecimal (`0x`, `0X`) forms.
+- Underscores (`_`) are supported as digit separators in binary, hexadecimal, decimal, and scientific notation literals.
+- Floating-point literals support scientific notation using `e` or `E` with an optional `+` or `-` sign.
+- Suffixes follow standard identifier rules and must be attached immediately after the last digit or quote without intervening whitespace. Suffixes are classified as dedicated token kinds (`SuffixedInteger`, `SuffixedFloat`, `SuffixedChar`, `SuffixedString`) whose semantic meaning is recognized in later resolution passes and operator overloads.
+- A sign (`+` or `-` before a number) is parsed as an operator.
 - Strings and characters cannot cross a line break. Escapes are scanned as two source characters; escape interpretation is deferred.
 - A character literal is diagnosed unless it contains exactly one logical character, where an escape sequence counts as one logical character.
 - An unrecognized character produces a lexer diagnostic and a `BadToken`; the parser filters bad tokens before parsing.

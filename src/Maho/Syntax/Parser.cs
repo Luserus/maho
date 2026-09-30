@@ -310,7 +310,8 @@ internal sealed partial class Parser
 
     /// <summary> Recognizes token kinds that can stand in for literal expressions during parsing. </summary>
     private static bool IsLiteralTokenKind(TokenKind kind) =>
-        kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String;
+        kind is TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
+             or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString;
 
     /// <summary> Parses the full compilation unit until the synthetic end token is reached. </summary>
     private CompilationUnit ParseCompilationUnit()

@@ -858,12 +858,35 @@ public sealed class MacroTests
             public class Host
             {
                 public struct void;
-                $BadPaste(12, abc);
+                $BadPaste(12, @);
             }
             """);
 
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0230");
+    }
+
+    [Fact]
+    public void Macro_TokenConcatenation_SuffixedLiteral_Succeeds()
+    {
+        var compilation = Compilation.FromSource("""
+            public macro $MakeSuffixed {
+                (@num: token, @suf: token) => {
+                    var x = @num##@suf;
+                }
+            }
+
+            public class Host
+            {
+                public struct void;
+                public void Test()
+                {
+                    $MakeSuffixed(123, i32);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]

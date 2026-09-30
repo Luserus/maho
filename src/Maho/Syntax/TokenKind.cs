@@ -21,6 +21,10 @@ public enum TokenKind
     Float, // '42.01'
     Char, // ''a''
     String, // '"Any string of words."'
+    SuffixedInteger, // '42i32'
+    SuffixedFloat, // '42.01f32'
+    SuffixedChar, // ''a'u8'
+    SuffixedString, // '"Any string of words."s'
 
     // "Something went wrong" token kinds
     BadToken, // '{The given token}'

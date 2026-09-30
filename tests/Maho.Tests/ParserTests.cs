@@ -1941,4 +1941,82 @@ public sealed class ParserTests
         Assert.Equal("c", Assert.IsType<SimpleName>(s4TupleName.Elements[2]).Name.Value);
         Assert.NotNull(s4.Declaration.Declarators[0].Initializer);
     }
+
+    [Fact]
+    public void Parse_SuffixedLiteralsInExpressions_ParsesAsLiteralExpressionsWithSuffixProperties()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Test()
+            {
+                var a = 123f32 + 456i32;
+                var b = 1.5e-3f32 * 2_000e1_0f64;
+                var c = 'a'u8;
+                var d = "hello"s;
+                foo(0x10_u32, 0b1010u8);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
+        var body = Assert.IsType<FunctionBlockBody>(func.Body);
+
+        // a = 123f32 + 456i32
+        var s1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
+        var bin = Assert.IsType<BinaryExpression>(s1.Declaration.Declarators[0].Initializer!.Initializer);
+        var left = Assert.IsType<LiteralExpression>(bin.LeftExpression);
+        Assert.Equal(TokenKind.SuffixedInteger, left.Literal.Kind);
+        Assert.True(left.HasSuffix);
+        Assert.Equal("f32", left.Suffix);
+        Assert.Equal("123", left.ValueWithoutSuffix);
+
+        var right = Assert.IsType<LiteralExpression>(bin.RightExpression);
+        Assert.Equal(TokenKind.SuffixedInteger, right.Literal.Kind);
+        Assert.True(right.HasSuffix);
+        Assert.Equal("i32", right.Suffix);
+        Assert.Equal("456", right.ValueWithoutSuffix);
+
+        // b = 1.5e-3f32 * 2_000e1_0f64
+        var s2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+        var mul = Assert.IsType<BinaryExpression>(s2.Declaration.Declarators[0].Initializer!.Initializer);
+        var mulLeft = Assert.IsType<LiteralExpression>(mul.LeftExpression);
+        Assert.Equal(TokenKind.SuffixedFloat, mulLeft.Literal.Kind);
+        Assert.True(mulLeft.HasSuffix);
+        Assert.Equal("f32", mulLeft.Suffix);
+        Assert.Equal("1.5e-3", mulLeft.ValueWithoutSuffix);
+
+        var mulRight = Assert.IsType<LiteralExpression>(mul.RightExpression);
+        Assert.Equal(TokenKind.SuffixedFloat, mulRight.Literal.Kind);
+        Assert.True(mulRight.HasSuffix);
+        Assert.Equal("f64", mulRight.Suffix);
+        Assert.Equal("2_000e1_0", mulRight.ValueWithoutSuffix);
+
+        // c = 'a'u8
+        var s3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
+        var charLit = Assert.IsType<LiteralExpression>(s3.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.Equal(TokenKind.SuffixedChar, charLit.Literal.Kind);
+        Assert.True(charLit.HasSuffix);
+        Assert.Equal("u8", charLit.Suffix);
+        Assert.Equal("'a'", charLit.ValueWithoutSuffix);
+
+        // d = "hello"s
+        var s4 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
+        var strLit = Assert.IsType<LiteralExpression>(s4.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.Equal(TokenKind.SuffixedString, strLit.Literal.Kind);
+        Assert.True(strLit.HasSuffix);
+        Assert.Equal("s", strLit.Suffix);
+        Assert.Equal("\"hello\"", strLit.ValueWithoutSuffix);
+
+        // foo(0x10_u32, 0b1010u8)
+        var s5 = Assert.IsType<LocalExpressionStatement>(body.Locals[4]);
+        var call = Assert.IsType<CallExpression>(s5.Expression);
+        var arg0 = Assert.IsType<LiteralExpression>(call.Arguments[0]);
+        Assert.Equal(TokenKind.SuffixedInteger, arg0.Literal.Kind);
+        Assert.Equal("u32", arg0.Suffix);
+        Assert.Equal("0x10", arg0.ValueWithoutSuffix);
+
+        var arg1 = Assert.IsType<LiteralExpression>(call.Arguments[1]);
+        Assert.Equal(TokenKind.SuffixedInteger, arg1.Literal.Kind);
+        Assert.Equal("u8", arg1.Suffix);
+        Assert.Equal("0b1010", arg1.ValueWithoutSuffix);
+    }
 }

@@ -140,7 +140,8 @@ internal sealed partial class Parser
             MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
             _ => ParseNamedExpression()
         },
-        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String => ParseLiteralExpression(),
+        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
+            or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
         _ => CreateMissingExpression()
     };
 
