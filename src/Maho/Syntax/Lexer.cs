@@ -52,11 +52,11 @@ internal sealed partial class Lexer
             if (kind is TokenKind.Identifier && !isEscapedIdentifier)
                 matching = MatchKeywordKind(span);
 
-            Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia, matching));
+            Tokens.Add(new Token(text, span, kind, leadingTrivia, trailingTrivia, matching));
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
-        Tokens.Add(new(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
+        Tokens.Add(new Token(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
 
         return Tokens;
     }
@@ -74,6 +74,7 @@ internal sealed partial class Lexer
         {
             current++; // skip opening '`'
             var idStart = current;
+
             while (UnicodeIdentifier.IsIdentifierContinue(text, current, out int advance))
                 current += advance;
 
@@ -82,12 +83,14 @@ internal sealed partial class Lexer
                 var idSpan = new TextSpan(idStart, current - idStart);
                 current++; // skip closing '`'
                 kind = TokenKind.Identifier;
+
                 return (idSpan, kind);
             }
             else
             {
                 ReportUnterminatedLiteral(start, TokenKind.Identifier);
                 kind = TokenKind.Identifier;
+
                 return (new TextSpan(idStart, current - idStart), kind);
             }
         }
@@ -155,7 +158,7 @@ internal sealed partial class Lexer
                     kind = kind == TokenKind.Float ? TokenKind.SuffixedFloat : TokenKind.SuffixedInteger;
             }
 
-            TextSpan span = new(start, current - start);
+            var span = new TextSpan(start, current - start);
             return (span, kind);
         }
         else if (IsOperator(CurrentChar) is (true, var opKind))
@@ -187,7 +190,7 @@ internal sealed partial class Lexer
                 if (ScanNumericSuffix())
                     kind = TokenKind.SuffixedFloat;
 
-                TextSpan span = new(start, current - start);
+                var span = new TextSpan(start, current - start);
                 return (span, kind);
             }
             else

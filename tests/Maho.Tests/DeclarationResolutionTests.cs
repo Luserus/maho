@@ -874,6 +874,448 @@ public sealed class DeclarationResolutionTests
         Assert.Empty(paramC.Attributes);
     }
 
+    [Fact]
+    public void Resolve_ModifiedTypes_ProduceSpecialSemanticTypes_And_RecordTreeReferences()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Int32;
+            public Int32* ptr;
+            public Int32& refVal;
+            public Int32[] spanVal;
+            public Int32[42] arrVal;
+            public Int32? optVal;
+            public Int32*[] nestedVal;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
+        var int32Handle = ResolutionContext.GetHandle(int32);
+
+        var ptr = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "ptr");
+        var refVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "refVal");
+        var spanVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "spanVal");
+        var arrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "arrVal");
+        var optVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "optVal");
+        var nestedVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVal");
+
+        Assert.Equal(TypeRefKind.Pointer, ptr.Type.Kind);
+        Assert.True(ptr.Type.IsResolved);
+        var ptrSem = Assert.IsType<PointerSemanticType>(ptr.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), ptrSem.ElementType);
+
+        Assert.Equal(TypeRefKind.Reference, refVal.Type.Kind);
+        Assert.True(refVal.Type.IsResolved);
+        var refSem = Assert.IsType<ReferenceSemanticType>(refVal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), refSem.ElementType);
+
+        Assert.Equal(TypeRefKind.Span, spanVal.Type.Kind);
+        Assert.True(spanVal.Type.IsResolved);
+        var spanSem = Assert.IsType<SpanSemanticType>(spanVal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), spanSem.ElementType);
+
+        Assert.Equal(TypeRefKind.Array, arrVal.Type.Kind);
+        Assert.True(arrVal.Type.IsResolved);
+        var arrSem = Assert.IsType<ArraySemanticType>(arrVal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), arrSem.ElementType);
+        Assert.True(arrSem.IsFixedSize);
+
+        Assert.Equal(TypeRefKind.Optional, optVal.Type.Kind);
+        Assert.True(optVal.Type.IsResolved);
+        var optSem = Assert.IsType<OptionalSemanticType>(optVal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), optSem.ElementType);
+
+        Assert.Equal(TypeRefKind.Span, nestedVal.Type.Kind);
+        Assert.True(nestedVal.Type.IsResolved);
+        var nestedSem = Assert.IsType<SpanSemanticType>(nestedVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Pointer, nestedSem.ElementType.Kind);
+        var innerPtrSem = Assert.IsType<PointerSemanticType>(nestedSem.ElementType.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), innerPtrSem.ElementType);
+
+        // Verify that the inner SimpleType node was recorded in ResolvedTree
+        var ptrDecl = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
+        var modifiedSyntax = Assert.IsType<ModifiedType>(ptrDecl.Declaration.Type);
+        AssertReference(context, modifiedSyntax.Type, int32Handle);
+    }
+
+    [Fact]
+    public void Resolve_TupleTypes_ProduceTupleSemanticType()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Int32;
+            public struct String;
+            public (Int32 a, String b) pair;
+            public Int32 (x, y, z) uniform;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
+        var str = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "String");
+        var int32Handle = ResolutionContext.GetHandle(int32);
+        var strHandle = ResolutionContext.GetHandle(str);
+
+        var pair = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "pair");
+        var uniform = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "uniform");
+
+        Assert.Equal(TypeRefKind.Tuple, pair.Type.Kind);
+        Assert.True(pair.Type.IsResolved);
+        var pairSem = Assert.IsType<TupleSemanticType>(pair.Type.SpecialType);
+        Assert.Equal(2, pairSem.Elements.Count);
+        Assert.Equal(TypeRef.Resolved(int32Handle), pairSem.Elements[0].Type);
+        Assert.Equal("a", pairSem.Elements[0].Name);
+        Assert.Equal(TypeRef.Resolved(strHandle), pairSem.Elements[1].Type);
+        Assert.Equal("b", pairSem.Elements[1].Name);
+
+        Assert.Equal(TypeRefKind.Tuple, uniform.Type.Kind);
+        Assert.True(uniform.Type.IsResolved);
+        var uniformSem = Assert.IsType<TupleSemanticType>(uniform.Type.SpecialType);
+        Assert.Equal(3, uniformSem.Elements.Count);
+        Assert.All(uniformSem.Elements, e => Assert.Equal(TypeRef.Resolved(int32Handle), e.Type));
+        Assert.Equal("x", uniformSem.Elements[0].Name);
+        Assert.Equal("y", uniformSem.Elements[1].Name);
+        Assert.Equal("z", uniformSem.Elements[2].Name);
+    }
+
+    [Fact]
+    public void Resolve_AllowsFunctionOverloading_ByModifierTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Int32;
+            public void Process(Int32 value) { }
+            public void Process(Int32* value) { }
+            public void Process(Int32[] value) { }
+            public void Process(Int32[10] value) { }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        Assert.Equal(4, context.FunctionSymbols.Count);
+
+        var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
+        var int32Handle = ResolutionContext.GetHandle(int32);
+
+        var fnPlain = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type == TypeRef.Resolved(int32Handle));
+        var fnPtr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Pointer);
+        var fnSpan = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Span);
+        var fnArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Array);
+    }
+
+    [Fact]
+    public void Resolve_Alias_ToSpecialSemanticType()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Int32;
+            using IntPtr = Int32*;
+            public IntPtr ptr;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
+        var alias = Assert.Single(context.AliasSymbols, a => a.Name.ToString() == "IntPtr");
+        var ptr = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "ptr");
+
+        Assert.Equal(TypeRefKind.Pointer, alias.Target.Kind);
+        Assert.True(alias.Target.IsResolved);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(alias)), ptr.Type);
+        Assert.Equal(TypeRefKind.Pointer, ptr.Type.UnwrapAlias(context).Kind);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(int32)), ((PointerSemanticType)ptr.Type.UnwrapAlias(context).SpecialType!).ElementType);
+    }
+
+    [Fact]
+    public void Resolve_VarInStatementContext_AlwaysInfers_EvenWithVarTypeInScope()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct var;
+            public void Test()
+            {
+                var x = 1;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var method = Assert.Single(context.FunctionSymbols, m => m.Name.ToString() == "Test");
+        var local = Assert.Single(method.LocalVariables);
+        Assert.Equal("x", local.Name.ToString());
+        Assert.True(local.Type.IsInferred);
+    }
+
+    [Fact]
+    public void Resolve_AccessingVarTypeInStatementContext_RequiresQualifiedName()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Holder
+            {
+                public struct var;
+            }
+            public void Test()
+            {
+                Holder.var x;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var method = Assert.Single(context.FunctionSymbols, m => m.Name.ToString() == "Test");
+        var local = Assert.Single(method.LocalVariables);
+        Assert.Equal("x", local.Name.ToString());
+        Assert.False(local.Type.IsInferred);
+        Assert.True(local.Type.IsResolved);
+        var holder = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Holder");
+        var nestedVar = Assert.Single(context.NestedTypeSymbols, t => t.Name.ToString() == "var");
+        Assert.Equal(ResolutionContext.GetHandle(nestedVar), local.Type.Handle);
+    }
+
+    [Fact]
+    public void Resolve_VarInNonInferenceContext_ResolvesVarTypeOrReportsError()
+    {
+        // When struct var is in scope, parameter type "var" resolves to struct var
+        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
+            public struct var;
+            public void Test(var p) { }
+            """);
+
+        Assert.Empty(diag1.Diagnostics);
+        ResolutionContext ctx1 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root1));
+        var fn1 = Assert.Single(ctx1.FunctionSymbols, f => f.Name.ToString() == "Test");
+        var varSym = Assert.Single(ctx1.TypeSymbols, t => t.Name.ToString() == "var");
+        var param = Assert.Single(ctx1.ParameterSymbols);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(varSym)), param.Type);
+
+        // When struct var is NOT in scope, parameter type "var" reports error
+        var (_, diag2, _, root2) = CompilerTestBed.Parse("""
+            public void Test(var p) { }
+            """);
+
+        Assert.Empty(diag2.Diagnostics);
+        ResolutionContext ctx2 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root2));
+        Assert.NotEmpty(ctx2.Diagnostics.Diagnostics);
+        Assert.Contains(ctx2.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
+    }
+
+    [Fact]
+    public void Resolve_VarInReturnType_AlwaysInfers_UnlessQualified()
+    {
+        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
+            public struct var;
+            public var InferFn() { return 1; }
+            """);
+
+        Assert.Empty(diag1.Diagnostics);
+        ResolutionContext ctx1 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root1));
+        var fn1 = Assert.Single(ctx1.FunctionSymbols, f => f.Name.ToString() == "InferFn");
+        Assert.True(fn1.ReturnType.IsInferred);
+
+        var (_, diag2, _, root2) = CompilerTestBed.Parse("""
+            public struct Holder
+            {
+                public struct var;
+            }
+            public Holder.var ReturnTypeFn() { return default; }
+            """);
+
+        Assert.Empty(diag2.Diagnostics);
+        ResolutionContext ctx2 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root2));
+        var fn2 = Assert.Single(ctx2.FunctionSymbols, f => f.Name.ToString() == "ReturnTypeFn");
+        Assert.False(fn2.ReturnType.IsInferred);
+        Assert.True(fn2.ReturnType.IsResolved);
+        var nestedVar = Assert.Single(ctx2.NestedTypeSymbols, t => t.Name.ToString() == "var");
+        Assert.Equal(ResolutionContext.GetHandle(nestedVar), fn2.ReturnType.Handle);
+    }
+
+    [Fact]
+    public void Resolve_ThrowawaySymbols_PutInSink_MultipleCanCoexist_NotLoweredOrInGlobalTables()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void _() { }
+            public void _(int a) { }
+            public struct _
+            {
+                public int x;
+                public void Method() { }
+            }
+            public struct _
+            {
+                public int y;
+            }
+            public void Test()
+            {
+                var _ = 1;
+                var _ = 2;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        // Primary tables only contain the non-throwaway declarations
+        Assert.Single(context.FunctionSymbols, f => f.Name.ToString() == "Test");
+        Assert.DoesNotContain(context.FunctionSymbols, f => f.Name.ToString() == "_");
+        Assert.DoesNotContain(context.TypeSymbols, t => t.Name.ToString() == "_");
+        Assert.Empty(context.FieldSymbols); // x and y are in the sink!
+
+        // Sink symbols contains the throwaway declarations and their member symbols
+        Assert.Equal(2, context.SinkSymbols.FunctionSymbols.Count);
+        Assert.All(context.SinkSymbols.FunctionSymbols, f => Assert.Equal("_", f.Name.ToString()));
+
+        Assert.Equal(2, context.SinkSymbols.TypeSymbols.Count);
+        Assert.All(context.SinkSymbols.TypeSymbols, t => Assert.Equal("_", t.Name.ToString()));
+
+        // Members of struct _ are also in the sink!
+        Assert.Equal(2, context.SinkSymbols.FieldSymbols.Count);
+        Assert.Single(context.SinkSymbols.MethodSymbols);
+
+        // Local _ variables are in the sink local variables, not Test's primary local variables
+        var testMethod = Assert.Single(context.FunctionSymbols, f => f.Name.ToString() == "Test");
+        Assert.Empty(testMethod.LocalVariables);
+        Assert.Equal(2, context.SinkLocalVariables.Count);
+    }
+
+    [Fact]
+    public void Resolve_ThrowawaySymbols_ResolutionStillWorksInBody()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Value;
+            public void _()
+            {
+                Value a;
+                Value b = a;
+            }
+            public struct _
+            {
+                public Value field;
+                public Value GetField()
+                {
+                    return this.field;
+                }
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var valueSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Value");
+        var valueHandle = ResolutionContext.GetHandle(valueSym);
+
+        var sinkFn = Assert.Single(context.SinkSymbols.FunctionSymbols);
+        Assert.Equal(2, sinkFn.LocalVariables.Count);
+        Assert.Equal(TypeRef.Resolved(valueHandle), sinkFn.LocalVariables[0].Type);
+        Assert.Equal(TypeRef.Resolved(valueHandle), sinkFn.LocalVariables[1].Type);
+
+        var sinkType = Assert.Single(context.SinkSymbols.TypeSymbols);
+        var sinkField = Assert.Single(context.SinkSymbols.FieldSymbols);
+        Assert.Equal(TypeRef.Resolved(valueHandle), sinkField.Type);
+        var sinkMethod = Assert.Single(context.SinkSymbols.MethodSymbols);
+        Assert.Equal(TypeRef.Resolved(valueHandle), sinkMethod.ReturnType);
+    }
+
+    [Fact]
+    public void Resolve_ThrowawaySymbols_CannotBeReferenced()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void _() { }
+            public struct _ { }
+            public void Test()
+            {
+                var _ = 1;
+                var a = _;
+                _ s;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        // Attempting to reference _ as variable or type reports unresolved diagnostics
+        Assert.NotEmpty(context.Diagnostics.Diagnostics);
+        Assert.Contains(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
+    }
+
+    [Fact]
+    public void Resolve_VarInField_NonInferenceContext_ResolvesVarTypeOrReportsError()
+    {
+        // When struct var is in scope, field type "var" resolves to struct var
+        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
+            public struct var;
+            public struct Model
+            {
+                public var field;
+            }
+            """);
+
+        Assert.Empty(diag1.Diagnostics);
+        ResolutionContext ctx1 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root1));
+        var varSym = Assert.Single(ctx1.TypeSymbols, t => t.Name.ToString() == "var");
+        var field = Assert.Single(ctx1.FieldSymbols);
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(varSym)), field.Type);
+
+        // When struct var is NOT in scope, field type "var" reports unresolved type error
+        var (_, diag2, _, root2) = CompilerTestBed.Parse("""
+            public struct Model
+            {
+                public var field;
+            }
+            """);
+
+        Assert.Empty(diag2.Diagnostics);
+        ResolutionContext ctx2 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root2));
+        Assert.NotEmpty(ctx2.Diagnostics.Diagnostics);
+        Assert.Contains(ctx2.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
+    }
+
+    [Fact]
+    public void Resolve_ThrowawayParameters_CanCoexist_AndRoutedToSink()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public void Handler(int _, int _) { }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        // No parameters in primary ParameterSymbols, both are in SinkSymbols.ParameterSymbols
+        Assert.Empty(context.ParameterSymbols);
+        Assert.Equal(2, context.SinkSymbols.ParameterSymbols.Count);
+        Assert.All(context.SinkSymbols.ParameterSymbols, p => Assert.Equal("_", p.Name.ToString()));
+    }
+
+    [Fact]
+    public void Resolve_ThrowawayDeclaration_TemporarilyInactivatesDeclaration()
+    {
+        // Renaming an active function to _ inactivates it:
+        // it cannot be called from active code, but its body resolution still validates types
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct User;
+            public void ActiveFn(User u) { }
+            // Temporarily inactivated function for testing
+            public void _(User u)
+            {
+                ActiveFn(u);
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        // Only ActiveFn is in global FunctionSymbols
+        Assert.Single(context.FunctionSymbols, f => f.Name.ToString() == "ActiveFn");
+        Assert.DoesNotContain(context.FunctionSymbols, f => f.Name.ToString() == "_");
+
+        // The inactivated function is in SinkSymbols
+        var sinkFn = Assert.Single(context.SinkSymbols.FunctionSymbols);
+        Assert.Equal("_", sinkFn.Name.ToString());
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));

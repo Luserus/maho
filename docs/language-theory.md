@@ -40,8 +40,6 @@ line-break  ::= "\n"
 trivia      ::= space | tab | line-break
 ```
 
-There is currently no comment lexical production. A slash is tokenized as `/`, not as the beginning of a line or block comment.
-
 ### 1.2 Identifiers and literals
 
 The regular-expression notation below is an implementation-level approximation of the .NET character predicates used by the lexer.
@@ -365,7 +363,7 @@ Namespaces and type declarations retain their containing namespace. Functions an
 
 The declaration pass records successful, unambiguous references in `ResolvedTree` and enforces semantic declaration invariants:
 
-- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types;
+- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types. Modified and compound syntax types are represented as first-class structural semantic types: pointers (`T*`), references (`T&`), unsized spans (`T[]`), fixed-size arrays (`T[n]`), optionals (`T?`), and tuples (`(T1, T2)` / `T (a, b)`), preserving type structure and modifier distinctness without requiring an intrinsic library discovery pass;
 - **Non-Partial Duplicate Type Declarations (`MH1002`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH1002` with primary label on the redeclaration, secondary label on the previous declaration, and remediation guidance;
 - **Partial Type Canonical Merging**: Multiple partial declarations of the same type in the same scope are merged into a canonical first symbol. Verifies that all partial declarations share the same `TypeKind` (e.g. all `class` or all `struct`);
 - **Partial Function Declarations (`MH1003`)**:

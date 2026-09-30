@@ -31,6 +31,16 @@ internal sealed class ResolutionContext
     public List<AliasSymbol> AliasSymbols { get; }
     public List<MacroSymbol> MacroSymbols { get; }
 
+    public SymbolStore SinkSymbols { get; } = SymbolStore.CreateEmpty();
+    private readonly List<LocalVariableSymbol> sinkLocalVariables = [];
+    public IReadOnlyList<LocalVariableSymbol> SinkLocalVariables => sinkLocalVariables;
+    public IEnumerable<LocalVariableSymbol> SinkLocalVariableSymbols =>
+        SinkSymbols.FunctionSymbols.SelectMany(f => f.LocalVariables)
+            .Concat(SinkSymbols.MethodSymbols.SelectMany(m => m.LocalVariables))
+            .Concat(sinkLocalVariables);
+    private readonly Dictionary<SymbolHandle, Symbol> sinkSymbolsByHandle = [];
+    private int sinkID = -1;
+
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
@@ -210,131 +220,294 @@ internal sealed class ResolutionContext
 
     public TypeSymbol CreateTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, NamespaceTrieNode? containingNamespace, TypeDeclaration? syntax)
     {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : typeID++;
         TypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            symbol = new ProductTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+            symbol = new ProductTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
         }
         else
-            symbol = new SumTypeSymbol(typeID++, enclosingScope, name, typeKind, containingNamespace, syntax);
+            symbol = new SumTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
 
-        TypeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.TypeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            TypeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
     public MemberTypeSymbol CreateMemberTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : nestedTypeID++;
         MemberTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            symbol = new MemberProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new MemberProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
         }
         else
-            symbol = new MemberSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new MemberSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
-        NestedTypeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.NestedTypeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            NestedTypeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalTypeSymbol CreateLocalTypeSymbol(Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax)
     {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : nestedTypeID++;
         LocalTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
         {
-            symbol = new LocalProductTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new LocalProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
         }
         else
-            symbol = new LocalSumTypeSymbol(nestedTypeID++, enclosingScope, name, typeKind, parent, syntax);
+            symbol = new LocalSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
-        NestedTypeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.NestedTypeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            NestedTypeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public AttributeSymbol CreateAttributeSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AttributeSignature? syntax)
     {
-        var symbol = new AttributeSymbol(attributeID++, name, enclosingScope, containingNamespace, syntax);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : attributeID++;
+        var symbol = new AttributeSymbol(id, name, enclosingScope, containingNamespace, syntax);
 
-        AttributeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.AttributeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            AttributeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
     public MemberAttributeSymbol CreateMemberAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
     {
-        var symbol = new MemberAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : nestedAttributeID++;
+        var symbol = new MemberAttributeSymbol(id, name, enclosingScope, parent, syntax);
 
-        NestedAttributeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.NestedAttributeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            NestedAttributeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalAttributeSymbol CreateLocalAttributeSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, AttributeSignature? syntax)
     {
-        var symbol = new LocalAttributeSymbol(nestedAttributeID++, name, enclosingScope, parent, syntax);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : nestedAttributeID++;
+        var symbol = new LocalAttributeSymbol(id, name, enclosingScope, parent, syntax);
 
-        NestedAttributeSymbols.Add(symbol);
+        if (isSink)
+        {
+            SinkSymbols.NestedAttributeSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            NestedAttributeSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public FunctionSymbol CreateFunctionSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, FunctionDeclaration? syntax)
     {
-        var symbol = new FunctionSymbol(functionID++, enclosingScope, name, containingNamespace, syntax);
-        FunctionSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : functionID++;
+        var symbol = new FunctionSymbol(id, enclosingScope, name, containingNamespace, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.FunctionSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            FunctionSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
     public MemberMethodSymbol CreateMemberMethodSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
     {
-        var symbol = new MemberMethodSymbol(methodID++, enclosingScope, name, parent, syntax);
-        MethodSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : methodID++;
+        var symbol = new MemberMethodSymbol(id, enclosingScope, name, parent, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.MethodSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            MethodSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalFunctionSymbol CreateLocalFunctionSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax)
     {
-        var symbol = new LocalFunctionSymbol(methodID++, name, enclosingScope, parent, syntax);
-        MethodSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : methodID++;
+        var symbol = new LocalFunctionSymbol(id, name, enclosingScope, parent, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.MethodSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            MethodSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public GlobalVariableSymbol CreateGlobalVariableSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, VariableDeclaration? syntax)
     {
-        var symbol = new GlobalVariableSymbol(globalVariableID++, enclosingScope, name, containingNamespace, syntax);
-        GlobalVariableSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : globalVariableID++;
+        var symbol = new GlobalVariableSymbol(id, enclosingScope, name, containingNamespace, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.GlobalVariableSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            GlobalVariableSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
     public FieldSymbol CreateFieldSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
     {
-        var symbol = new FieldSymbol(fieldID++, enclosingScope, name, parent, syntax);
-        FieldSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : fieldID++;
+        var symbol = new FieldSymbol(id, enclosingScope, name, parent, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.FieldSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            FieldSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public ParameterSymbol CreateParameterSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, Parameter? syntax)
     {
-        var symbol = new ParameterSymbol(parameterID++, enclosingScope, name, containingSymbol, syntax);
-        ParameterSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : parameterID++;
+        var symbol = new ParameterSymbol(id, enclosingScope, name, containingSymbol, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.ParameterSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            ParameterSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LocalVariableSymbol CreateLocalVariableSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, VariableDeclaration? syntax)
     {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        if (isSink)
+        {
+            var symbol = new LocalVariableSymbol(new SymbolID(sinkID--), enclosingScope, name, parent, syntax);
+            sinkLocalVariables.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+
+            if (name.Text != "_")
+            {
+                if (parent is { Kind: SymbolKind.Function })
+                {
+                    var func = GetFunctionSymbol(parent.Value);
+                    func?.LocalVariables.Add(symbol);
+                }
+                else if (parent is { Kind: SymbolKind.Method })
+                {
+                    var method = GetMethodSymbol(parent.Value);
+                    method?.LocalVariables.Add(symbol);
+                }
+            }
+
+            Register(enclosingScope, symbol);
+            return symbol;
+        }
+
         SymbolID id = 0;
-        if (parent is { Kind: SymbolKind.Function, ID: var funcId } && (int)funcId < FunctionSymbols.Count)
+        if (parent is { Kind: SymbolKind.Function, ID: var funcId } && (int)funcId >= 0 && (int)funcId < FunctionSymbols.Count)
         {
             var func = FunctionSymbols[funcId];
             id = func.LocalVariables.Count;
@@ -343,7 +516,7 @@ internal sealed class ResolutionContext
             Register(enclosingScope, symbol);
             return symbol;
         }
-        else if (parent is { Kind: SymbolKind.Method, ID: var methodId } && (int)methodId < MethodSymbols.Count)
+        else if (parent is { Kind: SymbolKind.Method, ID: var methodId } && (int)methodId >= 0 && (int)methodId < MethodSymbols.Count)
         {
             var method = MethodSymbols[methodId];
             id = method.LocalVariables.Count;
@@ -362,59 +535,214 @@ internal sealed class ResolutionContext
 
     public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)
     {
-        var symbol = new PropertySymbol(propertyID++, enclosingScope, name, hasBacking, syntax);
-        PropertySymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : propertyID++;
+        var symbol = new PropertySymbol(id, enclosingScope, name, hasBacking, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.PropertySymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            PropertySymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public GenericParameterSymbol CreateGenericParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
     {
-        var symbol = new GenericParameterSymbol(genericParameterID++, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
-        GenericParameterSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : genericParameterID++;
+        var symbol = new GenericParameterSymbol(id, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
+
+        if (isSink)
+        {
+            SinkSymbols.GenericParameterSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            GenericParameterSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public LabelSymbol CreateLabelSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingFunction, SyntaxNode? syntax)
     {
-        var symbol = new LabelSymbol(labelID++, enclosingScope, name, containingFunction, syntax);
-        LabelSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : labelID++;
+        var symbol = new LabelSymbol(id, enclosingScope, name, containingFunction, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.LabelSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            LabelSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, AliasDeclaration? syntax)
     {
-        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingSymbol, syntax);
-        AliasSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : aliasID++;
+        var symbol = new AliasSymbol(id, enclosingScope, name, containingSymbol, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.AliasSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            AliasSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public AliasSymbol CreateAliasSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, AliasDeclaration? syntax)
     {
-        var symbol = new AliasSymbol(aliasID++, enclosingScope, name, containingNamespace, syntax);
-        AliasSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : aliasID++;
+        var symbol = new AliasSymbol(id, enclosingScope, name, containingNamespace, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.AliasSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            AliasSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
 
     public MacroSymbol CreateMacroSymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, MacroDeclaration syntax)
     {
-        var symbol = new MacroSymbol(macroID++, enclosingScope, name, containingSymbol, syntax);
-        MacroSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : macroID++;
+        var symbol = new MacroSymbol(id, enclosingScope, name, containingSymbol, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.MacroSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            MacroSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol);
         return symbol;
     }
 
     public MacroSymbol CreateMacroSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, MacroDeclaration syntax)
     {
-        var symbol = new MacroSymbol(macroID++, enclosingScope, name, containingNamespace, syntax);
-        MacroSymbols.Add(symbol);
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : macroID++;
+        var symbol = new MacroSymbol(id, enclosingScope, name, containingNamespace, syntax);
+
+        if (isSink)
+        {
+            SinkSymbols.MacroSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+        {
+            MacroSymbols.Add(symbol);
+        }
+
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
     }
+
+    public FunctionSymbol? GetFunctionSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Function) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < FunctionSymbols.Count)
+            return FunctionSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FunctionSymbol func)
+            return func;
+        return null;
+    }
+
+    public MethodSymbol? GetMethodSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Method) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < MethodSymbols.Count)
+            return MethodSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is MethodSymbol method)
+            return method;
+        return null;
+    }
+
+    public TypeSymbol? GetTypeSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Type) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < TypeSymbols.Count)
+            return TypeSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is TypeSymbol t)
+            return t;
+        return null;
+    }
+
+    public NestedTypeSymbol? GetNestedTypeSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.NestedType) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < NestedTypeSymbols.Count)
+            return NestedTypeSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedTypeSymbol t)
+            return t;
+        return null;
+    }
+
+    public AliasSymbol? GetAliasSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Alias) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < AliasSymbols.Count)
+            return AliasSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is AliasSymbol a)
+            return a;
+        return null;
+    }
+
+    public GenericParameterSymbol? GetGenericParameterSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.GenericParameter) return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < GenericParameterSymbols.Count)
+            return GenericParameterSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is GenericParameterSymbol gp)
+            return gp;
+        return null;
+    }
+
+    public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
+    {
+        SymbolKind.Type => GetTypeSymbol(handle),
+        SymbolKind.NestedType => GetNestedTypeSymbol(handle),
+        SymbolKind.Function => GetFunctionSymbol(handle),
+        SymbolKind.Method => GetMethodSymbol(handle),
+        SymbolKind.Alias => GetAliasSymbol(handle),
+        SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
+        _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
+    };
 
     public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
 
@@ -444,10 +772,13 @@ internal sealed class ResolutionContext
                 case SymbolKind.NestedType when current.ID.Value >= 0 && current.ID.Value < NestedTypeSymbols.Count:
                     return current;
 
-                case SymbolKind.Alias when current.ID.Value >= 0 && current.ID.Value < AliasSymbols.Count:
-                    var alias = AliasSymbols[current.ID];
+                case SymbolKind.Type when current.ID.Value < 0 && sinkSymbolsByHandle.ContainsKey(current):
+                case SymbolKind.NestedType when current.ID.Value < 0 && sinkSymbolsByHandle.ContainsKey(current):
+                    return current;
 
-                    if (!alias.Target.IsResolved || alias.Target.Handle is not { } target)
+                case SymbolKind.Alias:
+                    var alias = GetAliasSymbol(current);
+                    if (alias is null || !alias.Target.IsResolved || alias.Target.Handle is not { } target)
                         return null;
 
                     current = target;
@@ -461,9 +792,31 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    /// <summary>
+    /// Unwraps any aliases transitively, returning the underlying <see cref="TypeRef"/>.
+    /// </summary>
+    public TypeRef UnwrapAlias(TypeRef typeRef)
+    {
+        var current = typeRef;
+        var visited = new HashSet<SymbolHandle>();
+
+        while (current.Kind == TypeRefKind.Resolved && current.Handle is { Kind: SymbolKind.Alias } aliasHandle && visited.Add(aliasHandle))
+        {
+            var alias = GetAliasSymbol(aliasHandle);
+            if (alias is null || !alias.Target.IsResolved)
+                break;
+            current = alias.Target;
+        }
+
+        return current;
+    }
+
     private void Register(Scope scope, Symbol symbol, NamespaceTrieNode? containingNamespace = null)
     {
-        scope.Symbols.Add(GetHandle(symbol), symbol);
+        if (symbol.Name.Text == "_")
+            return;
+
+        scope.Symbols[GetHandle(symbol)] = symbol;
 
         if (containingNamespace != null && containingNamespace != GlobalNamespace)
         {

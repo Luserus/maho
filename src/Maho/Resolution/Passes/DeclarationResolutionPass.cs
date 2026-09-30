@@ -13,7 +13,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private ResolutionContext context = null!;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
-    private readonly Dictionary<(TypeSyntax, Scope), TypeRef> resolvedTypes = [];
+    private readonly Dictionary<(TypeSyntax, Scope, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
@@ -59,6 +59,43 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             ResolveVariable(local, local.Syntax);
 
         foreach (var property in context.PropertySymbols)
+            ResolveProperty(property);
+
+        // Resolve throwaway sink declarations so their signatures and bodies resolve error-free
+        foreach (var attribute in context.SinkSymbols.AttributeSymbols)
+            ResolveAttributeDeclaration(attribute, attribute.Syntax);
+
+        foreach (var attribute in context.SinkSymbols.NestedAttributeSymbols)
+            ResolveAttributeDeclaration(attribute, attribute.Syntax);
+
+        foreach (var type in context.SinkSymbols.TypeSymbols)
+            ResolveType(type, type.Syntax);
+
+        foreach (var type in context.SinkSymbols.NestedTypeSymbols)
+            ResolveType(type, type.Syntax);
+
+        foreach (var alias in context.SinkSymbols.AliasSymbols)
+            ResolveAlias(alias);
+
+        foreach (var function in context.SinkSymbols.FunctionSymbols)
+            ResolveFunction(function);
+
+        foreach (var method in context.SinkSymbols.MethodSymbols)
+            ResolveMethod(method);
+
+        foreach (var parameter in context.SinkSymbols.ParameterSymbols)
+            ResolveParameter(parameter);
+
+        foreach (var global in context.SinkSymbols.GlobalVariableSymbols)
+            ResolveVariable(global, global.Syntax);
+
+        foreach (var field in context.SinkSymbols.FieldSymbols)
+            ResolveVariable(field, field.Syntax);
+
+        foreach (var local in context.SinkLocalVariableSymbols)
+            ResolveVariable(local, local.Syntax);
+
+        foreach (var property in context.SinkSymbols.PropertySymbols)
             ResolveProperty(property);
 
         foreach (var root in context.SyntaxTree.Roots)
@@ -204,8 +241,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
         var target = ResolveType(symbol.Syntax.Target, scope, reportDiagnostics: !symbol.IsGlobalAlias);
 
-        symbol.HasCompatibleConstraints = target.IsResolved && target.Handle is { } handle &&
-            AliasConstraintsAreCompatible(handle, symbol.Syntax.Target, scope);
+        symbol.HasCompatibleConstraints = target.IsResolved &&
+            (target.IsSpecial || (target.Handle is { } handle && AliasConstraintsAreCompatible(handle, symbol.Syntax.Target, scope)));
         symbol.Target = symbol.HasCompatibleConstraints ? target : (symbol.IsGlobalAlias && !target.IsResolved ? TypeRef.Unresolved : TypeRef.Error);
     }
 
@@ -240,9 +277,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private IReadOnlyList<SymbolHandle> GetGenericParameters(SymbolHandle handle) => handle.Kind switch
     {
-        SymbolKind.Type => context.TypeSymbols[handle.ID].GenericParameters,
-        SymbolKind.NestedType => context.NestedTypeSymbols[handle.ID].GenericParameters,
-        SymbolKind.Alias => context.AliasSymbols[handle.ID].GenericParameters,
+        SymbolKind.Type => context.GetTypeSymbol(handle)?.GenericParameters ?? [],
+        SymbolKind.NestedType => context.GetNestedTypeSymbol(handle)?.GenericParameters ?? [],
+        SymbolKind.Alias => context.GetAliasSymbol(handle)?.GenericParameters ?? [],
         _ => []
     };
 
@@ -273,7 +310,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             if (constraint.IsError)
                 continue;
 
-            if (constraint.IsResolved && !SatisfiesConstraint(candidate, constraint.Handle!.Value, []))
+            if (constraint.IsResolved && constraint.Handle is { } constraintHandle && !SatisfiesConstraint(candidate, constraintHandle, []))
                 return false;
         }
 
@@ -291,21 +328,30 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         switch (candidate.Kind)
         {
             case SymbolKind.GenericParameter:
-                foreach (var constraint in context.GenericParameterSymbols[candidate.ID].Constraints)
-                    if (constraint.IsResolved && SatisfiesConstraint(constraint.Handle!.Value, required, visited))
-                        return true;
+                if (context.GetGenericParameterSymbol(candidate) is { } gp)
+                {
+                    foreach (var constraint in gp.Constraints)
+                        if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(constraintHandle, required, visited))
+                            return true;
+                }
                 break;
             case SymbolKind.Type:
-                foreach (var baseType in context.TypeSymbols[candidate.ID].BaseTypes)
-                    if (baseType.IsResolved && SatisfiesConstraint(baseType.Handle!.Value, required, visited))
-                        return true;
+                if (context.GetTypeSymbol(candidate) is { } typeSym)
+                {
+                    foreach (var baseType in typeSym.BaseTypes)
+                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
+                            return true;
+                }
                 break;
             case SymbolKind.NestedType:
-                foreach (var baseType in context.NestedTypeSymbols[candidate.ID].BaseTypes)
-                    if (baseType.IsResolved && SatisfiesConstraint(baseType.Handle!.Value, required, visited))
-                        return true;
+                if (context.GetNestedTypeSymbol(candidate) is { } nestedTypeSym)
+                {
+                    foreach (var baseType in nestedTypeSym.BaseTypes)
+                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
+                            return true;
+                }
                 break;
-            case SymbolKind.Alias when context.AliasSymbols[candidate.ID].Target is { IsResolved: true, Handle: { } target }:
+            case SymbolKind.Alias when context.GetAliasSymbol(candidate)?.Target is { IsResolved: true, Handle: { } target }:
                 return SatisfiesConstraint(target, required, visited);
         }
 
@@ -319,7 +365,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
-        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
+        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -333,7 +379,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
-        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope);
+        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -353,15 +399,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     }
 
     private void ResolveVariable(GlobalVariableSymbol symbol, VariableDeclaration? syntax) =>
-        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value);
+        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value, allowInference: true);
 
     private void ResolveVariable(FieldSymbol symbol, VariableDeclaration? syntax) =>
-        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value);
+        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value, allowInference: false);
 
     private void ResolveVariable(LocalVariableSymbol symbol, VariableDeclaration? syntax) =>
-        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value);
+        ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value, allowInference: true);
 
-    private void ResolveVariableCore(Symbol symbol, VariableDeclaration? syntax, Action<TypeRef> setType, Action<List<SymbolHandle>> setAttributes)
+    private void ResolveVariableCore(Symbol symbol, VariableDeclaration? syntax, Action<TypeRef> setType, Action<List<SymbolHandle>> setAttributes, bool allowInference = false)
     {
         if (syntax is null)
             return;
@@ -379,10 +425,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             var matchedElement = tupleType.Elements.FirstOrDefault(e => e.Name != null && context.GetScopedSymbolName(new SimpleName(e.Name)).Last == symbol.Name);
             if (matchedElement != null)
-                resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope);
+                resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false);
         }
 
-        setType(resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope));
+        setType(resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference));
 
         foreach (var declarator in syntax.Declarators)
         {
@@ -482,7 +528,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveDeclarationSyntax(VariableDeclaration syntax, Scope scope, SymbolHandle containingFunction)
     {
-        ResolveType(syntax.Type, scope);
+        ResolveType(syntax.Type, scope, allowInference: true);
 
         if (!resolvedVariableAttributes.TryGetValue((syntax, scope), out _))
         {
@@ -590,51 +636,59 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return result;
     }
 
-    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
+    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false)
     {
-        if (resolvedTypes.TryGetValue((syntax, scope), out var cached))
+        if (resolvedTypes.TryGetValue((syntax, scope, allowInference), out var cached))
             return cached;
 
-        var result = ResolveTypeCore(syntax, scope, reportDiagnostics);
+        var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference);
         if (reportDiagnostics || result.IsResolved)
-            resolvedTypes[(syntax, scope)] = result;
+            resolvedTypes[(syntax, scope, allowInference)] = result;
 
         return result;
     }
 
-    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
+    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false)
     {
         if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
         {
-            if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is { } varSymbol)
-            {
-                var varHandle = ResolutionContext.GetHandle(varSymbol);
-                context.ResolvedTree.AddReference(syntax, varHandle);
+            if (allowInference)
+                return TypeRef.Inferred;
 
-                return TypeRef.Resolved(varHandle);
-            }
-
-            return TypeRef.Inferred;
+            return ResolveTypeName(syntax, scope, reportDiagnostics);
         }
 
         if (syntax is TupleType tuple)
         {
+            var elements = new List<TupleElement>(tuple.Elements.Count);
             foreach (var elem in tuple.Elements)
-                ResolveType(elem.Type, scope, reportDiagnostics);
-            return TypeRef.Unresolved;
-        }
-
-        if (syntax is ModifiedType modified && modified.Type is TupleType modifiedTuple)
-        {
-            foreach (var elem in modifiedTuple.Elements)
-                ResolveType(elem.Type, scope, reportDiagnostics);
-            return TypeRef.Unresolved;
+            {
+                var elemType = ResolveType(elem.Type, scope, reportDiagnostics);
+                elements.Add(new TupleElement(elemType, elem.Name?.Value));
+            }
+            return TypeRef.Tuple(elements);
         }
 
         if (syntax is UniformTupleType uniform)
         {
-            ResolveType(uniform.ElementType, scope, reportDiagnostics);
-            return TypeRef.Unresolved;
+            var elemType = ResolveType(uniform.ElementType, scope, reportDiagnostics);
+            var elements = new List<TupleElement>(uniform.Elements.Count);
+            foreach (var elem in uniform.Elements)
+                elements.Add(new TupleElement(elemType, elem.Name.Value));
+            return TypeRef.Tuple(elements);
+        }
+
+        if (syntax is ModifiedType modified)
+        {
+            var innerType = ResolveType(modified.Type, scope, reportDiagnostics);
+            return modified.Modifier switch
+            {
+                PointerTypeModifier => TypeRef.Pointer(innerType),
+                ReferenceTypeModifier => TypeRef.Reference(innerType),
+                OptionalTypeModifier => TypeRef.Optional(innerType),
+                ArrayTypeModifier array => ResolveArrayOrSpanModifier(array, innerType, scope),
+                _ => TypeRef.Error
+            };
         }
 
         if (syntax is GenericType generic)
@@ -798,6 +852,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return handle;
     }
 
+    private TypeRef ResolveArrayOrSpanModifier(ArrayTypeModifier array, TypeRef innerType, Scope scope)
+    {
+        if (array.Size is { } size)
+        {
+            ResolveExpression(size, scope, default);
+            return TypeRef.Array(innerType, size);
+        }
+
+        return TypeRef.Span(innerType);
+    }
+
     private void ResolveTypeChildren(TypeSyntax syntax, Scope scope)
     {
         switch (syntax)
@@ -807,9 +872,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case QualifiedType qualified:
                 ResolveType(qualified.Left, scope);
                 ResolveType(qualified.Right, scope);
-                break;
-            case ModifiedType modified when modified.Modifier is ArrayTypeModifier array:
-                ResolveExpression(array.Size, scope, default);
                 break;
         }
     }
@@ -1050,6 +1112,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var type in context.TypeSymbols)
         {
+            if (type.Name.Text == "_")
+                continue;
+
             var key = (type.ContainingNamespace, type.Name);
 
             if (!topGroups.TryGetValue(key, out var list))
@@ -1073,6 +1138,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var nestedGroups = new Dictionary<(Scope, SymbolPart), List<NestedTypeSymbol>>();
         foreach (var type in context.NestedTypeSymbols)
         {
+            if (type.Name.Text == "_")
+                continue;
+
             var key = (type.EnclosingScope, type.Name);
             if (!nestedGroups.TryGetValue(key, out var list))
             {
@@ -1237,10 +1305,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         IReadOnlyList<TypeRef> baseTypes;
 
-        if (current.Kind == SymbolKind.Type && current.ID.Value >= 0 && current.ID.Value < context.TypeSymbols.Count)
-            baseTypes = context.TypeSymbols[current.ID].BaseTypes;
-        else if (current.Kind == SymbolKind.NestedType && current.ID.Value >= 0 && current.ID.Value < context.NestedTypeSymbols.Count)
-            baseTypes = context.NestedTypeSymbols[current.ID].BaseTypes;
+        if (current.Kind == SymbolKind.Type && context.GetTypeSymbol(current) is { } typeSym)
+            baseTypes = typeSym.BaseTypes;
+        else if (current.Kind == SymbolKind.NestedType && context.GetNestedTypeSymbol(current) is { } nestedTypeSym)
+            baseTypes = nestedTypeSym.BaseTypes;
         else
             return false;
 
@@ -1272,6 +1340,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var fn in context.FunctionSymbols)
         {
+            if (fn.Name.Text == "_")
+                continue;
+
             var key = (fn.ContainingNamespace, fn.Name);
 
             if (!topGroups.TryGetValue(key, out var list))
@@ -1291,6 +1362,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var m in context.MethodSymbols)
         {
+            if (m.Name.Text == "_")
+                continue;
+
             var key = (m.EnclosingScope, m.Name);
             if (!methodGroups.TryGetValue(key, out var list))
             {
@@ -1430,9 +1504,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private bool ParameterTypesMatch(TypeRef typeA, IReadOnlyList<SymbolHandle> genericParamsA, TypeRef typeB, IReadOnlyList<SymbolHandle> genericParamsB, Parameter? syntaxA, Parameter? syntaxB)
     {
+        var unwrappedA = context.UnwrapAlias(typeA);
+        var unwrappedB = context.UnwrapAlias(typeB);
+
         int genIndexA = -1;
 
-        if (typeA.IsResolved && typeA.Handle is { } hA)
+        if (unwrappedA.IsResolved && unwrappedA.Handle is { } hA)
         {
             for (int k = 0; k < genericParamsA.Count; k++)
                 if (genericParamsA[k] == hA)
@@ -1444,7 +1521,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         int genIndexB = -1;
 
-        if (typeB.IsResolved && typeB.Handle is { } hB)
+        if (unwrappedB.IsResolved && unwrappedB.Handle is { } hB)
         {
             for (int k = 0; k < genericParamsB.Count; k++)
                 if (genericParamsB[k] == hB)
@@ -1457,10 +1534,36 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (genIndexA >= 0 || genIndexB >= 0)
             return genIndexA == genIndexB;
 
-        if (typeA.IsResolved && typeB.IsResolved)
+        if (unwrappedA.IsSpecial || unwrappedB.IsSpecial)
         {
-            var targetA = context.GetType(typeA) ?? typeA.Handle;
-            var targetB = context.GetType(typeB) ?? typeB.Handle;
+            if (unwrappedA.Kind != unwrappedB.Kind)
+                return false;
+
+            return (unwrappedA.SpecialType, unwrappedB.SpecialType) switch
+            {
+                (PointerSemanticType pA, PointerSemanticType pB) =>
+                    ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
+                (ReferenceSemanticType rA, ReferenceSemanticType rB) =>
+                    ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
+                (SpanSemanticType sA, SpanSemanticType sB) =>
+                    ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
+                (ArraySemanticType aA, ArraySemanticType aB) =>
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null) &&
+                    (aA.Size == aB.Size || Nullable.Equals(aA.Size.GetSpan(), aB.Size.GetSpan())),
+                (OptionalSemanticType oA, OptionalSemanticType oB) =>
+                    ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
+                (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>
+                    tA.Elements.Zip(tB.Elements).All(pair =>
+                        ParameterTypesMatch(pair.First.Type, genericParamsA, pair.Second.Type, genericParamsB, null, null) &&
+                        string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)),
+                _ => unwrappedA.Equals(unwrappedB)
+            };
+        }
+
+        if (unwrappedA.IsResolved && unwrappedB.IsResolved)
+        {
+            var targetA = context.GetType(unwrappedA) ?? unwrappedA.Handle;
+            var targetB = context.GetType(unwrappedB) ?? unwrappedB.Handle;
 
             return targetA == targetB;
         }
@@ -1484,6 +1587,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var global in context.GlobalVariableSymbols)
         {
+            if (global.Name.Text == "_")
+                continue;
+
             var key = (global.ContainingNamespace, global.Name);
 
             if (!globalGroups.TryGetValue(key, out var list))
@@ -1521,6 +1627,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var field in context.FieldSymbols)
         {
+            if (field.Name.Text == "_")
+                continue;
+
             var key = (field.Parent, field.Name);
             if (!fieldGroups.TryGetValue(key, out var list))
             {
@@ -1583,6 +1692,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         foreach (var prop in context.PropertySymbols)
         {
+            if (prop.Name.Text == "_")
+                continue;
+
             var key = (prop.EnclosingScope, prop.Name);
             if (!propGroups.TryGetValue(key, out var list))
             {
