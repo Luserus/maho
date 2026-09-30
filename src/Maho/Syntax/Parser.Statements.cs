@@ -96,70 +96,35 @@ internal sealed partial class Parser
     /// <returns> The statement node. </returns>
     private LocalStatement ParseLocalStatement(StatementParseMode parseMode = StatementParseMode.Normal)
     {
-        switch (parseMode)
+        switch (CurrentToken.Kind)
         {
-            case StatementParseMode.Normal:
-                switch (CurrentToken.Kind)
+            case TokenKind.Identifier:
+            case TokenKind.LeftParen:
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
+                    return ParseLocalIfStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
+                    return ParseLocalWhileStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                    return ParseLocalReturnStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
+                    return ParseLocalGotoStatement();
+                else if (Peek().Kind is TokenKind.Colon)
+                    return ParseLocalLabelStatement();
+                else if (LooksLikeVariableDeclaration() is (var success, var context))
                 {
-                    case TokenKind.Identifier:
-                    case TokenKind.LeftParen:
-                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
-                            return ParseLocalIfStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                            return ParseLocalWhileStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
-                            return ParseLocalReturnStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
-                            return ParseLocalGotoStatement();
-                        else if (Peek().Kind is TokenKind.Colon)
-                            return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context))
-                        {
-                            if (success || context is LookaheadResultContext.MissingDelimeter)
-                                return ParseLocalVariableDeclarationStatement();
-                        }
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return ParseLocalEmptyStatement();
-
-                    case TokenKind.LeftBrace:
-                        return ParseLocalBlockStatement([], []);
+                    if (success || context is LookaheadResultContext.MissingDelimeter)
+                        return ParseLocalVariableDeclarationStatement();
                 }
+                break;
 
-                return ParseLocalExpressionStatement(allowFinalExpression: false);
+            case TokenKind.Semicolon:
+                return ParseLocalEmptyStatement();
 
-            case StatementParseMode.AllowFinalExpression:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                    case TokenKind.LeftParen:
-                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
-                            return ParseLocalIfStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                            return ParseLocalWhileStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
-                            return ParseLocalReturnStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
-                            return ParseLocalGotoStatement();
-                        else if (Peek().Kind is TokenKind.Colon)
-                            return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context))
-                        {
-                            if (success || context is LookaheadResultContext.MissingDelimeter)
-                                return ParseLocalVariableDeclarationStatement();
-                        }
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return ParseLocalEmptyStatement();
-                }
-
-                return ParseLocalExpressionStatement(allowFinalExpression: true);
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(parseMode), parseMode, "Unhandled statement parse mode.");
+            case TokenKind.LeftBrace:
+                return ParseLocalBlockStatement([], []);
         }
+
+        return ParseLocalExpressionStatement(allowFinalExpression: parseMode is StatementParseMode.AllowFinalExpression);
     }
 
 
@@ -172,17 +137,25 @@ internal sealed partial class Parser
     {
         var expression = ParseExpectedExpression("for the local statement");
         Token semicolon;
+        bool isFinal = false;
 
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowFinalExpression)
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+        {
+            semicolon = Consume();
+            isFinal = false;
+        }
+        else if (allowFinalExpression && CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
+        {
+            semicolon = CreateMissingToken(); // Fabricated semicolon
+            isFinal = true;
+        }
+        else
         {
             semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local expression", MissingTokenAnchor.AfterPrevious);
+            isFinal = false;
         }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = CreateMissingToken(); // Fabricated semicolon
-        else
-            semicolon = Consume();
 
-        return new LocalExpressionStatement(expression, semicolon, isFinalExpression: allowFinalExpression);
+        return new LocalExpressionStatement(expression, semicolon, isFinalExpression: isFinal);
     }
 
     /// <summary> Parses a local variable declaration statement. </summary>

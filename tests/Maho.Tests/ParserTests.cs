@@ -324,6 +324,64 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_LocalBlock_RequiresSemicolonOnExpressions()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                {
+                    int x = 1;
+                    x + 2
+                }
+            }
+            """);
+
+        Assert.Contains(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120");
+    }
+
+    [Fact]
+    public void Parse_FunctionBlockBody_RequiresSemicolonOnExpressions()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                int x = 1;
+                x + 2
+            }
+            """);
+
+        Assert.Contains(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120");
+    }
+
+    [Fact]
+    public void Parse_BlockExpression_SupportsMultipleStatementsAndFinalExpression()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                var val = {
+                    int x = 1;
+                    call();
+                    x + 2
+                };
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
+        var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
+        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarators[0].Initializer!.Initializer);
+
+        Assert.Equal(2, blockExpr.Locals.Count);
+        Assert.IsType<LocalVariableDeclarationStatement>(blockExpr.Locals[0]);
+        var callStmt = Assert.IsType<LocalExpressionStatement>(blockExpr.Locals[1]);
+        Assert.False(callStmt.IsFinalExpression);
+        Assert.NotNull(blockExpr.FinalExpression);
+        Assert.IsType<BinaryExpression>(blockExpr.FinalExpression);
+    }
+
+    [Fact]
     public void Parse_TopLevelBlock_SupportsUsingDirective_And_AliasDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""

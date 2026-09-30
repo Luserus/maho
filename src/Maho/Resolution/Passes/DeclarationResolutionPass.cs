@@ -13,10 +13,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private ResolutionContext context = null!;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
+    private readonly Dictionary<(TypeSyntax, Scope), TypeRef> resolvedTypes = [];
+    private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
+    private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
+        resolvedBodies.Clear();
+        resolvedTypes.Clear();
+        resolvedDeclarators.Clear();
+        resolvedVariableAttributes.Clear();
 
         foreach (var attribute in context.AttributeSymbols)
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
@@ -359,7 +366,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (syntax is null)
             return;
 
-        setAttributes(ResolveAttributes(syntax.Attributes, symbol.EnclosingScope));
+        if (!resolvedVariableAttributes.TryGetValue((syntax, symbol.EnclosingScope), out var attributeHandles))
+        {
+            attributeHandles = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
+            resolvedVariableAttributes[(syntax, symbol.EnclosingScope)] = attributeHandles;
+        }
+        setAttributes(attributeHandles);
 
         TypeRef? resolvedType = null;
         bool isTupleDestructuring = syntax.Declarators.Any(d => d.Identifier is TupleName);
@@ -377,10 +389,16 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             if (declarator.Identifier is TupleName tupleName)
             {
                 if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
-                    ResolveExpression(declarator.Initializer?.Initializer, symbol.EnclosingScope, GetContainingFunction(symbol));
+                {
+                    if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                        ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+                }
             }
             else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
-                ResolveExpression(declarator.Initializer?.Initializer, symbol.EnclosingScope, GetContainingFunction(symbol));
+            {
+                if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                    ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+            }
         }
     }
 
@@ -466,12 +484,18 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         ResolveType(syntax.Type, scope);
 
-        foreach (var attribute in syntax.Attributes)
-            foreach (var application in attribute.Attributes)
-                ResolveNamed(application.Name, scope, application);
+        if (!resolvedVariableAttributes.TryGetValue((syntax, scope), out _))
+        {
+            foreach (var attribute in syntax.Attributes)
+                foreach (var application in attribute.Attributes)
+                    ResolveNamed(application.Name, scope, application);
+        }
 
         foreach (var declarator in syntax.Declarators)
-            ResolveExpression(declarator.Initializer?.Initializer, scope, containingFunction);
+        {
+            if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                ResolveExpression(initExpr, scope, containingFunction);
+        }
     }
 
     private void ResolveLabelReference(SyntaxNode syntax, SymbolPart name, SymbolHandle containingFunction)
@@ -568,6 +592,18 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
     {
+        if (resolvedTypes.TryGetValue((syntax, scope), out var cached))
+            return cached;
+
+        var result = ResolveTypeCore(syntax, scope, reportDiagnostics);
+        if (reportDiagnostics || result.IsResolved)
+            resolvedTypes[(syntax, scope)] = result;
+
+        return result;
+    }
+
+    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
+    {
         if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
         {
             if (ResolveSingle(scope, ResolutionContext.GetSymbolName(syntax)) is { } varSymbol)
@@ -660,7 +696,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 string? arityNote = GetArityMismatchNote(scope, name);
                 context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
             }
-            
+
             return TypeRef.Error;
         }
 
@@ -683,7 +719,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return TypeRef.Resolved(handle);
     }
 
-    private string? GetArityMismatchNote(Scope scope, SymbolName name)
+    private static string? GetArityMismatchNote(Scope scope, SymbolName name)
     {
         var targetPart = name.Last;
         if (targetPart.Arity > 0)

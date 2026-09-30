@@ -475,4 +475,40 @@ public sealed class DeclarationDiagnosticsTests
         var note = Assert.Single(diag.Notes);
         Assert.Contains("generic type 'Result<T>' exists in this scope with 1 type argument, but non-generic type 'Result' was not found", note.Message);
     }
+
+    [Fact]
+    public void UnresolvedType_InTupleDestructuring_EmitsMH0500ExactlyOnce()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Unit;
+            public Unit Test()
+            {
+                UnknownType (a, b, c) = (1, 2, 3);
+                return default;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
+    }
+
+    [Fact]
+    public void UnresolvedType_InMultipleDeclarators_EmitsMH0500ExactlyOnce()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Unit;
+            public Unit Test()
+            {
+                UnknownType a, b, c;
+                return default;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
+    }
 }
+
+

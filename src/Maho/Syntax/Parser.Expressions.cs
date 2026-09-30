@@ -293,6 +293,7 @@ internal sealed partial class Parser
                 }
                 break;
         }
+
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the block");
 
         return (openBrace, locals, finalExpression, closeBrace);
