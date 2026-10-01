@@ -19,10 +19,7 @@ internal sealed partial class Parser
         MissingSeparator,
         FailedParseTypeSyntax,
         FailedParseNamedSyntax,
-        IsBinaryOperator,
-        AmbiguousCastOrParenthesizedExpression,
-        AmbiguousPointerDeclaration,
-        AmbiguousReferenceDeclaration
+        IsBinaryOperator
     }
 
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
@@ -70,6 +67,70 @@ internal sealed partial class Parser
 
         lookaheadCurrent = saved;
         return (true, LookaheadResultContext.Success);
+    }
+
+    /// <summary> Checks whether the upcoming tokens form a generic argument clause in expression context, distinguishing binary comparisons from calls/generics. </summary>
+    private (bool ShouldParseAsGenerics, bool Success) LooksLikeExpressionGenerics()
+    {
+        lookaheadCurrent = current;
+        var saved = lookaheadCurrent;
+
+        LookaheadConsume(); // less than '<'
+        int argumentCount = 0;
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign and not TokenKind.EndToken)
+        {
+            argumentCount++;
+            if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                LookaheadConsume();
+            else
+            {
+                var (_, success, _) = LookaheadParseTypeSyntax();
+                if (!success)
+                {
+                    lookaheadCurrent = saved;
+                    return (false, false);
+                }
+            }
+
+            if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
+                break;
+
+            if (LookaheadCurrentToken.Kind is not TokenKind.Comma)
+            {
+                lookaheadCurrent = saved;
+                return (false, false);
+            }
+
+            LookaheadConsume(); // comma ','
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.GreaterThanSign)
+        {
+            lookaheadCurrent = saved;
+            return (false, false);
+        }
+
+        LookaheadConsume(); // '>'
+
+        // If it has multiple arguments: A<B, C> is unambiguous generics
+        if (argumentCount >= 2)
+        {
+            lookaheadCurrent = saved;
+            return (true, true);
+        }
+
+        // If single argument A<B>: only parse as generics if followed by '(' with named argument (p: x)
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen &&
+            LookaheadPeek(1).Kind is TokenKind.Identifier &&
+            LookaheadPeek(2).Kind is TokenKind.Colon)
+        {
+            lookaheadCurrent = saved;
+            return (true, true);
+        }
+
+        lookaheadCurrent = saved;
+        return (false, true);
     }
 
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-parameter clause. </summary>
@@ -142,79 +203,32 @@ internal sealed partial class Parser
         return (true, LookaheadResultContext.Success);
     }
 
-    /// <summary> Checks whether the upcoming tokens look like a cast expression rather than grouping parentheses. </summary>
-    private (bool Success, LookaheadResultContext Context) LooksLikeCastExpression()
-    {
-        lookaheadCurrent = current;
-
-        LookaheadConsume(); // Left paren
-        var (_, success, result) = LookaheadParseTypeSyntax();
-
-        if (!success)
-            return (false, LookaheadResultContext.FailedParseTypeSyntax);
-
-        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
-            return (false, LookaheadResultContext.MissingDelimeter);
-
-        LookaheadConsume(); // Right paren
-
-        bool castExpressionIsViable = LookaheadCanStartExpression();
-        bool parenthesizedExpressionIsViable = LookaheadCanContinueExpression();
-
-        if (castExpressionIsViable && parenthesizedExpressionIsViable)
-            return (true, LookaheadResultContext.AmbiguousCastOrParenthesizedExpression);
-
-        if (castExpressionIsViable)
-            return (true, LookaheadResultContext.Success);
-
-        if (parenthesizedExpressionIsViable)
-            return (false, LookaheadResultContext.IsBinaryOperator);
-
-        return (false, LookaheadResultContext.MissingDelimeter);
-    }
-
-    /// <summary> Checks whether the speculative current token can begin an expression. </summary>
-    private bool LookaheadCanStartExpression()
-    {
-        if (LookaheadCurrentToken.Kind is TokenKind.Dollar or TokenKind.LeftParen or TokenKind.LeftBrace or TokenKind.LeftBracket or TokenKind.Identifier)
-            return true;
-
-        if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
-            return true;
-
-        var (kind, length) = LookaheadGetCombinedOperatorData();
-        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix;
-    }
-
-    /// <summary> Checks whether the speculative current token can continue an already-parsed expression. </summary>
-    private bool LookaheadCanContinueExpression()
-    {
-        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBracket or TokenKind.Dot)
-            return true;
-
-        var (kind, length) = LookaheadGetCombinedOperatorData();
-        return length > 0 && operatorTable.TryGetValue(kind, out var entry) && (entry.IsInfix || entry.IsPostfix);
-    }
-
     /// <summary> Checks whether the upcoming tokens look like a variable declaration. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeVariableDeclaration()
     {
         lookaheadCurrent = current;
 
-        var (_, success, result) = LookaheadParseTypeSyntax();
+        var (type, success, _) = LookaheadParseTypeSyntax();
 
         if (!success)
             return (false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        (_, success) = LookaheadParseNamedSyntax();
+        if (IsDestructuringTupleType(type) && LookaheadCurrentToken.Kind is TokenKind.Equals)
+            return (true, LookaheadResultContext.Success);
 
-        if (!success)
+        var (name, nameSuccess) = LookaheadParseNamedSyntax();
+
+        if (!nameSuccess)
             return (false, LookaheadResultContext.FailedParseNamedSyntax);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Equals)
+        if (name is TupleName)
+        {
+            if (LookaheadCurrentToken.Kind is not TokenKind.Equals)
+                return (false, LookaheadResultContext.FailedParseNamedSyntax);
+        }
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Equals or TokenKind.Semicolon or TokenKind.Comma)
             return (true, LookaheadResultContext.Success);
-        else if (LookaheadCurrentToken.Kind is TokenKind.Semicolon or TokenKind.Comma)
-            return (true, result);
 
         return (false, LookaheadResultContext.MissingDelimeter);
     }
@@ -363,24 +377,20 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        if (type is ModifiedType modifiedType)
-        {
-            if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Pointer)
-                return (type, true, LookaheadResultContext.AmbiguousPointerDeclaration);
-            else if (modifiedType.Modifier.Kind is PostfixTypeModifierKind.Reference)
-                return (type, true, LookaheadResultContext.AmbiguousReferenceDeclaration);
-        }
-
         return (type, true, LookaheadResultContext.Success);
     }
 
     /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
     private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
     {
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
+            return LookaheadParseTupleType();
+
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
 
         var identifier = LookaheadConsume();
+        TypeSyntax baseType;
 
         if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments(fromLookahead: true).Success)
         {
@@ -389,10 +399,151 @@ internal sealed partial class Parser
             if (!success)
                 return (genericType, false);
 
-            return (genericType, true);
+            baseType = genericType;
         }
         else
-            return (new SimpleType(identifier), true);
+            baseType = new SimpleType(identifier);
+
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType(fromLookahead: true).Success)
+        {
+            var (uniformTuple, success) = LookaheadParseUniformTupleType(baseType);
+            if (!success)
+                return (uniformTuple, false);
+
+            return (uniformTuple, true);
+        }
+
+        return (baseType, true);
+    }
+
+    /// <summary> Checks whether the upcoming tokens form a uniform tuple type, e.g. <c>Type (a, b, c)</c>. </summary>
+    private (bool Success, LookaheadResultContext Context) LooksLikeUniformTupleType(bool fromLookahead = false)
+    {
+        if (!fromLookahead)
+            lookaheadCurrent = current;
+
+        int saved = lookaheadCurrent;
+        LookaheadConsume(); // consume '('
+        bool hasComma = false;
+        int elementCount = 0;
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+            {
+                lookaheadCurrent = saved;
+                return (false, LookaheadResultContext.FailedParseNamedSyntax);
+            }
+
+            LookaheadConsume(); // identifier
+            elementCount++;
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                LookaheadConsume(); // comma
+                hasComma = true;
+            }
+            else
+                break;
+        }
+
+        if (!hasComma || LookaheadCurrentToken.Kind is not TokenKind.RightParen || elementCount < 2)
+        {
+            lookaheadCurrent = saved;
+            return (false, LookaheadResultContext.MissingDelimeter);
+        }
+
+        LookaheadConsume(); // consume ')'
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Identifier or TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        {
+            lookaheadCurrent = saved;
+            return (true, LookaheadResultContext.Success);
+        }
+
+        lookaheadCurrent = saved;
+        return (false, LookaheadResultContext.MissingDelimeter);
+    }
+
+    private (UniformTupleType Type, bool Success) LookaheadParseUniformTupleType(TypeSyntax elementType)
+    {
+        var openParen = LookaheadConsume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var ident = LookaheadConsume();
+            nodesAndSeparators.Add(new SimpleName(ident));
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(LookaheadConsume());
+            }
+            else
+                break;
+        }
+
+        var closeParen = LookaheadConsume();
+        return (new UniformTupleType(elementType, openParen, new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), closeParen), true);
+    }
+
+    /// <summary> Speculatively parses a tuple type enclosed in parentheses. </summary>
+    private (TypeSyntax Type, bool Success) LookaheadParseTupleType()
+    {
+        int saved = lookaheadCurrent;
+        var openParen = LookaheadConsume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+        bool hasComma = false;
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            var (kind, length) = LookaheadGetCombinedOperatorData();
+
+            if (length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix)
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            var (elemType, success, _) = LookaheadParseTypeSyntax();
+
+            if (!success)
+            {
+                lookaheadCurrent = saved;
+                return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            Token? name = null;
+            if (LookaheadCurrentToken.Kind is TokenKind.Identifier && LookaheadCurrentToken.Kind is not TokenKind.Comma && LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+            {
+                name = LookaheadConsume();
+            }
+
+            nodesAndSeparators.Add(new TupleTypeElement(elemType, name));
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(LookaheadConsume());
+                hasComma = true;
+            }
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen || !hasComma)
+        {
+            lookaheadCurrent = saved;
+            return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+        }
+
+        var closeParen = LookaheadConsume();
+        return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), closeParen), true);
     }
 
     /// <summary> Speculatively parses a qualified type chain such as <c>A.B</c>. </summary>
@@ -511,6 +662,9 @@ internal sealed partial class Parser
     /// </summary>
     private (NamedSyntax Type, bool Success) LookaheadParseNamedSyntax()
     {
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
+            return LookaheadParseTupleName();
+
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
             return (new SimpleName(LookaheadCurrentToken), false);
 
@@ -520,6 +674,43 @@ internal sealed partial class Parser
             return LookaheadParseGenericName(name);
         else
             return (new SimpleName(name), true);
+    }
+
+    private (NamedSyntax Type, bool Success) LookaheadParseTupleName()
+    {
+        int saved = lookaheadCurrent;
+        var openParen = LookaheadConsume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+        bool hasComma = false;
+
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+            {
+                lookaheadCurrent = saved;
+                return (new TupleName(openParen, new SeparatedSyntaxList<NamedSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            var ident = LookaheadConsume();
+            nodesAndSeparators.Add(new SimpleName(ident));
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                hasComma = true;
+                nodesAndSeparators.Add(LookaheadConsume());
+            }
+            else
+                break;
+        }
+
+        if (!hasComma || LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+        {
+            lookaheadCurrent = saved;
+            return (new TupleName(openParen, new SeparatedSyntaxList<NamedSyntax>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+        }
+
+        var closeParen = LookaheadConsume();
+        return (new TupleName(openParen, new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators), closeParen), true);
     }
 
     /// <summary> Speculatively parses a generic name after its identifier has already been consumed. </summary>
@@ -593,5 +784,75 @@ internal sealed partial class Parser
         }
 
         return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), true);
+    }
+
+    /// <summary> Checks whether a bracketed construct at statement or top-level position looks like an attribute list rather than an expression. </summary>
+    private bool LooksLikeAttributeListInStatement()
+    {
+        if (CurrentToken.Kind is not TokenKind.LeftBracket)
+            return false;
+
+        int index = current;
+
+        while (index < tokens.Count && tokens[index].Kind is TokenKind.LeftBracket)
+        {
+            int depth = 0;
+            int braceDepth = 0;
+            bool foundClose = false;
+
+            while (index < tokens.Count)
+            {
+                var kind = tokens[index].Kind;
+                if (kind is TokenKind.LeftBracket)
+                {
+                    depth++;
+                }
+                else if (kind is TokenKind.RightBracket)
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        index++;
+                        foundClose = true;
+                        break;
+                    }
+                }
+                else if (kind is TokenKind.LeftBrace)
+                {
+                    braceDepth++;
+                }
+                else if (kind is TokenKind.RightBrace)
+                {
+                    if (braceDepth > 0)
+                        braceDepth--;
+                }
+                else if (kind is TokenKind.Semicolon && braceDepth == 0)
+                {
+                    break;
+                }
+                else if (kind is TokenKind.EndToken)
+                {
+                    break;
+                }
+
+                index++;
+            }
+
+            if (!foundClose)
+                return false;
+        }
+
+        if (index >= tokens.Count)
+            return false;
+
+        var nextToken = tokens[index];
+
+        if (nextToken.Kind is TokenKind.Identifier && nextToken.MatchingKind is not MatchingKeywordKind.As and not MatchingKeywordKind.With)
+            return true;
+
+        if (nextToken.Kind is TokenKind.LeftBrace)
+            return true;
+
+        return false;
     }
 }

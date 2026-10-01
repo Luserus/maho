@@ -5,6 +5,8 @@ namespace Maho.Resolution;
 
 internal abstract class MethodSymbol : Symbol
 {
+    public SpecialFunctionKind SpecialKind { get; internal set; }
+    public OperatorKind? OperatorKind { get; internal set; }
     public FunctionFlags Flags { get; internal set; }
     public SymbolHandle? Parent { get; }
 
@@ -12,12 +14,31 @@ internal abstract class MethodSymbol : Symbol
     public List<SymbolHandle> Attributes { get; internal set; }
 
     public List<SymbolHandle> Parameters { get; internal set; }
-    public List<SymbolHandle> LocalVariables { get; internal set; }
+    public List<LocalVariableSymbol> LocalVariables { get; internal set; }
     public List<SymbolHandle> LocalFunctions { get; internal set; }
     public List<SymbolHandle> LocalTypes { get; internal set; }
     public TypeRef ReturnType { get; internal set; } = TypeRef.Unresolved;
 
     public FunctionDeclaration? Syntax { get; }
+
+    public LocalVariableSymbol this[int index] => LocalVariables[index];
+    public LocalVariableSymbol this[SymbolID id] => LocalVariables[(int)id];
+    public LocalVariableSymbol this[SymbolHandle handle] => LocalVariables[(int)handle.ID];
+
+    public bool TryGetLocalVariable(int index, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out LocalVariableSymbol? symbol)
+    {
+        if (index >= 0 && index < LocalVariables.Count)
+        {
+            symbol = LocalVariables[index];
+            return true;
+        }
+
+        symbol = null;
+        return false;
+    }
+
+    public bool TryGetLocalVariable(SymbolID id, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out LocalVariableSymbol? symbol) =>
+        TryGetLocalVariable((int)id, out symbol);
 
     protected MethodSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? parent, FunctionDeclaration? syntax) : base(id, name, enclosingScope)
     {

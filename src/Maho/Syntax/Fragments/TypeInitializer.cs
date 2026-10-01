@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
-/// <summary> Collection initializer enclosed in braces. </summary>
-internal sealed class CollectionInitializer : SyntaxNode
+/// <summary> Type initializer enclosed in braces. </summary>
+internal sealed class TypeInitializer : SyntaxNode
 {
     /// <summary> Opening brace token. </summary>
     public Token LeftBrace { get; }
@@ -10,8 +10,8 @@ internal sealed class CollectionInitializer : SyntaxNode
     /// <summary> Closing brace token. </summary>
     public Token RightBrace { get; }
 
-    /// <summary> Creates one collection initializer node. </summary>
-    public CollectionInitializer(Token leftBrace, SeparatedSyntaxList<Expression> expressions, Token rightBrace)
+    /// <summary> Creates one type initializer node. </summary>
+    public TypeInitializer(Token leftBrace, SeparatedSyntaxList<Expression> expressions, Token rightBrace)
     {
         LeftBrace = leftBrace;
         Expressions = expressions;

@@ -1,0 +1,7 @@
+struct Int32;
+
+Int32 Main()
+{
+    UnknownType (a, b, c) = (1, 2, 3);
+    return 0;
+}

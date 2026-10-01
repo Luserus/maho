@@ -84,6 +84,13 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0502` | `UnresolvedIdentifier` | Variable, parameter, or member identifier not found in scope. |
 | `MH0503` | `AmbiguousIdentifier` | Identifier matches multiple visible symbols in scope. |
 | `MH0504` | `UnresolvedNamespace` | Namespace in `using` directive or qualified access not found. |
+| `MH0520` | `ConstructorOutsideType` | Constructor must be declared inside a type body. |
+| `MH0521` | `DestructorOutsideType` | Destructor must be declared inside a type body. |
+| `MH0522` | `OperatorOutsideType` | Operator overload must be declared inside a type body. |
+| `MH0523` | `UnrecognizedOperator` | Unrecognized operator in operator overload declaration. |
+| `MH0524` | `DestructorWithParameters` | Destructor cannot have parameters. |
+| `MH0525` | `ConstructorNameMismatch` | Constructor name does not match enclosing type name. |
+| `MH0526` | `OperatorMustBeStatic` | Operator overload must be declared static. |
 
 ### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0569`)
 | Code | Name | Description |

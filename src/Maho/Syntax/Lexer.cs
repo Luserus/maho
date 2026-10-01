@@ -44,7 +44,7 @@ internal sealed partial class Lexer
                 return Tokens;
             }
 
-            bool isEscapedIdentifier = CurrentChar == '`' && (char.IsLetter(Peek()) || Peek() == '_');
+            bool isEscapedIdentifier = CurrentChar == '`' && UnicodeIdentifier.IsIdentifierStart(text, current + 1, out _);
             var (span, kind) = LexTokenData();
             var trailingTrivia = LexTrivia();
             var matching = MatchingKeywordKind.None;
@@ -52,11 +52,11 @@ internal sealed partial class Lexer
             if (kind is TokenKind.Identifier && !isEscapedIdentifier)
                 matching = MatchKeywordKind(span);
 
-            Tokens.Add(new(text, span, kind, leadingTrivia, trailingTrivia, matching));
+            Tokens.Add(new Token(text, span, kind, leadingTrivia, trailingTrivia, matching));
         }
 
         // Add an EndToken at the end of the list to tell the parser when the final token has been reached.
-        Tokens.Add(new(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
+        Tokens.Add(new Token(text, new TextSpan(text.Length, 0), TokenKind.EndToken, [], []));
 
         return Tokens;
     }
@@ -70,49 +70,96 @@ internal sealed partial class Lexer
     {
         var start = current;
 
-        if (CurrentChar == '`' && (char.IsLetter(Peek()) || Peek() == '_'))
+        if (CurrentChar == '`' && UnicodeIdentifier.IsIdentifierStart(text, current + 1, out _))
         {
             current++; // skip opening '`'
             var idStart = current;
-            while (char.IsLetterOrDigit(CurrentChar) || CurrentChar == '_')
-                current++;
+
+            while (UnicodeIdentifier.IsIdentifierContinue(text, current, out int advance))
+                current += advance;
 
             if (CurrentChar == '`')
             {
                 var idSpan = new TextSpan(idStart, current - idStart);
                 current++; // skip closing '`'
                 kind = TokenKind.Identifier;
+
                 return (idSpan, kind);
             }
             else
             {
                 ReportUnterminatedLiteral(start, TokenKind.Identifier);
                 kind = TokenKind.Identifier;
+
                 return (new TextSpan(idStart, current - idStart), kind);
             }
         }
-        else if (char.IsLetter(CurrentChar) || CurrentChar == '_')
+        else if (UnicodeIdentifier.IsIdentifierStart(text, current, out int startLen))
         {
             kind = TokenKind.Identifier;
+            current += startLen;
 
-            while (char.IsLetterOrDigit(Peek(0)) || CurrentChar == '_')
-                current++;
+            while (UnicodeIdentifier.IsIdentifierContinue(text, current, out int continueLen))
+                current += continueLen;
         }
         else if (char.IsAsciiDigit(CurrentChar))
         {
-            kind = TokenKind.Integer;
-
-            while (char.IsAsciiDigit(Peek(0)))
-                current++;
-
-            if (IsOperator(CurrentChar) is (true, TokenKind.Dot) && char.IsAsciiDigit(Peek()))
+            if (CurrentChar == '0' && (Peek(1) is 'b' or 'B') && (Peek(2) is '0' or '1' || (Peek(2) == '_' && Peek(3) is '0' or '1')))
             {
-                kind = TokenKind.Float;
-                current++;
+                kind = TokenKind.Integer;
+                current += 2; // skip '0b' or '0B'
 
-                while (char.IsAsciiDigit(Peek(0)))
+                while (CurrentChar is '0' or '1' or '_')
                     current++;
+
+                if (ScanNumericSuffix())
+                    kind = TokenKind.SuffixedInteger;
             }
+            else if (CurrentChar == '0' && (Peek(1) is 'x' or 'X') && (char.IsAsciiHexDigit(Peek(2)) || (Peek(2) == '_' && char.IsAsciiHexDigit(Peek(3)))))
+            {
+                kind = TokenKind.Integer;
+                current += 2; // skip '0x' or '0X'
+
+                while (char.IsAsciiHexDigit(CurrentChar) || CurrentChar == '_')
+                    current++;
+
+                if (ScanNumericSuffix())
+                    kind = TokenKind.SuffixedInteger;
+            }
+            else
+            {
+                kind = TokenKind.Integer;
+
+                while (char.IsAsciiDigit(CurrentChar) || CurrentChar == '_')
+                    current++;
+
+                if (CurrentChar == '.' && char.IsAsciiDigit(Peek(1)))
+                {
+                    kind = TokenKind.Float;
+                    current++; // skip '.'
+
+                    while (char.IsAsciiDigit(CurrentChar) || CurrentChar == '_')
+                        current++;
+                }
+
+                if (IsExponentStart())
+                {
+                    kind = TokenKind.Float;
+                    current++; // skip 'e' or 'E'
+
+                    if (CurrentChar is '+' or '-')
+                        current++;
+
+                    while (char.IsAsciiDigit(CurrentChar) || CurrentChar == '_')
+                        current++;
+                }
+
+                if (ScanNumericSuffix())
+                    kind = kind == TokenKind.Float ? TokenKind.SuffixedFloat : TokenKind.SuffixedInteger;
+            }
+
+            var span = new TextSpan(start, current - start);
+            return (span, kind);
         }
         else if (IsOperator(CurrentChar) is (true, var opKind))
         {
@@ -123,10 +170,28 @@ internal sealed partial class Lexer
             else if (opKind is TokenKind.Dot && char.IsAsciiDigit(Peek()))
             {
                 kind = TokenKind.Float;
-                current++;
+                current++; // skip '.'
 
-                while (char.IsAsciiDigit(Peek(0)))
+                while (char.IsAsciiDigit(CurrentChar) || CurrentChar == '_')
                     current++;
+
+                if (IsExponentStart())
+                {
+                    kind = TokenKind.Float;
+                    current++; // skip 'e' or 'E'
+
+                    if (CurrentChar is '+' or '-')
+                        current++;
+
+                    while (char.IsAsciiDigit(CurrentChar) || CurrentChar == '_')
+                        current++;
+                }
+
+                if (ScanNumericSuffix())
+                    kind = TokenKind.SuffixedFloat;
+
+                var span = new TextSpan(start, current - start);
+                return (span, kind);
             }
             else
             {
@@ -141,9 +206,8 @@ internal sealed partial class Lexer
             current++;
         }
 
-        TextSpan span = new(start, current - start);
-
-        return (span, kind);
+        TextSpan nonLiteralSpan = new(start, current - start);
+        return (nonLiteralSpan, kind);
     }
 
     /// <summary>
@@ -181,6 +245,16 @@ internal sealed partial class Lexer
                 if (tokenKind is TokenKind.Char)
                     ReportCharacterLiteralLength(start, characterCount);
 
+                if (UnicodeIdentifier.IsIdentifierStart(text, current, out int suffixStartLen))
+                {
+                    current += suffixStartLen;
+                    while (UnicodeIdentifier.IsIdentifierContinue(text, current, out int continueLen))
+                        current += continueLen;
+
+                    kind = tokenKind == TokenKind.Char ? TokenKind.SuffixedChar : TokenKind.SuffixedString;
+                    return (new TextSpan(start, current - start), kind);
+                }
+
                 return (new TextSpan(start, current - start), tokenKind);
             }
 
@@ -202,6 +276,42 @@ internal sealed partial class Lexer
             current++;
             characterCount++;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsExponentStart()
+    {
+        if (CurrentChar is not ('e' or 'E'))
+            return false;
+
+        char p1 = Peek(1);
+        if (char.IsAsciiDigit(p1) || (p1 == '_' && char.IsAsciiDigit(Peek(2))))
+            return true;
+
+        if (p1 is '+' or '-')
+        {
+            char p2 = Peek(2);
+            return char.IsAsciiDigit(p2) || (p2 == '_' && char.IsAsciiDigit(Peek(3)));
+        }
+
+        return false;
+    }
+
+    private bool ScanNumericSuffix()
+    {
+        if (UnicodeIdentifier.IsIdentifierStart(text, current, out int startLen))
+        {
+            if (CurrentChar == '_' && !UnicodeIdentifier.IsIdentifierContinue(text, current + 1, out _))
+                return false;
+
+            current += startLen;
+            while (UnicodeIdentifier.IsIdentifierContinue(text, current, out int continueLen))
+                current += continueLen;
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary> Lexes a part of the program and returns all leading/trailing trivias before/after a token. </summary>
@@ -308,6 +418,7 @@ internal sealed partial class Lexer
         return identifier.Length switch
         {
             2 when identifier.SequenceEqual("if") => MatchingKeywordKind.If,
+            2 when identifier.SequenceEqual("as") => MatchingKeywordKind.As,
             3 when identifier.SequenceEqual("for") => MatchingKeywordKind.For,
             3 when identifier.SequenceEqual("get") => MatchingKeywordKind.Get,
             3 when identifier.SequenceEqual("new") => MatchingKeywordKind.New,
@@ -342,11 +453,14 @@ internal sealed partial class Lexer
             6 when identifier.SequenceEqual("struct") => MatchingKeywordKind.Struct,
             6 when identifier.SequenceEqual("static") => MatchingKeywordKind.Static,
             6 when identifier.SequenceEqual("unsafe") => MatchingKeywordKind.Unsafe,
+            6 when identifier.SequenceEqual("prefix") => MatchingKeywordKind.Prefix,
             7 when identifier.SequenceEqual("partial") => MatchingKeywordKind.Partial,
             7 when identifier.SequenceEqual("private") => MatchingKeywordKind.Private,
             7 when identifier.SequenceEqual("virtual") => MatchingKeywordKind.Virtual,
+            7 when identifier.SequenceEqual("postfix") => MatchingKeywordKind.Postfix,
             8 when identifier.SequenceEqual("Unsealed") => MatchingKeywordKind.Unsealed,
             8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
+            8 when identifier.SequenceEqual("operator") => MatchingKeywordKind.Operator,
             9 when identifier.SequenceEqual("intrinsic") => MatchingKeywordKind.Intrinsic,
             9 when identifier.SequenceEqual("attribute") => MatchingKeywordKind.Attribute,
             9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,

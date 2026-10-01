@@ -37,7 +37,7 @@ Maho diagnostics support modern, Rustc-style terminal reporting with multi-span 
 
 ## 3. Centralized Diagnostic Methods on `DiagnosticsManager`
 
-All diagnostic codes and error templates are centralized in `DiagnosticsManager` and formally cataloged in [docs/diagnostic-codes.md](file:///home/luserus/SoftwareDev/Systems/Compiler/maho/docs/diagnostic-codes.md). Semantic passes and front-end stages call domain-specific factory methods:
+All diagnostic codes and error templates are centralized in `DiagnosticsManager` and formally cataloged in docs/diagnostic-codes.md. Semantic passes and front-end stages call domain-specific factory methods:
 
 ### Lexer Diagnostics (`MH0100` - `MH0104`)
 - `ReportBadToken` (`MH0100`): illegal character in source.
@@ -76,7 +76,14 @@ All diagnostic codes and error templates are centralized in `DiagnosticsManager`
 - `ReportDuplicateVariableDeclaration` (`MH0535`): duplicate variable declaration.
 - `ReportDuplicatePropertyDeclaration` (`MH0536`): duplicate property declaration.
 - `ReportCyclicTypeHierarchy` (`MH0538`): base type inheritance cycle detected.
-
+### Special Functions (`MH0520` - `MH0526`)
+- `ReportConstructorOutsideType` (`MH0520`): constructor must be declared inside a type body.
+- `ReportDestructorOutsideType` (`MH0521`): destructor must be declared inside a type body.
+- `ReportOperatorOutsideType` (`MH0522`): operator overload must be declared inside a type body.
+- `ReportUnrecognizedOperator` (`MH0523`): unrecognized operator in operator overload declaration.
+- `ReportDestructorHasParameters` (`MH0524`): destructor cannot have parameters.
+- `ReportConstructorNameMismatch` (`MH0525`): constructor name does not match enclosing type name.
+- `ReportOperatorMustBeStatic` (`MH0526`): operator overload must be declared static.
 ### Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 - `ReportMacroRecursionLimitExceeded` (`MH0600`): macro recursion limit exceeded.
 - `ReportNoMatchingMacroArm` (`MH0601`): no matching pattern arm.

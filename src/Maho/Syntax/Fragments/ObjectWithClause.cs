@@ -6,10 +6,10 @@ internal sealed class ObjectWithClause : SyntaxNode
     /// <summary> With keyword token. </summary>
     public Token WithKeyword { get; }
     /// <summary> Initializer body after the with keyword. </summary>
-    public CollectionInitializer Initializer { get; }
+    public TypeInitializer Initializer { get; }
 
     /// <summary> Creates one object-style with clause. </summary>
-    public ObjectWithClause(Token withKeyword, CollectionInitializer initializer)
+    public ObjectWithClause(Token withKeyword, TypeInitializer initializer)
     {
         WithKeyword = withKeyword;
         Initializer = initializer;

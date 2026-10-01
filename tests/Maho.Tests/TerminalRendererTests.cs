@@ -298,7 +298,7 @@ public sealed class TerminalRendererTests
     [Fact]
     public void TerminalRenderer_WithMacroTrace_RendersInvocationSnippetAndDefinitionNote()
     {
-        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative, rootDirectory: ".");
         renderer.RegisterSource("StdLib.mh", "macro $DefineInt\n{\n    (@name: ident) => {\n        public struct @name {\n            public Result val;\n        }\n    }\n}\n\n$DefineInt(Foo);");
 
         var errSpan = new TextSpanInfo(69, 6, 75, new TextLocation(5, 20), new TextLocation(5, 26));

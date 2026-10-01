@@ -9,6 +9,8 @@ internal sealed class LocalProductTypeSymbol : LocalTypeSymbol
     public List<SymbolHandle> Properties { get; internal set; }
     public List<SymbolHandle> Methods { get; internal set; }
     public List<SymbolHandle> NestedTypes { get; internal set; }
+    /// <summary>Fast lookup: operator kind -> list of overloading method handles.</summary>
+    public Dictionary<OperatorKind, List<SymbolHandle>> OperatorOverloads { get; internal set; }
 
     public LocalProductTypeSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, TypeKind typeKind, SymbolHandle? parent, TypeDeclaration? syntax) : base(id, enclosingScope, name, typeKind, parent, syntax)
     {
@@ -16,5 +18,6 @@ internal sealed class LocalProductTypeSymbol : LocalTypeSymbol
         Properties = [];
         Methods = [];
         NestedTypes = [];
+        OperatorOverloads = [];
     }
 }

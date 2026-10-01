@@ -21,7 +21,7 @@ internal sealed partial class Parser
             // consume the prefix operator (combined)
             var opToken = ConsumeOperator();
             int rbp = prefixEntry.RightBindingPower;
-            var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious);
+            var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
             left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
         }
         else
@@ -58,10 +58,35 @@ internal sealed partial class Parser
                 var dot = Consume();
                 var identifier = ExpectIdentifierToken("after '.'");
                 left = new MemberAccessExpression(left, dot, identifier);
+
+                continue;
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
+            {
+                const int asBindingPower = 45;
+
+                if (asBindingPower < minBindingPower)
+                    break;
+
+                var asKeyword = Consume();
+                var targetType = ParseTypeSyntax();
+                left = new AsExpression(left, asKeyword, targetType);
+
                 continue;
             }
 
             var (kind, length) = GetCombinedOperatorData();
+
+            if (kind is TokenKind.MinusGreaterThan)
+            {
+                if (90 < minBindingPower)
+                    break;
+                
+                var arrow = ConsumeOperator();
+                var identifier = ExpectIdentifierToken("after '->'");
+                left = new MemberAccessExpression(left, arrow, identifier);
+                continue;
+            }
 
             if (length == 0)
                 break; // no operator here
@@ -94,10 +119,14 @@ internal sealed partial class Parser
                 // consume combined operator
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
-                string? context = opTok.Kind is TokenKind.Equals ? "after '=' in the assignment expression" : $"after '{opTok.Value}' in the binary expression";
-                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious);
+                string? context = opTok.Kind is TokenKind.Equals or TokenKind.PlusEquals or TokenKind.MinusEquals 
+                    or TokenKind.AsteriskEquals or TokenKind.ForwardSlashEquals or TokenKind.PercentageEquals
+                    ? $"after '{opTok.Value}' in the assignment expression" 
+                    : $"after '{opTok.Value}' in the binary expression";
+                var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
 
-                if (opTok.Kind is TokenKind.Equals)
+                if (opTok.Kind is TokenKind.Equals or TokenKind.PlusEquals or TokenKind.MinusEquals 
+                    or TokenKind.AsteriskEquals or TokenKind.ForwardSlashEquals or TokenKind.PercentageEquals)
                     left = new AssignmentExpression(left, opTok, right);
                 else
                     left = new BinaryExpression(left, opTok, right);
@@ -116,7 +145,7 @@ internal sealed partial class Parser
     private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
     {
         TokenKind.Dollar => ParseMacroInvocationExpression(),
-        TokenKind.LeftParen => ParseParenthesizedOrCastExpression(),
+        TokenKind.LeftParen => ParseParenthesizedOrTupleExpression(),
         TokenKind.LeftBrace => ParseBlockExpression(),
         TokenKind.LeftBracket => ParseCollectionExpression(),
         TokenKind.Identifier => CurrentToken.MatchingKind switch
@@ -126,7 +155,8 @@ internal sealed partial class Parser
             MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
             _ => ParseNamedExpression()
         },
-        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String => ParseLiteralExpression(),
+        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
+            or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
         _ => CreateMissingExpression()
     };
 
@@ -144,11 +174,41 @@ internal sealed partial class Parser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
 
+    private bool LooksLikeTurbofish()
+    {
+        if (CurrentToken.Kind is TokenKind.ColonColon)
+            return Peek().Kind is TokenKind.LessThanSign;
+
+        return CurrentToken.Kind is TokenKind.Colon &&
+               Peek().Kind is TokenKind.Colon &&
+               CurrentToken.Span.End == Peek().Span.Start &&
+               CurrentToken.TrailingTrivia.Length == 0 &&
+               Peek().LeadingTrivia.Length == 0 &&
+               Peek(2).Kind is TokenKind.LessThanSign;
+    }
+
+    private Token ConsumeColonColon()
+    {
+        if (CurrentToken.Kind is TokenKind.ColonColon)
+            return Consume();
+
+        var first = Consume();
+        var second = Consume();
+        return new Token(text, new TextSpan(first.Span.Start, second.Span.End - first.Span.Start), TokenKind.ColonColon, first.LeadingTrivia, second.TrailingTrivia);
+    }
+
     private NamedExpression ParseNamedExpression()
     {
         var identifier = Consume();
 
-        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
+        if (LooksLikeTurbofish())
+        {
+            var colonColon = ConsumeColonColon();
+            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
+            return new GenericNameExpression(identifier, colonColon, lessThan, genericArguments, greaterThan);
+        }
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeExpressionGenerics().ShouldParseAsGenerics)
         {
             var (lessThan, genericArguments, greaterThan) = ParseGenerics();
             return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);
@@ -157,53 +217,41 @@ internal sealed partial class Parser
         return new IdentifierNameExpression(identifier);
     }
 
-    private Expression ParseParenthesizedOrCastExpression()
+    private Expression ParseParenthesizedOrTupleExpression()
     {
-        var (success, context) = LooksLikeCastExpression();
+        var openParen = Consume(); // consume '('
 
-        if (success && context is LookaheadResultContext.AmbiguousCastOrParenthesizedExpression)
-            return ParseAmbiguousCastOrParenthesizedExpression();
-
-        if (success)
+        if (CurrentToken.Kind is TokenKind.RightParen)
         {
-            return ParseCastExpression();
+            var closeParen = Consume();
+            return new TupleExpression(openParen, new SeparatedSyntaxList<Expression>([]), closeParen);
         }
 
-        return ParseParenthesizedExpression();
-    }
+        var firstExpr = ParseExpectedExpression("inside parentheses", MissingTokenAnchor.AfterPrevious);
 
-    private AmbiguousCastOrParenthesizedExpression ParseAmbiguousCastOrParenthesizedExpression()
-    {
-        var start = current;
-        var castExpression = ParseCastExpression();
-        var castEnd = current;
+        if (CurrentToken.Kind is TokenKind.Comma)
+        {
+            var nodesAndSeparators = new List<SyntaxNode> { firstExpr, Consume() };
 
-        current = start;
-        var parenthesizedExpression = ParseParenthesizedExpression();
-        var parenthesizedAlternative = ParseExpressionContinuation(parenthesizedExpression);
-        var parenthesizedEnd = current;
+            while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+            {
+                var nextExpr = ParseExpectedExpression("in the tuple expression", MissingTokenAnchor.AfterPrevious);
+                nodesAndSeparators.Add(nextExpr);
 
-        current = castEnd >= parenthesizedEnd ? castEnd : parenthesizedEnd;
-        return new AmbiguousCastOrParenthesizedExpression(castExpression, parenthesizedAlternative);
-    }
+                if (CurrentToken.Kind is TokenKind.Comma)
+                {
+                    nodesAndSeparators.Add(Consume());
+                }
+                else
+                    break;
+            }
 
-    private ParenthesizedExpression ParseParenthesizedExpression()
-    {
-        var leftParen = Consume(); // consume '('
-        var expression = ParseExpectedExpression("inside the parenthesized expression", MissingTokenAnchor.AfterPrevious);
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple expression");
+            return new TupleExpression(openParen, new SeparatedSyntaxList<Expression>(nodesAndSeparators), closeParen);
+        }
+
         var rightParen = ExpectToken(TokenKind.RightParen, "')'", "to close the parenthesized expression");
-
-        return new ParenthesizedExpression(leftParen, expression, rightParen);
-    }
-
-    private CastExpression ParseCastExpression()
-    {
-        var leftParen = Consume();
-        var type = ParseTypeSyntax();
-        var rightParen = ExpectToken(TokenKind.RightParen, "')'", "to close the cast type");
-        var expression = ParseExpectedExpression("after the cast", MissingTokenAnchor.AfterPrevious);
-
-        return new CastExpression(leftParen, type, rightParen, expression);
+        return new ParenthesizedExpression(openParen, firstExpr, rightParen);
     }
 
     private IfExpression ParseIfExpression()
@@ -261,6 +309,7 @@ internal sealed partial class Parser
                 }
                 break;
         }
+
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the block");
 
         return (openBrace, locals, finalExpression, closeBrace);
@@ -305,21 +354,21 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<Expression>(nodesAndSeparators);
     }
 
-    private CollectionInitializer ParseCollectionInitializer()
+    private TypeInitializer ParseTypeInitializer()
     {
         var leftBrace = Consume();
         var expressions = ParseExpressionList(TokenKind.RightBrace);
-        var rightBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the collection initializer");
+        var rightBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the type initializer");
 
-        return new CollectionInitializer(leftBrace, expressions, rightBrace);
+        return new TypeInitializer(leftBrace, expressions, rightBrace);
     }
 
     private ObjectWithClause ParseObjectWithClause()
     {
         var withKeyword = Consume();
         var initializer = CurrentToken.Kind is TokenKind.LeftBrace
-            ? ParseCollectionInitializer()
-            : new CollectionInitializer(
+            ? ParseTypeInitializer()
+            : new TypeInitializer(
                 ExpectToken(TokenKind.LeftBrace, "'{'", "after 'with'"),
                 new SeparatedSyntaxList<Expression>([]),
                 ExpectToken(TokenKind.RightBrace, "'}'", "to close the with clause"));
@@ -363,10 +412,10 @@ internal sealed partial class Parser
         if (type is ModifiedType { Modifier: ArrayTypeModifier arrayModifier } arrayType && CurrentToken.Kind is not TokenKind.LeftParen)
         {
             var elementType = arrayType.Type;
-            CollectionInitializer? initializer = null;
+            TypeInitializer? initializer = null;
 
             if (CurrentToken.Kind is TokenKind.LeftBrace)
-                initializer = ParseCollectionInitializer();
+                initializer = ParseTypeInitializer();
 
             ObjectWithClause? withClause = null;
 

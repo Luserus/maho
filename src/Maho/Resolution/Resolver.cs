@@ -39,7 +39,6 @@ internal sealed class Resolver
                 baseContext.GlobalVariableSymbols,
                 baseContext.FieldSymbols,
                 baseContext.ParameterSymbols,
-                baseContext.LocalVariableSymbols,
                 baseContext.PropertySymbols,
                 baseContext.GenericParameterSymbols,
                 baseContext.LabelSymbols,

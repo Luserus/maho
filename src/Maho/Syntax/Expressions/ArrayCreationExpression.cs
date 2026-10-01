@@ -11,13 +11,13 @@ internal sealed class ArrayCreationExpression : ObjectCreationExpression
     public Expression? Size { get; }
     /// <summary> Closing bracket token. </summary>
     public Token RightBracket { get; }
-    /// <summary> Optional collection initializer. </summary>
-    public CollectionInitializer? Initializer { get; }
+    /// <summary> Optional type initializer. </summary>
+    public TypeInitializer? Initializer { get; }
     /// <summary> Optional object initializer clause. </summary>
     public ObjectWithClause? WithClause { get; }
 
     /// <summary> Creates one array creation expression node. </summary>
-    public ArrayCreationExpression(Token keyword, ObjectCreationKind kind, TypeSyntax type, Token leftBracket, Expression? size, Token rightBracket, CollectionInitializer? initializer, ObjectWithClause? withClause) : base(keyword, kind)
+    public ArrayCreationExpression(Token keyword, ObjectCreationKind kind, TypeSyntax type, Token leftBracket, Expression? size, Token rightBracket, TypeInitializer? initializer, ObjectWithClause? withClause) : base(keyword, kind)
     {
         Type = type;
         LeftBracket = leftBracket;
