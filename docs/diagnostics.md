@@ -37,7 +37,7 @@ Maho diagnostics support modern, Rustc-style terminal reporting with multi-span 
 
 ## 3. Centralized Diagnostic Methods on `DiagnosticsManager`
 
-All diagnostic codes and error templates are centralized in `DiagnosticsManager` and formally cataloged in [docs/diagnostic-codes.md](file:///home/luserus/SoftwareDev/Systems/Compiler/maho/docs/diagnostic-codes.md). Semantic passes and front-end stages call domain-specific factory methods:
+All diagnostic codes and error templates are centralized in `DiagnosticsManager` and formally cataloged in docs/diagnostic-codes.md. Semantic passes and front-end stages call domain-specific factory methods:
 
 ### Lexer Diagnostics (`MH0100` - `MH0104`)
 - `ReportBadToken` (`MH0100`): illegal character in source.

@@ -1316,6 +1316,85 @@ public sealed class DeclarationResolutionTests
         Assert.Equal("_", sinkFn.Name.ToString());
     }
 
+    [Fact]
+    public void Resolve_AttributeDeclaration_ResolvesOwnAttributesAndSignatureParameters()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public struct Int32;
+            public struct String;
+            public attribute Tag;
+
+            [Tag]
+            public attribute Config([Tag] Int32 count, String name);
+
+            public struct Container
+            {
+                public attribute MemberConfig(Int32 id);
+            }
+
+            public attribute _(Int32 sinkParam);
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        var tagAttr = Assert.Single(context.AttributeSymbols, a => a.Name.ToString() == "Tag");
+        var configAttr = Assert.Single(context.AttributeSymbols, a => a.Name.ToString() == "Config");
+        var int32Sym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Int32");
+        var stringSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "String");
+
+        // Attribute resolves its own attributes
+        var configAttrHandle = Assert.Single(configAttr.Attributes);
+        Assert.Equal(ResolutionContext.GetHandle(tagAttr), configAttrHandle);
+
+        // Attribute resolves its signature parameters
+        Assert.Equal(2, configAttr.Parameters.Count);
+        var countParam = context.GetParameterSymbol(configAttr.Parameters[0]);
+        var nameParam = context.GetParameterSymbol(configAttr.Parameters[1]);
+        Assert.NotNull(countParam);
+        Assert.NotNull(nameParam);
+
+        Assert.Equal("count", countParam.Name.ToString());
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(int32Sym)), countParam.Type);
+        var countAttrHandle = Assert.Single(countParam.Attributes);
+        Assert.Equal(ResolutionContext.GetHandle(tagAttr), countAttrHandle);
+
+        Assert.Equal("name", nameParam.Name.ToString());
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(stringSym)), nameParam.Type);
+
+        // Nested attribute resolves its parameters
+        var memberAttr = Assert.Single(context.NestedAttributeSymbols, a => a.Name.ToString() == "MemberConfig");
+        Assert.Single(memberAttr.Parameters);
+        var idParam = context.GetParameterSymbol(memberAttr.Parameters[0]);
+        Assert.NotNull(idParam);
+        Assert.Equal("id", idParam.Name.ToString());
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(int32Sym)), idParam.Type);
+
+        // Sink attribute resolves its parameters in sink
+        var sinkAttr = Assert.Single(context.SinkSymbols.AttributeSymbols, a => a.Name.ToString() == "_");
+        Assert.Single(sinkAttr.Parameters);
+        var sinkParam = context.GetParameterSymbol(sinkAttr.Parameters[0]);
+        Assert.NotNull(sinkParam);
+        Assert.Equal("sinkParam", sinkParam.Name.ToString());
+        Assert.Equal(TypeRef.Resolved(ResolutionContext.GetHandle(int32Sym)), sinkParam.Type);
+        Assert.Contains(sinkParam, context.SinkSymbols.ParameterSymbols);
+    }
+
+    [Fact]
+    public void Resolve_AttributeDeclaration_UnresolvedParameterType_ReportsDiagnostic()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public attribute Bad(UnknownType x);
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        Assert.NotEmpty(context.Diagnostics.Diagnostics);
+        Assert.Contains(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));

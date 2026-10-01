@@ -543,7 +543,7 @@ public static class CommandLine
                     break;
 
                 case "--color":
-                    if (index + 1 < args.Length && !args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    if (index + 1 < args.Length && !args[index + 1].StartsWith('-'))
                     {
                         index++;
                         colorMode = args[index].ToLowerInvariant() switch
@@ -621,12 +621,6 @@ public static class CommandLine
 
                 case "--no-recurse":
                     noRecurse = true;
-                    break;
-
-                case "-np":
-                case "--no-project":
-                case "--allow-no-project":
-                    // Accepted for backwards compatibility
                     break;
 
                 case string arg when arg.StartsWith("--implicit-toplevel=", StringComparison.OrdinalIgnoreCase):
@@ -783,7 +777,7 @@ public static class CommandLine
             return false;
         }
 
-        if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith("-", StringComparison.Ordinal)))
+        if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith('-')))
         {
             errorMessage = "The --debug option requires a destination path or '-' after -o or --output.";
             return false;
@@ -791,6 +785,7 @@ public static class CommandLine
 
         destination = ParseDestination(args[index]);
         errorMessage = null;
+
         return true;
     }
 
@@ -824,7 +819,7 @@ public static class CommandLine
             return false;
         }
 
-        if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith("-", StringComparison.Ordinal)))
+        if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith('-')))
         {
             errorMessage = "The --diagnostics option requires a destination path or '-' after -o or --output.";
             return false;

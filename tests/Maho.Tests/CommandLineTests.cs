@@ -89,7 +89,7 @@ public sealed class CommandLineTests
             File.WriteAllText(sourceFile, "var x = 1;");
 
             string diagFile = Path.Combine(tempDir, "diag.json");
-            CommandLine.Run(["-np", "--diagnostics", "json", "-o", diagFile, sourceFile]);
+            CommandLine.Run(["--diagnostics", "json", "-o", diagFile, sourceFile]);
 
             Assert.True(File.Exists(diagFile));
             string json = File.ReadAllText(diagFile);
@@ -112,7 +112,7 @@ public sealed class CommandLineTests
             File.WriteAllText(sourceFile, "public struct Widget;");
 
             string debugFile = Path.Combine(tempDir, "debug.json");
-            CommandLine.Run(["-np", "--debug", "parse", "-o", debugFile, sourceFile]);
+            CommandLine.Run(["--debug", "parse", "-o", debugFile, sourceFile]);
 
             Assert.True(File.Exists(debugFile));
             string json = File.ReadAllText(debugFile);
@@ -138,7 +138,7 @@ public sealed class CommandLineTests
             string diagFile = Path.Combine(tempDir, "diag.json");
 
             // Put source first to verify positional independence
-            CommandLine.Run(["-np", sourceFile, "--debug", "parse", "-o", debugFile, "--diagnostics", "json", "-o", diagFile]);
+            CommandLine.Run([sourceFile, "--debug", "parse", "-o", debugFile, "--diagnostics", "json", "-o", diagFile]);
 
             Assert.True(File.Exists(debugFile));
             Assert.True(File.Exists(diagFile));
@@ -278,7 +278,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                CommandLine.Run(["-np", sourceFile]);
+                CommandLine.Run([sourceFile]);
                 string output = sw.ToString();
                 Assert.DoesNotContain("MH0011", output);
             }
@@ -308,7 +308,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["-np", "--implicit-toplevel=false", sourceFile]);
+                int exitCode = CommandLine.Run(["--implicit-toplevel=false", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("MH0160", output);
@@ -373,7 +373,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                CommandLine.Run(["--no-project", tempDir]);
+                CommandLine.Run([tempDir]);
                 string output = sw.ToString();
                 Assert.DoesNotContain("No project file", output);
                 Assert.DoesNotContain("MH0011", output);
@@ -407,7 +407,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                CommandLine.Run(["--no-project", tempDir]);
+                CommandLine.Run([tempDir]);
                 string output = sw.ToString();
                 Assert.DoesNotContain("MH0011", output);
                 Assert.DoesNotContain("MH0012", output);
@@ -441,7 +441,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["--no-project", tempDir]);
+                int exitCode = CommandLine.Run([tempDir]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("MH0161", output);
@@ -472,7 +472,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["--no-project", "--implicit-toplevel=false", tempDir]);
+                int exitCode = CommandLine.Run(["--implicit-toplevel=false", tempDir]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("MH0160", output);
@@ -503,7 +503,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["-np", "--color", "never", sourceFile]);
+                int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("Build failed with 1 error(s)", output);
@@ -544,7 +544,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["-np", "--color", "never", sourceFile]);
+                int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("└── from this macro invocation", output);
@@ -732,7 +732,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["-np", "--color", "never", scriptFile]);
+                int exitCode = CommandLine.Run(["--color", "never", scriptFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("Build failed with 1 error(s)", output);
@@ -854,7 +854,7 @@ public sealed class CommandLineTests
             try
             {
                 Console.SetError(sw);
-                int exitCode = CommandLine.Run(["--check", "-np", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
+                int exitCode = CommandLine.Run(["--check", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("Build succeeded", output);

@@ -290,6 +290,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbol = context.CreateAttributeSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Name).Last, declaredNamespace, declaration);
 
         symbol.Flags = ResolveAttributeFlags(declaration.Modifiers);
+
+        if (symbol.Name.Text == "_" || enclosingScope.IsSink)
+            attributeScope.IsSink = true;
+
         ResolutionContext.BindChildScope(ownerScope, symbol, attributeScope);
         context.RegisterSyntaxScope(declaration, attributeScope);
         symbol.Parameters = DiscoverParameters(declaration, attributeScope, ResolutionContext.GetHandle(symbol));
@@ -301,6 +305,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbol = context.CreateMemberAttributeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingType, declaration);
 
         symbol.Flags = ResolveAttributeFlags(declaration.Modifiers);
+
+        if (symbol.Name.Text == "_" || enclosingScope.IsSink)
+            attributeScope.IsSink = true;
+
         ResolutionContext.BindChildScope(enclosingScope, symbol, attributeScope);
         context.RegisterSyntaxScope(declaration, attributeScope);
         symbol.Parameters = DiscoverParameters(declaration, attributeScope, ResolutionContext.GetHandle(symbol));
@@ -312,6 +320,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbol = context.CreateLocalAttributeSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Name).Last, containingFunction, declaration);
 
         symbol.Flags = ResolveAttributeFlags(declaration.Modifiers);
+
+        if (symbol.Name.Text == "_" || enclosingScope.IsSink)
+            attributeScope.IsSink = true;
+
         ResolutionContext.BindChildScope(enclosingScope, symbol, attributeScope);
         context.RegisterSyntaxScope(declaration, attributeScope);
         symbol.Parameters = DiscoverParameters(declaration, attributeScope, ResolutionContext.GetHandle(symbol));

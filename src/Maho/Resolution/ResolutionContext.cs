@@ -675,61 +675,109 @@ internal sealed class ResolutionContext
 
     public FunctionSymbol? GetFunctionSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.Function) return null;
+        if (handle.Kind != SymbolKind.Function)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < FunctionSymbols.Count)
             return FunctionSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FunctionSymbol func)
             return func;
+
         return null;
     }
 
     public MethodSymbol? GetMethodSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.Method) return null;
+        if (handle.Kind != SymbolKind.Method)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < MethodSymbols.Count)
             return MethodSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is MethodSymbol method)
             return method;
+
         return null;
     }
 
     public TypeSymbol? GetTypeSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.Type) return null;
+        if (handle.Kind != SymbolKind.Type)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < TypeSymbols.Count)
             return TypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is TypeSymbol t)
             return t;
+
         return null;
     }
 
     public NestedTypeSymbol? GetNestedTypeSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.NestedType) return null;
+        if (handle.Kind != SymbolKind.NestedType)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < NestedTypeSymbols.Count)
             return NestedTypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedTypeSymbol t)
             return t;
+
         return null;
     }
 
     public AliasSymbol? GetAliasSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.Alias) return null;
+        if (handle.Kind != SymbolKind.Alias)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < AliasSymbols.Count)
             return AliasSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is AliasSymbol a)
             return a;
+
         return null;
     }
 
     public GenericParameterSymbol? GetGenericParameterSymbol(SymbolHandle handle)
     {
-        if (handle.Kind != SymbolKind.GenericParameter) return null;
+        if (handle.Kind != SymbolKind.GenericParameter)
+            return null;
         if (handle.ID.Value >= 0 && handle.ID.Value < GenericParameterSymbols.Count)
             return GenericParameterSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is GenericParameterSymbol gp)
             return gp;
+
+        return null;
+    }
+
+    public ParameterSymbol? GetParameterSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Parameter)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < ParameterSymbols.Count)
+            return ParameterSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is ParameterSymbol p)
+            return p;
+
+        return null;
+    }
+
+    public AttributeSymbol? GetAttributeSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Attribute)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < AttributeSymbols.Count)
+            return AttributeSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is AttributeSymbol a)
+            return a;
+
+        return null;
+    }
+
+    public NestedAttributeSymbol? GetNestedAttributeSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.NestedAttribute)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < NestedAttributeSymbols.Count)
+            return NestedAttributeSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedAttributeSymbol a)
+            return a;
+
         return null;
     }
 
@@ -741,6 +789,9 @@ internal sealed class ResolutionContext
         SymbolKind.Method => GetMethodSymbol(handle),
         SymbolKind.Alias => GetAliasSymbol(handle),
         SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
+        SymbolKind.Parameter => GetParameterSymbol(handle),
+        SymbolKind.Attribute => GetAttributeSymbol(handle),
+        SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
         _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
     };
 

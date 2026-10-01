@@ -15,6 +15,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
     private readonly Dictionary<(TypeSyntax, Scope, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
+    private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
     public override void Resolve(ResolutionContext context)
@@ -23,6 +24,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         resolvedBodies.Clear();
         resolvedTypes.Clear();
         resolvedDeclarators.Clear();
+        resolvedParameters.Clear();
         resolvedVariableAttributes.Clear();
 
         foreach (var attribute in context.AttributeSymbols)
@@ -186,6 +188,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
+
+        foreach (var handle in symbol.Parameters)
+        {
+            if (context.GetParameterSymbol(handle) is { } parameter)
+                ResolveParameter(parameter);
+        }
     }
 
     private void ResolveAttributeDeclaration(NestedAttributeSymbol symbol, AttributeSignature? syntax)
@@ -194,6 +202,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
+
+        foreach (var handle in symbol.Parameters)
+        {
+            if (context.GetParameterSymbol(handle) is { } parameter)
+                ResolveParameter(parameter);
+        }
     }
 
     private void ResolveType(TypeSymbol symbol, TypeDeclaration? syntax)
@@ -388,7 +402,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveParameter(ParameterSymbol symbol)
     {
-        if (symbol.Syntax is null)
+        if (symbol.Syntax is null || !resolvedParameters.Add(symbol))
             return;
 
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
