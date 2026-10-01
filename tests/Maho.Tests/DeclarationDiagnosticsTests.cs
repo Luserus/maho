@@ -509,6 +509,261 @@ public sealed class DeclarationDiagnosticsTests
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
         Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
     }
+
+    [Fact]
+    public void ConstructorOutsideType_TopLevel_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            Foo()
+            {
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void ConstructorOutsideType_InNamespace_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            namespace Sample
+            {
+                public Foo()
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void DestructorOutsideType_TopLevel_EmitsMH0521()
+    {
+        var compilation = Compilation.FromSource("""
+            ~Foo()
+            {
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0521");
+        Assert.Contains("destructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void DestructorOutsideType_InNamespace_EmitsMH0521()
+    {
+        var compilation = Compilation.FromSource("""
+            namespace Sample
+            {
+                ~Foo()
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0521");
+        Assert.Contains("destructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void OperatorOutsideType_TopLevel_EmitsMH0522()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Int32;
+            static Int32 operator +(Int32 a, Int32 b)
+            {
+                return a;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0522");
+        Assert.Contains("operator overload must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void OperatorOutsideType_InNamespace_EmitsMH0522()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Int32;
+            namespace Sample
+            {
+                static Int32 operator +(Int32 a, Int32 b)
+                {
+                    return a;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0522");
+        Assert.Contains("operator overload must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void UnrecognizedOperator_EmitsMH0523()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Vector
+            {
+                public static Vector operator @(Vector a, Vector b)
+                {
+                    return a;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0523");
+        Assert.Contains("unrecognized operator", diag.Message);
+    }
+
+    [Fact]
+    public void DestructorWithParameters_EmitsMH0524()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Int32;
+            public class Resource
+            {
+                ~Resource(Int32 code)
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0524");
+        Assert.Contains("destructor cannot have parameters", diag.Message);
+    }
+
+    [Fact]
+    public void ConstructorNameMismatch_EmitsMH0525()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Foo
+            {
+                public Bar()
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0525");
+        Assert.Contains("constructor name 'Bar' does not match enclosing type name 'Foo'", diag.Message);
+    }
+
+    [Fact]
+    public void OperatorNotStatic_EmitsMH0526()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Vector
+            {
+                public Vector operator +(Vector a, Vector b)
+                {
+                    return a;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0526");
+        Assert.Contains("operator overload must be declared static", diag.Message);
+    }
+
+    [Fact]
+    public void SpecialFunctions_ValidDeclarations_SucceedWithoutErrors()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Box
+            {
+                public Box()
+                {
+                }
+
+                ~Box()
+                {
+                }
+
+                public static Box operator +(Box a, Box b)
+                {
+                    return a;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.Empty(compilation.Diagnostics);
+    }
+
+    [Fact]
+    public void ConstructorOutsideType_Local_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Foo
+            {
+                public void Method()
+                {
+                    Bar()
+                    {
+                    }
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void DestructorOutsideType_Local_EmitsMH0521()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Foo
+            {
+                public void Method()
+                {
+                    ~Bar()
+                    {
+                    }
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0521");
+        Assert.Contains("destructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void OperatorOutsideType_Local_EmitsMH0522()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Int32;
+            public class Foo
+            {
+                public void Method()
+                {
+                    static Int32 operator +(Int32 a, Int32 b)
+                    {
+                        return a;
+                    }
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0522");
+        Assert.Contains("operator overload must be declared inside a type body", diag.Message);
+    }
 }
 
 

@@ -156,6 +156,42 @@ public sealed class SymbolDiscoveryTests
     }
 
     [Fact]
+    public void Resolve_SpecialFunctions_SetSpecialKindAndOperatorKind()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box
+            {
+                public Box() {}
+                ~Box() {}
+                static Box operator +(Box a, Box b) {}
+                static Box operator prefix ++(Box a) {}
+            }
+            """);
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        var methods = context.MethodSymbols;
+        Assert.Equal(4, methods.Count);
+
+        var ctor = methods.Single(m => m.Name.Text == ".ctor");
+        Assert.Equal(SpecialFunctionKind.Constructor, ctor.SpecialKind);
+        Assert.Null(ctor.OperatorKind);
+
+        var dtor = methods.Single(m => m.Name.Text == ".dtor");
+        Assert.Equal(SpecialFunctionKind.Destructor, dtor.SpecialKind);
+        Assert.Null(dtor.OperatorKind);
+
+        var opAdd = methods.Single(m => m.Name.Text == "op_Add");
+        Assert.Equal(SpecialFunctionKind.Operator, opAdd.SpecialKind);
+        Assert.Equal(OperatorKind.Add, opAdd.OperatorKind);
+
+        var opInc = methods.Single(m => m.Name.Text == "op_PrefixIncrement");
+        Assert.Equal(SpecialFunctionKind.Operator, opInc.SpecialKind);
+        Assert.Equal(OperatorKind.PrefixIncrement, opInc.OperatorKind);
+    }
+
+    [Fact]
     public void Resolve_DiscoversAliasSymbolsAcrossAllBlockScopesAndGenericParameters()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""

@@ -377,9 +377,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
+        if (symbol.SpecialKind is SpecialFunctionKind.Constructor)
+        {
+            context.Diagnostics.ReportConstructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+        }
+        else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
+        {
+            context.Diagnostics.ReportDestructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+        }
+        else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
+        {
+            context.Diagnostics.ReportOperatorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+        }
+
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
-        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
+
+        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor and not SpecialFunctionKind.Destructor)
+            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -391,9 +406,56 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax is null)
             return;
 
+        if (symbol is LocalFunctionSymbol)
+        {
+            if (symbol.SpecialKind is SpecialFunctionKind.Constructor)
+            {
+                context.Diagnostics.ReportConstructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+            }
+            else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
+            {
+                context.Diagnostics.ReportDestructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+            }
+            else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
+            {
+                context.Diagnostics.ReportOperatorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+            }
+        }
+        else
+        {
+            if (symbol.SpecialKind is SpecialFunctionKind.Constructor)
+            {
+                var constructorName = ResolutionContext.GetSymbolName(symbol.Syntax.Signature.Identifier).Last.Text;
+                var enclosingTypeName = symbol.Parent is { } parentHandle && context.GetSymbol(parentHandle) is { } parentSymbol ? parentSymbol.Name.Text : null;
+                if (enclosingTypeName is not null && constructorName != enclosingTypeName)
+                {
+                    context.Diagnostics.ReportConstructorNameMismatch(constructorName, enclosingTypeName, symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+                }
+            }
+            else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
+            {
+                if (symbol.Syntax.Signature.Parameters.Count > 0)
+                {
+                    var paramSpan = TextSpan.FromBounds(
+                        symbol.Syntax.Signature.OpenParen.Span.Start,
+                        symbol.Syntax.Signature.CloseParen.Span.End);
+                    context.Diagnostics.ReportDestructorHasParameters(paramSpan, symbol.Syntax.GetSource());
+                }
+            }
+            else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
+            {
+                if ((symbol.Flags & FunctionFlags.Static) == 0)
+                {
+                    context.Diagnostics.ReportOperatorMustBeStatic(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
+                }
+            }
+        }
+
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
-        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
+
+        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor and not SpecialFunctionKind.Destructor)
+            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -1045,23 +1107,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private static void PopulateProductMembers(TypeSymbol symbol)
     {
         if (symbol is ProductTypeSymbol product)
-            PopulateProductMembers(product.Fields, product.Properties, product.Methods, product.NestedTypes, GetOwnedScope(product));
+            PopulateProductMembers(product.Fields, product.Properties, product.Methods, product.NestedTypes, product.OperatorOverloads, GetOwnedScope(product));
     }
 
     private static void PopulateProductMembers(NestedTypeSymbol symbol)
     {
         if (symbol is MemberProductTypeSymbol member)
-            PopulateProductMembers(member.Fields, member.Properties, member.Methods, member.NestedTypes, GetOwnedScope(member));
+            PopulateProductMembers(member.Fields, member.Properties, member.Methods, member.NestedTypes, member.OperatorOverloads, GetOwnedScope(member));
         else if (symbol is LocalProductTypeSymbol local)
-            PopulateProductMembers(local.Fields, local.Properties, local.Methods, local.NestedTypes, GetOwnedScope(local));
+            PopulateProductMembers(local.Fields, local.Properties, local.Methods, local.NestedTypes, local.OperatorOverloads, GetOwnedScope(local));
     }
 
-    private static void PopulateProductMembers(List<SymbolHandle> fields, List<SymbolHandle> properties, List<SymbolHandle> methods, List<SymbolHandle> nestedTypes, Scope scope)
+    private static void PopulateProductMembers(List<SymbolHandle> fields, List<SymbolHandle> properties, List<SymbolHandle> methods, List<SymbolHandle> nestedTypes, Dictionary<Syntax.OperatorKind, List<SymbolHandle>> operatorOverloads, Scope scope)
     {
         fields.Clear();
         properties.Clear();
         methods.Clear();
         nestedTypes.Clear();
+        operatorOverloads.Clear();
 
         foreach (var symbol in scope.Symbols.Values)
         {
@@ -1077,6 +1140,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     break;
                 case SymbolKind.Method:
                     methods.Add(handle);
+                    if (symbol is MethodSymbol { OperatorKind: { } opKind })
+                    {
+                        if (!operatorOverloads.TryGetValue(opKind, out var overloads))
+                            operatorOverloads[opKind] = overloads = [];
+
+                        overloads.Add(handle);
+                    }
                     break;
                 case SymbolKind.NestedType:
                     nestedTypes.Add(handle);

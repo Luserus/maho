@@ -77,5 +77,15 @@ public enum TokenKind
     AmpersandAmpersand, // '&&'
     VerticalBarVerticalBar, // '||'
     SingleLineComment, // //
-    MultiLineComment // /* */
+    MultiLineComment, // /* */
+
+    // Combined operators for special functions and expression support
+    PlusPlus,           // '++'
+    MinusMinus,         // '--'
+    PlusEquals,         // '+='
+    MinusEquals,        // '-='
+    AsteriskEquals,     // '*='
+    ForwardSlashEquals, // '/='
+    PercentageEquals,   // '%='
+    MinusGreaterThan    // '->'
 }

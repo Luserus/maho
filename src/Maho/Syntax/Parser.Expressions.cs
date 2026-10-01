@@ -77,6 +77,17 @@ internal sealed partial class Parser
 
             var (kind, length) = GetCombinedOperatorData();
 
+            if (kind is TokenKind.MinusGreaterThan)
+            {
+                if (90 < minBindingPower)
+                    break;
+                
+                var arrow = ConsumeOperator();
+                var identifier = ExpectIdentifierToken("after '->'");
+                left = new MemberAccessExpression(left, arrow, identifier);
+                continue;
+            }
+
             if (length == 0)
                 break; // no operator here
 
@@ -108,10 +119,14 @@ internal sealed partial class Parser
                 // consume combined operator
                 var opTok = ConsumeOperator();
                 int rbp = entry.RightBindingPower;
-                string? context = opTok.Kind is TokenKind.Equals ? "after '=' in the assignment expression" : $"after '{opTok.Value}' in the binary expression";
+                string? context = opTok.Kind is TokenKind.Equals or TokenKind.PlusEquals or TokenKind.MinusEquals 
+                    or TokenKind.AsteriskEquals or TokenKind.ForwardSlashEquals or TokenKind.PercentageEquals
+                    ? $"after '{opTok.Value}' in the assignment expression" 
+                    : $"after '{opTok.Value}' in the binary expression";
                 var right = ParseExpectedExpression(context: context, anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
 
-                if (opTok.Kind is TokenKind.Equals)
+                if (opTok.Kind is TokenKind.Equals or TokenKind.PlusEquals or TokenKind.MinusEquals 
+                    or TokenKind.AsteriskEquals or TokenKind.ForwardSlashEquals or TokenKind.PercentageEquals)
                     left = new AssignmentExpression(left, opTok, right);
                 else
                     left = new BinaryExpression(left, opTok, right);

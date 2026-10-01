@@ -266,6 +266,58 @@ internal sealed class DiagnosticsManager
             .WithHelp($"qualify '{typeName}' with its namespace or use an alias")
             .Report();
 
+    /// <summary> Reports that a constructor was declared outside of a type body. </summary>
+    // Possibly syntax error but for some reason inserted into semantic one.
+    public void ReportConstructorOutsideType(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0520", "constructor must be declared inside a type body", span, source)
+            .WithPrimaryLabel(span, "constructor declared outside a type", source)
+            .WithHelp("move the constructor inside a class, struct, or union declaration")
+            .Report();
+
+    /// <summary> Reports that a destructor was declared outside of a type body. </summary>
+    // Possibly syntax error but for some reason inserted into semantic one.
+    public void ReportDestructorOutsideType(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0521", "destructor must be declared inside a type body", span, source)
+            .WithPrimaryLabel(span, "destructor declared outside a type", source)
+            .WithHelp("move the destructor inside a class, struct, or union declaration")
+            .Report();
+
+    /// <summary> Reports that an operator overload was declared outside of a type body. </summary>
+    public void ReportOperatorOutsideType(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0522", "operator overload must be declared inside a type body", span, source)
+            .WithPrimaryLabel(span, "operator overload declared outside a type", source)
+            .WithHelp("move the operator overload inside a class, struct, or union declaration")
+            .Report();
+
+    /// <summary> Reports an unrecognized operator in an operator overload declaration. </summary>
+    public void ReportUnrecognizedOperator(TextSpan span, string operatorText, SourceText? source = null) =>
+        BuildError("MH0523", $"unrecognized operator '{operatorText}' in operator overload declaration", span, source)
+            .WithPrimaryLabel(span, "unrecognized operator", source)
+            .WithHelp("specify a valid overloadable operator")
+            .Report();
+
+    /// <summary> Reports that a destructor declaration specifies parameters. </summary>
+    public void ReportDestructorHasParameters(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0524", "destructor cannot have parameters", span, source)
+            .WithPrimaryLabel(span, "destructor cannot declare parameters", source)
+            .WithHelp("remove all parameters from the destructor declaration")
+            .Report();
+
+    /// <summary> Reports that a constructor name does not match the enclosing type name. </summary>
+    public void ReportConstructorNameMismatch(string constructorName, string enclosingTypeName, TextSpan span, SourceText? source = null) =>
+        BuildError("MH0525", $"constructor name '{constructorName}' does not match enclosing type name '{enclosingTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"constructor name must match enclosing type '{enclosingTypeName}'", source)
+            .WithHelp($"rename the constructor to '{enclosingTypeName}' or provide a return type if this is a method")
+            .Report();
+
+    /// <summary> Reports that an operator overload was not declared static. </summary>
+    public void ReportOperatorMustBeStatic(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0526", "operator overload must be declared static", span, source)
+            .WithPrimaryLabel(span, "operator overload must be declared static", source)
+            .WithHelp("add the 'static' modifier to the operator overload declaration")
+            .Report();
+
+
     /// <summary> Reports a duplicate type declaration pointing to both declaration sites. </summary>
     public void ReportDuplicateTypeDeclaration(
         string typeName,

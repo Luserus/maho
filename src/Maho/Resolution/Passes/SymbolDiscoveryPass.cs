@@ -436,8 +436,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
         var functionScope = context.CreateScope(enclosingScope);
-        var symbol = context.CreateFunctionSymbol(ownerScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last, containingNamespace,
-                                                              declaration);
+        var symbolName = GetSpecialFunctionSymbolName(declaration);
+        var symbol = context.CreateFunctionSymbol(ownerScope, symbolName, containingNamespace, declaration);
+        symbol.SpecialKind = declaration.SpecialKind;
+        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -453,7 +455,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private void ResolveMemberFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, SymbolHandle containingType)
     {
         var functionScope = context.CreateScope(enclosingScope);
-        var symbol = context.CreateMemberMethodSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last, containingType, declaration);
+        var symbolName = GetSpecialFunctionSymbolName(declaration);
+        var symbol = context.CreateMemberMethodSymbol(enclosingScope, symbolName, containingType, declaration);
+        symbol.SpecialKind = declaration.SpecialKind;
+        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -472,7 +477,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     private LocalFunctionSymbol ResolveLocalFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, SymbolHandle? containingMethod)
     {
         var functionScope = context.CreateScope(enclosingScope);
-        var symbol = context.CreateLocalFunctionSymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last, containingMethod, declaration);
+        var symbolName = GetSpecialFunctionSymbolName(declaration);
+        var symbol = context.CreateLocalFunctionSymbol(enclosingScope, symbolName, containingMethod, declaration);
+        symbol.SpecialKind = declaration.SpecialKind;
+        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -922,4 +930,18 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
         return flags;
     }
+
+    /// <summary>
+    /// Returns the symbol name for special function declarations.
+    /// Constructors -> ".ctor", Destructors -> ".dtor", Operators -> "op_{Kind}".
+    /// Ordinary functions use their declared name.
+    /// </summary>
+    private static SymbolPart GetSpecialFunctionSymbolName(FunctionDeclaration declaration) =>
+        declaration.SpecialKind switch
+        {
+            SpecialFunctionKind.Constructor => new SymbolPart(".ctor"),
+            SpecialFunctionKind.Destructor => new SymbolPart(".dtor"),
+            SpecialFunctionKind.Operator => new SymbolPart($"op_{declaration.OperatorKind}"),
+            _ => ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last
+        };
 }

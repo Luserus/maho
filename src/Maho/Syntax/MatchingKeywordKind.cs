@@ -49,5 +49,8 @@ internal enum MatchingKeywordKind : byte
     Tokens,
     Token,
     Nameof,
-    As
+    As,
+    Operator,
+    Prefix,
+    Postfix,
 }

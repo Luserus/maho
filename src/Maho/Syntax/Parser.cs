@@ -72,6 +72,14 @@ internal sealed partial class Parser
         (">=", TokenKind.GreaterThanEquals),
         ("&&", TokenKind.AmpersandAmpersand),
         ("||", TokenKind.VerticalBarVerticalBar),
+        ("++", TokenKind.PlusPlus),
+        ("--", TokenKind.MinusMinus),
+        ("+=", TokenKind.PlusEquals),
+        ("-=", TokenKind.MinusEquals),
+        ("*=", TokenKind.AsteriskEquals),
+        ("/=", TokenKind.ForwardSlashEquals),
+        ("%=", TokenKind.PercentageEquals),
+        ("->", TokenKind.MinusGreaterThan),
         ("+", TokenKind.Plus),
         ("-", TokenKind.Minus),
         ("*", TokenKind.Asterisk),
@@ -82,7 +90,10 @@ internal sealed partial class Parser
         ("<", TokenKind.LessThanSign),
         (">", TokenKind.GreaterThanSign),
         ("?", TokenKind.QuestionMark),
-        ("=", TokenKind.Equals)
+        ("=", TokenKind.Equals),
+        ("!", TokenKind.ExclamationMark),
+        ("~", TokenKind.Tilde),
+        ("^", TokenKind.Caret)
     ];
 
     private static readonly Dictionary<TokenKind, OperatorEntry> operatorTable = new()
@@ -100,7 +111,37 @@ internal sealed partial class Parser
         { TokenKind.GreaterThanEquals, new OperatorEntry(TokenKind.GreaterThanEquals, OperatorRole.Infix, 40, 41) },
         { TokenKind.AmpersandAmpersand, new OperatorEntry(TokenKind.AmpersandAmpersand, OperatorRole.Infix, 25, 26) },
         { TokenKind.VerticalBarVerticalBar, new OperatorEntry(TokenKind.VerticalBarVerticalBar, OperatorRole.Infix, 20, 21) },
-        { TokenKind.Equals, new OperatorEntry(TokenKind.Equals, OperatorRole.Infix, 10, 9) } // Right associative
+        { TokenKind.Equals, new OperatorEntry(TokenKind.Equals, OperatorRole.Infix, 10, 9) }, // Right associative
+
+        // NEW: Increment/decrement (prefix + postfix)
+        { TokenKind.PlusPlus, new OperatorEntry(TokenKind.PlusPlus, OperatorRole.Prefix | OperatorRole.Postfix, 85, 86) },
+        { TokenKind.MinusMinus, new OperatorEntry(TokenKind.MinusMinus, OperatorRole.Prefix | OperatorRole.Postfix, 85, 86) },
+
+        // NEW: Prefix-only unary operators
+        { TokenKind.ExclamationMark, new OperatorEntry(TokenKind.ExclamationMark, OperatorRole.Prefix | OperatorRole.Postfix, 85, 86) },
+        { TokenKind.Tilde, new OperatorEntry(TokenKind.Tilde, OperatorRole.Prefix, 85, 86) },
+
+        // NEW: Postfix-only operators
+        { TokenKind.QuestionMark, new OperatorEntry(TokenKind.QuestionMark, OperatorRole.Postfix, 85, 86) },
+
+        // NEW: Bitwise operators
+        { TokenKind.Ampersand, new OperatorEntry(TokenKind.Ampersand, OperatorRole.Prefix | OperatorRole.Infix, 50, 51) },
+        { TokenKind.VerticalBar, new OperatorEntry(TokenKind.VerticalBar, OperatorRole.Infix, 45, 46) },
+        { TokenKind.Caret, new OperatorEntry(TokenKind.Caret, OperatorRole.Infix, 48, 49) },
+
+        // NEW: Shift operators
+        { TokenKind.LessThanLessThanSigns, new OperatorEntry(TokenKind.LessThanLessThanSigns, OperatorRole.Infix, 55, 56) },
+        { TokenKind.GreaterThanGreaterThanSigns, new OperatorEntry(TokenKind.GreaterThanGreaterThanSigns, OperatorRole.Infix, 55, 56) },
+
+        // NEW: Arrow (member dereference access)
+        { TokenKind.MinusGreaterThan, new OperatorEntry(TokenKind.MinusGreaterThan, OperatorRole.Infix, 90, 91) },
+
+        // NEW: Compound assignment (right-associative like =)
+        { TokenKind.PlusEquals, new OperatorEntry(TokenKind.PlusEquals, OperatorRole.Infix, 10, 9) },
+        { TokenKind.MinusEquals, new OperatorEntry(TokenKind.MinusEquals, OperatorRole.Infix, 10, 9) },
+        { TokenKind.AsteriskEquals, new OperatorEntry(TokenKind.AsteriskEquals, OperatorRole.Infix, 10, 9) },
+        { TokenKind.ForwardSlashEquals, new OperatorEntry(TokenKind.ForwardSlashEquals, OperatorRole.Infix, 10, 9) },
+        { TokenKind.PercentageEquals, new OperatorEntry(TokenKind.PercentageEquals, OperatorRole.Infix, 10, 9) },
     };
 
     private static readonly OperatorTrieNode operatorTrie;
@@ -132,7 +173,8 @@ internal sealed partial class Parser
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
     /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
     private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
-        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put;
+        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put
+        and not MatchingKeywordKind.Operator;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -383,6 +425,12 @@ internal sealed partial class Parser
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        else if (CurrentToken.Kind is TokenKind.Tilde)
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        else if (LooksLikeMemberOperatorDeclaration())
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
+        else if (LooksLikeTopLevelConstructor(allowSemicolon: false))
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
@@ -421,6 +469,12 @@ internal sealed partial class Parser
             return ParseMemberAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(attributes, modifiers);
+        else if (CurrentToken.Kind is TokenKind.Tilde)
+            return ParseMemberDestructor(attributes, modifiers);
+        else if (LooksLikeMemberOperatorDeclaration())
+            return ParseMemberOperatorDeclaration(attributes, modifiers);
+        else if (LooksLikeMemberConstructor())
+            return ParseMemberConstructor(attributes, modifiers);
         else
             return ParseMemberFieldDeclarationOrFunctionOrProperty(attributes, modifiers);
     }
@@ -441,7 +495,10 @@ internal sealed partial class Parser
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration([], []);
 
-        if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier)
+        if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier ||
+            CurrentToken.Kind is TokenKind.Tilde ||
+            LooksLikeMemberOperatorDeclaration() ||
+            LooksLikeTopLevelConstructor(allowSemicolon: false))
             return ParseLocalDeclaration();
 
         return ParseLocalStatement(parseMode);

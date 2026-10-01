@@ -42,6 +42,11 @@ public sealed class ParserTests
     [InlineData("public static int Compute() { return 0; }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
     [InlineData("public int Value { get; set; }", typeof(MemberPropertyDeclaration), null)]
     [InlineData("public int Value;", typeof(MemberFieldDeclaration), null)]
+    [InlineData("public Foo();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
+    [InlineData("public Foo() { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("~Foo();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
+    [InlineData("~Foo() { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("static V operator +(V a, V b) { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
     public void Parse_MemberDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
         Member member = ParseSingleMember(source, expectedType);
@@ -57,6 +62,55 @@ public sealed class ParserTests
         };
 
         Assert.IsType(expectedBodyType, body);
+    }
+
+    [Theory]
+    [InlineData("public Foo();", SpecialFunctionKind.Constructor, null)]
+    [InlineData("~Foo();", SpecialFunctionKind.Destructor, null)]
+    [InlineData("static V operator +(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Add)]
+    [InlineData("static V operator -(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Subtract)]
+    [InlineData("static V operator *(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Multiply)]
+    [InlineData("static V operator /(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Divide)]
+    [InlineData("static V operator %(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Modulo)]
+    [InlineData("static V operator prefix +(V a) { }", SpecialFunctionKind.Operator, OperatorKind.UnaryPlus)]
+    [InlineData("static V operator prefix -(V a) { }", SpecialFunctionKind.Operator, OperatorKind.UnaryMinus)]
+    [InlineData("static V operator prefix *(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Dereference)]
+    [InlineData("static V operator prefix ++(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PrefixIncrement)]
+    [InlineData("static V operator prefix --(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PrefixDecrement)]
+    [InlineData("static V operator postfix ++(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixIncrement)]
+    [InlineData("static V operator postfix --(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixDecrement)]
+    [InlineData("static V operator prefix !(V a) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalNot)]
+    [InlineData("static V operator postfix !(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixBang)]
+    [InlineData("static V operator postfix ?(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixQuestion)]
+    [InlineData("static V operator ||(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalOr)]
+    [InlineData("static V operator &&(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalAnd)]
+    [InlineData("static V operator !=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.NotEqual)]
+    [InlineData("static V operator ==(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Equal)]
+    [InlineData("static V operator +=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.AddAssign)]
+    [InlineData("static V operator -=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.SubtractAssign)]
+    [InlineData("static V operator *=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.MultiplyAssign)]
+    [InlineData("static V operator /=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.DivideAssign)]
+    [InlineData("static V operator %=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.ModuloAssign)]
+    [InlineData("static V operator ->(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Arrow)]
+    [InlineData("static V operator <(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LessThan)]
+    [InlineData("static V operator >(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.GreaterThan)]
+    [InlineData("static V operator <=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LessOrEqual)]
+    [InlineData("static V operator >=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.GreaterOrEqual)]
+    [InlineData("static V operator |(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseOr)]
+    [InlineData("static V operator &(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseAnd)]
+    [InlineData("static V operator prefix &(V a) { }", SpecialFunctionKind.Operator, OperatorKind.AddressOf)]
+    [InlineData("static V operator ^(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseXor)]
+    [InlineData("static V operator prefix ~(V a) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseNot)]
+    [InlineData("static V operator <<(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LeftShift)]
+    [InlineData("static V operator >>(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.RightShift)]
+    [InlineData("static V operator new(int x) { }", SpecialFunctionKind.Operator, OperatorKind.ObjectNew)]
+    [InlineData("static V operator put(int x) { }", SpecialFunctionKind.Operator, OperatorKind.ObjectPut)]
+    [InlineData("static V operator ()(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Call)]
+    public void Parse_SpecialFunctions(string source, SpecialFunctionKind expectedSpecialKind, OperatorKind? expectedOperatorKind)
+    {
+        var member = (MemberFunctionDeclaration)ParseSingleMember(source, typeof(MemberFunctionDeclaration));
+        Assert.Equal(expectedSpecialKind, member.Function.SpecialKind);
+        Assert.Equal(expectedOperatorKind, member.Function.OperatorKind);
     }
 
     [Theory]
@@ -1819,6 +1873,33 @@ public sealed class ParserTests
         var genType = Assert.IsType<GenericType>(decl.Declaration.Type);
         Assert.Equal("A", genType.Name.Value);
         Assert.Equal("C", Assert.IsType<SimpleName>(decl.Declaration.Declarators[0].Identifier).Name.Value);
+    }
+
+    [Theory]
+    [InlineData("++x", typeof(UnaryExpression))]
+    [InlineData("x++", typeof(UnaryExpression))]
+    [InlineData("--x", typeof(UnaryExpression))]
+    [InlineData("x--", typeof(UnaryExpression))]
+    [InlineData("!x", typeof(UnaryExpression))]
+    [InlineData("x!", typeof(UnaryExpression))]
+    [InlineData("x?", typeof(UnaryExpression))]
+    [InlineData("~x", typeof(UnaryExpression))]
+    [InlineData("a & b", typeof(BinaryExpression))]
+    [InlineData("a | b", typeof(BinaryExpression))]
+    [InlineData("a ^ b", typeof(BinaryExpression))]
+    [InlineData("a << b", typeof(BinaryExpression))]
+    [InlineData("a >> b", typeof(BinaryExpression))]
+    [InlineData("a -> b", typeof(MemberAccessExpression))]
+    [InlineData("a += b", typeof(AssignmentExpression))]
+    [InlineData("a -= b", typeof(AssignmentExpression))]
+    [InlineData("a *= b", typeof(AssignmentExpression))]
+    [InlineData("a /= b", typeof(AssignmentExpression))]
+    [InlineData("a %= b", typeof(AssignmentExpression))]
+    public void Parse_SpecialExpressionKinds(string source, Type expectedType)
+    {
+        var stmt = ParseSingleLocal($"var x = {source};", typeof(LocalVariableDeclarationStatement));
+        var decl = (LocalVariableDeclarationStatement)stmt;
+        Assert.IsType(expectedType, decl.Declaration.Declarators[0].Initializer!.Initializer);
     }
 
     [Fact]

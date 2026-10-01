@@ -5,6 +5,8 @@ namespace Maho.Resolution;
 
 internal sealed class FunctionSymbol : Symbol
 {
+    public SpecialFunctionKind SpecialKind { get; internal set; }
+    public OperatorKind? OperatorKind { get; internal set; }
     public FunctionFlags Flags { get; internal set; }
 
     public NamespaceTrieNode? ContainingNamespace { get; }

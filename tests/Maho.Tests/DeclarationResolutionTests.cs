@@ -1395,6 +1395,31 @@ public sealed class DeclarationResolutionTests
         Assert.Contains(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
     }
 
+    [Fact]
+    public void Resolve_SpecialFunctions_PopulatesOperatorOverloadsDictionary()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box
+            {
+                static Box operator +(Box a, Box b) {}
+                static Box operator prefix ++(Box a) {}
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        var boxType = (ProductTypeSymbol)context.TypeSymbols[0];
+
+        Assert.True(boxType.OperatorOverloads.TryGetValue(OperatorKind.Add, out var addOverloads));
+        Assert.Single(addOverloads);
+        Assert.Equal("op_Add", ((MethodSymbol)context.GetSymbol(addOverloads[0])!).Name.Text);
+
+        Assert.True(boxType.OperatorOverloads.TryGetValue(OperatorKind.PrefixIncrement, out var incOverloads));
+        Assert.Single(incOverloads);
+        Assert.Equal("op_PrefixIncrement", ((MethodSymbol)context.GetSymbol(incOverloads[0])!).Name.Text);
+    }
+
     private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));
