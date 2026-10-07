@@ -6,7 +6,6 @@ namespace Maho.Resolution;
 internal abstract class MethodSymbol : Symbol
 {
     public SpecialFunctionKind SpecialKind { get; internal set; }
-    public OperatorKind? OperatorKind { get; internal set; }
     public FunctionFlags Flags { get; internal set; }
     public SymbolHandle? Parent { get; }
 

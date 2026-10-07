@@ -174,7 +174,9 @@ internal sealed partial class Parser
     /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
     private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
         matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put
-        and not MatchingKeywordKind.Operator;
+        and not MatchingKeywordKind.Operator
+        and not MatchingKeywordKind.If and not MatchingKeywordKind.While
+        and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -208,7 +210,8 @@ internal sealed partial class Parser
     private enum StatementParseMode : byte
     {
         Normal,
-        AllowFinalExpression
+        AllowFinalExpression,
+        FunctionBody
     }
 
     /// <summary> Chooses which source location to use when synthesizing a missing token. </summary>
@@ -425,15 +428,11 @@ internal sealed partial class Parser
             return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
         else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-        else if (CurrentToken.Kind is TokenKind.Tilde)
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-        else if (LooksLikeMemberOperatorDeclaration())
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
-        else if (LooksLikeTopLevelConstructor(allowSemicolon: false))
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
+        else if (LooksLikeTopLevelConstructor(allowSemicolon: false))
+            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
             if (success || context is LookaheadResultContext.MissingDelimeter)
@@ -469,10 +468,6 @@ internal sealed partial class Parser
             return ParseMemberAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(attributes, modifiers);
-        else if (CurrentToken.Kind is TokenKind.Tilde)
-            return ParseMemberDestructor(attributes, modifiers);
-        else if (LooksLikeMemberOperatorDeclaration())
-            return ParseMemberOperatorDeclaration(attributes, modifiers);
         else if (LooksLikeMemberConstructor())
             return ParseMemberConstructor(attributes, modifiers);
         else
@@ -495,11 +490,12 @@ internal sealed partial class Parser
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration([], []);
 
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto)
+            return ParseLocalStatement(parseMode);
+
         if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier ||
-            CurrentToken.Kind is TokenKind.Tilde ||
-            LooksLikeMemberOperatorDeclaration() ||
             LooksLikeTopLevelConstructor(allowSemicolon: false))
-            return ParseLocalDeclaration();
+            return ParseLocalDeclaration(parseMode);
 
         return ParseLocalStatement(parseMode);
     }
@@ -514,9 +510,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(ParseGenericArgument());
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }

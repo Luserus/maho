@@ -148,11 +148,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case TopLevelLabelStatement label:
                 context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingFunction, label);
                 break;
-            case TopLevelIfStatement conditional:
-                DiscoverTopLevelLabels(conditional.ThenStatement, scope, containingFunction);
-                if (conditional.ElseStatement is not null)
-                    DiscoverTopLevelLabels(conditional.ElseStatement.Statement, scope, containingFunction);
-                break;
             case TopLevelWhileStatement loop:
                 DiscoverTopLevelLabels(loop.Statement, scope, containingFunction);
                 break;
@@ -439,7 +434,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbolName = GetSpecialFunctionSymbolName(declaration);
         var symbol = context.CreateFunctionSymbol(ownerScope, symbolName, containingNamespace, declaration);
         symbol.SpecialKind = declaration.SpecialKind;
-        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -458,7 +452,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbolName = GetSpecialFunctionSymbolName(declaration);
         var symbol = context.CreateMemberMethodSymbol(enclosingScope, symbolName, containingType, declaration);
         symbol.SpecialKind = declaration.SpecialKind;
-        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -480,7 +473,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         var symbolName = GetSpecialFunctionSymbolName(declaration);
         var symbol = context.CreateLocalFunctionSymbol(enclosingScope, symbolName, containingMethod, declaration);
         symbol.SpecialKind = declaration.SpecialKind;
-        symbol.OperatorKind = declaration.OperatorKind;
         if (symbol.Name.Text == "_" || enclosingScope.IsSink)
             functionScope.IsSink = true;
 
@@ -602,15 +594,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
     {
         switch (local)
         {
-            case LocalBlockStatement block:
-                {
-                    Scope blockScope = context.CreateScope(scope);
-                    context.RegisterSyntaxScope(block, blockScope);
-
-                    foreach (var child in block.Locals)
-                        ResolveLocal(child, blockScope, containingSymbol, containingMethod);
-                    break;
-                }
             case LocalLabelStatement label:
                 context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingSymbol, label);
                 break;
@@ -646,24 +629,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 break;
             case LocalExpressionStatement exprStmt:
                 DiscoverBlockExpressions(exprStmt.Expression, scope, containingSymbol, containingMethod);
-                break;
-            case LocalIfStatement ifStmt:
-                Scope ifScope = ifStmt.Declaration is not null ? context.CreateScope(scope) : scope;
-                if (ifStmt.Declaration is not null)
-                {
-                    context.RegisterSyntaxScope(ifStmt, ifScope);
-                    foreach (var declarator in ifStmt.Declaration.Declarators)
-                    {
-                        if (declarator.Initializer?.Initializer is { } initExpr)
-                            DiscoverBlockExpressions(initExpr, ifScope, containingSymbol, containingMethod);
-                    }
-                    ResolveLocalVariableDeclaration(ifStmt.Declaration, ifScope, containingSymbol);
-                }
-
-                DiscoverBlockExpressions(ifStmt.Condition, ifScope, containingSymbol, containingMethod);
-                ResolveLocal(ifStmt.ThenStatement, ifScope, containingSymbol, containingMethod);
-                if (ifStmt.ElseStatement is not null)
-                    ResolveLocal(ifStmt.ElseStatement.Statement, ifScope, containingSymbol, containingMethod);
                 break;
             case LocalWhileStatement whileStmt:
                 Scope whileScope = whileStmt.Declaration is not null ? context.CreateScope(scope) : scope;
@@ -731,9 +696,26 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         }
         else if (expr is IfExpression ifExpr)
         {
-            DiscoverBlockExpressions(ifExpr.Condition, scope, containingSymbol, containingMethod);
-            DiscoverBlockExpressions(ifExpr.ThenExpression, scope, containingSymbol, containingMethod);
-            DiscoverBlockExpressions(ifExpr.ElseExpression, scope, containingSymbol, containingMethod);
+            Scope ifScope = ifExpr.Declaration is not null ? context.CreateScope(scope) : scope;
+            if (ifExpr.Declaration is not null)
+            {
+                context.RegisterSyntaxScope(ifExpr, ifScope);
+                foreach (var declarator in ifExpr.Declaration.Declarators)
+                {
+                    if (declarator.Initializer?.Initializer is { } initExpr)
+                        DiscoverBlockExpressions(initExpr, ifScope, containingSymbol, containingMethod);
+                }
+                ResolveLocalVariableDeclaration(ifExpr.Declaration, ifScope, containingSymbol);
+            }
+
+            DiscoverBlockExpressions(ifExpr.Condition, ifScope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(ifExpr.ThenExpression, ifScope, containingSymbol, containingMethod);
+            if (ifExpr.ElseExpression is not null)
+                DiscoverBlockExpressions(ifExpr.ElseExpression.Expression, ifScope, containingSymbol, containingMethod);
+        }
+        else if (expr is ElseExpression elseExpr)
+        {
+            DiscoverBlockExpressions(elseExpr.Expression, scope, containingSymbol, containingMethod);
         }
         else if (expr is TupleExpression tuple)
         {
@@ -933,15 +915,12 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     /// <summary>
     /// Returns the symbol name for special function declarations.
-    /// Constructors -> ".ctor", Destructors -> ".dtor", Operators -> "op_{Kind}".
-    /// Ordinary functions use their declared name.
+    /// Constructors -> ".ctor". Ordinary functions use their declared name.
     /// </summary>
     private static SymbolPart GetSpecialFunctionSymbolName(FunctionDeclaration declaration) =>
         declaration.SpecialKind switch
         {
             SpecialFunctionKind.Constructor => new SymbolPart(".ctor"),
-            SpecialFunctionKind.Destructor => new SymbolPart(".dtor"),
-            SpecialFunctionKind.Operator => new SymbolPart($"op_{declaration.OperatorKind}"),
             _ => ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last
         };
 }

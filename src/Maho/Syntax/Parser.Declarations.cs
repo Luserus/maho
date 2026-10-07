@@ -20,16 +20,6 @@ internal sealed partial class Parser
             return ParseTopLevelAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
-        else if (CurrentToken.Kind is TokenKind.Tilde)
-        {
-            var dtor = ParseMemberDestructor(attributes, modifiers);
-            return new TopLevelFunctionDeclaration(dtor.Function);
-        }
-        else if (LooksLikeMemberOperatorDeclaration())
-        {
-            var op = ParseMemberOperatorDeclaration(attributes, modifiers);
-            return new TopLevelFunctionDeclaration(op.Function);
-        }
         else if (LooksLikeTopLevelConstructor(allowSemicolon: modifiers.Count > 0))
         {
             var ctor = ParseMemberConstructor(attributes, modifiers);
@@ -416,29 +406,40 @@ internal sealed partial class Parser
         return new MemberPropertyDeclaration(attributes, modifiers, type, identifier, body);
     }
 
-    private Local ParseLocalDeclaration()
+    private Local ParseLocalDeclaration(StatementParseMode parseMode = StatementParseMode.Normal)
     {
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseLocalBlockStatement(attributes, modifiers);
+        {
+            var (openBrace, locals, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: parseMode is StatementParseMode.AllowFinalExpression);
+            var blockExpr = new BlockExpression(attributes, modifiers, openBrace, locals, finalExpression, closeBrace);
+            Token semicolon;
+            bool isFinal = false;
+
+            if (CurrentToken.Kind is TokenKind.Semicolon)
+            {
+                semicolon = Consume();
+            }
+            else if (parseMode is StatementParseMode.AllowFinalExpression && CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
+            {
+                semicolon = CreateMissingToken();
+                isFinal = true;
+            }
+            else
+            {
+                semicolon = CreateMissingToken();
+            }
+
+            return new LocalExpressionStatement(blockExpr, semicolon, isFinalExpression: isFinal);
+        }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
-        else if (CurrentToken.Kind is TokenKind.Tilde)
-        {
-            var dtor = ParseMemberDestructor(attributes, modifiers);
-            return new LocalFunctionDeclaration(dtor.Function);
-        }
-        else if (LooksLikeMemberOperatorDeclaration())
-        {
-            var op = ParseMemberOperatorDeclaration(attributes, modifiers);
-            return new LocalFunctionDeclaration(op.Function);
-        }
         else if (LooksLikeTopLevelConstructor(allowSemicolon: modifiers.Count > 0))
         {
             var ctor = ParseMemberConstructor(attributes, modifiers);
@@ -716,7 +717,7 @@ internal sealed partial class Parser
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var start = current;
-            var local = ParseLocal();
+            var local = ParseLocal(StatementParseMode.FunctionBody);
             locals.Add(local);
             RecoverLocalIfStalled(start);
         }
@@ -1174,213 +1175,5 @@ internal sealed partial class Parser
 
         var nextKind = tokens[probe].Kind;
         return nextKind is TokenKind.LeftBrace or TokenKind.EqualsGreaterThan || (allowSemicolon && nextKind is TokenKind.Semicolon);
-    }
-
-    /// <summary>Parses ~TypeName() body inside a type body as a destructor.</summary>
-    private MemberFunctionDeclaration ParseMemberDestructor(
-        IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
-    {
-        var tilde = Consume(); // ~
-        var nameToken = ExpectIdentifierToken("for the destructor name");
-        var identifier = new SimpleName(nameToken);
-
-        var missingReturnType = new SimpleType(CreateMissingToken());
-
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the destructor name");
-        var parameters = ParseParameterList(); // Expected empty but parse for error recovery
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the destructor parameter list");
-
-        var signature = new FunctionSignature(modifiers, missingReturnType, identifier,
-            openParen, parameters, closeParen, []);
-        var body = ParseFunctionBody();
-
-        return new MemberFunctionDeclaration(
-            new FunctionDeclaration(attributes, signature, body, SpecialFunctionKind.Destructor));
-    }
-
-    /// <summary>Parses: return_type operator [prefix|postfix]? op_tokens(params) body</summary>
-    private MemberFunctionDeclaration ParseMemberOperatorDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
-    {
-        var returnType = ParseTypeSyntax();
-        var operatorKeyword = Consume(); // 'operator'
-
-        var (operatorKind, operatorTokens) = ParseOperatorTokens();
-
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the operator tokens");
-        var parameters = ParseParameterList();
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the operator parameter list");
-
-        List<TypeConstraintClause> constraints = [];
-        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
-            constraints.Add(ParseTypeConstraintClause());
-
-        // Use operator keyword as the "identifier" in the signature
-        var identifier = new SimpleName(operatorKeyword);
-        var signature = new FunctionSignature(modifiers, returnType, identifier,
-            openParen, parameters, closeParen, constraints);
-        var body = ParseFunctionBody();
-
-        return new MemberFunctionDeclaration(
-            new FunctionDeclaration(attributes, signature, body,
-                SpecialFunctionKind.Operator, operatorKind, operatorTokens));
-    }
-
-    /// <summary>
-    /// Lookahead: checks if upcoming tokens form Type 'operator' ...
-    /// </summary>
-    private bool LooksLikeMemberOperatorDeclaration()
-    {
-        lookaheadCurrent = current;
-        var (_, success, _) = LookaheadParseTypeSyntax();
-        if (!success) return false;
-        return tokens[lookaheadCurrent].MatchingKind is MatchingKeywordKind.Operator;
-    }
-
-    /// <summary>
-    /// Parses operator token(s) after the 'operator' keyword. Supports optional
-    /// 'prefix'/'postfix' disambiguation keyword for ambiguous operators.
-    /// </summary>
-    private (OperatorKind Kind, List<Token> Tokens) ParseOperatorTokens()
-    {
-        var opTokens = new List<Token>();
-
-        // Check for prefix/postfix disambiguation keyword
-        bool isExplicitPrefix = CurrentToken.MatchingKind is MatchingKeywordKind.Prefix;
-        bool isExplicitPostfix = CurrentToken.MatchingKind is MatchingKeywordKind.Postfix;
-
-        if (isExplicitPrefix || isExplicitPostfix)
-        {
-            opTokens.Add(Consume()); // consume 'prefix' or 'postfix'
-        }
-
-        // Try combined operator
-        var (combinedKind, combinedLength) = GetCombinedOperatorData();
-
-        if (combinedLength > 0)
-        {
-            var opToken = ConsumeOperator();
-            opTokens.Add(opToken);
-
-            var kind = combinedKind switch
-            {
-                // Binary arithmetic
-                TokenKind.Plus when !isExplicitPrefix => OperatorKind.Add,
-                TokenKind.Plus => OperatorKind.UnaryPlus,
-                TokenKind.Minus when !isExplicitPrefix => OperatorKind.Subtract,
-                TokenKind.Minus => OperatorKind.UnaryMinus,
-                TokenKind.Asterisk when !isExplicitPrefix => OperatorKind.Multiply,
-                TokenKind.Asterisk => OperatorKind.Dereference,
-                TokenKind.ForwardSlash => OperatorKind.Divide,
-                TokenKind.Percentage => OperatorKind.Modulo,
-
-                // Increment/decrement
-                TokenKind.PlusPlus when isExplicitPostfix => OperatorKind.PostfixIncrement,
-                TokenKind.PlusPlus when isExplicitPrefix => OperatorKind.PrefixIncrement,
-                TokenKind.PlusPlus => ReportMissingFixityKeyword(opToken, OperatorKind.PrefixIncrement),
-                TokenKind.MinusMinus when isExplicitPostfix => OperatorKind.PostfixDecrement,
-                TokenKind.MinusMinus when isExplicitPrefix => OperatorKind.PrefixDecrement,
-                TokenKind.MinusMinus => ReportMissingFixityKeyword(opToken, OperatorKind.PrefixDecrement),
-
-                // Equality
-                TokenKind.EqualsEquals => OperatorKind.Equal,
-                TokenKind.ExclamationEquals => OperatorKind.NotEqual,
-
-                // Logical
-                TokenKind.VerticalBarVerticalBar => OperatorKind.LogicalOr,
-                TokenKind.AmpersandAmpersand => OperatorKind.LogicalAnd,
-
-                // Relational
-                TokenKind.LessThanSign => OperatorKind.LessThan,
-                TokenKind.GreaterThanSign => OperatorKind.GreaterThan,
-                TokenKind.LessThanEquals => OperatorKind.LessOrEqual,
-                TokenKind.GreaterThanEquals => OperatorKind.GreaterOrEqual,
-
-                // Shift
-                TokenKind.LessThanLessThanSigns => OperatorKind.LeftShift,
-                TokenKind.GreaterThanGreaterThanSigns => OperatorKind.RightShift,
-
-                // Compound assignment
-                TokenKind.PlusEquals => OperatorKind.AddAssign,
-                TokenKind.MinusEquals => OperatorKind.SubtractAssign,
-                TokenKind.AsteriskEquals => OperatorKind.MultiplyAssign,
-                TokenKind.ForwardSlashEquals => OperatorKind.DivideAssign,
-                TokenKind.PercentageEquals => OperatorKind.ModuloAssign,
-
-                // Arrow
-                TokenKind.MinusGreaterThan => OperatorKind.Arrow,
-
-                // Single-char operators
-                TokenKind.ExclamationMark when isExplicitPostfix => OperatorKind.PostfixBang,
-                TokenKind.ExclamationMark when isExplicitPrefix => OperatorKind.LogicalNot,
-                TokenKind.ExclamationMark => ReportMissingFixityKeyword(opToken, OperatorKind.LogicalNot),
-                TokenKind.QuestionMark when isExplicitPostfix => OperatorKind.PostfixQuestion,
-                TokenKind.QuestionMark => ReportMissingFixityKeyword(opToken, OperatorKind.PostfixQuestion),
-                TokenKind.VerticalBar => OperatorKind.BitwiseOr,
-                TokenKind.Ampersand when isExplicitPrefix => OperatorKind.AddressOf,
-                TokenKind.Ampersand => OperatorKind.BitwiseAnd,
-                TokenKind.Caret => OperatorKind.BitwiseXor,
-                TokenKind.Tilde when isExplicitPrefix => OperatorKind.BitwiseNot,
-                TokenKind.Tilde => ReportMissingFixityKeyword(opToken, OperatorKind.BitwiseNot),
-
-                _ => ReportUnrecognizedOperator(opToken)
-            };
-
-            return (kind, opTokens);
-        }
-
-        // Special tokens not in the operator trie
-        switch (CurrentToken.Kind)
-        {
-            case TokenKind.Tilde:
-                opTokens.Add(Consume());
-                return (OperatorKind.BitwiseNot, opTokens);
-            case TokenKind.Caret:
-                opTokens.Add(Consume());
-                return (OperatorKind.BitwiseXor, opTokens);
-        }
-
-        // Keyword-based operators
-        switch (CurrentToken.MatchingKind)
-        {
-            case MatchingKeywordKind.New:
-                opTokens.Add(Consume());
-                return (OperatorKind.ObjectNew, opTokens);
-            case MatchingKeywordKind.Put:
-                opTokens.Add(Consume());
-                return (OperatorKind.ObjectPut, opTokens);
-        }
-
-        // Callable operator: ()
-        if (CurrentToken.Kind is TokenKind.LeftParen && Peek().Kind is TokenKind.RightParen)
-        {
-            opTokens.Add(Consume()); // (
-            opTokens.Add(Consume()); // )
-            return (OperatorKind.Call, opTokens);
-        }
-
-        // Unrecognized
-        if (CurrentToken.Kind is not TokenKind.LeftParen and not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken)
-        {
-            var unrecognizedToken = Consume();
-            opTokens.Add(unrecognizedToken);
-            return (ReportUnrecognizedOperator(unrecognizedToken), opTokens);
-        }
-
-        diagnostics.ReportUnrecognizedOperator(CurrentToken.Span, GetTokenDisplay(CurrentToken).Materialize(), text);
-        opTokens.Add(RecoverWithMissingToken());
-        return (OperatorKind.Add, opTokens);
-    }
-
-    private OperatorKind ReportUnrecognizedOperator(Token opToken)
-    {
-        diagnostics.ReportUnrecognizedOperator(opToken.Span, GetTokenDisplay(opToken).Materialize(), text);
-        return OperatorKind.Add;
-    }
-
-    private OperatorKind ReportMissingFixityKeyword(Token opToken, OperatorKind fallback)
-    {
-        diagnostics.ReportExpectedToken(opToken.Span, "the 'prefix' or 'postfix' keyword before the operator",
-            GetTokenDisplay(opToken), "in operator overload declaration");
-        return fallback;
     }
 }

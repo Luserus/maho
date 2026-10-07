@@ -258,7 +258,7 @@ internal sealed partial class Parser
     {
         var ifKeyword = Consume();
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
-        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
+        var (declaration, semicolon, condition) = ParseConditionalHeader("if");
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'if' condition");
         var thenExpression = ParseExpectedExpression("for the 'if' then-expression", MissingTokenAnchor.AfterPrevious);
 
@@ -271,7 +271,7 @@ internal sealed partial class Parser
             elseExpression = new ElseExpression(elseKeyword, elseExpr);
         }
 
-        return new IfExpression(ifKeyword, openParen, condition, closeParen, thenExpression, elseExpression);
+        return new IfExpression(ifKeyword, openParen, declaration, semicolon, condition, closeParen, thenExpression, elseExpression);
     }
 
     private (Token OpenBrace, IReadOnlyList<Local> Locals, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)

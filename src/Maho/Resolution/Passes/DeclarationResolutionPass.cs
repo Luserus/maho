@@ -158,18 +158,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case TopLevelGotoStatement statement:
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);
                 break;
-            case TopLevelIfStatement statement:
-                Scope ifScope = statement.Declaration is not null ? context.CreateScope(scope) : scope;
-                if (statement.Declaration is not null)
-                {
-                    ResolveDeclarationSyntax(statement.Declaration, ifScope, containingFunction);
-                }
-                ResolveExpression(statement.Condition, ifScope, containingFunction);
-                ResolveTopLevel(statement.ThenStatement, ifScope, containingFunction);
 
-                if (statement.ElseStatement is not null)
-                    ResolveTopLevel(statement.ElseStatement.Statement, ifScope, containingFunction);
-                break;
             case TopLevelWhileStatement statement:
                 Scope whileScope = statement.Declaration is not null ? context.CreateScope(scope) : scope;
                 if (statement.Declaration is not null)
@@ -381,19 +370,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             context.Diagnostics.ReportConstructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
         }
-        else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
-        {
-            context.Diagnostics.ReportDestructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-        }
-        else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
-        {
-            context.Diagnostics.ReportOperatorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-        }
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor and not SpecialFunctionKind.Destructor)
+        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
@@ -412,14 +393,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 context.Diagnostics.ReportConstructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
             }
-            else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
-            {
-                context.Diagnostics.ReportDestructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-            }
-            else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
-            {
-                context.Diagnostics.ReportOperatorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-            }
         }
         else
         {
@@ -432,29 +405,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     context.Diagnostics.ReportConstructorNameMismatch(constructorName, enclosingTypeName, symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
                 }
             }
-            else if (symbol.SpecialKind is SpecialFunctionKind.Destructor)
-            {
-                if (symbol.Syntax.Signature.Parameters.Count > 0)
-                {
-                    var paramSpan = TextSpan.FromBounds(
-                        symbol.Syntax.Signature.OpenParen.Span.Start,
-                        symbol.Syntax.Signature.CloseParen.Span.End);
-                    context.Diagnostics.ReportDestructorHasParameters(paramSpan, symbol.Syntax.GetSource());
-                }
-            }
-            else if (symbol.SpecialKind is SpecialFunctionKind.Operator)
-            {
-                if ((symbol.Flags & FunctionFlags.Static) == 0)
-                {
-                    context.Diagnostics.ReportOperatorMustBeStatic(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-                }
-            }
         }
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor and not SpecialFunctionKind.Destructor)
+        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
@@ -562,27 +518,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         switch (local)
         {
-            case LocalBlockStatement block:
-                Scope blockScope = context.GetSyntaxScope(block, scope);
-                foreach (var child in block.Locals)
-                    ResolveLocal(child, blockScope, containingFunction);
-                break;
             case LocalExpressionStatement statement:
                 ResolveExpression(statement.Expression, scope, containingFunction);
                 break;
             case LocalReturnStatement statement:
                 ResolveExpression(statement.Statement.Expression, scope, containingFunction);
-                break;
-            case LocalIfStatement statement:
-                Scope ifScope = statement.Declaration is not null ? context.GetSyntaxScope(statement, scope) : scope;
-                if (statement.Declaration is not null)
-                {
-                    ResolveDeclarationSyntax(statement.Declaration, ifScope, containingFunction);
-                }
-                ResolveExpression(statement.Condition, ifScope, containingFunction);
-                ResolveLocal(statement.ThenStatement, ifScope, containingFunction);
-                if (statement.ElseStatement is not null)
-                    ResolveLocal(statement.ElseStatement.Statement, ifScope, containingFunction);
                 break;
             case LocalWhileStatement statement:
                 Scope whileScope = statement.Declaration is not null ? context.GetSyntaxScope(statement, scope) : scope;
@@ -1002,9 +942,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveExpression(argument.Value, scope, containingSymbol);
                 break;
             case IfExpression conditional:
-                ResolveExpression(conditional.Condition, scope, containingSymbol);
-                ResolveExpression(conditional.ThenExpression, scope, containingSymbol);
-                ResolveExpression(conditional.ElseExpression, scope, containingSymbol);
+                Scope ifScope = conditional.Declaration is not null ? context.GetSyntaxScope(conditional, scope) : scope;
+                if (conditional.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(conditional.Declaration, ifScope, containingSymbol);
+                }
+                ResolveExpression(conditional.Condition, ifScope, containingSymbol);
+                ResolveExpression(conditional.ThenExpression, ifScope, containingSymbol);
+                ResolveExpression(conditional.ElseExpression, ifScope, containingSymbol);
                 break;
             case ElseExpression @else:
                 ResolveExpression(@else.Expression, scope, containingSymbol);
@@ -1107,24 +1052,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private static void PopulateProductMembers(TypeSymbol symbol)
     {
         if (symbol is ProductTypeSymbol product)
-            PopulateProductMembers(product.Fields, product.Properties, product.Methods, product.NestedTypes, product.OperatorOverloads, GetOwnedScope(product));
+            PopulateProductMembers(product.Fields, product.Properties, product.Methods, product.NestedTypes, GetOwnedScope(product));
     }
 
     private static void PopulateProductMembers(NestedTypeSymbol symbol)
     {
         if (symbol is MemberProductTypeSymbol member)
-            PopulateProductMembers(member.Fields, member.Properties, member.Methods, member.NestedTypes, member.OperatorOverloads, GetOwnedScope(member));
+            PopulateProductMembers(member.Fields, member.Properties, member.Methods, member.NestedTypes, GetOwnedScope(member));
         else if (symbol is LocalProductTypeSymbol local)
-            PopulateProductMembers(local.Fields, local.Properties, local.Methods, local.NestedTypes, local.OperatorOverloads, GetOwnedScope(local));
+            PopulateProductMembers(local.Fields, local.Properties, local.Methods, local.NestedTypes, GetOwnedScope(local));
     }
 
-    private static void PopulateProductMembers(List<SymbolHandle> fields, List<SymbolHandle> properties, List<SymbolHandle> methods, List<SymbolHandle> nestedTypes, Dictionary<Syntax.OperatorKind, List<SymbolHandle>> operatorOverloads, Scope scope)
+    private static void PopulateProductMembers(List<SymbolHandle> fields, List<SymbolHandle> properties, List<SymbolHandle> methods, List<SymbolHandle> nestedTypes, Scope scope)
     {
         fields.Clear();
         properties.Clear();
         methods.Clear();
         nestedTypes.Clear();
-        operatorOverloads.Clear();
 
         foreach (var symbol in scope.Symbols.Values)
         {
@@ -1140,13 +1084,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     break;
                 case SymbolKind.Method:
                     methods.Add(handle);
-                    if (symbol is MethodSymbol { OperatorKind: { } opKind })
-                    {
-                        if (!operatorOverloads.TryGetValue(opKind, out var overloads))
-                            operatorOverloads[opKind] = overloads = [];
-
-                        overloads.Add(handle);
-                    }
                     break;
                 case SymbolKind.NestedType:
                     nestedTypes.Add(handle);

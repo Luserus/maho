@@ -13,21 +13,16 @@ The `Statements` folder contains AST node shapes for statements at both the top 
 ### Top-level block and statement forms
 
 - `TopLevelBlock`
-- `TopLevelElseStatement`
 - `TopLevelEmptyStatement`
 - `TopLevelExpressionStatement`
-- `TopLevelIfStatement`
 - `TopLevelReturnStatement`
 - `TopLevelVariableDeclarationStatement`
 - `TopLevelWhileStatement`
 
 ### Local statement forms
 
-- `LocalBlockStatement`
-- `LocalElseStatement`
 - `LocalEmptyStatement`
 - `LocalExpressionStatement`
-- `LocalIfStatement`
 - `LocalReturnStatement`
 - `LocalVariableDeclarationStatement`
 - `LocalWhileStatement`
@@ -43,11 +38,13 @@ That makes the syntax tree more explicit, even if it produces more files.
 
 The payoff is that parser and later semantic code can tell whether a statement appeared in top-level or local scope without reconstructing that context from parent chains.
 
+Note that blocks and `if` statements are unified into expressions (`BlockExpression`, `IfExpression`) wrapped in `TopLevelExpressionStatement` or `LocalExpressionStatement`. When a block expression or if expression (ending with a block) does not immediately precede `}` in an enclosing block, the compiler fabricates an expression statement without requiring a semicolon.
+
 Top-level statement nodes require file-level opt-in through `#pragma toplevel enable`. During
 resolution, variables in an opted-in compilation unit are treated as locals of that file's
 implicit `Main` function.
 
-Conditional statement headers (`LocalIfStatement`, `TopLevelIfStatement`, `LocalWhileStatement`, and `TopLevelWhileStatement`) support either a simple `expression` condition or a `declaration; expression` syntax (e.g. `if (int x = f(); x > 0)`), scoping any declared variable to both the test expression and the statement body.
+Conditional headers in `IfExpression`, `LocalWhileStatement`, and `TopLevelWhileStatement` support either a simple `expression` condition or a `declaration; expression` syntax (e.g. `if (int x = f(); x > 0)`), scoping any declared variable to both the test expression and the then/body expression.
 
 ## How to traverse this folder
 

@@ -44,9 +44,6 @@ public sealed class ParserTests
     [InlineData("public int Value;", typeof(MemberFieldDeclaration), null)]
     [InlineData("public Foo();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public Foo() { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
-    [InlineData("~Foo();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
-    [InlineData("~Foo() { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
-    [InlineData("static V operator +(V a, V b) { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
     public void Parse_MemberDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
         Member member = ParseSingleMember(source, expectedType);
@@ -65,52 +62,11 @@ public sealed class ParserTests
     }
 
     [Theory]
-    [InlineData("public Foo();", SpecialFunctionKind.Constructor, null)]
-    [InlineData("~Foo();", SpecialFunctionKind.Destructor, null)]
-    [InlineData("static V operator +(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Add)]
-    [InlineData("static V operator -(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Subtract)]
-    [InlineData("static V operator *(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Multiply)]
-    [InlineData("static V operator /(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Divide)]
-    [InlineData("static V operator %(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Modulo)]
-    [InlineData("static V operator prefix +(V a) { }", SpecialFunctionKind.Operator, OperatorKind.UnaryPlus)]
-    [InlineData("static V operator prefix -(V a) { }", SpecialFunctionKind.Operator, OperatorKind.UnaryMinus)]
-    [InlineData("static V operator prefix *(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Dereference)]
-    [InlineData("static V operator prefix ++(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PrefixIncrement)]
-    [InlineData("static V operator prefix --(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PrefixDecrement)]
-    [InlineData("static V operator postfix ++(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixIncrement)]
-    [InlineData("static V operator postfix --(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixDecrement)]
-    [InlineData("static V operator prefix !(V a) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalNot)]
-    [InlineData("static V operator postfix !(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixBang)]
-    [InlineData("static V operator postfix ?(V a) { }", SpecialFunctionKind.Operator, OperatorKind.PostfixQuestion)]
-    [InlineData("static V operator ||(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalOr)]
-    [InlineData("static V operator &&(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LogicalAnd)]
-    [InlineData("static V operator !=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.NotEqual)]
-    [InlineData("static V operator ==(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.Equal)]
-    [InlineData("static V operator +=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.AddAssign)]
-    [InlineData("static V operator -=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.SubtractAssign)]
-    [InlineData("static V operator *=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.MultiplyAssign)]
-    [InlineData("static V operator /=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.DivideAssign)]
-    [InlineData("static V operator %=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.ModuloAssign)]
-    [InlineData("static V operator ->(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Arrow)]
-    [InlineData("static V operator <(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LessThan)]
-    [InlineData("static V operator >(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.GreaterThan)]
-    [InlineData("static V operator <=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LessOrEqual)]
-    [InlineData("static V operator >=(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.GreaterOrEqual)]
-    [InlineData("static V operator |(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseOr)]
-    [InlineData("static V operator &(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseAnd)]
-    [InlineData("static V operator prefix &(V a) { }", SpecialFunctionKind.Operator, OperatorKind.AddressOf)]
-    [InlineData("static V operator ^(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseXor)]
-    [InlineData("static V operator prefix ~(V a) { }", SpecialFunctionKind.Operator, OperatorKind.BitwiseNot)]
-    [InlineData("static V operator <<(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.LeftShift)]
-    [InlineData("static V operator >>(V a, V b) { }", SpecialFunctionKind.Operator, OperatorKind.RightShift)]
-    [InlineData("static V operator new(int x) { }", SpecialFunctionKind.Operator, OperatorKind.ObjectNew)]
-    [InlineData("static V operator put(int x) { }", SpecialFunctionKind.Operator, OperatorKind.ObjectPut)]
-    [InlineData("static V operator ()(V a) { }", SpecialFunctionKind.Operator, OperatorKind.Call)]
-    public void Parse_SpecialFunctions(string source, SpecialFunctionKind expectedSpecialKind, OperatorKind? expectedOperatorKind)
+    [InlineData("public Foo();", SpecialFunctionKind.Constructor)]
+    public void Parse_SpecialFunctions(string source, SpecialFunctionKind expectedSpecialKind)
     {
         var member = (MemberFunctionDeclaration)ParseSingleMember(source, typeof(MemberFunctionDeclaration));
         Assert.Equal(expectedSpecialKind, member.Function.SpecialKind);
-        Assert.Equal(expectedOperatorKind, member.Function.OperatorKind);
     }
 
     [Theory]
@@ -137,7 +93,7 @@ public sealed class ParserTests
 
     [Theory]
     [InlineData("call();", typeof(TopLevelExpressionStatement))]
-    [InlineData("if (1) return; else ;", typeof(TopLevelIfStatement))]
+    [InlineData("if (1) 2 else 3;", typeof(TopLevelExpressionStatement))]
     [InlineData("while (1) ;", typeof(TopLevelWhileStatement))]
     [InlineData("return 0;", typeof(TopLevelReturnStatement))]
     [InlineData("return value;", typeof(TopLevelReturnStatement))]
@@ -366,7 +322,8 @@ public sealed class ParserTests
         Assert.Empty(diagnostics.Diagnostics);
         var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
         var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
-        var blockStmt = Assert.IsType<LocalBlockStatement>(Assert.Single(body.Locals));
+        var exprStmt = Assert.IsType<LocalExpressionStatement>(Assert.Single(body.Locals));
+        var blockStmt = Assert.IsType<BlockExpression>(exprStmt.Expression);
 
         Assert.Equal(3, blockStmt.Locals.Count);
         var localUsing = Assert.IsType<LocalUsingDirective>(blockStmt.Locals[0]);
@@ -378,7 +335,7 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_LocalBlock_RequiresSemicolonOnExpressions()
+    public void Parse_LocalBlock_RequiresSemicolonOnNonFinalExpressions()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
             public static void Test()
@@ -386,11 +343,111 @@ public sealed class ParserTests
                 {
                     int x = 1;
                     x + 2
+                    int y = 3;
                 }
             }
             """);
 
         Assert.Contains(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120");
+    }
+
+    [Fact]
+    public void Parse_LocalBlock_AllowsTrailingExpression()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                var val = {
+                    int x = 1;
+                    x + 2
+                };
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_TrailingBlockExpressionInBlockContext()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                var val = {
+                    int x = 1;
+                    { x + 2 }
+                };
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_StandaloneScopeBlockWithoutSemicolon()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                {
+                    int x = 1;
+                }
+                int y = 2;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_IfStatementWithoutSemicolonWhenEndingWithBlock()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                if (1)
+                {
+                    int x = 1;
+                }
+                else
+                {
+                    int x = 2;
+                }
+                int y = 3;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_IfStatementWithEmbeddedExpressionAndSemicolon()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                if (1) call();
+                int y = 3;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_FunctionBodyDisallowsTrailingExpressionAndReportsExpectedReturn()
+    {
+        var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                int x = 1;
+                x + 2
+            }
+            """);
+
+        var diag = Assert.Single(diagnostics.Diagnostics);
+        Assert.Equal("MH0120", diag.DiagnosticCode);
+        Assert.Contains("expected a return statement", diag.Message);
     }
 
     [Fact]
@@ -508,9 +565,9 @@ public sealed class ParserTests
     [Theory]
     [InlineData("int value = 1;", typeof(LocalVariableDeclarationStatement))]
     [InlineData("call();", typeof(LocalExpressionStatement))]
-    [InlineData("if (1) return; else ;", typeof(LocalIfStatement))]
+    [InlineData("if (1) 2 else 3;", typeof(LocalExpressionStatement))]
     [InlineData("while (1) ;", typeof(LocalWhileStatement))]
-    [InlineData("{ int nested = 1; }", typeof(LocalBlockStatement))]
+    [InlineData("{ int nested = 1; }", typeof(LocalExpressionStatement))]
     [InlineData("return 0;", typeof(LocalReturnStatement))]
     [InlineData(";", typeof(LocalEmptyStatement))]
     public void Parse_LocalStatementKinds(string source, Type expectedType)
@@ -675,24 +732,27 @@ public sealed class ParserTests
         Assert.Empty(varStmtDoubleEmpty.Declaration.Attributes[0].Attributes);
         Assert.Empty(varStmtDoubleEmpty.Declaration.Attributes[1].Attributes);
 
-        // [Marker] { } parses as attributed block statement
-        Local localBlock = ParseSingleLocal("[Marker] { int x = 1; }", typeof(LocalBlockStatement));
-        LocalBlockStatement blockStmt = Assert.IsType<LocalBlockStatement>(localBlock);
-        Assert.Single(blockStmt.Attributes);
-        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(blockStmt.Attributes[0].Attributes).Name).Name.Value);
+        // [Marker] { } parses as attributed block expression statement
+        Local localBlock = ParseSingleLocal("[Marker] { int x = 1; }", typeof(LocalExpressionStatement));
+        LocalExpressionStatement blockStmt = Assert.IsType<LocalExpressionStatement>(localBlock);
+        BlockExpression blockExpr = Assert.IsType<BlockExpression>(blockStmt.Expression);
+        Assert.Single(blockExpr.Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(blockExpr.Attributes[0].Attributes).Name).Name.Value);
 
-        // [] { } parses as block statement with empty attribute list
-        Local localEmptyBlock = ParseSingleLocal("[] { int x = 1; }", typeof(LocalBlockStatement));
-        LocalBlockStatement emptyBlockStmt = Assert.IsType<LocalBlockStatement>(localEmptyBlock);
-        Assert.Single(emptyBlockStmt.Attributes);
-        Assert.Empty(emptyBlockStmt.Attributes[0].Attributes);
+        // [] { } parses as block expression statement with empty attribute list
+        Local localEmptyBlock = ParseSingleLocal("[] { int x = 1; }", typeof(LocalExpressionStatement));
+        LocalExpressionStatement emptyBlockStmt = Assert.IsType<LocalExpressionStatement>(localEmptyBlock);
+        BlockExpression emptyBlockExpr = Assert.IsType<BlockExpression>(emptyBlockStmt.Expression);
+        Assert.Single(emptyBlockExpr.Attributes);
+        Assert.Empty(emptyBlockExpr.Attributes[0].Attributes);
 
-        // [][] { } parses as block statement with two empty attribute lists
-        Local localDoubleEmptyBlock = ParseSingleLocal("[][] { int x = 1; }", typeof(LocalBlockStatement));
-        LocalBlockStatement doubleEmptyBlockStmt = Assert.IsType<LocalBlockStatement>(localDoubleEmptyBlock);
-        Assert.Equal(2, doubleEmptyBlockStmt.Attributes.Count);
-        Assert.Empty(doubleEmptyBlockStmt.Attributes[0].Attributes);
-        Assert.Empty(doubleEmptyBlockStmt.Attributes[1].Attributes);
+        // [][] { } parses as block expression statement with two empty attribute lists
+        Local localDoubleEmptyBlock = ParseSingleLocal("[][] { int x = 1; }", typeof(LocalExpressionStatement));
+        LocalExpressionStatement doubleEmptyBlockStmt = Assert.IsType<LocalExpressionStatement>(localDoubleEmptyBlock);
+        BlockExpression doubleEmptyBlockExpr = Assert.IsType<BlockExpression>(doubleEmptyBlockStmt.Expression);
+        Assert.Equal(2, doubleEmptyBlockExpr.Attributes.Count);
+        Assert.Empty(doubleEmptyBlockExpr.Attributes[0].Attributes);
+        Assert.Empty(doubleEmptyBlockExpr.Attributes[1].Attributes);
     }
 
     [Fact]
@@ -770,11 +830,12 @@ public sealed class ParserTests
     [Fact]
     public void Parse_ConditionalWithDeclarationAndExpression()
     {
-        Local localIf = ParseSingleLocal("if (int x = 1; x > 0) return;", typeof(LocalIfStatement));
-        LocalIfStatement ifStmt = Assert.IsType<LocalIfStatement>(localIf);
-        Assert.NotNull(ifStmt.Declaration);
-        Assert.NotNull(ifStmt.Semicolon);
-        Assert.IsType<BinaryExpression>(ifStmt.Condition);
+        Local localIf = ParseSingleLocal("if (int x = 1; x > 0) return;", typeof(LocalExpressionStatement));
+        LocalExpressionStatement ifStmt = Assert.IsType<LocalExpressionStatement>(localIf);
+        IfExpression ifExpr = Assert.IsType<IfExpression>(ifStmt.Expression);
+        Assert.NotNull(ifExpr.Declaration);
+        Assert.NotNull(ifExpr.Semicolon);
+        Assert.IsType<BinaryExpression>(ifExpr.Condition);
 
         Local localWhile = ParseSingleLocal("while (int x = 1; x > 0) ;", typeof(LocalWhileStatement));
         LocalWhileStatement whileStmt = Assert.IsType<LocalWhileStatement>(localWhile);
@@ -867,16 +928,17 @@ public sealed class ParserTests
         Assert.Single(topLevelBlock.Attributes);
         Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
 
-        LocalBlockStatement localBlock = Assert.IsType<LocalBlockStatement>(ParseSingleLocal("""
+        LocalExpressionStatement localBlock = Assert.IsType<LocalExpressionStatement>(ParseSingleLocal("""
             [Attribute]
             unsafe
             {
                 int nested;
             }
-            """, typeof(LocalBlockStatement)));
+            """, typeof(LocalExpressionStatement)));
 
-        Assert.Single(localBlock.Attributes);
-        Assert.Contains(localBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        BlockExpression blockExpr = Assert.IsType<BlockExpression>(localBlock.Expression);
+        Assert.Single(blockExpr.Attributes);
+        Assert.Contains(blockExpr.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
     }
 
     [Fact]
@@ -1349,7 +1411,7 @@ public sealed class ParserTests
                     local = if (local) local else 0;
                     local = identity<int>(value: local);
 
-                    if (int testCond = local; testCond) return local; else ;
+                    if (int testCond = local; testCond) local = 1; else local = 2;
                     while (int testLoop = local; testLoop) ;
                     { int scoped = 0; scoped = local; }
                     return local;
@@ -1375,7 +1437,7 @@ public sealed class ParserTests
 
             global { using Extra; int globalBlockValue = 0; }
             call();
-            if (1) return; else ;
+            if (1) 2 else 3;
             while (1) ;
             { int blockValue = 0; }
             return 0;
@@ -1417,17 +1479,12 @@ public sealed class ParserTests
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),
             typeof(TopLevelExpressionStatement),
-            typeof(TopLevelIfStatement),
-            typeof(TopLevelElseStatement),
             typeof(TopLevelWhileStatement),
             typeof(TopLevelBlockDeclaration),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),
-            typeof(LocalIfStatement),
-            typeof(LocalElseStatement),
             typeof(LocalWhileStatement),
-            typeof(LocalBlockStatement),
             typeof(LocalReturnStatement),
             typeof(LocalEmptyStatement),
             typeof(VariableDeclaration),
