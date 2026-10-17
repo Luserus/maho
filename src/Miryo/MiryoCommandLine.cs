@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
 using Miryo.Build;
 
 namespace Miryo;
@@ -28,7 +31,17 @@ public static class MiryoCommandLine
         }
     }
 
-    public static int Run(string[] args) => Run(args, Console.Out, Console.Error);
+    public static int Run(string[] args)
+    {
+        try
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+        catch
+        {
+        }
+        return Run(args, Console.Out, Console.Error);
+    }
 
     public static int Run(string[] args, TextWriter stdout, TextWriter stderr)
     {
@@ -204,6 +217,7 @@ public static class MiryoCommandLine
         bool noProject = false;
         bool stopAtIl = false;
         string? outputDir = null;
+        string? colorMode = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -226,6 +240,19 @@ public static class MiryoCommandLine
                     break;
                 case "--check":
                     checkOnly = true;
+                    break;
+                case "--color":
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                    {
+                        colorMode = args[++i].ToLowerInvariant();
+                    }
+                    else
+                    {
+                        colorMode = "always";
+                    }
+                    break;
+                case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
+                    colorMode = c[(c.IndexOf('=') + 1)..].ToLowerInvariant();
                     break;
                 case "-o" or "--output":
                     if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
@@ -256,6 +283,7 @@ public static class MiryoCommandLine
 
         targetPath ??= Directory.GetCurrentDirectory();
         string fullTargetPath = Path.GetFullPath(targetPath);
+        var buildTimer = Stopwatch.StartNew();
 
         MiryoConfiguration config;
         try
@@ -278,6 +306,19 @@ public static class MiryoCommandLine
         }
 
         var mahocArgs = new List<string>();
+        string displayProjectName = Path.GetFileNameWithoutExtension(fullTargetPath);
+        if (!noProject && Directory.Exists(fullTargetPath))
+        {
+            string? foundProject = MiryoBuildSystem.FindProjectFile(fullTargetPath);
+            if (foundProject is not null)
+                displayProjectName = Path.GetFileNameWithoutExtension(foundProject);
+        }
+
+        string[]? explicitSourcePaths = null;
+        bool useColors = ShouldUseColors(colorMode);
+
+        mahocArgs.Add("--color");
+        mahocArgs.Add(useColors ? "always" : "never");
 
         if (checkOnly)
             mahocArgs.Add("--check");
@@ -290,19 +331,28 @@ public static class MiryoCommandLine
             mahocArgs.Add(outputDir);
         }
 
+        stdout.WriteLine($"Building {displayProjectName}:");
+        StartPipelineStage(stdout, "Analyzing project configuration...");
+        var configurationTimer = Stopwatch.StartNew();
+
         if (noProject)
         {
-            if (File.Exists(fullTargetPath))
-            {
-                mahocArgs.Add(fullTargetPath);
-            }
-            else if (Directory.Exists(fullTargetPath))
+            if (File.Exists(fullTargetPath) || Directory.Exists(fullTargetPath))
             {
                 mahocArgs.Add(fullTargetPath);
             }
             else
             {
+                configurationTimer.Stop();
+                CompletePipelineStage(stdout, success: false, configurationTimer.Elapsed, useColors);
+                stdout.Flush();
+                stderr.WriteLine();
+                stderr.WriteLine("Project:");
                 stderr.WriteLine($"Input path not found: {fullTargetPath}");
+                stderr.Flush();
+                stdout.WriteLine();
+                stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.Flush();
                 return 1;
             }
         }
@@ -318,14 +368,32 @@ public static class MiryoCommandLine
                 string? found = MiryoBuildSystem.FindProjectFile(fullTargetPath);
                 if (found is null)
                 {
+                    configurationTimer.Stop();
+                    CompletePipelineStage(stdout, success: false, configurationTimer.Elapsed, useColors);
+                    stdout.Flush();
+                    stderr.WriteLine();
+                    stderr.WriteLine("Project:");
                     stderr.WriteLine($"No project file ('.mhpr') found in '{fullTargetPath}'. Use --no-project to compile without a project file.");
+                    stderr.Flush();
+                    stdout.WriteLine();
+                    stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                    stdout.Flush();
                     return 1;
                 }
                 projectFilePath = found;
             }
             else
             {
+                configurationTimer.Stop();
+                CompletePipelineStage(stdout, success: false, configurationTimer.Elapsed, useColors);
+                stdout.Flush();
+                stderr.WriteLine();
+                stderr.WriteLine("Project:");
                 stderr.WriteLine($"Target path not found: {fullTargetPath}");
+                stderr.Flush();
+                stdout.WriteLine();
+                stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.Flush();
                 return 1;
             }
 
@@ -336,7 +404,16 @@ public static class MiryoCommandLine
             }
             catch (Exception ex)
             {
+                configurationTimer.Stop();
+                CompletePipelineStage(stdout, success: false, configurationTimer.Elapsed, useColors);
+                stdout.Flush();
+                stderr.WriteLine();
+                stderr.WriteLine("Project:");
                 stderr.WriteLine($"Failed to load project '{projectFilePath}': {ex.Message}");
+                stderr.Flush();
+                stdout.WriteLine();
+                stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.Flush();
                 return 1;
             }
 
@@ -349,11 +426,26 @@ public static class MiryoCommandLine
 
                 if (!File.Exists(refPath) && !Directory.Exists(refPath))
                 {
+                    configurationTimer.Stop();
+                    CompletePipelineStage(stdout, success: false, configurationTimer.Elapsed, useColors);
+                    stdout.Flush();
+                    stderr.WriteLine();
+                    stderr.WriteLine("Project:");
                     stderr.WriteLine($"Referenced project not found: {refPath}");
+                    stderr.Flush();
+                    stdout.WriteLine();
+                    stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                    stdout.Flush();
                     return 1;
                 }
 
-                int refExit = ExecuteBuild([refPath], stdout, stderr, checkOnly);
+                var refArgs = new List<string> { refPath };
+                if (colorMode is not null)
+                {
+                    refArgs.Add("--color");
+                    refArgs.Add(colorMode);
+                }
+                int refExit = ExecuteBuild([.. refArgs], stdout, stderr, checkOnly);
                 if (refExit != 0)
                     return refExit;
             }
@@ -377,28 +469,167 @@ public static class MiryoCommandLine
                 mahocArgs.Add($"{aliasName}={target}");
             }
 
-            foreach (string file in project.SourceFiles)
-                mahocArgs.Add(file);
+            foreach (string referencedProject in project.ProjectsReferenced)
+            {
+                string referencePath = Path.IsPathRooted(referencedProject)
+                    ? referencedProject
+                    : Path.GetFullPath(Path.Combine(project.ProjectDirectory, referencedProject));
+                mahocArgs.Add("--reference-project");
+                mahocArgs.Add(referencePath);
+            }
+
+            mahocArgs.Add("--project-name");
+            mahocArgs.Add(project.ProjectName);
+            mahocArgs.Add("--module-name");
+            mahocArgs.Add(ToKebabCase(project.ProjectName));
+            mahocArgs.Add("--project-directory");
+            mahocArgs.Add(project.ProjectDirectory);
+            mahocArgs.Add("--source-paths-stdin");
+            explicitSourcePaths = [.. project.SourceFiles];
         }
+
+        string? serverPath = config.FindTool("mahoc_server");
+        if (serverPath is not null)
+        {
+            mahocArgs.Add("--server-path");
+            mahocArgs.Add(serverPath);
+        }
+
+        configurationTimer.Stop();
+        CompletePipelineStage(stdout, success: true, configurationTimer.Elapsed, useColors);
+
+        StartPipelineStage(stdout, "Executing core compile...");
+        var compileTimer = Stopwatch.StartNew();
 
         try
         {
             var psi = MiryoConfiguration.CreateProcessStartInfo(mahocPath, mahocArgs);
+            psi.RedirectStandardInput = explicitSourcePaths is not null;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            string resultPipeName = $"miryo-result-{Guid.NewGuid():N}";
+            psi.ArgumentList.Add("--result-pipe");
+            psi.ArgumentList.Add(resultPipeName);
+
+            using var resultPipe = new NamedPipeServerStream(resultPipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             using var process = Process.Start(psi);
             if (process is null)
             {
+                compileTimer.Stop();
+                CompletePipelineStage(stdout, success: false, compileTimer.Elapsed, useColors);
+                stdout.Flush();
+                stderr.WriteLine();
+                stderr.WriteLine("Compiler:");
                 stderr.WriteLine("Failed to launch 'mahoc' process.");
+                stderr.Flush();
+                stdout.WriteLine();
+                stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.Flush();
                 return 1;
             }
 
+            if (explicitSourcePaths is not null)
+            {
+                foreach (string sourcePath in explicitSourcePaths)
+                    process.StandardInput.WriteLine(sourcePath);
+                process.StandardInput.Close();
+            }
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var diagnosticsTask = process.StandardError.ReadToEndAsync();
+            using var pipeTimeout = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var pipeConnection = resultPipe.WaitForConnectionAsync(pipeTimeout.Token);
+            pipeConnection.GetAwaiter().GetResult();
+            using var resultReader = new StreamReader(resultPipe, Encoding.UTF8, leaveOpen: true);
+            string resultJson = resultReader.ReadToEnd();
             process.WaitForExit();
+
+            compileTimer.Stop();
+            string compilerOutput = outputTask.GetAwaiter().GetResult();
+            string diagnostics = diagnosticsTask.GetAwaiter().GetResult();
+
+            long elapsedTicks = compileTimer.Elapsed.Ticks;
+            bool hasErrors = process.ExitCode != 0;
+            bool laterStagesNotImplemented = false;
+            if (!string.IsNullOrWhiteSpace(resultJson))
+            {
+                using JsonDocument result = JsonDocument.Parse(resultJson);
+                var root = result.RootElement;
+                if (root.TryGetProperty("elapsedTicks", out JsonElement ticks))
+                    elapsedTicks = ticks.GetInt64();
+                if (root.TryGetProperty("hasErrors", out JsonElement errors))
+                    hasErrors = errors.GetBoolean();
+                laterStagesNotImplemented = root.TryGetProperty("pipelineError", out JsonElement pipeline) &&
+                    pipeline.ValueKind == JsonValueKind.String &&
+                    pipeline.GetString()?.Contains("lowering and code-generation", StringComparison.OrdinalIgnoreCase) == true;
+            }
+
+            TimeSpan compileElapsed = TimeSpan.FromTicks(elapsedTicks);
+            CompletePipelineStage(stdout, success: !hasErrors, compileElapsed, useColors);
+
+            if (!string.IsNullOrEmpty(compilerOutput))
+            {
+                stdout.Write(compilerOutput);
+                stdout.Flush();
+            }
+
+            if (!string.IsNullOrWhiteSpace(diagnostics))
+            {
+                stdout.Flush();
+                stderr.WriteLine();
+                stderr.WriteLine("Compiler:");
+                stderr.WriteLine(diagnostics.TrimEnd());
+                stderr.Flush();
+            }
+
+            if (laterStagesNotImplemented)
+            {
+                stdout.WriteLine($"build {FormatFailed("failed", useColors)} due to later stages not being implemented");
+            }
+
+            stdout.WriteLine();
+            stdout.WriteLine($"build {FormatStatus(process.ExitCode == 0, useColors, capitalize: false)} in {FormatElapsed(buildTimer.Elapsed)}");
+            stdout.Flush();
             return process.ExitCode;
         }
         catch (Exception ex)
         {
+            compileTimer.Stop();
+            CompletePipelineStage(stdout, success: false, compileTimer.Elapsed, useColors);
+            stdout.Flush();
+            stderr.WriteLine();
+            stderr.WriteLine("Compiler:");
             stderr.WriteLine($"Error launching compiler: {ex.Message}");
+            stderr.Flush();
+            stdout.WriteLine();
+            stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+            stdout.Flush();
             return 1;
         }
+    }
+
+    private static string ToKebabCase(string value)
+    {
+        var result = new StringBuilder(value.Length + 8);
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
+                result.Append('-');
+            result.Append(char.ToLowerInvariant(value[i]));
+        }
+        return result.ToString();
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds >= 1)
+            return $"{elapsed.TotalSeconds:0.##}s";
+        if (elapsed.TotalMilliseconds >= 1)
+            return $"{elapsed.TotalMilliseconds:0.##}ms";
+        if (elapsed.TotalMicroseconds >= 1)
+            return $"{elapsed.TotalMicroseconds:0.##}µs";
+        return $"{elapsed.Ticks * 100:n0}ns";
     }
 
     private static int ExecuteRun(string[] args, TextWriter stdout, TextWriter stderr)
@@ -425,7 +656,8 @@ public static class MiryoCommandLine
             return buildExit;
         }
 
-        stderr.WriteLine("Run failed: Native code execution pipeline not implemented yet.");
+        bool useColors = ShouldUseColors(null);
+        stderr.WriteLine($"Run {FormatFailed("failed", useColors)}: Native code execution pipeline not implemented yet.");
         return 1;
     }
 
@@ -505,7 +737,47 @@ public static class MiryoCommandLine
         writer.WriteLine("  --stop-at-il          Compile up to Maho Intermediate Language (IL) and halt");
         writer.WriteLine("  --check               Verify syntax and semantics without code generation");
         writer.WriteLine("  -o, --output <dir>    Set output directory destination");
+        writer.WriteLine("  --color <mode>        Control ANSI colored diagnostics (auto, always, never)");
         writer.WriteLine("  --config <path>       Specify toolchain configuration file (default: miryo.config)");
         writer.WriteLine("  -h, --help            Show this help text");
+    }
+
+    private const string AnsiReset = "\u001b[0m";
+    private const string AnsiRed = "\u001b[31;1m";
+    private const string AnsiGreen = "\u001b[32;1m";
+
+    private static bool ShouldUseColors(string? colorMode) => colorMode switch
+    {
+        "always" => true,
+        "never" => false,
+        _ => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
+             Environment.GetEnvironmentVariable("NO_COLOR") == null &&
+             Environment.GetEnvironmentVariable("TERM") != "dumb"
+    };
+
+    private static string FormatSuccess(string text, bool useColors) => useColors ? $"{AnsiGreen}{text}{AnsiReset}" : text;
+    private static string FormatFailed(string text, bool useColors) => useColors ? $"{AnsiRed}{text}{AnsiReset}" : text;
+
+    private static string FormatStatus(bool success, bool useColors, bool capitalize = true)
+    {
+        string text = success ? (capitalize ? "Success" : "success") : (capitalize ? "Failed" : "failed");
+        return success ? FormatSuccess(text, useColors) : FormatFailed(text, useColors);
+    }
+
+    private static void StartPipelineStage(TextWriter writer, string stage)
+    {
+        const int ColumnWidth = 42;
+        string paddedStage = stage.PadRight(ColumnWidth);
+        writer.Write(paddedStage);
+        writer.Flush();
+    }
+
+    private static void CompletePipelineStage(TextWriter writer, bool success, TimeSpan elapsed, bool useColors)
+    {
+        string status = success
+            ? FormatSuccess("Success", useColors)
+            : $"{FormatFailed("Failed", useColors)} ";
+        writer.WriteLine($"{status} | {FormatElapsed(elapsed)}");
+        writer.Flush();
     }
 }

@@ -16,7 +16,7 @@ internal sealed class Resolver
     private readonly ResolvedTree resolvedTree = new ResolvedTree();
 
     public ResolutionContext Resolve(
-        SyntaxTree syntaxTree,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
         ResolutionContext? baseContext = null,
         DiagnosticsManager? diagnostics = null,
@@ -54,7 +54,7 @@ internal sealed class Resolver
         }
 
         var context = new ResolutionContext(
-            syntaxTree,
+            syntaxTrees,
             resolved,
             globalNamespace,
             symbolStore,
@@ -69,4 +69,12 @@ internal sealed class Resolver
 
         return context;
     }
+
+    public ResolutionContext Resolve(
+        SyntaxTree syntaxTree,
+        IReadOnlyList<ResolutionContext>? referencedProjects = null,
+        ResolutionContext? baseContext = null,
+        DiagnosticsManager? diagnostics = null,
+        CompilationOptions? options = null) =>
+        Resolve([syntaxTree], referencedProjects, baseContext, diagnostics, options);
 }

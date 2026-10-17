@@ -4,6 +4,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLI_PROJECT="$REPO_ROOT/src/MahoCli/MahoCli.csproj"
+SERVER_PROJECT="$REPO_ROOT/src/MahoServer/MahoServer.csproj"
+SERVER_HOST_PROJECT="$REPO_ROOT/src/MahoServerHost/MahoServerHost.csproj"
 MIRYO_PROJECT="$REPO_ROOT/src/Miryo/Miryo.csproj"
 MAHO_PROJECT="$REPO_ROOT/src/Maho/Maho.csproj"
 DIST_DIR="$REPO_ROOT/dist"
@@ -142,18 +144,25 @@ publish_target() {
     # 1. Publish mahoc
     dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
 
-    # 2. Publish miryo
+    # 2. Publish mahoc-server
+    dotnet publish "$SERVER_HOST_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
+
+    # 3. Publish MahoServer library
+    dotnet publish "$SERVER_PROJECT" -c "$config" -o "$out_dir" "${debug_props[@]}" --nologo -v q
+
+    # 4. Publish miryo
     dotnet publish "$MIRYO_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
 
-    # 3. Publish Maho library
+    # 5. Publish Maho library
     dotnet publish "$MAHO_PROJECT" -c "$config" -o "$out_dir" "${debug_props[@]}" --nologo -v q
 
-    # 4. Generate miryo.config
+    # 6. Generate miryo.config
     cat > "$out_dir/miryo.config" <<'EOF'
 # Miryo Toolchain Configuration
 
 [tools]
 mahoc = ["./mahoc", "mahoc"]
+mahoc_server = ["./mahoc-server", "mahoc-server"]
 il2llvmir = ["./il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]
@@ -203,11 +212,13 @@ if [ "$build_all" = true ]; then
     fi
 
     host_mahoc="$(find_binary "$DIST_DIR" "mahoc")"
+    host_server="$(find_binary "$DIST_DIR" "mahoc-server")"
     host_miryo="$(find_binary "$DIST_DIR" "miryo")"
 
     echo ""
     echo "Maho toolchain successfully built for all major platforms:"
     echo "  Host Compiler (mahoc): $host_mahoc"
+    echo "  Host Server:           $host_server"
     echo "  Host Project (miryo):  $host_miryo"
     echo ""
     echo "Execute host toolchain via:"
@@ -220,12 +231,16 @@ elif [ -n "$target_platform" ]; then
     publish_target "$target_platform" "$target_dir"
 
     mahoc_bin="$(find_binary "$target_dir" "mahoc")"
+    server_bin="$(find_binary "$target_dir" "mahoc-server")"
     miryo_bin="$(find_binary "$target_dir" "miryo")"
 
     echo ""
     echo "Maho toolchain successfully built for $target_platform:"
-    echo "  mahoc: $mahoc_bin"
-    echo "  miryo: $miryo_bin"
+    echo "  mahoc:          $mahoc_bin"
+    echo "  mahoc-server:   $server_bin"
+    echo "  miryo:          $miryo_bin"
+    echo "  Core Library:   $target_dir/Maho.dll"
+    echo "  Server Library: $target_dir/MahoServer.dll"
     echo ""
     if [ "$target_platform" = "$host_rid" ]; then
         echo "Execute toolchain via:"
@@ -239,14 +254,17 @@ else
     publish_target "$host_rid" "$DIST_DIR"
 
     mahoc_bin="$(find_binary "$DIST_DIR" "mahoc")"
+    server_bin="$(find_binary "$DIST_DIR" "mahoc-server")"
     miryo_bin="$(find_binary "$DIST_DIR" "miryo")"
 
     echo ""
     echo "Maho toolchain successfully built:"
-    echo "  mahoc:         $mahoc_bin"
-    echo "  miryo:         $miryo_bin"
-    echo "  Core Library:  $DIST_DIR/Maho.dll"
-    echo "  Configuration: $DIST_DIR/miryo.config"
+    echo "  mahoc:          $mahoc_bin"
+    echo "  mahoc-server:   $server_bin"
+    echo "  miryo:          $miryo_bin"
+    echo "  Core Library:   $DIST_DIR/Maho.dll"
+    echo "  Server Library: $DIST_DIR/MahoServer.dll"
+    echo "  Configuration:  $DIST_DIR/miryo.config"
     echo ""
     echo "Execute toolchain via:"
     echo "  $miryo_bin [command] [options]"

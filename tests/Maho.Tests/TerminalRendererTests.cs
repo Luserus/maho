@@ -398,6 +398,7 @@ public sealed class TerminalRendererTests
         Assert.Equal("0ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.Zero));
         Assert.Equal("1.23s", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromSeconds(1.234)));
         Assert.Equal("45.67ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromMilliseconds(45.67)));
+        Assert.Equal("12.5µs", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromMicroseconds(12.5)));
         Assert.Equal("500ns", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromTicks(5)));
     }
 }

@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.IO.Pipes;
+using Maho.Server;
 
 namespace Maho;
 
@@ -43,7 +45,14 @@ public static class CommandLine
         bool EmitIl = false,
         bool CheckOnly = false,
         bool NoRecurse = false,
-        IReadOnlyDictionary<string, string>? GlobalAliases = null);
+        IReadOnlyDictionary<string, string>? GlobalAliases = null,
+        IReadOnlyList<string>? ReferencedProjects = null,
+        string? ResultPipeName = null,
+        string? ProjectName = null,
+        string? ModuleName = null,
+        string? ProjectDirectory = null,
+        bool SourcePathsStdin = false,
+        string? ServerPath = null);
 
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
@@ -91,6 +100,7 @@ public static class CommandLine
         {
             analysis = Compile(options);
         }
+
         catch (CompilerPipelineNotImplementedException ex)
         {
             analysis = ex.Analysis;
@@ -102,6 +112,19 @@ public static class CommandLine
             return 1;
         }
 
+        if (options.ResultPipeName is not null)
+        {
+            try
+            {
+                WriteResultPipe(options.ResultPipeName, analysis, pipelineError);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to write compiler result pipe: {ex.Message}");
+                return 1;
+            }
+        }
+
         bool writeFailed = false;
 
         if (options.DebugOutput is not AnalysisOutput.None)
@@ -110,11 +133,15 @@ public static class CommandLine
             writeFailed |= !WriteOutput(options.DebugDestination, debugOutput, Console.Out, "debug output");
         }
 
+        // Miryo receives pipeline state through its result pipe and owns the final build-stage
+        // message. Source diagnostics remain on stderr in both direct and build invocations.
+        string? renderedPipelineError = options.ResultPipeName is null ? pipelineError : null;
+        bool includeStatus = options.ResultPipeName is null;
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
-            DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, pipelineError),
-            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, pipelineError, options.PathStyle),
-            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, pipelineError, options.ColorMode, options.PathStyle)
+            DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, renderedPipelineError),
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, renderedPipelineError, options.PathStyle, includeStatus),
+            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, renderedPipelineError, options.ColorMode, options.PathStyle, includeStatus)
         };
 
         if (options.DiagnosticsRequested || !string.IsNullOrEmpty(diagnosticsOutput))
@@ -123,7 +150,8 @@ public static class CommandLine
         bool hasErrors = analysis.HasErrors ||
             (options.WarningsAsErrors && analysis.Files.Any(f => f.Analysis?.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning) == true));
 
-        return hasErrors || pipelineError is not null || writeFailed ? 1 : 0;
+        bool failed = hasErrors || pipelineError is not null || writeFailed;
+        return failed ? 1 : 0;
     }
 
     private static (List<string> Files, string RootPath) ResolveFiles(IReadOnlyList<string> inputs, string pattern, bool noRecurse)
@@ -168,7 +196,10 @@ public static class CommandLine
 
     private static CompilerProjectAnalysisResult Compile(CliOptions cliOptions)
     {
-        var (files, rootPath) = ResolveFiles(cliOptions.SourceInputs, cliOptions.Pattern ?? "*.mh", cliOptions.NoRecurse);
+        var inputs = cliOptions.SourcePathsStdin
+            ? Console.In.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : cliOptions.SourceInputs.ToArray();
+        var (files, rootPath) = ResolveFiles(inputs, cliOptions.Pattern ?? "*.mh", cliOptions.NoRecurse);
 
         string? resolvedEntry = null;
         if (cliOptions.EntryFile is not null)
@@ -195,15 +226,58 @@ public static class CommandLine
             ImplicitTopLevel = cliOptions.ImplicitTopLevel ?? true,
             EntryFile = resolvedEntry,
             RootDirectory = rootPath,
+            ReferencedProjects = cliOptions.ReferencedProjects ?? [],
             GlobalAliases = cliOptions.GlobalAliases ?? new Dictionary<string, string>()
         };
 
-        if (cliOptions.CheckOnly)
-        {
-            return MahoCompiler.AnalyzeFiles(files, cliOptions.DebugOutput, rootPath, compOptions);
-        }
+        string projectDirectory = cliOptions.ProjectDirectory ?? rootPath;
+        string projectName = cliOptions.ProjectName ?? Path.GetFileName(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        string moduleName = cliOptions.ModuleName ?? ToKebabCase(projectName);
+        var request = new CompilerServerRequest(projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.DebugOutput, cliOptions.CheckOnly);
+        CompilerServerResponse response = CompilerServerClient.Compile(projectDirectory, request, cliOptions.ServerPath);
 
-        return MahoCompiler.CompileFiles(files, cliOptions.DebugOutput, rootPath, compOptions);
+        var batch = response.Files.Select(file => new CompilerBatchFileResult(
+            file.SourcePath,
+            new DebugCompilationOutput(file.SourcePath, file.LexerJson, file.ParserJson, file.Diagnostics),
+            file.AnalysisError,
+            file.IsInternalError)).ToArray();
+        var result = new CompilerProjectAnalysisResult(response.ProjectName, batch)
+        {
+            EntryFile = response.EntryFile,
+            PhaseTimers = new CompilationPhaseTimers(TimeSpan.FromTicks(response.ElapsedTicks), TimeSpan.Zero, TimeSpan.Zero)
+        };
+
+        if (response.LaterStagesNotImplemented)
+            throw new CompilerPipelineNotImplementedException("The lowering and code-generation pipeline has not been implemented.", result);
+
+        return result;
+    }
+
+    private static string ToKebabCase(string value)
+    {
+        var output = new StringBuilder(value.Length + 8);
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
+                output.Append('-');
+            output.Append(char.ToLowerInvariant(value[i]));
+        }
+        return output.ToString();
+    }
+
+    private static readonly JsonSerializerOptions PipeJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static void WriteResultPipe(string pipeName, CompilerProjectAnalysisResult analysis, string? pipelineError)
+    {
+        using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.Out);
+        pipe.Connect(5000);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true };
+        writer.WriteLine(JsonSerializer.Serialize(new
+        {
+            elapsedTicks = analysis.Elapsed.Ticks,
+            hasErrors = analysis.HasErrors,
+            pipelineError
+        }, PipeJsonOptions));
     }
 
     private static string BuildDebugOutput(string inputPath, CompilerProjectAnalysisResult analysis)
@@ -264,7 +338,8 @@ public static class CommandLine
         string inputPath,
         CompilerProjectAnalysisResult analysis,
         string? pipelineError,
-        DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative)
+        DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative,
+        bool includeStatus = true)
     {
         StringBuilder output = new();
         string displayRoot = pathStyle switch
@@ -321,16 +396,19 @@ public static class CommandLine
             output.AppendLine($"error MH9000: {pipelineError}");
         }
 
-        string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
+        if (includeStatus)
+        {
+            string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
 
-        if (errorCount == 0 && warningCount == 0)
-            output.AppendLine($"Build succeeded in {timeStr}");
-        else if (errorCount > 0 && warningCount > 0)
-            output.AppendLine($"Build failed with {errorCount} error(s) and {warningCount} warning(s)");
-        else if (errorCount > 0)
-            output.AppendLine($"Build failed with {errorCount} error(s)");
-        else
-            output.AppendLine($"Build succeeded with {warningCount} warning(s) in {timeStr}");
+            if (errorCount == 0 && warningCount == 0)
+                output.AppendLine($"Build succeeded in {timeStr}");
+            else if (errorCount > 0 && warningCount > 0)
+                output.AppendLine($"Build failed with {errorCount} error(s) and {warningCount} warning(s)");
+            else if (errorCount > 0)
+                output.AppendLine($"Build failed with {errorCount} error(s)");
+            else
+                output.AppendLine($"Build succeeded with {warningCount} warning(s) in {timeStr}");
+        }
 
         return output.ToString();
     }
@@ -340,7 +418,8 @@ public static class CommandLine
         CompilerProjectAnalysisResult analysis,
         string? pipelineError,
         DiagnosticColorMode colorMode,
-        DiagnosticPathStyle pathStyle)
+        DiagnosticPathStyle pathStyle,
+        bool includeStatus = true)
     {
         string projectRoot = GetDisplayRoot(inputPath);
         var renderer = new TerminalDiagnosticRenderer(
@@ -380,7 +459,8 @@ public static class CommandLine
             sb.AppendLine($"error[MH9000]: {pipelineError}");
         }
 
-        sb.Append(renderer.RenderStatus(errorCount, warningCount, analysis.Elapsed));
+        if (includeStatus)
+            sb.Append(renderer.RenderStatus(errorCount, warningCount, analysis.Elapsed));
 
         return sb.ToString();
     }
@@ -472,6 +552,13 @@ public static class CommandLine
         bool checkOnly = false;
         bool noRecurse = false;
         var globalAliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        var referencedProjects = new List<string>();
+        string? resultPipeName = null;
+        string? projectName = null;
+        string? moduleName = null;
+        string? projectDirectory = null;
+        bool sourcePathsStdin = false;
+        string? serverPath = null;
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -560,6 +647,17 @@ public static class CommandLine
                     }
                     break;
 
+                case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
+                    string modeStr = c[(c.IndexOf('=') + 1)..].ToLowerInvariant();
+                    colorMode = modeStr switch
+                    {
+                        "auto" => DiagnosticColorMode.Auto,
+                        "always" => DiagnosticColorMode.Always,
+                        "never" => DiagnosticColorMode.Never,
+                        _ => (DiagnosticColorMode?)null
+                    } ?? throw new ArgumentException($"Invalid color mode '{modeStr}'. Expected auto, always, or never.");
+                    break;
+
                 case "--diagnostic-paths":
                     if (index + 1 >= args.Length || (args[index + 1] != "-" && args[index + 1].StartsWith('-')))
                     {
@@ -621,6 +719,60 @@ public static class CommandLine
 
                 case "--no-recurse":
                     noRecurse = true;
+                    break;
+
+                case "--source-paths-stdin":
+                    sourcePathsStdin = true;
+                    break;
+
+                case "--result-pipe":
+                    if (!TryReadValue(args, ref index, argument, out resultPipeName, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
+                case "--project-name":
+                    if (!TryReadValue(args, ref index, argument, out projectName, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
+                case "--module-name":
+                    if (!TryReadValue(args, ref index, argument, out moduleName, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
+                case "--project-directory":
+                    if (!TryReadValue(args, ref index, argument, out projectDirectory, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
+                case "--reference-project":
+                    if (!TryReadValue(args, ref index, argument, out string? referenceProject, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    referencedProjects.Add(referenceProject!);
+                    break;
+
+                case "--server-path":
+                case "--compiler-server-path":
+                    if (!TryReadValue(args, ref index, argument, out serverPath, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
                     break;
 
                 case string arg when arg.StartsWith("--implicit-toplevel=", StringComparison.OrdinalIgnoreCase):
@@ -702,7 +854,14 @@ public static class CommandLine
             emitIl,
             checkOnly,
             noRecurse,
-            globalAliases.Count > 0 ? globalAliases : null);
+            globalAliases.Count > 0 ? globalAliases : null,
+            referencedProjects,
+            resultPipeName,
+            projectName,
+            moduleName,
+            projectDirectory,
+            sourcePathsStdin,
+            serverPath);
 
         errorMessage = null;
         return true;
@@ -739,6 +898,19 @@ public static class CommandLine
             target[aliasName] = targetType;
         }
 
+        return true;
+    }
+
+    private static bool TryReadValue(string[] args, ref int index, string option, out string? value, out string? errorMessage)
+    {
+        if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
+        {
+            value = null;
+            errorMessage = $"The {option} option requires a value.";
+            return false;
+        }
+        value = args[++index];
+        errorMessage = null;
         return true;
     }
 
@@ -873,6 +1045,12 @@ public static class CommandLine
         writer.WriteLine("  --check                                                     Verify syntax and semantics without code generation.");
         writer.WriteLine("  --pattern <pattern>                                         File search pattern for directory inputs (default: '*.mh').");
         writer.WriteLine("  --no-recurse                                                Do not search subdirectories recursively when directory is passed.");
+        writer.WriteLine("  --source-paths-stdin                                        Read explicit source paths, one per line, from standard input.");
+        writer.WriteLine("  --project-name <PascalCase>                                 Project identity supplied by the build system.");
+        writer.WriteLine("  --module-name <kebab-case>                                  Compiled module identity supplied by the build system.");
+        writer.WriteLine("  --project-directory <path>                                  Directory watched by the compiler server.");
+        writer.WriteLine("  --server-path <path>                                        Explicit path to the mahoc-server executable.");
+        writer.WriteLine("  --reference-project <path>                                  Referenced project metadata/source path supplied by Miryo.");
         writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
         writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");
         writer.WriteLine("  --debug (lex|parse)+ (-o|--output) <file|->                 Write selected debug JSON to a file or stdout.");

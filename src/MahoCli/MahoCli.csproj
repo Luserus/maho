@@ -7,12 +7,12 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>mahoc</AssemblyName>
-    <RootNamespace>Maho</RootNamespace>
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Maho\Maho.csproj" />
+    <ProjectReference Include="..\MahoServer\MahoServer.csproj" />
   </ItemGroup>
 
 </Project>

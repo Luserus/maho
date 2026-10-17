@@ -24,8 +24,8 @@ internal sealed class MacroExpansionPass : ResolutionPass
                 macroTable[macroSymbol.Name] = macroSymbol.Syntax;
 
         // Also collect directly from syntax tree roots if not yet discovered
-        foreach (var root in context.SyntaxTree.Roots)
-            CollectMacros(root.Members, macroTable);
+        foreach (var tree in context.SyntaxTrees)
+            CollectMacros(tree.Root.Members, macroTable);
 
         ulong recursionLimit = context.Options?.MacroRecursionLimit ?? 128;
         var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable, context);
@@ -40,8 +40,9 @@ internal sealed class MacroExpansionPass : ResolutionPass
             if (recursionLimit > 0 && currentDepth > recursionLimit)
                 break;
 
-            foreach (var root in context.SyntaxTree.Roots)
+            foreach (var tree in context.SyntaxTrees)
             {
+                var root = tree.Root;
                 var sourceText = root.GetSource() ?? (root.Members.Count > 0 ? root.Members[0].GetSource() : null) ?? new SourceText(string.Empty);
 
                 if (ExpandCompilationUnit(root, expander, currentDepth, sourceText))

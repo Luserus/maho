@@ -360,7 +360,7 @@ public sealed class DeclarationResolutionTests
         var globalNamespace = new NamespaceTrieNode();
         var symbols = new SymbolStore([], [], [], [], [], [], [], [], [], [], [], [], [], []);
         var scopes = new List<Scope> { new(null) };
-        var context = new ResolutionContext(syntaxTree, resolvedTree, globalNamespace, symbols, scopes);
+        var context = new ResolutionContext([syntaxTree], resolvedTree, globalNamespace, symbols, scopes);
 
         new SymbolDiscoveryPass().Resolve(context);
 

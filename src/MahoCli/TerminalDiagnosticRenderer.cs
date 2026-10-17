@@ -20,13 +20,13 @@ public sealed class TerminalDiagnosticRenderer
     private readonly string? projectDirectory;
 
     // ANSI Escape Sequences
-    private const string Reset = "\u001b[0m";
-    private const string Bold = "\u001b[1m";
-    private const string Red = "\u001b[31;1m";
-    private const string Yellow = "\u001b[33;1m";
-    private const string Cyan = "\u001b[36;1m";
-    private const string Blue = "\u001b[34;1m";
-    private const string Green = "\u001b[32;1m";
+    internal const string Reset = "\u001b[0m";
+    internal const string Bold = "\u001b[1m";
+    internal const string Red = "\u001b[31;1m";
+    internal const string Yellow = "\u001b[33;1m";
+    internal const string Cyan = "\u001b[36;1m";
+    internal const string Blue = "\u001b[34;1m";
+    internal const string Green = "\u001b[32;1m";
 
     public TerminalDiagnosticRenderer(
         DiagnosticColorMode colorMode = DiagnosticColorMode.Auto,
@@ -424,6 +424,8 @@ public sealed class TerminalDiagnosticRenderer
             return $"{elapsed.TotalSeconds:0.##}s";
         if (elapsed.TotalMilliseconds >= 1.0)
             return $"{elapsed.TotalMilliseconds:0.##}ms";
+        if (elapsed.TotalMicroseconds >= 1.0)
+            return $"{elapsed.TotalMicroseconds:0.##}µs";
         if (elapsed.TotalNanoseconds > 0)
             return $"{(long)elapsed.TotalNanoseconds}ns";
         return "0ms";
@@ -446,14 +448,18 @@ public sealed class TerminalDiagnosticRenderer
         }
         else if (errorCount > 0 && warningCount > 0)
         {
-            sb.Append("Build failed with ");
+            sb.Append("Build ");
+            sb.Append(Colorize(Red, "failed"));
+            sb.Append(" with ");
             sb.Append(Colorize(Red, $"{errorCount} error(s)"));
             sb.Append(" and ");
             sb.AppendLine(Colorize(Yellow, $"{warningCount} warning(s)"));
         }
         else if (errorCount > 0)
         {
-            sb.Append("Build failed with ");
+            sb.Append("Build ");
+            sb.Append(Colorize(Red, "failed"));
+            sb.Append(" with ");
             sb.AppendLine(Colorize(Red, $"{errorCount} error(s)"));
         }
         else
@@ -502,11 +508,11 @@ public sealed class TerminalDiagnosticRenderer
         return $"{ansiColor}{text}{Reset}";
     }
 
-    private static bool ShouldEnableColors(DiagnosticColorMode mode) => mode switch
+    internal static bool ShouldEnableColors(DiagnosticColorMode mode) => mode switch
     {
         DiagnosticColorMode.Always => true,
         DiagnosticColorMode.Never => false,
-        DiagnosticColorMode.Auto => !Console.IsOutputRedirected &&
+        DiagnosticColorMode.Auto => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
                                     Environment.GetEnvironmentVariable("NO_COLOR") == null &&
                                     Environment.GetEnvironmentVariable("TERM") != "dumb",
         _ => false

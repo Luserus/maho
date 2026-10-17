@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using Maho.Text;
@@ -169,6 +168,7 @@ internal sealed partial class Parser
             var declaration = ParseVariableDeclaration();
             var semicolon = ExpectToken(TokenKind.Semicolon, "';'", $"after the declaration in the '{statementName}' condition", MissingTokenAnchor.AfterPrevious);
             var condition = ParseExpectedExpression($"for the '{statementName}' condition", MissingTokenAnchor.AfterPrevious);
+
             return (declaration, semicolon, condition);
         }
         else

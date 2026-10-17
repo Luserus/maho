@@ -23,6 +23,7 @@ public sealed class Compilation
     public IReadOnlyList<Compilation> ReferencedCompilations { get; }
     internal ResolutionContext? Context { get; }
     public IReadOnlyList<DiagnosticInfo> Diagnostics { get; }
+    public CompiledArtifact Artifact { get; }
 
     public bool HasErrors => Diagnostics.Any(d =>
         d.Severity == DiagnosticSeverity.Error ||
@@ -35,7 +36,8 @@ public sealed class Compilation
         CompilationOptions options,
         IReadOnlyList<Compilation> referencedCompilations,
         ResolutionContext? context,
-        IReadOnlyList<DiagnosticInfo> diagnostics)
+        IReadOnlyList<DiagnosticInfo> diagnostics,
+        CompiledArtifact? artifact = null)
     {
         ProjectName = projectName;
         SyntaxTrees = syntaxTrees;
@@ -44,6 +46,7 @@ public sealed class Compilation
         ReferencedCompilations = referencedCompilations;
         Context = context;
         Diagnostics = diagnostics;
+        Artifact = artifact ?? CompiledArtifact.Empty;
     }
 
     /// <summary>
@@ -65,7 +68,7 @@ public sealed class Compilation
         var parser = new Parser(sourceText, diagnosticsManager);
         var unit = parser.Parse(lexer.Tokens);
 
-        var syntaxTree = SyntaxTree.CreateSingleRoot(unit, filePath);
+        var syntaxTree = new SyntaxTree(unit, sourceText, diagnosticsManager, filePath);
         var resolver = new Resolver();
         var refContexts = referencedCompilations?.Select(c => c.Context).OfType<ResolutionContext>().ToList();
         var context = resolver.Resolve(syntaxTree, referencedProjects: refContexts, diagnostics: diagnosticsManager, options: options);
@@ -207,7 +210,9 @@ public sealed class Compilation
                 allInternalDiagnostics.Add((diag, sourceTexts[i], pathsList[i]));
         }
 
-        var syntaxTree = new SyntaxTree(projectName, roots.ToArray());
+        var syntaxTrees = new SyntaxTree[pathsList.Count];
+        for (int i = 0; i < pathsList.Count; i++)
+            syntaxTrees[i] = new SyntaxTree(roots[i], sourceTexts[i], fileDms[i], pathsList[i]);
         var resolver = new Resolver();
 
         var referencedContexts = referencedCompilations
@@ -216,13 +221,20 @@ public sealed class Compilation
             .ToList();
 
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.Resolve(syntaxTree, referencedContexts, diagnostics: resolutionDm, options: options);
+        var context = resolver.Resolve(syntaxTrees, referencedContexts, diagnostics: resolutionDm, options: options);
 
         foreach (var diag in resolutionDm.Diagnostics)
         {
             var src = diag.Source;
             string? diagPath = src?.FilePath;
-            allInternalDiagnostics.Add((diag, src ?? (pathsList.Count > 0 ? sourceTexts[0] : null!), diagPath ?? (pathsList.Count > 0 ? pathsList[0] : "source.mh")));
+            int treeIndex = Array.FindIndex(sourceTexts, text => ReferenceEquals(text, src));
+            if (treeIndex < 0)
+                treeIndex = 0;
+
+            if (fileDms.Length > 0)
+                fileDms[treeIndex].Report(diag);
+
+            allInternalDiagnostics.Add((diag, src ?? (pathsList.Count > 0 ? sourceTexts[treeIndex] : null!), diagPath ?? (pathsList.Count > 0 ? pathsList[treeIndex] : "source.mh")));
         }
 
         var projected = new List<DiagnosticInfo>(allInternalDiagnostics.Count);
@@ -233,7 +245,7 @@ public sealed class Compilation
 
         return new Compilation(
             projectName,
-            [syntaxTree],
+            syntaxTrees,
             sourceTexts,
             options,
             referencedCompilations,
@@ -275,6 +287,10 @@ public sealed class Compilation
     /// Spawns an interactive <see cref="AnalysisSession"/> rooted in this compilation.
     /// </summary>
     public AnalysisSession CreateSession() => new(this);
+
+    /// <summary>Reserved entry point for future editor semantic queries.</summary>
+    internal SemanticModel GetSemanticModel(SyntaxTree syntaxTree) =>
+        throw new NotImplementedException("Semantic-model queries are not implemented yet.");
 
     private static List<DiagnosticInfo> ProjectDiagnostics(
         IReadOnlyList<Diagnostic> diagnostics,

@@ -45,7 +45,10 @@ public sealed class SymbolDiscoveryTests
         Assert.Empty(enabledDiagnostics.Diagnostics);
         Assert.Empty(ordinaryDiagnostics.Diagnostics);
 
-        ResolutionContext context = new Resolver().Resolve(new SyntaxTree("project", [enabledRoot, ordinaryRoot]));
+        ResolutionContext context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(enabledRoot, "enabled.mh"),
+            SyntaxTree.CreateSingleRoot(ordinaryRoot, "ordinary.mh")
+        ]);
 
         Assert.Single(context.FunctionSymbols, symbol => symbol.Name.ToString() == "Main" && symbol.Syntax is null);
         Assert.Single(context.LocalVariableSymbols, symbol => symbol.Name.ToString() == "scriptValue");

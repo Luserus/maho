@@ -359,8 +359,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public partial class MultiFile;");
         var (_, _, _, root2) = CompilerTestBed.Parse("public partial class MultiFile;");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.False(context.Diagnostics.HasErrors);
     }
@@ -370,8 +372,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public class DupeMulti;");
         var (_, _, _, root2) = CompilerTestBed.Parse("public class DupeMulti;");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.True(context.Diagnostics.HasErrors);
         var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0530");
@@ -383,8 +387,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public partial void Work() { return; }");
         var (_, _, _, root2) = CompilerTestBed.Parse("public partial void Work() { return; }");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.True(context.Diagnostics.HasErrors);
         var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0533");

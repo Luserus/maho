@@ -8,7 +8,8 @@ namespace Maho.Resolution;
 
 internal sealed class ResolutionContext
 {
-    public SyntaxTree SyntaxTree { get; }
+    public IReadOnlyList<SyntaxTree> SyntaxTrees { get; }
+    internal SyntaxTree SyntaxTree => SyntaxTrees[0];
     public ResolvedTree ResolvedTree { get; }
     public DiagnosticsManager Diagnostics { get; }
 
@@ -90,7 +91,7 @@ internal sealed class ResolutionContext
     private int macroID;
 
     public ResolutionContext(
-        SyntaxTree syntaxTree,
+        IReadOnlyList<SyntaxTree> syntaxTrees,
         ResolvedTree resolvedTree,
         NamespaceTrieNode globalNamespace,
         SymbolStore symbols,
@@ -100,7 +101,7 @@ internal sealed class ResolutionContext
         DiagnosticsManager? diagnostics = null,
         CompilationOptions? options = null)
     {
-        SyntaxTree = syntaxTree;
+        SyntaxTrees = syntaxTrees;
         ResolvedTree = resolvedTree;
         Diagnostics = diagnostics ?? new DiagnosticsManager();
         Options = options ?? new CompilationOptions();

@@ -19,8 +19,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             RegisterGlobalAliases(globalAliases);
         }
 
-        foreach (var root in context.SyntaxTree.Roots)
-            ResolveCompilationUnit(root);
+        foreach (var tree in context.SyntaxTrees)
+            ResolveCompilationUnit(tree.Root);
     }
 
     private void RegisterGlobalAliases(IReadOnlyDictionary<string, string> globalAliases)

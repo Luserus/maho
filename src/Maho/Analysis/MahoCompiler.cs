@@ -250,10 +250,12 @@ public static class MahoCompiler
         }
 
         // Project-wide resolution
-        var syntaxTree = new SyntaxTree(projectName, [.. validRoots]);
+        var syntaxTrees = new SyntaxTree[validRoots.Count];
+        for (int i = 0; i < validRoots.Count; i++)
+            syntaxTrees[i] = new SyntaxTree(validRoots[i], validSourceTexts[i], validFileDms[i], validPaths[i]);
         var resolver = new Resolver();
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.Resolve(syntaxTree, diagnostics: resolutionDm, options: options);
+        var context = resolver.Resolve(syntaxTrees, diagnostics: resolutionDm, options: options);
 
         foreach (var diag in resolutionDm.Diagnostics)
         {
@@ -326,6 +328,17 @@ public static class MahoCompiler
     /// </summary>
     public static CompilerProjectAnalysisResult AnalyzeFiles(IEnumerable<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string? rootPath = null,
         CompilationOptions? options = null) => CompileFilesCore(filePaths, output, rootPath, options);
+
+    /// <summary>
+    /// Compiler API entry point for tools that need the immutable compilation artifact rather than
+    /// CLI-shaped per-file output. Lowering is intentionally not invoked yet.
+    /// </summary>
+    public static Compilation CreateCompilation(
+        IEnumerable<string> filePaths,
+        string? projectName = null,
+        CompilationOptions? options = null,
+        IReadOnlyList<Compilation>? referencedCompilations = null) =>
+        Compilation.FromFiles(filePaths, projectName, options, referencedCompilations);
 
     /// <summary>
     /// Compiles a collection of source files and returns a structured <see cref="CompilerProjectAnalysisResult"/>.
