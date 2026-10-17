@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Miryo.Build;
 
 namespace Miryo;
@@ -488,6 +489,8 @@ public static class MiryoCommandLine
             explicitSourcePaths = [.. project.SourceFiles];
         }
 
+        // The configured server selects the compiler package. Without one,
+        // mahoc uses only its colocated-server convenience fallback.
         string? serverPath = config.FindTool("mahoc_server");
         if (serverPath is not null)
         {
@@ -539,7 +542,13 @@ public static class MiryoCommandLine
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var diagnosticsTask = process.StandardError.ReadToEndAsync();
             using var pipeTimeout = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(5));
-            var pipeConnection = resultPipe.WaitForConnectionAsync(pipeTimeout.Token);
+            Task pipeConnection = resultPipe.WaitForConnectionAsync(pipeTimeout.Token);
+            Task processExit = process.WaitForExitAsync();
+            if (Task.WhenAny(pipeConnection, processExit).GetAwaiter().GetResult() == processExit)
+            {
+                string compilerDiagnostics = diagnosticsTask.GetAwaiter().GetResult();
+                throw new InvalidDataException($"mahoc exited before writing its result pipe (exit code {process.ExitCode}). {compilerDiagnostics}".TrimEnd());
+            }
             pipeConnection.GetAwaiter().GetResult();
             using var resultReader = new StreamReader(resultPipe, Encoding.UTF8, leaveOpen: true);
             string resultJson = resultReader.ReadToEnd();

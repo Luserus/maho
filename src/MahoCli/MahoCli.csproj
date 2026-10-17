@@ -11,8 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Maho\Maho.csproj" />
-    <ProjectReference Include="..\MahoServer\MahoServer.csproj" />
+    <ProjectReference Include="..\MahoServerProtocol\MahoServerProtocol.csproj" />
+    <ProjectReference Include="..\MahoServerClient\MahoServerClient.csproj" />
   </ItemGroup>
 
 </Project>

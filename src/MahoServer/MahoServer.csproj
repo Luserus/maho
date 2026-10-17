@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Maho/Maho.csproj" />
+    <ProjectReference Include="../MahoServerProtocol/MahoServerProtocol.csproj" />
   </ItemGroup>
 </Project>

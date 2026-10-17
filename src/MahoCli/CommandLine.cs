@@ -6,7 +6,14 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Pipes;
-using Maho.Server;
+using Maho.Server.Client;
+using Maho.Server.Protocol;
+using AnalysisOutput = Maho.Server.Protocol.CompilerDebugOutput;
+using DiagnosticColorMode = Maho.Server.Protocol.CompilerDiagnosticColorMode;
+using DiagnosticFormat = Maho.Server.Protocol.CompilerDiagnosticFormat;
+using DiagnosticInfo = Maho.Server.Protocol.CompilerDiagnostic;
+using DiagnosticPathStyle = Maho.Server.Protocol.CompilerDiagnosticPathStyle;
+using DiagnosticSeverity = Maho.Server.Protocol.CompilerDiagnosticSeverity;
 
 namespace Maho;
 
@@ -54,6 +61,23 @@ public static class CommandLine
         bool SourcePathsStdin = false,
         string? ServerPath = null);
 
+    // Terminal views contain protocol data only, so mahoc does not load a
+    // particular compiler assembly merely to render its response.
+    private sealed record DebugCompilationOutput(string SourcePath, string? LexerJson, string? ParserJson, IReadOnlyList<DiagnosticInfo> Diagnostics);
+    private sealed record CompilerBatchFileResult(string SourcePath, DebugCompilationOutput? DebugOutput, string? AnalysisError, bool IsInternalError)
+    {
+        public DebugCompilationOutput? Output => DebugOutput;
+    }
+
+    private sealed class CompilerProjectAnalysisResult(string projectName, CompilerBatchFileResult[] files, string? entryFile, long elapsedTicks, bool hasErrors)
+    {
+        public string ProjectName { get; } = projectName;
+        public CompilerBatchFileResult[] Files { get; } = files;
+        public string? EntryFile { get; } = entryFile;
+        public TimeSpan Elapsed { get; } = TimeSpan.FromTicks(elapsedTicks);
+        public bool HasErrors { get; } = hasErrors;
+    }
+
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
     {
@@ -94,23 +118,24 @@ public static class CommandLine
 
         string primaryInput = options.SourceInputs.Count > 0 ? options.SourceInputs[0] : Directory.GetCurrentDirectory();
         CompilerProjectAnalysisResult analysis;
-        string? pipelineError = null;
+        string? pipelineError;
 
         try
         {
             analysis = Compile(options);
         }
 
-        catch (CompilerPipelineNotImplementedException ex)
-        {
-            analysis = ex.Analysis;
-            pipelineError = ex.Message;
-        }
         catch (Exception ex) when (IsUserFacingError(ex))
         {
             Console.Error.WriteLine($"Failed to compile '{primaryInput}': {FormatPathOrIoError(ex, primaryInput, "compile the input")}");
             return 1;
         }
+
+        // Only the build protocol reaches the later-stage boundary. A direct
+        // mahoc invocation reports the analysis compilation it actually ran.
+        pipelineError = (options.ResultPipeName is not null || options.EmitIl) && !options.CheckOnly && !analysis.HasErrors
+            ? "The lowering and code-generation pipeline has not been implemented."
+            : null;
 
         if (options.ResultPipeName is not null)
         {
@@ -148,7 +173,7 @@ public static class CommandLine
             writeFailed |= !WriteOutput(options.DiagnosticsDestination, diagnosticsOutput, Console.Error, "diagnostics");
 
         bool hasErrors = analysis.HasErrors ||
-            (options.WarningsAsErrors && analysis.Files.Any(f => f.Analysis?.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning) == true));
+            (options.WarningsAsErrors && analysis.Files.Any(f => f.Output?.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning) == true));
 
         bool failed = hasErrors || pipelineError is not null || writeFailed;
         return failed ? 1 : 0;
@@ -212,7 +237,7 @@ public static class CommandLine
                 throw new FileNotFoundException($"Configured EntryFile not found: {resolvedEntry}", resolvedEntry);
         }
 
-        var compOptions = new CompilationOptions
+        var compOptions = new CompilerOptions
         {
             ColorMode = cliOptions.ColorMode,
             PathStyle = cliOptions.PathStyle,
@@ -233,24 +258,23 @@ public static class CommandLine
         string projectDirectory = cliOptions.ProjectDirectory ?? rootPath;
         string projectName = cliOptions.ProjectName ?? Path.GetFileName(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         string moduleName = cliOptions.ModuleName ?? ToKebabCase(projectName);
-        var request = new CompilerServerRequest(projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.DebugOutput, cliOptions.CheckOnly);
-        CompilerServerResponse response = CompilerServerClient.Compile(projectDirectory, request, cliOptions.ServerPath);
+        var request = new CompilerServerRequest(CompilerProtocol.Version, projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.DebugOutput, cliOptions.CheckOnly);
+        string serverPath = cliOptions.ServerPath ?? FindCompilerServerExecutable();
+        CompilerServerPackage package = CompilerServerClient.LoadPackage(serverPath);
+        CompilerServerResponse response = CompilerServerClient.Compile(package, request);
 
         var batch = response.Files.Select(file => new CompilerBatchFileResult(
             file.SourcePath,
             new DebugCompilationOutput(file.SourcePath, file.LexerJson, file.ParserJson, file.Diagnostics),
             file.AnalysisError,
             file.IsInternalError)).ToArray();
-        var result = new CompilerProjectAnalysisResult(response.ProjectName, batch)
-        {
-            EntryFile = response.EntryFile,
-            PhaseTimers = new CompilationPhaseTimers(TimeSpan.FromTicks(response.ElapsedTicks), TimeSpan.Zero, TimeSpan.Zero)
-        };
+        return new CompilerProjectAnalysisResult(response.ProjectName, batch, response.EntryFile, response.ElapsedTicks, response.HasErrors);
+    }
 
-        if (response.LaterStagesNotImplemented)
-            throw new CompilerPipelineNotImplementedException("The lowering and code-generation pipeline has not been implemented.", result);
-
-        return result;
+    private static string FindCompilerServerExecutable()
+    {
+        string name = OperatingSystem.IsWindows() ? "mahoc-server.exe" : "mahoc-server";
+        return Path.Combine(AppContext.BaseDirectory, name);
     }
 
     private static string ToKebabCase(string value)
@@ -399,15 +423,9 @@ public static class CommandLine
         if (includeStatus)
         {
             string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
-
-            if (errorCount == 0 && warningCount == 0)
-                output.AppendLine($"Build succeeded in {timeStr}");
-            else if (errorCount > 0 && warningCount > 0)
-                output.AppendLine($"Build failed with {errorCount} error(s) and {warningCount} warning(s)");
-            else if (errorCount > 0)
-                output.AppendLine($"Build failed with {errorCount} error(s)");
-            else
-                output.AppendLine($"Build succeeded with {warningCount} warning(s) in {timeStr}");
+            output.AppendLine(errorCount > 0
+                ? $"compilation failed in {timeStr}"
+                : $"compilation success in {timeStr}");
         }
 
         return output.ToString();
@@ -460,7 +478,12 @@ public static class CommandLine
         }
 
         if (includeStatus)
-            sb.Append(renderer.RenderStatus(errorCount, warningCount, analysis.Elapsed));
+        {
+            string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
+            sb.AppendLine(errorCount > 0
+                ? $"compilation failed in {timeStr}"
+                : $"compilation success in {timeStr}");
+        }
 
         return sb.ToString();
     }
@@ -475,7 +498,7 @@ public static class CommandLine
             {
                 ["filePath"] = file.SourcePath,
                 ["diagnostics"] = file.Output is { } fileAnalysis
-                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, MahoJsonContext.Default.IReadOnlyListDiagnosticInfo)
+                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, JsonOptions)
                     : new JsonArray()
             };
 
@@ -1031,7 +1054,11 @@ public static class CommandLine
         };
     }
 
-    private static void PrintVersion(TextWriter writer) => writer.WriteLine($"Maho: v{MahoCompiler.VersionString}");
+    private static void PrintVersion(TextWriter writer)
+    {
+        string version = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        writer.WriteLine($"mahoc: v{version}");
+    }
 
     private static void PrintUsage(TextWriter writer)
     {
@@ -1049,7 +1076,7 @@ public static class CommandLine
         writer.WriteLine("  --project-name <PascalCase>                                 Project identity supplied by the build system.");
         writer.WriteLine("  --module-name <kebab-case>                                  Compiled module identity supplied by the build system.");
         writer.WriteLine("  --project-directory <path>                                  Directory watched by the compiler server.");
-        writer.WriteLine("  --server-path <path>                                        Explicit path to the mahoc-server executable.");
+        writer.WriteLine("  --server-path <path>                                        Compiler server executable; defaults beside mahoc.");
         writer.WriteLine("  --reference-project <path>                                  Referenced project metadata/source path supplied by Miryo.");
         writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
         writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");

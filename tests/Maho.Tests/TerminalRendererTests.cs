@@ -1,6 +1,20 @@
-using Maho.Diagnostics;
+using Maho.Server.Protocol;
+using Maho;
+using DiagnosticColorMode = Maho.Server.Protocol.CompilerDiagnosticColorMode;
+using DiagnosticPathStyle = Maho.Server.Protocol.CompilerDiagnosticPathStyle;
+using DiagnosticSeverity = Maho.Server.Protocol.CompilerDiagnosticSeverity;
+using DiagnosticLabelStyle = Maho.Server.Protocol.CompilerDiagnosticLabelStyle;
+using TextLocation = Maho.Server.Protocol.CompilerTextLocation;
+using TextSpanInfo = Maho.Server.Protocol.CompilerTextSpan;
+using DiagnosticInfo = Maho.Server.Protocol.CompilerDiagnostic;
+using DiagnosticLabelInfo = Maho.Server.Protocol.CompilerDiagnosticLabel;
+using DiagnosticNoteInfo = Maho.Server.Protocol.CompilerDiagnosticNote;
+using DiagnosticHelpInfo = Maho.Server.Protocol.CompilerDiagnosticHelp;
+using DiagnosticSuggestionInfo = Maho.Server.Protocol.CompilerDiagnosticSuggestion;
+using TextEditInfo = Maho.Server.Protocol.CompilerTextEdit;
+using MacroExpansionTraceInfo = Maho.Server.Protocol.CompilerMacroTrace;
 
-namespace Maho.Tests;
+namespace MahoRendererTests;
 
 public sealed class TerminalRendererTests
 {
@@ -90,8 +104,7 @@ public sealed class TerminalRendererTests
             Suggestions: [
                 new DiagnosticSuggestionInfo(
                     "rename to PascalCase",
-                    [new TextEditInfo(span, "var NewName = 10;", "fix.mh")],
-                    SuggestionApplicability.MachineApplicable)
+                    [new TextEditInfo(span, "var NewName = 10;", "fix.mh")])
             ]);
 
         string output = renderer.Render(diagnostic);

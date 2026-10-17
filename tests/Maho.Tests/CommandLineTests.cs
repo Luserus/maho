@@ -32,7 +32,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["--version"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("Maho: v", sw.ToString());
+            Assert.Contains("mahoc: v", sw.ToString());
         }
         finally
         {
@@ -51,7 +51,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["-v"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("Maho: v", sw.ToString());
+            Assert.Contains("mahoc: v", sw.ToString());
         }
         finally
         {
@@ -506,7 +506,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("Build failed with 1 error(s)", output);
+                Assert.Contains("compilation failed in", output);
             }
             finally
             {
@@ -548,7 +548,7 @@ public sealed class CommandLineTests
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("└── from this macro invocation", output);
-                Assert.Contains("Build failed with 1 error(s)", output);
+                Assert.Contains("compilation failed in", output);
             }
             finally
             {
@@ -596,7 +596,7 @@ public sealed class CommandLineTests
     }
 
     [Fact]
-    public void CommandLine_SingleFile_FailsWithPipelineNotImplementedMH9000()
+    public void CommandLine_SingleFile_ReportsCompilationSuccess()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliSingleFile_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -611,9 +611,9 @@ public sealed class CommandLineTests
             {
                 Console.SetError(sw);
                 int exitCode = CommandLine.Run([sourceFile]);
-                Assert.Equal(1, exitCode);
+                Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("MH9000", output);
+                Assert.Contains("compilation success in", output);
             }
             finally
             {
@@ -735,7 +735,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", scriptFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("Build failed with 1 error(s)", output);
+                Assert.Contains("compilation failed in", output);
             }
             finally
             {
@@ -857,7 +857,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--check", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("Build succeeded", output);
+                Assert.Contains("compilation success in", output);
             }
             finally
             {

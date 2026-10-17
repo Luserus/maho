@@ -141,11 +141,13 @@ publish_target() {
         exe_args+=("-r" "$rid" "--no-self-contained")
     fi
 
-    # 1. Publish mahoc
-    dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
-
-    # 2. Publish mahoc-server
+    # 1. Publish mahoc-server before mahoc. The CLI copies the colocated
+    # server package when built normally, while publish puts both tools in
+    # the same final directory below.
     dotnet publish "$SERVER_HOST_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
+
+    # 2. Publish mahoc
+    dotnet publish "$CLI_PROJECT" -c "$config" -o "$out_dir" "${exe_args[@]}" --nologo -v q
 
     # 3. Publish MahoServer library
     dotnet publish "$SERVER_PROJECT" -c "$config" -o "$out_dir" "${debug_props[@]}" --nologo -v q

@@ -253,9 +253,8 @@ public sealed class MiryoTests
             File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nImplicitTopLevel : true;\n");
             File.WriteAllText(programFile, "call();");
 
-            // Point config to the compiled mahoc.dll
-            string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
-            string mahocDll = Path.Combine(repoRoot, "src/MahoCli/bin/Debug/net10.0/mahoc.dll");
+            // Use the test package's colocated mahoc/mahoc-server pair.
+            string mahocDll = Path.Combine(AppContext.BaseDirectory, "mahoc.dll");
             string configFile = Path.Combine(tempDir, "miryo.config");
             File.WriteAllText(configFile, $"""
                 [tools]
@@ -291,8 +290,7 @@ public sealed class MiryoTests
             File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nImplicitTopLevel : true;\n");
             File.WriteAllText(programFile, "public struct Widget;");
 
-            string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
-            string mahocDll = Path.Combine(repoRoot, "src/MahoCli/bin/Debug/net10.0/mahoc.dll");
+            string mahocDll = Path.Combine(AppContext.BaseDirectory, "mahoc.dll");
             string configFile = Path.Combine(tempDir, "miryo.config");
             File.WriteAllText(configFile, $"""
                 [tools]
