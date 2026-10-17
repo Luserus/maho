@@ -20,7 +20,7 @@ These files are intentionally declarative: they define the tree that the parser 
 - Access/call forms:
   `MemberAccessExpression`, `CallExpression`, `IndexExpression`, `NamedArgumentExpression`
 - Control-flow-like forms:
-  `IfExpression`, `ElseExpression`, `BlockExpression`
+  `IfExpression`, `ElseExpression`, `WhileExpression`, `BlockExpression`
 - Construction forms:
   `ArrayCreationExpression`, `ObjectCreationExpression`, `ConstructorCallExpression`, `CollectionExpression`
 - Supporting enums:

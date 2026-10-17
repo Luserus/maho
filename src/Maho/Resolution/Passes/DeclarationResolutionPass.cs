@@ -158,16 +158,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case TopLevelGotoStatement statement:
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);
                 break;
-
-            case TopLevelWhileStatement statement:
-                Scope whileScope = statement.Declaration is not null ? context.CreateScope(scope) : scope;
-                if (statement.Declaration is not null)
-                {
-                    ResolveDeclarationSyntax(statement.Declaration, whileScope, containingFunction);
-                }
-                ResolveExpression(statement.Condition, whileScope, containingFunction);
-                ResolveTopLevel(statement.Statement, whileScope, containingFunction);
-                break;
         }
     }
 
@@ -523,15 +513,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
             case LocalReturnStatement statement:
                 ResolveExpression(statement.Statement.Expression, scope, containingFunction);
-                break;
-            case LocalWhileStatement statement:
-                Scope whileScope = statement.Declaration is not null ? context.GetSyntaxScope(statement, scope) : scope;
-                if (statement.Declaration is not null)
-                {
-                    ResolveDeclarationSyntax(statement.Declaration, whileScope, containingFunction);
-                }
-                ResolveExpression(statement.Condition, whileScope, containingFunction);
-                ResolveLocal(statement.Body, whileScope, containingFunction);
                 break;
             case LocalGotoStatement statement:
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);
@@ -950,6 +931,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveExpression(conditional.Condition, ifScope, containingSymbol);
                 ResolveExpression(conditional.ThenExpression, ifScope, containingSymbol);
                 ResolveExpression(conditional.ElseExpression, ifScope, containingSymbol);
+                break;
+            case WhileExpression loop:
+                Scope whileScope = loop.Declaration is not null ? context.GetSyntaxScope(loop, scope) : scope;
+                if (loop.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(loop.Declaration, whileScope, containingSymbol);
+                }
+                ResolveExpression(loop.Condition, whileScope, containingSymbol);
+                ResolveExpression(loop.Body, whileScope, containingSymbol);
                 break;
             case ElseExpression @else:
                 ResolveExpression(@else.Expression, scope, containingSymbol);

@@ -148,9 +148,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case TopLevelLabelStatement label:
                 context.CreateLabelSymbol(scope, new SymbolPart(label.Identifier), containingFunction, label);
                 break;
-            case TopLevelWhileStatement loop:
-                DiscoverTopLevelLabels(loop.Statement, scope, containingFunction);
-                break;
         }
     }
 
@@ -630,22 +627,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case LocalExpressionStatement exprStmt:
                 DiscoverBlockExpressions(exprStmt.Expression, scope, containingSymbol, containingMethod);
                 break;
-            case LocalWhileStatement whileStmt:
-                Scope whileScope = whileStmt.Declaration is not null ? context.CreateScope(scope) : scope;
-                if (whileStmt.Declaration is not null)
-                {
-                    context.RegisterSyntaxScope(whileStmt, whileScope);
-                    foreach (var declarator in whileStmt.Declaration.Declarators)
-                    {
-                        if (declarator.Initializer?.Initializer is { } initExpr)
-                            DiscoverBlockExpressions(initExpr, whileScope, containingSymbol, containingMethod);
-                    }
-                    ResolveLocalVariableDeclaration(whileStmt.Declaration, whileScope, containingSymbol);
-                }
-
-                DiscoverBlockExpressions(whileStmt.Condition, whileScope, containingSymbol, containingMethod);
-                ResolveLocal(whileStmt.Body, whileScope, containingSymbol, containingMethod);
-                break;
         }
     }
 
@@ -725,6 +706,23 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         else if (expr is AsExpression asExpr)
         {
             DiscoverBlockExpressions(asExpr.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is WhileExpression whileExpr)
+        {
+            Scope whileScope = whileExpr.Declaration is not null ? context.CreateScope(scope) : scope;
+            if (whileExpr.Declaration is not null)
+            {
+                context.RegisterSyntaxScope(whileExpr, whileScope);
+                foreach (var declarator in whileExpr.Declaration.Declarators)
+                {
+                    if (declarator.Initializer?.Initializer is { } initExpr)
+                        DiscoverBlockExpressions(initExpr, whileScope, containingSymbol, containingMethod);
+                }
+                ResolveLocalVariableDeclaration(whileExpr.Declaration, whileScope, containingSymbol);
+            }
+
+            DiscoverBlockExpressions(whileExpr.Condition, whileScope, containingSymbol, containingMethod);
+            DiscoverBlockExpressions(whileExpr.Body, whileScope, containingSymbol, containingMethod);
         }
     }
 

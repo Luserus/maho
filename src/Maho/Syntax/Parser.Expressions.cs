@@ -152,6 +152,7 @@ internal sealed partial class Parser
         {
             MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
             MatchingKeywordKind.If => ParseIfExpression(),
+            MatchingKeywordKind.While => ParseWhileExpression(),
             MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
             _ => ParseNamedExpression()
         },
@@ -272,6 +273,16 @@ internal sealed partial class Parser
         }
 
         return new IfExpression(ifKeyword, openParen, declaration, semicolon, condition, closeParen, thenExpression, elseExpression);
+    }
+
+    private WhileExpression ParseWhileExpression()
+    {
+        var whileKeyword = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
+        var (declaration, semicolon, condition) = ParseConditionalHeader("while");
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
+        var body = ParseExpectedExpression("for the 'while' body", MissingTokenAnchor.AfterPrevious);
+        return new WhileExpression(whileKeyword, openParen, declaration, semicolon, condition, closeParen, body);
     }
 
     private (Token OpenBrace, IReadOnlyList<Local> Locals, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)

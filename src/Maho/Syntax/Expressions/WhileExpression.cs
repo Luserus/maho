@@ -1,7 +1,7 @@
 namespace Maho.Syntax;
 
-/// <summary> Local while statement with an optional declaration, loop condition, and single body statement. </summary>
-internal sealed class LocalWhileStatement : LocalStatement
+/// <summary> While loop expression with an optional declaration, loop condition, and body expression. </summary>
+internal sealed class WhileExpression : Expression
 {
     /// <summary> The while keyword token. </summary>
     public Token Keyword { get; }
@@ -15,11 +15,11 @@ internal sealed class LocalWhileStatement : LocalStatement
     public Expression Condition { get; }
     /// <summary> Closing parenthesis token. </summary>
     public Token CloseParen { get; }
-    /// <summary> Loop body statement. </summary>
-    public LocalStatement Body { get; }
+    /// <summary> Loop body expression. </summary>
+    public Expression Body { get; }
 
-    /// <summary> Creates one local while statement node with an optional declaration. </summary>
-    public LocalWhileStatement(Token keyword, Token openParen, VariableDeclaration? declaration, Token? semicolon, Expression condition, Token closeParen, LocalStatement body)
+    /// <summary> Creates one while expression node with an optional declaration. </summary>
+    public WhileExpression(Token keyword, Token openParen, VariableDeclaration? declaration, Token? semicolon, Expression condition, Token closeParen, Expression body)
     {
         Keyword = keyword;
         OpenParen = openParen;
@@ -30,8 +30,8 @@ internal sealed class LocalWhileStatement : LocalStatement
         Body = body;
     }
 
-    /// <summary> Creates one local while statement node with condition only. </summary>
-    public LocalWhileStatement(Token keyword, Token openParen, Expression condition, Token closeParen, LocalStatement body)
+    /// <summary> Creates one while expression node with condition only. </summary>
+    public WhileExpression(Token keyword, Token openParen, Expression condition, Token closeParen, Expression body)
         : this(keyword, openParen, null, null, condition, closeParen, body)
     {
     }

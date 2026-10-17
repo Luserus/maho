@@ -12,9 +12,7 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                    return ParseTopLevelWhileStatement();
-                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseTopLevelReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
                     return ParseTopLevelGotoStatement();
@@ -38,32 +36,15 @@ internal sealed partial class Parser
         Token semicolon;
 
         if (CurrentToken.Kind is TokenKind.Semicolon)
-        {
             semicolon = Consume();
-        }
         else if (EndsWithBlock(expression))
-        {
             semicolon = CreateMissingToken();
-        }
         else
-        {
             semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the top-level expression", MissingTokenAnchor.AfterPrevious);
-        }
 
         return new TopLevelExpressionStatement(expression, semicolon);
     }
 
-    private TopLevelWhileStatement ParseTopLevelWhileStatement()
-    {
-        var whileKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
-        var (declaration, semicolon, condition) = ParseConditionalHeader("while");
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
-
-        var body = ParseTopLevelStatement();
-
-        return new TopLevelWhileStatement(whileKeyword, openParen, declaration, semicolon, condition, closeParen, body);
-    }
 
     private TopLevelReturnStatement ParseTopLevelReturnStatement()
     {
@@ -90,9 +71,7 @@ internal sealed partial class Parser
         {
             case TokenKind.Identifier:
             case TokenKind.LeftParen:
-                if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                    return ParseLocalWhileStatement();
-                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseLocalReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
                     return ParseLocalGotoStatement();
@@ -113,17 +92,6 @@ internal sealed partial class Parser
     }
 
 
-    private LocalWhileStatement ParseLocalWhileStatement()
-    {
-        var whileKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
-        var (declaration, semicolon, condition) = ParseConditionalHeader("while");
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
-
-        var body = ParseLocalStatement();
-
-        return new LocalWhileStatement(whileKeyword, openParen, declaration, semicolon, condition, closeParen, body);
-    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private LocalEmptyStatement ParseLocalEmptyStatement() => new LocalEmptyStatement(Consume());
@@ -134,7 +102,7 @@ internal sealed partial class Parser
     {
         var expression = ParseExpectedExpression("for the local statement");
         Token semicolon;
-        bool isFinal = false;
+        bool isFinal;
 
         if (CurrentToken.Kind is TokenKind.Semicolon)
         {
@@ -218,8 +186,12 @@ internal sealed partial class Parser
         {
             if (ifExpr.ElseExpression is not null)
                 return EndsWithBlock(ifExpr.ElseExpression.Expression);
+
             return EndsWithBlock(ifExpr.ThenExpression);
         }
+        if (expr is WhileExpression whileExpr)
+            return EndsWithBlock(whileExpr.Body);
+
         return false;
     }
 
@@ -238,6 +210,7 @@ internal sealed partial class Parser
         var keyword = Consume();
         var identifier = ExpectIdentifierToken("after 'goto'");
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the goto target", MissingTokenAnchor.AfterPrevious);
+
         return new LocalGotoStatement(keyword, identifier, semicolon);
     }
 

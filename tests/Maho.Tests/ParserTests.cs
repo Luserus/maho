@@ -94,7 +94,7 @@ public sealed class ParserTests
     [Theory]
     [InlineData("call();", typeof(TopLevelExpressionStatement))]
     [InlineData("if (1) 2 else 3;", typeof(TopLevelExpressionStatement))]
-    [InlineData("while (1) ;", typeof(TopLevelWhileStatement))]
+    [InlineData("while (1) call();", typeof(TopLevelExpressionStatement))]
     [InlineData("return 0;", typeof(TopLevelReturnStatement))]
     [InlineData("return value;", typeof(TopLevelReturnStatement))]
     [InlineData(";", typeof(TopLevelEmptyStatement))]
@@ -493,6 +493,78 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_WhileExpression_WithoutSemicolon_WhenBodyEndsWithBlock()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                while (true)
+                {
+                    call();
+                }
+                int next = 1;
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
+        Assert.Equal(2, body.Locals.Count);
+        var whileStmt = Assert.IsType<LocalExpressionStatement>(body.Locals[0]);
+        var whileExpr = Assert.IsType<WhileExpression>(whileStmt.Expression);
+        Assert.IsType<BlockExpression>(whileExpr.Body);
+        Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+    }
+
+    [Fact]
+    public void Parse_WhileExpression_AsFinalExpressionInBlockExpression()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public static void Test()
+            {
+                var val = {
+                    int x = 0;
+                    while (x < 10)
+                    {
+                        x = x + 1;
+                    }
+                };
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
+        var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
+        var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
+        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarators[0].Initializer!.Initializer);
+
+        Assert.Single(blockExpr.Locals);
+        Assert.NotNull(blockExpr.FinalExpression);
+        var whileExpr = Assert.IsType<WhileExpression>(blockExpr.FinalExpression);
+        Assert.IsType<BlockExpression>(whileExpr.Body);
+    }
+
+    [Fact]
+    public void Parse_TopLevelWhileExpression_WithoutSemicolon_WhenBodyEndsWithBlock()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            #pragma toplevel enable
+            while (true)
+            {
+                call();
+            }
+            int x = 1;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.Equal(2, root.Members.Count);
+        var whileStmt = Assert.IsType<TopLevelExpressionStatement>(root.Members[0]);
+        var whileExpr = Assert.IsType<WhileExpression>(whileStmt.Expression);
+        Assert.IsType<BlockExpression>(whileExpr.Body);
+        Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
+    }
+
+    [Fact]
     public void Parse_TopLevelBlock_SupportsUsingDirective_And_AliasDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
@@ -566,7 +638,7 @@ public sealed class ParserTests
     [InlineData("int value = 1;", typeof(LocalVariableDeclarationStatement))]
     [InlineData("call();", typeof(LocalExpressionStatement))]
     [InlineData("if (1) 2 else 3;", typeof(LocalExpressionStatement))]
-    [InlineData("while (1) ;", typeof(LocalWhileStatement))]
+    [InlineData("while (1) call();", typeof(LocalExpressionStatement))]
     [InlineData("{ int nested = 1; }", typeof(LocalExpressionStatement))]
     [InlineData("return 0;", typeof(LocalReturnStatement))]
     [InlineData(";", typeof(LocalEmptyStatement))]
@@ -837,11 +909,12 @@ public sealed class ParserTests
         Assert.NotNull(ifExpr.Semicolon);
         Assert.IsType<BinaryExpression>(ifExpr.Condition);
 
-        Local localWhile = ParseSingleLocal("while (int x = 1; x > 0) ;", typeof(LocalWhileStatement));
-        LocalWhileStatement whileStmt = Assert.IsType<LocalWhileStatement>(localWhile);
-        Assert.NotNull(whileStmt.Declaration);
-        Assert.NotNull(whileStmt.Semicolon);
-        Assert.IsType<BinaryExpression>(whileStmt.Condition);
+        Local localWhile = ParseSingleLocal("while (int x = 1; x > 0) call();", typeof(LocalExpressionStatement));
+        LocalExpressionStatement whileStmt = Assert.IsType<LocalExpressionStatement>(localWhile);
+        WhileExpression whileExpr = Assert.IsType<WhileExpression>(whileStmt.Expression);
+        Assert.NotNull(whileExpr.Declaration);
+        Assert.NotNull(whileExpr.Semicolon);
+        Assert.IsType<BinaryExpression>(whileExpr.Condition);
     }
 
     [Theory]
@@ -1412,7 +1485,8 @@ public sealed class ParserTests
                     local = identity<int>(value: local);
 
                     if (int testCond = local; testCond) local = 1; else local = 2;
-                    while (int testLoop = local; testLoop) ;
+                    ;
+                    while (int testLoop = local; testLoop) local = 1;
                     { int scoped = 0; scoped = local; }
                     return local;
                 }
@@ -1438,7 +1512,7 @@ public sealed class ParserTests
             global { using Extra; int globalBlockValue = 0; }
             call();
             if (1) 2 else 3;
-            while (1) ;
+            while (1) call();
             { int blockValue = 0; }
             return 0;
             ;
@@ -1479,12 +1553,10 @@ public sealed class ParserTests
             typeof(LocalFunctionDeclaration),
             typeof(LocalVariableDeclarationStatement),
             typeof(TopLevelExpressionStatement),
-            typeof(TopLevelWhileStatement),
             typeof(TopLevelBlockDeclaration),
             typeof(TopLevelReturnStatement),
             typeof(TopLevelEmptyStatement),
             typeof(LocalExpressionStatement),
-            typeof(LocalWhileStatement),
             typeof(LocalReturnStatement),
             typeof(LocalEmptyStatement),
             typeof(VariableDeclaration),
@@ -1522,6 +1594,7 @@ public sealed class ParserTests
             typeof(CollectionConstructorModifier),
             typeof(IfExpression),
             typeof(ElseExpression),
+            typeof(WhileExpression),
             typeof(ConstructorCallExpression),
             typeof(ArrayCreationExpression),
             typeof(ObjectWithClause),
