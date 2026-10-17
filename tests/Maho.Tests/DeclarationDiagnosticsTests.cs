@@ -359,8 +359,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public partial class MultiFile;");
         var (_, _, _, root2) = CompilerTestBed.Parse("public partial class MultiFile;");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.False(context.Diagnostics.HasErrors);
     }
@@ -370,8 +372,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public class DupeMulti;");
         var (_, _, _, root2) = CompilerTestBed.Parse("public class DupeMulti;");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.True(context.Diagnostics.HasErrors);
         var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0530");
@@ -383,8 +387,10 @@ public sealed class DeclarationDiagnosticsTests
     {
         var (_, _, _, root1) = CompilerTestBed.Parse("public partial void Work() { return; }");
         var (_, _, _, root2) = CompilerTestBed.Parse("public partial void Work() { return; }");
-        var syntaxTree = new SyntaxTree("TestProject", [root1, root2]);
-        var context = new Resolver().Resolve(syntaxTree);
+        var context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(root1, "first.mh"),
+            SyntaxTree.CreateSingleRoot(root2, "second.mh")
+        ]);
 
         Assert.True(context.Diagnostics.HasErrors);
         var diag = Assert.Single(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0533");
@@ -475,4 +481,130 @@ public sealed class DeclarationDiagnosticsTests
         var note = Assert.Single(diag.Notes);
         Assert.Contains("generic type 'Result<T>' exists in this scope with 1 type argument, but non-generic type 'Result' was not found", note.Message);
     }
+
+    [Fact]
+    public void UnresolvedType_InTupleDestructuring_EmitsMH0500ExactlyOnce()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Unit;
+            public Unit Test()
+            {
+                UnknownType (a, b, c) = (1, 2, 3);
+                return default;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
+    }
+
+    [Fact]
+    public void UnresolvedType_InMultipleDeclarators_EmitsMH0500ExactlyOnce()
+    {
+        var compilation = Compilation.FromSource("""
+            public struct Unit;
+            public Unit Test()
+            {
+                UnknownType a, b, c;
+                return default;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
+        Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
+    }
+
+    [Fact]
+    public void ConstructorOutsideType_TopLevel_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            Foo()
+            {
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+    [Fact]
+    public void ConstructorOutsideType_InNamespace_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            namespace Sample
+            {
+                public Foo()
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+
+
+    [Fact]
+    public void ConstructorNameMismatch_EmitsMH0525()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Foo
+            {
+                public Bar()
+                {
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0525");
+        Assert.Contains("constructor name 'Bar' does not match enclosing type name 'Foo'", diag.Message);
+    }
+
+
+
+    [Fact]
+    public void SpecialFunctions_ValidDeclarations_SucceedWithoutErrors()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Box
+            {
+                public Box()
+                {
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.Empty(compilation.Diagnostics);
+    }
+
+    [Fact]
+    public void ConstructorOutsideType_Local_EmitsMH0520()
+    {
+        var compilation = Compilation.FromSource("""
+            public class Foo
+            {
+                public void Method()
+                {
+                    Bar()
+                    {
+                    }
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
+        Assert.Contains("constructor must be declared inside a type body", diag.Message);
+    }
+
+
 }
+
+

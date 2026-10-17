@@ -24,11 +24,11 @@ internal sealed class MacroExpansionPass : ResolutionPass
                 macroTable[macroSymbol.Name] = macroSymbol.Syntax;
 
         // Also collect directly from syntax tree roots if not yet discovered
-        foreach (var root in context.SyntaxTree.Roots)
-            CollectMacros(root.Members, macroTable);
+        foreach (var tree in context.SyntaxTrees)
+            CollectMacros(tree.Root.Members, macroTable);
 
         ulong recursionLimit = context.Options?.MacroRecursionLimit ?? 128;
-        var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable);
+        var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable, context);
 
         ulong currentDepth = 0;
         bool anyExpanded;
@@ -40,8 +40,9 @@ internal sealed class MacroExpansionPass : ResolutionPass
             if (recursionLimit > 0 && currentDepth > recursionLimit)
                 break;
 
-            foreach (var root in context.SyntaxTree.Roots)
+            foreach (var tree in context.SyntaxTrees)
             {
+                var root = tree.Root;
                 var sourceText = root.GetSource() ?? (root.Members.Count > 0 ? root.Members[0].GetSource() : null) ?? new SourceText(string.Empty);
 
                 if (ExpandCompilationUnit(root, expander, currentDepth, sourceText))
@@ -88,7 +89,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         {
             if (local is LocalMacroDeclaration localMacro)
                 macroTable[new SymbolPart(localMacro.Macro.Name)] = localMacro.Macro;
-            else if (local is LocalBlockStatement block)
+            else if (local is LocalExpressionStatement exprStmt && exprStmt.Expression is BlockExpression block)
                 CollectLocalMacros(block.Locals, macroTable);
             else if (local is LocalFunctionDeclaration localFunc && localFunc.Function.Body is FunctionBlockBody funcBody)
                 CollectLocalMacros(funcBody.Locals, macroTable);
@@ -274,13 +275,6 @@ internal sealed class MacroExpansionPass : ResolutionPass
                     changed = true;
                 }
             }
-            else if (local is LocalBlockStatement block)
-            {
-                if (ExpandLocalBlock(block, expander, currentDepth, sourceText))
-                    changed = true;
-
-                newLocals.Add(local);
-            }
             else
             {
                 if (ExpandLocal(local, expander, currentDepth, sourceText))
@@ -292,59 +286,6 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (changed)
             blockBody.Locals = newLocals;
-
-        return changed;
-    }
-
-    private static bool ExpandLocalBlock(LocalBlockStatement block, MacroExpander expander, ulong currentDepth, SourceText sourceText)
-    {
-        bool changed = false;
-        var newLocals = new List<Local>();
-
-        foreach (var local in block.Locals)
-        {
-            if (local is LocalMacroInvocationDeclaration localInv)
-            {
-                var expanded = expander.ExpandStatement(localInv.Invocation, currentDepth, localInv.ExpansionOrigin, sourceText);
-
-                if (expanded.Count == 1 && expanded[0] is LocalMacroInvocationDeclaration unexp && ReferenceEquals(unexp.Invocation, localInv.Invocation))
-                    newLocals.Add(local);
-                else
-                {
-                    newLocals.AddRange(expanded);
-                    changed = true;
-                }
-            }
-            else if (local is LocalExpressionStatement exprStmt && exprStmt.Expression is MacroInvocationExpression inv)
-            {
-                var expanded = expander.ExpandStatement(inv, currentDepth, exprStmt.ExpansionOrigin, sourceText);
-
-                if (expanded.Count == 1 && expanded[0] is LocalMacroInvocationDeclaration unexp && ReferenceEquals(unexp.Invocation, inv))
-                    newLocals.Add(local);
-                else
-                {
-                    newLocals.AddRange(expanded);
-                    changed = true;
-                }
-            }
-            else if (local is LocalBlockStatement innerBlock)
-            {
-                if (ExpandLocalBlock(innerBlock, expander, currentDepth, sourceText))
-                    changed = true;
-
-                newLocals.Add(local);
-            }
-            else
-            {
-                if (ExpandLocal(local, expander, currentDepth, sourceText))
-                    changed = true;
-
-                newLocals.Add(local);
-            }
-        }
-
-        if (changed)
-            block.Locals = newLocals;
 
         return changed;
     }
@@ -578,7 +519,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             if (localsChanged || !ReferenceEquals(newFinal, block.FinalExpression))
             {
                 changed = true;
-                return new BlockExpression(block.OpenBrace, newLocals, newFinal, block.CloseBrace)
+                return new BlockExpression(block.Attributes, block.Modifiers, block.OpenBrace, newLocals, newFinal, block.CloseBrace)
                 {
                     ExpansionOrigin = block.ExpansionOrigin
                 };

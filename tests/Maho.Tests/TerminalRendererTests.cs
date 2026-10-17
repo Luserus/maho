@@ -1,6 +1,20 @@
-using Maho.Diagnostics;
+using Maho.Server.Protocol;
+using Maho;
+using DiagnosticColorMode = Maho.Server.Protocol.CompilerDiagnosticColorMode;
+using DiagnosticPathStyle = Maho.Server.Protocol.CompilerDiagnosticPathStyle;
+using DiagnosticSeverity = Maho.Server.Protocol.CompilerDiagnosticSeverity;
+using DiagnosticLabelStyle = Maho.Server.Protocol.CompilerDiagnosticLabelStyle;
+using TextLocation = Maho.Server.Protocol.CompilerTextLocation;
+using TextSpanInfo = Maho.Server.Protocol.CompilerTextSpan;
+using DiagnosticInfo = Maho.Server.Protocol.CompilerDiagnostic;
+using DiagnosticLabelInfo = Maho.Server.Protocol.CompilerDiagnosticLabel;
+using DiagnosticNoteInfo = Maho.Server.Protocol.CompilerDiagnosticNote;
+using DiagnosticHelpInfo = Maho.Server.Protocol.CompilerDiagnosticHelp;
+using DiagnosticSuggestionInfo = Maho.Server.Protocol.CompilerDiagnosticSuggestion;
+using TextEditInfo = Maho.Server.Protocol.CompilerTextEdit;
+using MacroExpansionTraceInfo = Maho.Server.Protocol.CompilerMacroTrace;
 
-namespace Maho.Tests;
+namespace MahoRendererTests;
 
 public sealed class TerminalRendererTests
 {
@@ -90,8 +104,7 @@ public sealed class TerminalRendererTests
             Suggestions: [
                 new DiagnosticSuggestionInfo(
                     "rename to PascalCase",
-                    [new TextEditInfo(span, "var NewName = 10;", "fix.mh")],
-                    SuggestionApplicability.MachineApplicable)
+                    [new TextEditInfo(span, "var NewName = 10;", "fix.mh")])
             ]);
 
         string output = renderer.Render(diagnostic);
@@ -298,7 +311,7 @@ public sealed class TerminalRendererTests
     [Fact]
     public void TerminalRenderer_WithMacroTrace_RendersInvocationSnippetAndDefinitionNote()
     {
-        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative);
+        var renderer = new TerminalDiagnosticRenderer(DiagnosticColorMode.Never, DiagnosticPathStyle.Relative, rootDirectory: ".");
         renderer.RegisterSource("StdLib.mh", "macro $DefineInt\n{\n    (@name: ident) => {\n        public struct @name {\n            public Result val;\n        }\n    }\n}\n\n$DefineInt(Foo);");
 
         var errSpan = new TextSpanInfo(69, 6, 75, new TextLocation(5, 20), new TextLocation(5, 26));
@@ -398,6 +411,7 @@ public sealed class TerminalRendererTests
         Assert.Equal("0ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.Zero));
         Assert.Equal("1.23s", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromSeconds(1.234)));
         Assert.Equal("45.67ms", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromMilliseconds(45.67)));
+        Assert.Equal("12.5µs", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromMicroseconds(12.5)));
         Assert.Equal("500ns", TerminalDiagnosticRenderer.FormatTime(TimeSpan.FromTicks(5)));
     }
 }

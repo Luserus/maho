@@ -1,6 +1,6 @@
 # Maho
 
-An experimental programming language and compiler project inspired by C#.
+The compiler and toolchain for the Maho programming language.
 
 ## Current Status
 

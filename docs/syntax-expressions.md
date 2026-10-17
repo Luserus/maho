@@ -12,15 +12,15 @@ These files are intentionally declarative: they define the tree that the parser 
 ## Expression families in this folder
 
 - Name/reference forms:
-  `IdentifierNameExpression`, `GenericNameExpression`
+  `IdentifierNameExpression`, `GenericNameExpression` (supports standard `<...>` as well as explicit turbofish `::<...>`)
 - Literal/grouping forms:
-  `LiteralExpression`, `ParenthesizedExpression`
+  `LiteralExpression`, `ParenthesizedExpression`, `TupleExpression`
 - Operator forms:
-  `UnaryExpression`, `BinaryExpression`, `AssignmentExpression`, `CastExpression`
+  `UnaryExpression`, `BinaryExpression`, `AssignmentExpression`, `AsExpression`
 - Access/call forms:
   `MemberAccessExpression`, `CallExpression`, `IndexExpression`, `NamedArgumentExpression`
 - Control-flow-like forms:
-  `IfExpression`, `ElseExpression`, `BlockExpression`
+  `IfExpression`, `ElseExpression`, `WhileExpression`, `BlockExpression`
 - Construction forms:
   `ArrayCreationExpression`, `ObjectCreationExpression`, `ConstructorCallExpression`, `CollectionExpression`
 - Supporting enums:

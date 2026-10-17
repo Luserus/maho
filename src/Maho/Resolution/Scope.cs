@@ -27,9 +27,13 @@ internal sealed class Scope
 
     public static Scope GlobalScope { get; } = new Scope(null);
 
+    /// <summary> Indicates whether this scope is a sink scope for throwaway symbols. </summary>
+    public bool IsSink { get; set; }
+
     public Scope(Scope? parent)
     {
         Parent = parent;
+        IsSink = parent?.IsSink ?? false;
         Symbols = [];
         SymbolsByName = [];
         ChildScopes = [];
@@ -37,14 +41,17 @@ internal sealed class Scope
 
     public Scope? GetChildScope(SymbolHandle handle)
     {
-        if (ChildScopes.TryGetValue(handle, out var scope))
-            return scope;
-
-        for (int i = 0; i < ImportedScopes.Count; i++)
+        for (var current = this; current != null; current = current.Parent)
         {
-            var imported = ImportedScopes[i].GetChildScope(handle);
-            if (imported is not null)
-                return imported;
+            if (current.ChildScopes.TryGetValue(handle, out var scope))
+                return scope;
+
+            for (int i = 0; i < current.ImportedScopes.Count; i++)
+            {
+                var imported = current.ImportedScopes[i].GetChildScope(handle);
+                if (imported is not null)
+                    return imported;
+            }
         }
 
         return null;
@@ -162,7 +169,7 @@ internal sealed class Scope
         {
             var symbol = start[0];
 
-            var child = scope.GetChildScope((symbol.Kind, symbol.ID));
+            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
 
             if (child is null)
                 return [];
@@ -222,7 +229,7 @@ internal sealed class Scope
 
             // More components follow (e.g. Type.NestedType)
             var symbol = symbols[0];
-            var childScope = scope.GetChildScope((symbol.Kind, symbol.ID));
+            var childScope = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
             if (childScope is null)
                 return [];
 
@@ -235,7 +242,7 @@ internal sealed class Scope
             for (int i = index; i < name.Count - 1; i++)
             {
                 var nextSymbol = nextSymbols[0];
-                var nextChild = scope.GetChildScope((nextSymbol.Kind, nextSymbol.ID));
+                var nextChild = scope.GetChildScope((nextSymbol.Kind, nextSymbol.ID)) ?? nextSymbol.EnclosingScope?.GetChildScope((nextSymbol.Kind, nextSymbol.ID));
                 if (nextChild is null)
                     return [];
                 scope = nextChild;

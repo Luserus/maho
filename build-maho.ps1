@@ -63,6 +63,8 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
 $CliProject = Join-Path $RepoRoot "src\MahoCli\MahoCli.csproj"
+$ServerProject = Join-Path $RepoRoot "src\MahoServer\MahoServer.csproj"
+$ServerHostProject = Join-Path $RepoRoot "src\MahoServerHost\MahoServerHost.csproj"
 $MiryoProject = Join-Path $RepoRoot "src\Miryo\Miryo.csproj"
 $MahoProject = Join-Path $RepoRoot "src\Maho\Maho.csproj"
 $DistDir = Join-Path $RepoRoot "dist"
@@ -120,24 +122,37 @@ function Publish-Target([string]$rid, [string]$outDir) {
         throw "dotnet publish mahoc failed with exit code $LASTEXITCODE"
     }
 
-    # 2. Publish miryo
+    # 2. Publish mahoc-server
+    dotnet publish "$ServerHostProject" -c $config -o "$outDir" @extraArgs --nologo -v q
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish mahoc-server failed with exit code $LASTEXITCODE"
+    }
+
+    # 3. Publish MahoServer library
+    dotnet publish "$ServerProject" -c $config -o "$outDir" @debugProps --nologo -v q
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish MahoServer failed with exit code $LASTEXITCODE"
+    }
+
+    # 4. Publish miryo
     dotnet publish "$MiryoProject" -c $config -o "$outDir" @extraArgs --nologo -v q
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish miryo failed with exit code $LASTEXITCODE"
     }
 
-    # 3. Publish Maho library
+    # 5. Publish Maho library
     dotnet publish "$MahoProject" -c $config -o "$outDir" @debugProps --nologo -v q
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish Maho failed with exit code $LASTEXITCODE"
     }
 
-    # 4. Generate miryo.config
+    # 6. Generate miryo.config
     $configContent = @"
 # Miryo Toolchain Configuration
 
 [tools]
 mahoc = ["./mahoc", "mahoc"]
+mahoc_server = ["./mahoc-server", "mahoc-server"]
 il2llvmir = ["./il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]
@@ -196,11 +211,13 @@ if ($All) {
     Publish-Target -rid $hostRid -outDir $DistDir
 
     $hostMahoc = Find-Binary $DistDir "mahoc"
+    $hostServer = Find-Binary $DistDir "mahoc-server"
     $hostMiryo = Find-Binary $DistDir "miryo"
 
     Write-Host ""
     Write-Host "Maho toolchain successfully built for all major platforms:" -ForegroundColor Green
     Write-Host "  Host Compiler (mahoc): $hostMahoc"
+    Write-Host "  Host Server:           $hostServer"
     Write-Host "  Host Project (miryo):  $hostMiryo"
     Write-Host ""
     Write-Host "Execute host toolchain via:"
@@ -217,12 +234,16 @@ if ($All) {
     Publish-Target -rid $targetPlatform -outDir $targetDir
 
     $mahocBin = Find-Binary $targetDir "mahoc"
+    $serverBin = Find-Binary $targetDir "mahoc-server"
     $miryoBin = Find-Binary $targetDir "miryo"
 
     Write-Host ""
     Write-Host "Maho toolchain successfully built for $targetPlatform:" -ForegroundColor Green
-    Write-Host "  mahoc: $mahocBin"
-    Write-Host "  miryo: $miryoBin"
+    Write-Host "  mahoc:          $mahocBin"
+    Write-Host "  mahoc-server:   $serverBin"
+    Write-Host "  miryo:          $miryoBin"
+    Write-Host "  Core Library:   $(Join-Path $targetDir 'Maho.dll')"
+    Write-Host "  Server Library: $(Join-Path $targetDir 'MahoServer.dll')"
     Write-Host ""
     if ($targetPlatform -eq $hostRid) {
         Write-Host "Execute toolchain via:"
@@ -235,14 +256,17 @@ if ($All) {
     Publish-Target -rid $hostRid -outDir $DistDir
 
     $mahocBin = Find-Binary $DistDir "mahoc"
+    $serverBin = Find-Binary $DistDir "mahoc-server"
     $miryoBin = Find-Binary $DistDir "miryo"
 
     Write-Host ""
     Write-Host "Maho toolchain successfully built:" -ForegroundColor Green
-    Write-Host "  mahoc:         $mahocBin"
-    Write-Host "  miryo:         $miryoBin"
-    Write-Host "  Core Library:  $(Join-Path $DistDir 'Maho.dll')"
-    Write-Host "  Configuration: $(Join-Path $DistDir 'miryo.config')"
+    Write-Host "  mahoc:          $mahocBin"
+    Write-Host "  mahoc-server:   $serverBin"
+    Write-Host "  miryo:          $miryoBin"
+    Write-Host "  Core Library:   $(Join-Path $DistDir 'Maho.dll')"
+    Write-Host "  Server Library: $(Join-Path $DistDir 'MahoServer.dll')"
+    Write-Host "  Configuration:  $(Join-Path $DistDir 'miryo.config')"
     Write-Host ""
     Write-Host "Execute toolchain via:"
     Write-Host "  $miryoBin [command] [options]"

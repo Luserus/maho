@@ -266,6 +266,22 @@ internal sealed class DiagnosticsManager
             .WithHelp($"qualify '{typeName}' with its namespace or use an alias")
             .Report();
 
+    /// <summary> Reports that a constructor was declared outside of a type body. </summary>
+    // Possibly syntax error but for some reason inserted into semantic one.
+    public void ReportConstructorOutsideType(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0520", "constructor must be declared inside a type body", span, source)
+            .WithPrimaryLabel(span, "constructor declared outside a type", source)
+            .WithHelp("move the constructor inside a class, struct, or union declaration")
+            .Report();
+
+    /// <summary> Reports that a constructor name does not match the enclosing type name. </summary>
+    public void ReportConstructorNameMismatch(string constructorName, string enclosingTypeName, TextSpan span, SourceText? source = null) =>
+        BuildError("MH0525", $"constructor name '{constructorName}' does not match enclosing type name '{enclosingTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"constructor name must match enclosing type '{enclosingTypeName}'", source)
+            .WithHelp($"rename the constructor to '{enclosingTypeName}' or provide a return type if this is a method")
+            .Report();
+
+
     /// <summary> Reports a duplicate type declaration pointing to both declaration sites. </summary>
     public void ReportDuplicateTypeDeclaration(
         string typeName,

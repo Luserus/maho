@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -5,6 +6,7 @@ namespace Maho.Resolution;
 internal sealed class ParameterSymbol : Symbol
 {
     public SymbolHandle? ContainingSymbol { get; }
+    public List<SymbolHandle> Attributes { get; internal set; }
     public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
     public Parameter? Syntax { get; }
 
@@ -12,6 +14,7 @@ internal sealed class ParameterSymbol : Symbol
     {
         Kind = SymbolKind.Parameter;
         ContainingSymbol = containingSymbol;
+        Attributes = [];
         Syntax = syntax;
     }
 }

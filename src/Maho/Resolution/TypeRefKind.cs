@@ -10,5 +10,17 @@ internal enum TypeRefKind : byte
     /// <summary>The type reference failed to resolve or is syntactically invalid.</summary>
     Error,
     /// <summary>The type reference was successfully resolved to a concrete symbol.</summary>
-    Resolved
+    Resolved,
+    /// <summary>Pointer type (<c>T*</c>).</summary>
+    Pointer,
+    /// <summary>Reference type (<c>T&amp;</c>).</summary>
+    Reference,
+    /// <summary>Fixed-size array type (<c>T[size]</c>).</summary>
+    Array,
+    /// <summary>Unsized span type (<c>T[]</c>).</summary>
+    Span,
+    /// <summary>Optional type (<c>T?</c>).</summary>
+    Optional,
+    /// <summary>Tuple type (<c>(T1, T2)</c>).</summary>
+    Tuple
 }

@@ -26,7 +26,9 @@ public sealed class SymbolDiscoveryTests
         LocalVariableSymbol scriptValue = Assert.Single(context.LocalVariableSymbols);
         Assert.Equal("scriptValue", scriptValue.Name.ToString());
         Assert.Equal(ResolutionContext.GetHandle(main), scriptValue.Parent);
-        Assert.Equal(ResolutionContext.GetHandle(scriptValue), Assert.Single(main.LocalVariables));
+        Assert.Same(scriptValue, Assert.Single(main.LocalVariables));
+        Assert.Same(scriptValue, main[0]);
+        Assert.Same(scriptValue, main[scriptValue.ID]);
     }
 
     [Fact]
@@ -43,7 +45,10 @@ public sealed class SymbolDiscoveryTests
         Assert.Empty(enabledDiagnostics.Diagnostics);
         Assert.Empty(ordinaryDiagnostics.Diagnostics);
 
-        ResolutionContext context = new Resolver().Resolve(new SyntaxTree("project", [enabledRoot, ordinaryRoot]));
+        ResolutionContext context = new Resolver().Resolve([
+            SyntaxTree.CreateSingleRoot(enabledRoot, "enabled.mh"),
+            SyntaxTree.CreateSingleRoot(ordinaryRoot, "ordinary.mh")
+        ]);
 
         Assert.Single(context.FunctionSymbols, symbol => symbol.Name.ToString() == "Main" && symbol.Syntax is null);
         Assert.Single(context.LocalVariableSymbols, symbol => symbol.Name.ToString() == "scriptValue");
@@ -151,6 +156,26 @@ public sealed class SymbolDiscoveryTests
         Assert.Equal("ExampleAlias", context.AliasSymbols[0].Name.ToString());
         Assert.All(context.GenericParameterSymbols, parameter => Assert.NotNull(parameter.GenericSymbol));
         Assert.True(context.GlobalNamespace.Next.ContainsKey(new SymbolPart("Example")));
+    }
+
+    [Fact]
+    public void Resolve_SpecialFunctions_SetSpecialKind()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            public class Box
+            {
+                public Box() {}
+            }
+            """);
+        Assert.Empty(diagnostics.Diagnostics);
+
+        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+
+        var methods = context.MethodSymbols;
+        Assert.Single(methods);
+
+        var ctor = methods.Single(m => m.Name.Text == ".ctor");
+        Assert.Equal(SpecialFunctionKind.Constructor, ctor.SpecialKind);
     }
 
     [Fact]

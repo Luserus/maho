@@ -20,6 +20,11 @@ internal sealed partial class Parser
             return ParseTopLevelAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
+        else if (LooksLikeTopLevelConstructor(allowSemicolon: modifiers.Count > 0))
+        {
+            var ctor = ParseMemberConstructor(attributes, modifiers);
+            return new TopLevelFunctionDeclaration(ctor.Function);
+        }
         else
             return ParseTopLevelVariableDeclarationOrFunction(attributes, modifiers);
     }
@@ -290,9 +295,16 @@ internal sealed partial class Parser
     private TopLevelDeclaration ParseTopLevelVariableDeclarationOrFunction(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var type = ParseTypeSyntax();
+
+        if (IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
+        {
+            var tupleName = CreateTupleNameFromTupleType((TupleType)type);
+            return ParseTopLevelVariableDeclaration(attributes, modifiers, type, tupleName);
+        }
+
         var identifier = ParseNamedSyntax();
 
-        if (CurrentToken.Kind is TokenKind.LeftParen)
+        if (identifier is not TupleName && CurrentToken.Kind is TokenKind.LeftParen)
             return ParseTopLevelFunctionDeclaration(attributes, modifiers, type, identifier);
         else
             return ParseTopLevelVariableDeclaration(attributes, modifiers, type, identifier);
@@ -306,21 +318,6 @@ internal sealed partial class Parser
         return new TopLevelVariableDeclaration(declaration, semicolon);
     }
 
-    private TopLevelAmbiguousPointerDeclaration ParseTopLevelAmbiguousPointerDeclaration()
-    {
-        var declaration = ParseAmbiguousPointerDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous pointer declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new TopLevelAmbiguousPointerDeclaration(declaration, semicolon);
-    }
-
-    private TopLevelAmbiguousReferenceDeclaration ParseTopLevelAmbiguousReferenceDeclaration()
-    {
-        var declaration = ParseAmbiguousReferenceDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous reference declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new TopLevelAmbiguousReferenceDeclaration(declaration, semicolon);
-    }
 
     private TopLevelFunctionDeclaration ParseTopLevelFunctionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, NamedSyntax identifier)
     {
@@ -370,9 +367,16 @@ internal sealed partial class Parser
         attributes ??= ParseAttributeLists();
         modifiers ??= ParseModifiers();
         var type = ParseTypeSyntax();
+
+        if (IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
+        {
+            var tupleName = CreateTupleNameFromTupleType((TupleType)type);
+            return ParseMemberFieldDeclaration(attributes, modifiers, type, tupleName);
+        }
+
         var identifier = ParseNamedSyntax();
 
-        if (CurrentToken.Kind is TokenKind.LeftParen)
+        if (identifier is not TupleName && CurrentToken.Kind is TokenKind.LeftParen)
             return ParseMemberFunction(attributes, modifiers, type, identifier);
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseMemberPropertyDeclaration(attributes, modifiers, type, identifier);
@@ -402,19 +406,45 @@ internal sealed partial class Parser
         return new MemberPropertyDeclaration(attributes, modifiers, type, identifier, body);
     }
 
-    private Local ParseLocalDeclaration()
+    private Local ParseLocalDeclaration(StatementParseMode parseMode = StatementParseMode.Normal)
     {
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseLocalBlockStatement(attributes, modifiers);
+        {
+            var (openBrace, locals, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: parseMode is StatementParseMode.AllowFinalExpression);
+            var blockExpr = new BlockExpression(attributes, modifiers, openBrace, locals, finalExpression, closeBrace);
+            Token semicolon;
+            bool isFinal = false;
+
+            if (CurrentToken.Kind is TokenKind.Semicolon)
+            {
+                semicolon = Consume();
+            }
+            else if (parseMode is StatementParseMode.AllowFinalExpression && CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
+            {
+                semicolon = CreateMissingToken();
+                isFinal = true;
+            }
+            else
+            {
+                semicolon = CreateMissingToken();
+            }
+
+            return new LocalExpressionStatement(blockExpr, semicolon, isFinalExpression: isFinal);
+        }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseLocalTypeDeclaration(attributes, modifiers);
+        else if (LooksLikeTopLevelConstructor(allowSemicolon: modifiers.Count > 0))
+        {
+            var ctor = ParseMemberConstructor(attributes, modifiers);
+            return new LocalFunctionDeclaration(ctor.Function);
+        }
         else
             return ParseLocalVariableDeclarationStatementOrFunction(attributes, modifiers);
     }
@@ -499,13 +529,23 @@ internal sealed partial class Parser
             }
             else
             {
-                if (CurrentToken.Kind is not TokenKind.Identifier)
+                if (firstIdentifier is null && nodesAndSeparators.Count == 0 && IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
+                {
+                    identifier = CreateTupleNameFromTupleType((TupleType)type);
+                }
+                else if (CurrentToken.Kind is TokenKind.LeftParen)
+                {
+                    identifier = ParseTupleName();
+                }
+                else if (CurrentToken.Kind is TokenKind.Identifier)
+                {
+                    identifier = ParseNamedSyntax();
+                }
+                else
                 {
                     diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
                     break;
                 }
-
-                identifier = ParseNamedSyntax();
             }
 
             wasCommaLast = false;
@@ -541,21 +581,6 @@ internal sealed partial class Parser
         return new VariableDeclaration(attributes, modifiers, type, declarators);
     }
 
-    private AmbiguousPointerDeclaration ParseAmbiguousPointerDeclaration()
-    {
-        var type = ParseTypeSyntax();
-        var identifier = ParseNamedSyntax();
-
-        return new AmbiguousPointerDeclaration(type, identifier);
-    }
-
-    private AmbiguousReferenceDeclaration ParseAmbiguousReferenceDeclaration()
-    {
-        var type = ParseTypeSyntax();
-        var identifier = ParseNamedSyntax();
-
-        return new AmbiguousReferenceDeclaration(type, identifier);
-    }
 
     private SeparatedSyntaxList<Parameter> ParseParameterList()
     {
@@ -563,6 +588,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
+            var attributes = ParseAttributeLists();
             var modifiers = ParseModifiers();
 
             var type = ParseTypeSyntax();
@@ -589,7 +615,7 @@ internal sealed partial class Parser
             }
 
             var declarator = new ParameterVariableDeclarator(modifiers, type, identifier);
-            var variableDecl = new Parameter(declarator, initializer);
+            var variableDecl = new Parameter(attributes, declarator, initializer);
 
             nodesAndSeparators.Add(variableDecl);
 
@@ -691,7 +717,7 @@ internal sealed partial class Parser
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var start = current;
-            var local = ParseLocal();
+            var local = ParseLocal(StatementParseMode.FunctionBody);
             locals.Add(local);
             RecoverLocalIfStalled(start);
         }
@@ -721,6 +747,9 @@ internal sealed partial class Parser
 
     private TypeSyntax ParsePrimaryType()
     {
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+            return ParseTupleType();
+
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
             diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type name");
@@ -728,11 +757,117 @@ internal sealed partial class Parser
         }
 
         var identifier = Consume();
+        TypeSyntax baseType;
 
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
-            return ParseGenericType(identifier);
+            baseType = ParseGenericType(identifier);
         else
-            return new SimpleType(identifier);
+            baseType = new SimpleType(identifier);
+
+        if (CurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType().Success)
+            return ParseUniformTupleType(baseType);
+
+        return baseType;
+    }
+
+    private UniformTupleType ParseUniformTupleType(TypeSyntax elementType)
+    {
+        var openParen = Consume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var ident = ExpectIdentifierToken("in tuple element list");
+            nodesAndSeparators.Add(new SimpleName(ident));
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+            }
+            else
+                break;
+        }
+
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple type");
+        return new UniformTupleType(elementType, openParen, new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), closeParen);
+    }
+
+    private TupleType ParseTupleType()
+    {
+        var openParen = Consume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var element = ParseTypeSyntax();
+            Token? name = null;
+            if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
+            {
+                name = Consume();
+            }
+
+            nodesAndSeparators.Add(new TupleTypeElement(element, name));
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+            }
+            else
+                break;
+        }
+
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple type");
+        return new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), closeParen);
+    }
+
+    private TupleName ParseTupleName()
+    {
+        var openParen = Consume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var ident = ExpectIdentifierToken("for the tuple declarator name");
+            nodesAndSeparators.Add(new SimpleName(ident));
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodesAndSeparators.Add(Consume());
+            }
+            else
+                break;
+        }
+
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple declarator");
+        return new TupleName(openParen, new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators), closeParen);
+    }
+
+    private static bool IsDestructuringTupleType(TypeSyntax type)
+    {
+        if (type is not TupleType tupleType || tupleType.Elements.Count == 0)
+            return false;
+
+        for (int i = 0; i < tupleType.Elements.Count; i++)
+        {
+            if (tupleType.Elements[i].Name is null)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static TupleName CreateTupleNameFromTupleType(TupleType tupleType)
+    {
+        var nodesAndSeparators = new List<SyntaxNode>();
+        for (int i = 0; i < tupleType.Elements.Count; i++)
+        {
+            var elem = tupleType.Elements[i];
+            nodesAndSeparators.Add(new SimpleName(elem.Name!));
+            var separator = tupleType.Elements.GetSeparator(i);
+            if (separator is not null)
+                nodesAndSeparators.Add(separator);
+        }
+        return new TupleName(tupleType.OpenParen, new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators), tupleType.CloseParen);
     }
 
     private QualifiedType ParseQualifiedType(TypeSyntax firstPart)
@@ -816,6 +951,9 @@ internal sealed partial class Parser
 
     private NamedSyntax ParseNamedSyntax(bool allowQualified = false, bool allowGenericName = true, bool allowGenericQualifiedParts = true)
     {
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+            return ParseTupleName();
+
         NamedSyntax name = ParseNamedSyntaxPart();
 
         if (!allowQualified || CurrentToken.Kind is not TokenKind.Dot)
@@ -916,5 +1054,126 @@ internal sealed partial class Parser
         }
 
         return new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators);
+    }
+
+    /// <summary>
+    /// Parses TypeName(params) body inside a type body as a constructor.
+    /// The name (which matches the type name) is treated as the identifier.
+    /// No return type is present — we synthesize a missing return type.
+    /// </summary>
+    private MemberFunctionDeclaration ParseMemberConstructor(
+        IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var nameToken = Consume(); // The type name acting as constructor name
+        var identifier = new SimpleName(nameToken);
+
+        // Synthesize a missing return type (constructors have no explicit return type)
+        var missingReturnType = new SimpleType(CreateMissingToken());
+
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the constructor name");
+        var parameters = ParseParameterList();
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the constructor parameter list");
+
+        List<TypeConstraintClause> constraints = [];
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
+
+        var signature = new FunctionSignature(modifiers, missingReturnType, identifier,
+            openParen, parameters, closeParen, constraints);
+        var body = ParseFunctionBody();
+
+        return new MemberFunctionDeclaration(
+            new FunctionDeclaration(attributes, signature, body, SpecialFunctionKind.Constructor));
+    }
+
+    /// <summary>
+    /// Checks if the current position looks like a constructor: Identifier '(' with no
+    /// preceding return type. Since call expressions are not valid in member context,
+    /// Identifier '(' followed by '{', '=>', or ';' unambiguously means constructor.
+    /// (Distinguishes from tuple fields like 'Int32 (x, y, z) uniform;').
+    /// </summary>
+    private bool LooksLikeMemberConstructor()
+    {
+        if (CurrentToken.Kind is not TokenKind.Identifier
+            || !CanBeTypeIdentifier(CurrentToken.MatchingKind)
+            || CurrentToken.MatchingKind is MatchingKeywordKind.Operator
+            || Peek().Kind is not TokenKind.LeftParen)
+        {
+            return false;
+        }
+
+        int probe = current + 1; // current is Identifier, probe is '('
+        int depth = 1;
+        probe++;
+
+        while (depth > 0 && probe < tokens.Count && tokens[probe].Kind is not TokenKind.EndToken)
+        {
+            if (tokens[probe].Kind is TokenKind.LeftParen)
+                depth++;
+            else if (tokens[probe].Kind is TokenKind.RightParen)
+                depth--;
+            probe++;
+        }
+
+        if (depth != 0 || probe >= tokens.Count)
+            return false;
+
+        // Skip 'where' clauses
+        while (probe < tokens.Count && tokens[probe].MatchingKind is MatchingKeywordKind.Where)
+        {
+            probe++;
+            while (probe < tokens.Count &&
+                   tokens[probe].Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken &&
+                   tokens[probe].MatchingKind is not MatchingKeywordKind.Where)
+            {
+                probe++;
+            }
+        }
+
+        if (probe >= tokens.Count)
+            return false;
+
+        var nextKind = tokens[probe].Kind;
+        return nextKind is TokenKind.LeftBrace or TokenKind.EqualsGreaterThan or TokenKind.Semicolon;
+    }
+
+    private bool LooksLikeTopLevelConstructor(bool allowSemicolon = false)
+    {
+        if (!LooksLikeMemberConstructor())
+            return false;
+
+        int probe = current + 1; // current is Identifier, probe is '('
+        int depth = 1;
+        probe++;
+
+        while (depth > 0 && probe < tokens.Count && tokens[probe].Kind is not TokenKind.EndToken)
+        {
+            if (tokens[probe].Kind is TokenKind.LeftParen)
+                depth++;
+            else if (tokens[probe].Kind is TokenKind.RightParen)
+                depth--;
+            probe++;
+        }
+
+        if (depth != 0 || probe >= tokens.Count)
+            return false;
+
+        // Skip 'where' clauses
+        while (probe < tokens.Count && tokens[probe].MatchingKind is MatchingKeywordKind.Where)
+        {
+            probe++;
+            while (probe < tokens.Count &&
+                   tokens[probe].Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken &&
+                   tokens[probe].MatchingKind is not MatchingKeywordKind.Where)
+            {
+                probe++;
+            }
+        }
+
+        if (probe >= tokens.Count)
+            return false;
+
+        var nextKind = tokens[probe].Kind;
+        return nextKind is TokenKind.LeftBrace or TokenKind.EqualsGreaterThan || (allowSemicolon && nextKind is TokenKind.Semicolon);
     }
 }

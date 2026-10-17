@@ -84,6 +84,8 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0502` | `UnresolvedIdentifier` | Variable, parameter, or member identifier not found in scope. |
 | `MH0503` | `AmbiguousIdentifier` | Identifier matches multiple visible symbols in scope. |
 | `MH0504` | `UnresolvedNamespace` | Namespace in `using` directive or qualified access not found. |
+| `MH0520` | `ConstructorOutsideType` | Constructor must be declared inside a type body. |
+| `MH0525` | `ConstructorNameMismatch` | Constructor name does not match enclosing type name. |
 
 ### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0569`)
 | Code | Name | Description |

@@ -253,9 +253,8 @@ public sealed class MiryoTests
             File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nImplicitTopLevel : true;\n");
             File.WriteAllText(programFile, "call();");
 
-            // Point config to the compiled mahoc.dll
-            string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
-            string mahocDll = Path.Combine(repoRoot, "src/MahoCli/bin/Debug/net10.0/mahoc.dll");
+            // Use the test package's colocated mahoc/mahoc-server pair.
+            string mahocDll = Path.Combine(AppContext.BaseDirectory, "mahoc.dll");
             string configFile = Path.Combine(tempDir, "miryo.config");
             File.WriteAllText(configFile, $"""
                 [tools]
@@ -291,8 +290,7 @@ public sealed class MiryoTests
             File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nImplicitTopLevel : true;\n");
             File.WriteAllText(programFile, "public struct Widget;");
 
-            string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
-            string mahocDll = Path.Combine(repoRoot, "src/MahoCli/bin/Debug/net10.0/mahoc.dll");
+            string mahocDll = Path.Combine(AppContext.BaseDirectory, "mahoc.dll");
             string configFile = Path.Combine(tempDir, "miryo.config");
             File.WriteAllText(configFile, $"""
                 [tools]
@@ -333,5 +331,37 @@ public sealed class MiryoTests
         {
             Directory.Delete(tempDir, true);
         }
+    }
+
+    [Fact]
+    public void MiryoCommandLine_BareDirectoryInvocation_ReturnsErrorAndUsage()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["dir"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.Contains("Unknown command 'dir'. Expected a command keyword.", errOutput);
+        Assert.Contains("Commands:", errOutput);
+        Assert.Contains("build [path]", errOutput);
+        Assert.Contains("run [path]", errOutput);
+        Assert.Contains("new <name>", errOutput);
+        Assert.Contains("check [path]", errOutput);
+        Assert.Contains("clean [path]", errOutput);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_UnknownOption_ReturnsErrorAndUsage()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["--foo"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.Contains("Unknown option '--foo'.", errOutput);
+        Assert.Contains("Commands:", errOutput);
+        Assert.Contains("build [path]", errOutput);
     }
 }

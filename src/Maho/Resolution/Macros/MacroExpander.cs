@@ -16,23 +16,22 @@ internal sealed class MacroExpander
     private readonly DiagnosticsManager diagnostics;
     private readonly ulong recursionLimit;
     private readonly Dictionary<SymbolPart, MacroDeclaration> macroTable;
+    private readonly ResolutionContext? context;
     private int hygieneCounter;
 
-    public MacroExpander(DiagnosticsManager diagnostics, ulong recursionLimit, Dictionary<SymbolPart, MacroDeclaration> macroTable)
+    public MacroExpander(DiagnosticsManager diagnostics, ulong recursionLimit, Dictionary<SymbolPart, MacroDeclaration> macroTable, ResolutionContext? context = null)
     {
         this.diagnostics = diagnostics;
         this.recursionLimit = recursionLimit;
         this.macroTable = macroTable;
+        this.context = context;
     }
 
-    public void RegisterMacro(MacroDeclaration macro)
-    {
-        macroTable[new SymbolPart(macro.Name)] = macro;
-    }
+    public void RegisterMacro(MacroDeclaration macro) => macroTable[new SymbolPart(macro.Name)] = macro;
 
     public bool HasMacro(SymbolPart name) => macroTable.ContainsKey(name);
 
-    private readonly HashSet<MacroInvocationExpression> failedInvocations = new();
+    private readonly HashSet<MacroInvocationExpression> failedInvocations = [];
 
     private static TextSpan GetMacroSpan(MacroInvocationExpression invocation) =>
         TextSpan.FromBounds(invocation.DollarToken.Span.Start, invocation.Name.Span.End);
@@ -73,6 +72,7 @@ internal sealed class MacroExpander
             return invocation;
 
         var name = new SymbolPart(invocation.Name);
+
         if (!macroTable.TryGetValue(name, out var macro))
         {
             failedInvocations.Add(invocation);
@@ -84,10 +84,11 @@ internal sealed class MacroExpander
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+
             return invocation;
         }
 
-        var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
+        var (arm, substitutedTokens, localNames, hygieneId, templateTokensSet) = MatchAndSubstitute(macro, invocation, sourceText);
 
         if (arm is null || substitutedTokens is null)
         {
@@ -100,16 +101,21 @@ internal sealed class MacroExpander
         if (!arm.Template.IsExpression)
         {
             var blockExpr = parser.ParseBlockExpressionSnippet(substitutedTokens);
+
             if (blockExpr.FinalExpression is null)
             {
                 // Block macro with statements cannot be used in expression context
                 failedInvocations.Add(invocation);
                 diagnostics.ReportInvalidMacroContext(GetInvocationSpan(invocation), name.ToString(), "an expression", "statements", invocation.DollarToken.Source ?? sourceText);
+
                 return invocation;
             }
 
             var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
             AttachOrigin(blockExpr, origin);
+
+            if (hygieneId.IsMacroGenerated)
+                TagHygiene(blockExpr, localNames!, hygieneId, templateTokensSet!);
 
             return blockExpr;
         }
@@ -117,6 +123,9 @@ internal sealed class MacroExpander
         var expandedExpr = parser.ParseExpressionSnippet(substitutedTokens);
         var exprOrigin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
         AttachOrigin(expandedExpr, exprOrigin);
+
+        if (hygieneId.IsMacroGenerated)
+            TagHygiene(expandedExpr, localNames!, hygieneId, templateTokensSet!);
 
         return expandedExpr;
     }
@@ -130,10 +139,12 @@ internal sealed class MacroExpander
             return [new LocalMacroInvocationDeclaration(invocation, null)];
 
         var name = new SymbolPart(invocation.Name);
+
         if (!macroTable.TryGetValue(name, out var macro))
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
+
             return [new LocalMacroInvocationDeclaration(invocation, null)];
         }
 
@@ -141,10 +152,11 @@ internal sealed class MacroExpander
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+
             return [new LocalMacroInvocationDeclaration(invocation, null)];
         }
 
-        var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
+        var (arm, substitutedTokens, localNames, hygieneId, templateTokensSet) = MatchAndSubstitute(macro, invocation, sourceText);
 
         if (arm is null || substitutedTokens is null)
         {
@@ -160,16 +172,28 @@ internal sealed class MacroExpander
             var expr = parser.ParseExpressionSnippet(substitutedTokens);
             var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
             AttachOrigin(expr, origin);
-            var stmt = new LocalExpressionStatement(expr, new Token(sourceText, default, TokenKind.Semicolon, [], []));
-            stmt.ExpansionOrigin = origin;
+            var stmt = new LocalExpressionStatement(expr, new Token(sourceText, default, TokenKind.Semicolon, [], []))
+            {
+                ExpansionOrigin = origin
+            };
+
+            if (hygieneId.IsMacroGenerated)
+                TagHygiene(stmt, localNames!, hygieneId, templateTokensSet!);
+
             statements = [stmt];
         }
         else
         {
             statements = parser.ParseStatementsSnippet(substitutedTokens);
             var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+
             foreach (var stmt in statements)
+            {
                 AttachOrigin(stmt, origin);
+
+                if (hygieneId.IsMacroGenerated)
+                    TagHygiene(stmt, localNames!, hygieneId, templateTokensSet!);
+            }
         }
 
         return statements;
@@ -184,6 +208,7 @@ internal sealed class MacroExpander
             return [new MemberMacroInvocationDeclaration(invocation, null)];
 
         var name = new SymbolPart(invocation.Name);
+
         if (!macroTable.TryGetValue(name, out var macro))
         {
             failedInvocations.Add(invocation);
@@ -195,10 +220,12 @@ internal sealed class MacroExpander
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+
             return [new MemberMacroInvocationDeclaration(invocation, null)];
         }
 
-        var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
+        var (arm, substitutedTokens, _, _, _) = MatchAndSubstitute(macro, invocation, sourceText);
+
         if (arm is null || substitutedTokens is null)
         {
             failedInvocations.Add(invocation);
@@ -224,10 +251,12 @@ internal sealed class MacroExpander
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
 
         var name = new SymbolPart(invocation.Name);
+
         if (!macroTable.TryGetValue(name, out var macro))
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportUnresolvedMacro(GetMacroSpan(invocation), name.ToString(), invocation.DollarToken.Source ?? sourceText);
+
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
         }
 
@@ -235,10 +264,12 @@ internal sealed class MacroExpander
         {
             failedInvocations.Add(invocation);
             diagnostics.ReportMacroRecursionLimitExceeded(GetInvocationSpan(invocation), name.ToString(), recursionLimit, invocation.DollarToken.Source ?? sourceText);
+
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
         }
 
-        var (arm, substitutedTokens) = MatchAndSubstitute(macro, invocation, sourceText);
+        var (arm, substitutedTokens, _, _, _) = MatchAndSubstitute(macro, invocation, sourceText);
+
         if (arm is null || substitutedTokens is null)
         {
             failedInvocations.Add(invocation);
@@ -255,7 +286,7 @@ internal sealed class MacroExpander
         return topLevels;
     }
 
-    private (MacroArmSyntax? Arm, List<Token>? SubstitutedTokens) MatchAndSubstitute(
+    private (MacroArmSyntax? Arm, List<Token>? SubstitutedTokens, HashSet<SymbolPart>? LocalNames, HygieneId HygieneId, HashSet<Token>? TemplateTokensSet) MatchAndSubstitute(
         MacroDeclaration macro,
         MacroInvocationExpression invocation,
         SourceText sourceText)
@@ -266,8 +297,12 @@ internal sealed class MacroExpander
 
             if (match is not null)
             {
+                var templateTokensSet = new HashSet<Token>(arm.Template.Tokens, ReferenceEqualityComparer.Instance);
+                var localNames = FindMacroLocalNames(arm.Template.Tokens, match.Value.Bindings, match.Value.PackBindings);
+                var hygieneId = localNames.Count > 0 ? new HygieneId(++hygieneCounter) : HygieneId.Root;
+
                 var substituted = SubstituteTokens(arm.Template.Tokens, match.Value.Bindings, match.Value.PackBindings, sourceText);
-                return (arm, substituted);
+                return (arm, substituted, localNames, hygieneId, templateTokensSet);
             }
         }
 
@@ -276,7 +311,7 @@ internal sealed class MacroExpander
             macro.Name.Value,
             invocation.DollarToken.Source ?? sourceText);
 
-        return (null, null);
+        return (null, null, null, HygieneId.Root, null);
     }
 
     private readonly record struct MatchResult(
@@ -374,6 +409,7 @@ internal sealed class MacroExpander
                 templateTokens[i + 1].Kind is TokenKind.LeftParen)
             {
                 int closeParenIdx = FindMatchingParen(templateTokens, i + 1);
+
                 if (closeParenIdx > 0 && IsEllipsisAt(templateTokens, closeParenIdx + 1, out int ellipsisLength))
                 {
                     var repetitionBody = SliceTokens(templateTokens, i + 2, closeParenIdx - (i + 2));
@@ -387,10 +423,12 @@ internal sealed class MacroExpander
                             {
                                 [referencedPack.Value] = pack[elemIdx]
                             };
+
                             foreach (var tokenPart in FindAllPackReferences(repetitionBody, referencedPack.Value))
                             {
                                 elementBindings[tokenPart] = pack[elemIdx];
                             }
+
                             var unrolled = SubstituteTokens(repetitionBody, elementBindings, packBindings, sourceText);
                             result.AddRange(unrolled);
                         }
@@ -430,6 +468,7 @@ internal sealed class MacroExpander
                 templateTokens[i + 1].Kind is TokenKind.LeftParen)
             {
                 int closeParenIdx = FindMatchingParen(templateTokens, i + 1);
+
                 if (closeParenIdx == i + 4 &&
                     templateTokens[i + 2].Kind is TokenKind.AtSymbol &&
                     templateTokens[i + 3].Kind is TokenKind.Identifier)
@@ -449,6 +488,7 @@ internal sealed class MacroExpander
 
                         result.Add(stringToken);
                         i = closeParenIdx + 1;
+
                         continue;
                     }
                 }
@@ -463,6 +503,7 @@ internal sealed class MacroExpander
                 {
                     result.AddRange(argTokens);
                     i += 2;
+
                     continue;
                 }
             }
@@ -474,9 +515,6 @@ internal sealed class MacroExpander
 
         // Apply ## token concatenation
         result = ProcessTokenConcatenation(result, sourceText);
-
-        // Apply hygiene alpha-renaming
-        ApplyHygiene(result, bindings, packBindings, sourceText);
 
         return result;
     }
@@ -498,6 +536,7 @@ internal sealed class MacroExpander
 
         var result = new List<Token>(tokens.Count);
         int i = 0;
+
         while (i < tokens.Count)
         {
             if (IsConcatenationOperator(tokens, i))
@@ -509,6 +548,7 @@ internal sealed class MacroExpander
                 {
                     diagnostics.ReportInvalidTokenConcatenation(hash1.Span, "'##' cannot appear at the start of a macro template", sourceText);
                     i += 2;
+
                     continue;
                 }
 
@@ -516,6 +556,7 @@ internal sealed class MacroExpander
                 {
                     diagnostics.ReportInvalidTokenConcatenation(hash2.Span, "'##' cannot appear at the end of a macro template", sourceText);
                     i += 2;
+
                     continue;
                 }
 
@@ -533,6 +574,7 @@ internal sealed class MacroExpander
                         new TextSpan(left.Span.Start, Math.Max(0, right.Span.End - left.Span.Start)),
                         $"pasting '{left.Value}' and '{right.Value}' does not result in a valid token",
                         sourceText);
+
                     i += 3;
                 }
             }
@@ -580,6 +622,7 @@ internal sealed class MacroExpander
                 a.LeadingTrivia,
                 b.TrailingTrivia,
                 lexedTokens[0].MatchingKind);
+
             return true;
         }
 
@@ -587,43 +630,63 @@ internal sealed class MacroExpander
         return false;
     }
 
-    private void ApplyHygiene(
-        List<Token> tokens,
+    private static HashSet<SymbolPart> FindMacroLocalNames(
+        IReadOnlyList<Token> templateTokens,
         Dictionary<SymbolPart, IReadOnlyList<Token>> bindings,
-        Dictionary<SymbolPart, List<IReadOnlyList<Token>>> packBindings,
-        SourceText sourceText)
+        Dictionary<SymbolPart, List<IReadOnlyList<Token>>> packBindings)
     {
         var localNames = new HashSet<SymbolPart>();
-        var renameMap = new Dictionary<SymbolPart, string>();
 
-        for (int i = 0; i < tokens.Count - 1; i++)
+        for (int i = 0; i < templateTokens.Count - 1; i++)
         {
-            if (tokens[i].MatchingKind is MatchingKeywordKind.Var && tokens[i + 1].Kind is TokenKind.Identifier)
+            if (templateTokens[i].MatchingKind is MatchingKeywordKind.Var && templateTokens[i + 1].Kind is TokenKind.Identifier)
             {
-                var varPart = new SymbolPart(tokens[i + 1]);
-                if (!bindings.ContainsKey(varPart) && !packBindings.ContainsKey(varPart) && !localNames.Contains(varPart))
+                var varPart = new SymbolPart(templateTokens[i + 1]);
+
+                if (!bindings.ContainsKey(varPart) && !packBindings.ContainsKey(varPart))
                 {
                     localNames.Add(varPart);
-                    renameMap[varPart] = $"{varPart}__m{++hygieneCounter}";
                 }
             }
         }
 
-        if (renameMap.Count == 0)
+        return localNames;
+    }
+
+    private void TagHygiene(
+        SyntaxNode? node,
+        HashSet<SymbolPart> localNames,
+        HygieneId hygieneId,
+        HashSet<Token> templateTokensSet)
+    {
+        if (node is null || context is null)
             return;
 
-        for (int i = 0; i < tokens.Count; i++)
+        switch (node)
         {
-            if (tokens[i].Kind is TokenKind.Identifier && renameMap.TryGetValue(new SymbolPart(tokens[i]), out var newName))
-            {
-                tokens[i] = new Token(
-                    new SourceText(newName),
-                    new TextSpan(0, newName.Length),
-                    TokenKind.Identifier,
-                    tokens[i].LeadingTrivia,
-                    tokens[i].TrailingTrivia);
-            }
+            case VariableDeclarator declarator:
+                if (declarator.Identifier is SimpleName simple &&
+                    templateTokensSet.Contains(simple.Name) &&
+                    localNames.Contains(new SymbolPart(simple.Name)))
+                {
+                    context.RegisterHygiene(declarator.Identifier, hygieneId);
+                    context.RegisterHygiene(declarator, hygieneId);
+                    context.RegisterHygiene(simple.Name, hygieneId);
+                }
+                break;
+
+            case IdentifierNameExpression identExpr:
+                if (templateTokensSet.Contains(identExpr.Identifier) &&
+                    localNames.Contains(new SymbolPart(identExpr.Identifier)))
+                {
+                    context.RegisterHygiene(identExpr, hygieneId);
+                    context.RegisterHygiene(identExpr.Identifier, hygieneId);
+                }
+                break;
         }
+
+        foreach ((_, SyntaxNode child) in SyntaxSpan.GetChildren(node))
+            TagHygiene(child, localNames, hygieneId, templateTokensSet);
     }
 
     private static int FindMatchingParen(IReadOnlyList<Token> tokens, int openParenIdx)
@@ -637,6 +700,7 @@ internal sealed class MacroExpander
             else if (tokens[i].Kind is TokenKind.RightParen)
             {
                 depth--;
+
                 if (depth == 0)
                     return i;
             }
@@ -681,7 +745,7 @@ internal sealed class MacroExpander
         return slice;
     }
 
-    private static SymbolPart? FindReferencedPack(IReadOnlyList<Token> tokens, Dictionary<SymbolPart, List<IReadOnlyList<Token>>> packBindings)
+    private static SymbolPart? FindReferencedPack(List<Token> tokens, Dictionary<SymbolPart, List<IReadOnlyList<Token>>> packBindings)
     {
         for (int i = 0; i < tokens.Count - 1; i++)
         {
@@ -711,7 +775,7 @@ internal sealed class MacroExpander
         return null;
     }
 
-    private static List<SymbolPart> FindAllPackReferences(IReadOnlyList<Token> tokens, SymbolPart packName)
+    private static List<SymbolPart> FindAllPackReferences(List<Token> tokens, SymbolPart packName)
     {
         var list = new List<SymbolPart>();
         var packSpan = packName.AsSpan();
@@ -722,6 +786,7 @@ internal sealed class MacroExpander
             {
                 var part = new SymbolPart(tokens[i + 1]);
                 var span = part.AsSpan();
+
                 if (span.SequenceEqual(packSpan) ||
                     (packSpan.Length == span.Length + 1 && packSpan.StartsWith(span) && packSpan[^1] == 's') ||
                     (span.Length == packSpan.Length + 1 && span.StartsWith(packSpan) && span[^1] == 's'))

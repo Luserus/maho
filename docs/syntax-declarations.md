@@ -11,6 +11,7 @@ This folder is more about shape than behavior. The parser builds these nodes els
 - `SimpleName`
 - `QualifiedName`
 - `GenericName`
+- `TupleName`
 - `NamedSyntax`
 
 These model identifier-like structures and name composition.
@@ -22,6 +23,9 @@ These model identifier-like structures and name composition.
 - `QualifiedType`
 - `GenericType`
 - `ModifiedType`
+- `TupleType`
+- `TupleTypeElement`
+- `UniformTupleType`
 - `TypeKind`
 
 These files define how type references are represented independently of semantic meaning.
@@ -32,8 +36,6 @@ These files define how type references are represented independently of semantic
 - `TypeDeclaration`
 - `FunctionDeclaration`
 - `VariableDeclaration`
-- `AmbiguousPointerDeclaration`
-- `AmbiguousReferenceDeclaration`
 - `Parameter`
 
 These are the shared declaration nouns.

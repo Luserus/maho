@@ -21,6 +21,10 @@ public enum TokenKind
     Float, // '42.01'
     Char, // ''a''
     String, // '"Any string of words."'
+    SuffixedInteger, // '42i32'
+    SuffixedFloat, // '42.01f32'
+    SuffixedChar, // ''a'u8'
+    SuffixedString, // '"Any string of words."s'
 
     // "Something went wrong" token kinds
     BadToken, // '{The given token}'
@@ -60,6 +64,7 @@ public enum TokenKind
     Dollar, // '$'
 
     // Combined operators
+    ColonColon, // '::'
     DotDotDot, // '...'
     EqualsEquals, // '=='
     ExclamationEquals, // '!='
@@ -72,5 +77,15 @@ public enum TokenKind
     AmpersandAmpersand, // '&&'
     VerticalBarVerticalBar, // '||'
     SingleLineComment, // //
-    MultiLineComment // /* */
+    MultiLineComment, // /* */
+
+    // Combined operators for special functions and expression support
+    PlusPlus,           // '++'
+    MinusMinus,         // '--'
+    PlusEquals,         // '+='
+    MinusEquals,        // '-='
+    AsteriskEquals,     // '*='
+    ForwardSlashEquals, // '/='
+    PercentageEquals,   // '%='
+    MinusGreaterThan    // '->'
 }

@@ -1,0 +1,6 @@
+struct Int32;
+
+Int32 Main()
+{
+    return 0;
+}

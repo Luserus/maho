@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Maho.Diagnostics;
+using Maho.Server.Protocol;
 
 namespace Maho;
 
@@ -15,22 +15,22 @@ public sealed class TerminalDiagnosticRenderer
 {
     private readonly Dictionary<string, string[]> fileCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly bool useColors;
-    private readonly DiagnosticPathStyle pathStyle;
+    private readonly CompilerDiagnosticPathStyle pathStyle;
     private readonly string rootDirectory;
     private readonly string? projectDirectory;
 
     // ANSI Escape Sequences
-    private const string Reset = "\u001b[0m";
-    private const string Bold = "\u001b[1m";
-    private const string Red = "\u001b[31;1m";
-    private const string Yellow = "\u001b[33;1m";
-    private const string Cyan = "\u001b[36;1m";
-    private const string Blue = "\u001b[34;1m";
-    private const string Green = "\u001b[32;1m";
+    internal const string Reset = "\u001b[0m";
+    internal const string Bold = "\u001b[1m";
+    internal const string Red = "\u001b[31;1m";
+    internal const string Yellow = "\u001b[33;1m";
+    internal const string Cyan = "\u001b[36;1m";
+    internal const string Blue = "\u001b[34;1m";
+    internal const string Green = "\u001b[32;1m";
 
     public TerminalDiagnosticRenderer(
-        DiagnosticColorMode colorMode = DiagnosticColorMode.Auto,
-        DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative,
+        CompilerDiagnosticColorMode colorMode = CompilerDiagnosticColorMode.Auto,
+        CompilerDiagnosticPathStyle pathStyle = CompilerDiagnosticPathStyle.Relative,
         string? rootDirectory = null,
         string? projectDirectory = null)
     {
@@ -48,22 +48,22 @@ public sealed class TerminalDiagnosticRenderer
     /// <summary>
     /// Formats a single diagnostic into a rich Rust-style terminal string.
     /// </summary>
-    public string Render(DiagnosticInfo diagnostic)
+    public string Render(CompilerDiagnostic diagnostic)
     {
         var sb = new StringBuilder();
 
         // 1. Header: error[MH1002]: message
         string severityName = diagnostic.Severity switch
         {
-            DiagnosticSeverity.Error => "error",
-            DiagnosticSeverity.Warning => "warning",
+            CompilerDiagnosticSeverity.Error => "error",
+            CompilerDiagnosticSeverity.Warning => "warning",
             _ => "info"
         };
 
         string severityColor = diagnostic.Severity switch
         {
-            DiagnosticSeverity.Error => Red,
-            DiagnosticSeverity.Warning => Yellow,
+            CompilerDiagnosticSeverity.Error => Red,
+            CompilerDiagnosticSeverity.Warning => Yellow,
             _ => Cyan
         };
 
@@ -89,7 +89,7 @@ public sealed class TerminalDiagnosticRenderer
         {
             var lineAnnotations = new SortedDictionary<int, List<LineAnnotation>>();
 
-            void AddAnnotation(int lineNum, int colNum, int length, DiagnosticLabelStyle style, string? message)
+            void AddAnnotation(int lineNum, int colNum, int length, CompilerDiagnosticLabelStyle style, string? message)
             {
                 if (lineNum < 1 || lineNum > lines.Length)
                     return;
@@ -128,10 +128,10 @@ public sealed class TerminalDiagnosticRenderer
                 }
 
                 if (!primaryCovered && line >= 1 && line <= lines.Length)
-                    AddAnnotation(line, col, diagnostic.Span.Length, DiagnosticLabelStyle.Primary, null);
+                    AddAnnotation(line, col, diagnostic.Span.Length, CompilerDiagnosticLabelStyle.Primary, null);
             }
             else if (line >= 1 && line <= lines.Length)
-                AddAnnotation(line, col, diagnostic.Span.Length, DiagnosticLabelStyle.Primary, null);
+                AddAnnotation(line, col, diagnostic.Span.Length, CompilerDiagnosticLabelStyle.Primary, null);
 
             if (lineAnnotations.Count > 0)
             {
@@ -160,7 +160,7 @@ public sealed class TerminalDiagnosticRenderer
                     sb.Append(Colorize(Blue, $"{lineStr} | "));
                     sb.AppendLine(sourceLine);
 
-                    var activeAnnotations = annotations.Where(a => a.Style != DiagnosticLabelStyle.Context).ToList();
+                    var activeAnnotations = annotations.Where(a => a.Style != CompilerDiagnosticLabelStyle.Context).ToList();
 
                     if (activeAnnotations.Count > 0)
                     {
@@ -205,8 +205,8 @@ public sealed class TerminalDiagnosticRenderer
 
                                 AppendWhitespace(sb, sourceLine, currentVisualCol, startCol);
 
-                                char mark = ann.Style is DiagnosticLabelStyle.Secondary ? '-' : '^';
-                                string markColor = ann.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                char mark = ann.Style is CompilerDiagnosticLabelStyle.Secondary ? '-' : '^';
+                                string markColor = ann.Style is CompilerDiagnosticLabelStyle.Secondary ? Cyan : severityColor;
                                 string underline = new string(mark, length);
                                 sb.Append(Colorize(markColor, underline));
 
@@ -235,7 +235,7 @@ public sealed class TerminalDiagnosticRenderer
                         {
                             var targetAnn = labeled[k];
                             int targetCol = GetConnectorCol(targetAnn);
-                            string targetColor = targetAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                            string targetColor = targetAnn.Style is CompilerDiagnosticLabelStyle.Secondary ? Cyan : severityColor;
 
                             sb.Append(Colorize(Blue, $"{emptyGutter} | "));
                             int currentCol = 1;
@@ -251,7 +251,7 @@ public sealed class TerminalDiagnosticRenderer
 
                                 AppendWhitespace(sb, sourceLine, currentCol, branchCol);
 
-                                string branchColor = branchAnn.Style is DiagnosticLabelStyle.Secondary ? Cyan : severityColor;
+                                string branchColor = branchAnn.Style is CompilerDiagnosticLabelStyle.Secondary ? Cyan : severityColor;
                                 sb.Append(Colorize(branchColor, "|"));
                                 currentCol = branchCol + 1;
                             }
@@ -405,7 +405,7 @@ public sealed class TerminalDiagnosticRenderer
     /// <summary>
     /// Renders a list of diagnostics.
     /// </summary>
-    public string RenderAll(IEnumerable<DiagnosticInfo> diagnostics)
+    public string RenderAll(IEnumerable<CompilerDiagnostic> diagnostics)
     {
         var sb = new StringBuilder();
 
@@ -424,6 +424,8 @@ public sealed class TerminalDiagnosticRenderer
             return $"{elapsed.TotalSeconds:0.##}s";
         if (elapsed.TotalMilliseconds >= 1.0)
             return $"{elapsed.TotalMilliseconds:0.##}ms";
+        if (elapsed.TotalMicroseconds >= 1.0)
+            return $"{elapsed.TotalMicroseconds:0.##}µs";
         if (elapsed.TotalNanoseconds > 0)
             return $"{(long)elapsed.TotalNanoseconds}ns";
         return "0ms";
@@ -446,14 +448,18 @@ public sealed class TerminalDiagnosticRenderer
         }
         else if (errorCount > 0 && warningCount > 0)
         {
-            sb.Append("Build failed with ");
+            sb.Append("Build ");
+            sb.Append(Colorize(Red, "failed"));
+            sb.Append(" with ");
             sb.Append(Colorize(Red, $"{errorCount} error(s)"));
             sb.Append(" and ");
             sb.AppendLine(Colorize(Yellow, $"{warningCount} warning(s)"));
         }
         else if (errorCount > 0)
         {
-            sb.Append("Build failed with ");
+            sb.Append("Build ");
+            sb.Append(Colorize(Red, "failed"));
+            sb.Append(" with ");
             sb.AppendLine(Colorize(Red, $"{errorCount} error(s)"));
         }
         else
@@ -502,11 +508,11 @@ public sealed class TerminalDiagnosticRenderer
         return $"{ansiColor}{text}{Reset}";
     }
 
-    private static bool ShouldEnableColors(DiagnosticColorMode mode) => mode switch
+    internal static bool ShouldEnableColors(CompilerDiagnosticColorMode mode) => mode switch
     {
-        DiagnosticColorMode.Always => true,
-        DiagnosticColorMode.Never => false,
-        DiagnosticColorMode.Auto => !Console.IsOutputRedirected &&
+        CompilerDiagnosticColorMode.Always => true,
+        CompilerDiagnosticColorMode.Never => false,
+        CompilerDiagnosticColorMode.Auto => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
                                     Environment.GetEnvironmentVariable("NO_COLOR") == null &&
                                     Environment.GetEnvironmentVariable("TERM") != "dumb",
         _ => false
@@ -517,7 +523,7 @@ public sealed class TerminalDiagnosticRenderer
         if (rawPath is null)
             return null;
 
-        if (pathStyle == DiagnosticPathStyle.Relative)
+        if (pathStyle == CompilerDiagnosticPathStyle.Relative)
         {
             try
             {
@@ -528,7 +534,7 @@ public sealed class TerminalDiagnosticRenderer
                 return rawPath;
             }
         }
-        else if (pathStyle == DiagnosticPathStyle.ProjectRelative)
+        else if (pathStyle == CompilerDiagnosticPathStyle.ProjectRelative)
         {
             try
             {
@@ -540,7 +546,7 @@ public sealed class TerminalDiagnosticRenderer
                 return rawPath;
             }
         }
-        else if (pathStyle == DiagnosticPathStyle.Full)
+        else if (pathStyle == CompilerDiagnosticPathStyle.Full)
         {
             try
             {
@@ -555,7 +561,7 @@ public sealed class TerminalDiagnosticRenderer
         return rawPath;
     }
 
-    private void AppendFallback(StringBuilder sb, DiagnosticInfo diagnostic)
+    private void AppendFallback(StringBuilder sb, CompilerDiagnostic diagnostic)
     {
         if (diagnostic.MacroTrace is not null)
         {
@@ -603,7 +609,7 @@ public sealed class TerminalDiagnosticRenderer
     private readonly record struct LineAnnotation(
         int StartCol,
         int Length,
-        DiagnosticLabelStyle Style,
+        CompilerDiagnosticLabelStyle Style,
         string? Message
     );
 }

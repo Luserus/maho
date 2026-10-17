@@ -48,6 +48,7 @@ public sealed class MiryoConfiguration
         var config = new MiryoConfiguration(dir, configFilePath: null, isLoadedFromDisk: isLoadedFromDisk, loadWarning: loadWarning);
 
         config.SetRaw("tools", "mahoc", new ConfigValue.ArrayValue(["./mahoc", "./dist/mahoc", "mahoc"]));
+        config.SetRaw("tools", "mahoc_server", new ConfigValue.ArrayValue(["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]));
         config.SetRaw("tools", "il2llvmir", new ConfigValue.ArrayValue(["./il2llvmir", "./dist/il2llvmir", "il2llvmir"]));
         config.SetRaw("tools", "llvm_opt", new ConfigValue.ArrayValue(["opt", "/usr/bin/opt"]));
         config.SetRaw("tools", "llvm_clang", new ConfigValue.ArrayValue(["clang", "/usr/bin/clang"]));

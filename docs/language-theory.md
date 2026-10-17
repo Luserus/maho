@@ -40,25 +40,36 @@ line-break  ::= "\n"
 trivia      ::= space | tab | line-break
 ```
 
-There is currently no comment lexical production. A slash is tokenized as `/`, not as the beginning of a line or block comment.
-
 ### 1.2 Identifiers and literals
 
 The regular-expression notation below is an implementation-level approximation of the .NET character predicates used by the lexer.
 
 ```text
-identifier  ::= [\p{L}_][\p{L}\p{Nd}_]*
-integer     ::= [0-9]+
-float       ::= [0-9]+\.[0-9]+ | \.[0-9]+
-char        ::= ' ( escaped-char | non-quote-non-newline )* '
-string      ::= " ( escaped-char | non-quote-non-newline )* "
-escaped-char ::= "\\" any-non-newline-character
+identifier       ::= <ID_Start | '_'> <ID_Continue>*
+suffix           ::= <ID_Start | '_'> <ID_Continue>*
+dec-digits       ::= [0-9][0-9_]*
+bin-digits       ::= [01][01_]*
+hex-digits       ::= [0-9a-fA-F][0-9a-fA-F_]*
+exponent         ::= [eE] [+-]? dec-digits
+integer          ::= ( "0" [bB] bin-digits | "0" [xX] hex-digits | dec-digits )
+float            ::= ( dec-digits \. dec-digits? | \. dec-digits ) exponent? | dec-digits exponent
+suffixed-integer ::= integer suffix
+suffixed-float   ::= float suffix
+char             ::= ' ( escaped-char | non-quote-non-newline )* '
+suffixed-char    ::= char suffix
+string           ::= " ( escaped-char | non-quote-non-newline )* "
+suffixed-string  ::= string suffix
+escaped-char     ::= "\\" any-non-newline-character
 ```
 
 Notes:
 
-- Identifiers may begin with a Unicode letter or `_`; later characters may also be Unicode digits.
-- Integer and float literals currently have no sign, exponent, radix prefix, separator, or suffix syntax. A sign is parsed as an operator.
+- Identifiers and suffixes conform to Unicode Standard Annex #31 (UAX #31): starting characters include Unicode categories `Lu`, `Ll`, `Lt`, `Lm`, `Lo`, `Nl`, and connector punctuation `_` (`Pc`); continuation characters additionally include `Nd` (decimal digits), `Mn` (non-spacing marks), `Mc` (spacing combining marks), and `Cf` (formatting characters).
+- Numeric literals support decimal, binary (`0b`, `0B`), and hexadecimal (`0x`, `0X`) forms.
+- Underscores (`_`) are supported as digit separators in binary, hexadecimal, decimal, and scientific notation literals.
+- Floating-point literals support scientific notation using `e` or `E` with an optional `+` or `-` sign.
+- Suffixes follow standard identifier rules and must be attached immediately after the last digit or quote without intervening whitespace. Suffixes are classified as dedicated token kinds (`SuffixedInteger`, `SuffixedFloat`, `SuffixedChar`, `SuffixedString`) whose semantic meaning is recognized in later resolution passes and operator overloads.
+- A sign (`+` or `-` before a number) is parsed as an operator.
 - Strings and characters cannot cross a line break. Escapes are scanned as two source characters; escape interpretation is deferred.
 - A character literal is diagnosed unless it contains exactly one logical character, where an escape sequence counts as one logical character.
 - An unrecognized character produces a lexer diagnostic and a `BadToken`; the parser filters bad tokens before parsing.
@@ -184,7 +195,11 @@ The generic parameter forms mean:
 
 ```text
 type                    ::= primary-type { type-modifier } [ "." type ]
-primary-type            ::= identifier [ generic-argument-clause ]
+primary-type            ::= identifier [ generic-argument-clause ] [ uniform-tuple-suffix ]
+                          | tuple-type
+tuple-type              ::= "(" tuple-type-element { "," tuple-type-element } [","] ")"
+tuple-type-element      ::= type [ identifier ]
+uniform-tuple-suffix    ::= "(" identifier { "," identifier } [","] ")"
 type-modifier           ::= array-modifier | "?" | "*" | "&"
 array-modifier          ::= "[" [ expression ] "]"
 
@@ -215,7 +230,7 @@ type-body               ::= ";" | "{" { member } "}"
 function-declaration    ::= type declaration-name "(" parameter-list ")"
                           { type-constraint-clause } function-body
 parameter-list          ::= [ parameter { "," parameter } [","] ]
-parameter               ::= modifiers type declaration-name [ "=" expression ]
+parameter               ::= { attribute-list } modifiers type declaration-name [ "=" expression ]
 function-body           ::= ";" | "{" { local } "}"
 
 variable-declaration    ::= type variable-declarator
@@ -248,6 +263,7 @@ Expressions are parsed with a Pratt parser. The concrete binding powers, from hi
 | ---: | --- | --- |
 | 70 | unary `+`, unary `-`, binary `+`, binary `-` | prefix and infix |
 | 60 | `*`, `/`, `%` | infix |
+| 45 | `as` | infix |
 | 40 | `<`, `<=`, `>`, `>=` | infix |
 | 35 | `==`, `!=` | infix |
 | 25 | `&&` | infix |
@@ -266,28 +282,43 @@ continuation            ::= "(" argument-list ")"
 primary-expression      ::= literal
                           | named-expression
                           | "(" expression ")"
-                          | "(" type ")" expression
+                          | tuple-expression
                           | if-expression
                           | block-expression
                           | collection-expression
                           | creation-expression
 
-named-expression        ::= identifier [ generic-argument-clause ]
+tuple-expression        ::= "(" expression "," expression { "," expression } [","] ")"
+named-expression        ::= identifier [ ( "::" | ε ) generic-argument-clause ]
 if-expression           ::= "if" "(" expression ")" expression
                           [ "else" expression ]
 block-expression        ::= "{" { local } [ expression ] "}"
 collection-expression   ::= "[" expression-list "]" [ "with" "(" argument-list ")" ]
 creation-expression     ::= ( "new" | "put" ) type "(" argument-list ")" [ object-with-clause ]
                           | ( "new" | "put" ) type array-modifier
-                            [ collection-initializer ] [ object-with-clause ]
-object-with-clause      ::= "with" collection-initializer
-collection-initializer  ::= "{" expression-list "}"
+                            [ type-initializer ] [ object-with-clause ]
+object-with-clause      ::= "with" type-initializer
+type-initializer        ::= "{" expression-list "}"
 expression-list         ::= [ expression { "," expression } [","] ]
 argument-list           ::= [ argument { "," argument } [","] ]
 argument                ::= expression | identifier ":" expression
 ```
 
-The cast-versus-parenthesized-expression ambiguity is preserved in a dedicated syntax node when both readings remain plausible. `[` starts a collection expression in expression context, but a local construct beginning with `[` is first interpreted as an attribute-list declaration; that ambiguity is not yet resolved in favour of a standalone collection-expression statement.
+Casting uses the explicit binary `as` expression (`expr as Type`), eliminating prefix-cast ambiguities. Type modifiers bind tighter than expression operators in declaration contexts; standalone constructs like `A * B;` or `A & B;` are parsed directly and unambiguously as variable declarations, while parenthesization `(A * B);` provides the expression-statement escape hatch. Similarly, generic forms like `A<B> C;` are unambiguously recognized as declarations in statement context.
+
+In expression contexts, generic application versus relational comparisons is disambiguated cleanly:
+- `A<B>(x)` and `A<B>(x, y)` parse as binary comparison expressions (`(A < B) > (x)`).
+- `A<B, C>(x)` and `A<B>(p: x)` parse as call expressions on generic names because multiple generic arguments or named argument syntax (`p: x`) distinguish them syntactically from binary expressions.
+- `A::<B>(x)` and `A::<B>` support the explicit turbofish `::` operator on named expressions for disambiguating generic specialization on functions, variables, and instances.
+
+Tuple types and declarations support extended forms:
+- `(Type a, Type2 b, Type3 c) var;`: tuple types with explicit element names.
+- `(Type a, Type2 b, Type3 c) = expr;`: tuple destructuring variable declarations with individual types per element, allowing heterogeneous types and implicit conversions.
+- `Type (a, b, c) var;`: uniform tuple types where elements share a single base type, as well as `Type (a, b, c) = expr;` for uniform tuple destructuring variable declarations.
+In statement context, a construct beginning with `[` disambiguates between attribute annotations and expressions by looking at the token following the closing `]` of the bracket list (or after the last list when chained, e.g. `[][]`):
+- It parses as attribute annotation(s) if followed by an identifier (e.g. `[attr] ident`, `[] ident`, `[][] ident`), modifier, declaration keyword, or `{` (e.g. `[attr] { }`, `[] { }` on an attributed block statement, since type initializers require `with`). Note that `[] ident` parses as an empty attribute annotation on that identifier rather than an expression, because `[] ident` is nonsense syntax in expressions.
+- It parses as an expression if followed by a semicolon `;` (e.g. `[x];`, `[];`, `[1, 2, 3];`), dot `.`, operator (`+`, `-`, `=`, `as`, etc.), or indexer (e.g. `[1, 2][0];`, `[][];`).
+- An unclosed `[` where `]` is not found at the top nested level reports a syntax error.
 
 ## 5. Statements and placement
 
@@ -300,8 +331,8 @@ local-statement         ::= expression ";" | ";" | return-statement
                           | "{" { local } "}"
 
 return-statement        ::= "return" [ expression ] ";"
-if-statement            ::= "if" "(" expression ")" statement [ "else" statement ]
-while-statement         ::= "while" "(" expression ")" statement
+if-statement            ::= "if" "(" [ variable-declaration ";" ] expression ")" statement [ "else" statement ]
+while-statement         ::= "while" "(" [ variable-declaration ";" ] expression ")" statement
 label                   ::= identifier ":"
 goto-statement          ::= "goto" identifier ";"
 ```
@@ -332,7 +363,7 @@ Namespaces and type declarations retain their containing namespace. Functions an
 
 The declaration pass records successful, unambiguous references in `ResolvedTree` and enforces semantic declaration invariants:
 
-- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types;
+- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types. Modified and compound syntax types are represented as first-class structural semantic types: pointers (`T*`), references (`T&`), unsized spans (`T[]`), fixed-size arrays (`T[n]`), optionals (`T?`), and tuples (`(T1, T2)` / `T (a, b)`), preserving type structure and modifier distinctness without requiring an intrinsic library discovery pass;
 - **Non-Partial Duplicate Type Declarations (`MH1002`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH1002` with primary label on the redeclaration, secondary label on the previous declaration, and remediation guidance;
 - **Partial Type Canonical Merging**: Multiple partial declarations of the same type in the same scope are merged into a canonical first symbol. Verifies that all partial declarations share the same `TypeKind` (e.g. all `class` or all `struct`);
 - **Partial Function Declarations (`MH1003`)**:

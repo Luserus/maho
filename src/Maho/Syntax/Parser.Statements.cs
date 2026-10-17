@@ -1,6 +1,6 @@
-using System;
 using System.Runtime.CompilerServices;
 using System.Collections.Generic;
+using Maho.Text;
 
 namespace Maho.Syntax;
 
@@ -11,11 +11,7 @@ internal sealed partial class Parser
         switch (CurrentToken.Kind)
         {
             case TokenKind.Identifier:
-                if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
-                    return ParseTopLevelIfStatement();
-                else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                    return ParseTopLevelWhileStatement();
-                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseTopLevelReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
                     return ParseTopLevelGotoStatement();
@@ -25,7 +21,6 @@ internal sealed partial class Parser
 
             case TokenKind.Semicolon:
                 return ParseTopLevelEmptyStatement();
-
         }
 
         return ParseTopLevelExpressionStatement();
@@ -37,43 +32,18 @@ internal sealed partial class Parser
     private TopLevelExpressionStatement ParseTopLevelExpressionStatement()
     {
         var expression = ParseExpectedExpression("for the top-level statement");
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the top-level expression", MissingTokenAnchor.AfterPrevious);
+        Token semicolon;
+
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+            semicolon = Consume();
+        else if (EndsWithBlock(expression))
+            semicolon = CreateMissingToken();
+        else
+            semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the top-level expression", MissingTokenAnchor.AfterPrevious);
 
         return new TopLevelExpressionStatement(expression, semicolon);
     }
 
-    private TopLevelIfStatement ParseTopLevelIfStatement()
-    {
-        var ifKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
-        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'if' condition");
-
-        var thenStatement = ParseTopLevelStatement();
-
-        TopLevelElseStatement? elseStatement = null;
-
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
-        {
-            var elseKeyword = Consume();
-            var elseStmt = ParseTopLevelStatement();
-            elseStatement = new TopLevelElseStatement(elseKeyword, elseStmt);
-        }
-
-        return new TopLevelIfStatement(ifKeyword, openParen, condition, closeParen, thenStatement, elseStatement);
-    }
-
-    private TopLevelWhileStatement ParseTopLevelWhileStatement()
-    {
-        var whileKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
-        var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
-
-        var body = ParseTopLevelStatement();
-
-        return new TopLevelWhileStatement(whileKeyword, openParen, condition, closeParen, body);
-    }
 
     private TopLevelReturnStatement ParseTopLevelReturnStatement()
     {
@@ -96,85 +66,30 @@ internal sealed partial class Parser
     /// <returns> The statement node. </returns>
     private LocalStatement ParseLocalStatement(StatementParseMode parseMode = StatementParseMode.Normal)
     {
-        switch (parseMode)
+        switch (CurrentToken.Kind)
         {
-            case StatementParseMode.Normal:
-                switch (CurrentToken.Kind)
+            case TokenKind.Identifier:
+            case TokenKind.LeftParen:
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
+                    return ParseLocalReturnStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
+                    return ParseLocalGotoStatement();
+                else if (Peek().Kind is TokenKind.Colon)
+                    return ParseLocalLabelStatement();
+                else if (LooksLikeVariableDeclaration() is (var success, var context))
                 {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
-                            return ParseLocalIfStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                            return ParseLocalWhileStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
-                            return ParseLocalReturnStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
-                            return ParseLocalGotoStatement();
-                        else if (Peek().Kind is TokenKind.Colon)
-                            return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context))
-                        {
-                            if (!success && context is LookaheadResultContext.MissingDelimeter)
-                                return ParseLocalVariableDeclarationStatement();
-
-                            if (success)
-                            {
-                                if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                    return ParseLocalAmbiguousDeclarationStatement(context);
-
-                                return ParseLocalVariableDeclarationStatement();
-                            }
-                        }
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return ParseLocalEmptyStatement();
-
-                    case TokenKind.LeftBrace:
-                        return ParseLocalBlockStatement([], []);
+                    if (success || context is LookaheadResultContext.MissingDelimeter)
+                        return ParseLocalVariableDeclarationStatement();
                 }
+                break;
 
-                return ParseLocalExpressionStatement(allowFinalExpression: false);
-
-            case StatementParseMode.AllowFinalExpression:
-                switch (CurrentToken.Kind)
-                {
-                    case TokenKind.Identifier:
-                        if (CurrentToken.MatchingKind is MatchingKeywordKind.If)
-                            return ParseLocalIfStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.While)
-                            return ParseLocalWhileStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
-                            return ParseLocalReturnStatement();
-                        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
-                            return ParseLocalGotoStatement();
-                        else if (Peek().Kind is TokenKind.Colon)
-                            return ParseLocalLabelStatement();
-                        else if (LooksLikeVariableDeclaration() is (var success, var context))
-                        {
-                            if (!success && context is LookaheadResultContext.MissingDelimeter)
-                                return ParseLocalVariableDeclarationStatement();
-
-                            if (success)
-                            {
-                                if (context is LookaheadResultContext.AmbiguousPointerDeclaration or LookaheadResultContext.AmbiguousReferenceDeclaration)
-                                    return ParseLocalAmbiguousDeclarationStatement(context);
-
-                                return ParseLocalVariableDeclarationStatement();
-                            }
-                        }
-                        break;
-
-                    case TokenKind.Semicolon:
-                        return ParseLocalEmptyStatement();
-                }
-
-                return ParseLocalExpressionStatement(allowFinalExpression: true);
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(parseMode), parseMode, "Unhandled statement parse mode.");
+            case TokenKind.Semicolon:
+                return ParseLocalEmptyStatement();
         }
+
+        return ParseLocalExpressionStatement(parseMode);
     }
+
 
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -182,21 +97,58 @@ internal sealed partial class Parser
 
     /// <summary> Parses a local expression statement. </summary>
     /// <returns> The local expression statement node. </returns>
-    private LocalExpressionStatement ParseLocalExpressionStatement(bool allowFinalExpression)
+    private LocalExpressionStatement ParseLocalExpressionStatement(StatementParseMode parseMode)
     {
         var expression = ParseExpectedExpression("for the local statement");
         Token semicolon;
+        bool isFinal;
 
-        if (CurrentToken.Kind is not TokenKind.Semicolon && !allowFinalExpression)
+        if (CurrentToken.Kind is TokenKind.Semicolon)
+        {
+            semicolon = Consume();
+            isFinal = false;
+        }
+        else if (EndsWithBlock(expression))
+        {
+            if (parseMode is StatementParseMode.AllowFinalExpression && CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
+            {
+                semicolon = CreateMissingToken();
+                isFinal = true;
+            }
+            else
+            {
+                semicolon = CreateMissingToken();
+                isFinal = false;
+            }
+        }
+        else if (CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
+        {
+            if (parseMode is StatementParseMode.AllowFinalExpression)
+            {
+                semicolon = CreateMissingToken();
+                isFinal = true;
+            }
+            else if (parseMode is StatementParseMode.FunctionBody)
+            {
+                MissingTokenAnchor effectiveAnchor = GetEffectiveAnchor(MissingTokenAnchor.BeforeCurrent, isClosingToken: true);
+                TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
+                diagnostics.ReportExpectedToken(diagnosticSpan, "a return statement", GetTokenDisplay(CurrentToken));
+                semicolon = CreateMissingToken();
+                isFinal = false;
+            }
+            else
+            {
+                semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local expression", MissingTokenAnchor.AfterPrevious);
+                isFinal = false;
+            }
+        }
+        else
         {
             semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the local expression", MissingTokenAnchor.AfterPrevious);
+            isFinal = false;
         }
-        else if (CurrentToken.Kind is not TokenKind.Semicolon)
-            semicolon = CreateMissingToken(); // Fabricated semicolon
-        else
-            semicolon = Consume();
 
-        return new LocalExpressionStatement(expression, semicolon, isFinalExpression: allowFinalExpression);
+        return new LocalExpressionStatement(expression, semicolon, isFinalExpression: isFinal);
     }
 
     /// <summary> Parses a local variable declaration statement. </summary>
@@ -209,68 +161,38 @@ internal sealed partial class Parser
         return new LocalVariableDeclarationStatement(variableDeclaration, semicolon);
     }
 
-    private LocalStatement ParseLocalAmbiguousDeclarationStatement(LookaheadResultContext context) =>
-        context switch
+    private (VariableDeclaration? Declaration, Token? Semicolon, Expression Condition) ParseConditionalHeader(string statementName)
+    {
+        if (LooksLikeVariableDeclaration().Success)
         {
-            LookaheadResultContext.AmbiguousPointerDeclaration => ParseLocalAmbiguousPointerDeclarationStatement(),
-            LookaheadResultContext.AmbiguousReferenceDeclaration => ParseLocalAmbiguousReferenceDeclarationStatement(),
-            _ => throw new ArgumentOutOfRangeException(nameof(context), context, "Unhandled ambiguous declaration context.")
-        };
+            var declaration = ParseVariableDeclaration();
+            var semicolon = ExpectToken(TokenKind.Semicolon, "';'", $"after the declaration in the '{statementName}' condition", MissingTokenAnchor.AfterPrevious);
+            var condition = ParseExpectedExpression($"for the '{statementName}' condition", MissingTokenAnchor.AfterPrevious);
 
-    private LocalAmbiguousPointerDeclarationStatement ParseLocalAmbiguousPointerDeclarationStatement()
-    {
-        var declaration = ParseAmbiguousPointerDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous pointer declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new LocalAmbiguousPointerDeclarationStatement(declaration, semicolon);
-    }
-
-    private LocalAmbiguousReferenceDeclarationStatement ParseLocalAmbiguousReferenceDeclarationStatement()
-    {
-        var declaration = ParseAmbiguousReferenceDeclaration();
-        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the ambiguous reference declaration", MissingTokenAnchor.AfterPrevious);
-
-        return new LocalAmbiguousReferenceDeclarationStatement(declaration, semicolon);
-    }
-
-    private LocalIfStatement ParseLocalIfStatement()
-    {
-        var ifKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'if'");
-        var condition = ParseExpectedExpression("for the 'if' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'if' condition");
-
-        var thenStatement = ParseLocalStatement();
-
-        LocalElseStatement? elseStatement = null;
-
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Else)
-        {
-            var elseKeyword = Consume();
-            var elseStmt = ParseLocalStatement();
-            elseStatement = new LocalElseStatement(elseKeyword, elseStmt);
+            return (declaration, semicolon, condition);
         }
-
-        return new LocalIfStatement(ifKeyword, openParen, condition, closeParen, thenStatement, elseStatement);
+        else
+        {
+            var condition = ParseExpectedExpression($"for the '{statementName}' condition", MissingTokenAnchor.AfterPrevious);
+            return (null, null, condition);
+        }
     }
 
-    private LocalWhileStatement ParseLocalWhileStatement()
+    private static bool EndsWithBlock(Expression expr)
     {
-        var whileKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'while'");
-        var condition = ParseExpectedExpression("for the 'while' condition", MissingTokenAnchor.AfterPrevious);
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'while' condition");
+        if (expr is BlockExpression)
+            return true;
+        if (expr is IfExpression ifExpr)
+        {
+            if (ifExpr.ElseExpression is not null)
+                return EndsWithBlock(ifExpr.ElseExpression.Expression);
 
-        var body = ParseLocalStatement();
+            return EndsWithBlock(ifExpr.ThenExpression);
+        }
+        if (expr is WhileExpression whileExpr)
+            return EndsWithBlock(whileExpr.Body);
 
-        return new LocalWhileStatement(whileKeyword, openParen, condition, closeParen, body);
-    }
-
-    private LocalBlockStatement ParseLocalBlockStatement(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
-    {
-        var (openBrace, locals, _, closeBrace) = ParseBlock(allowFinalExpression: false);
-
-        return new LocalBlockStatement(attributes, modifiers, openBrace, locals, closeBrace);
+        return false;
     }
 
 
@@ -288,6 +210,7 @@ internal sealed partial class Parser
         var keyword = Consume();
         var identifier = ExpectIdentifierToken("after 'goto'");
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the goto target", MissingTokenAnchor.AfterPrevious);
+
         return new LocalGotoStatement(keyword, identifier, semicolon);
     }
 

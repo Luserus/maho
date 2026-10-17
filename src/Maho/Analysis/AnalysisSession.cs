@@ -78,8 +78,7 @@ public sealed class AnalysisSession
         }
         else
         {
-            var emptyTree = new SyntaxTree("<empty>", []);
-            CurrentContext = new Resolver().Resolve(emptyTree);
+            CurrentContext = Compilation.FromSource(string.Empty, "<empty>", Options).Context!;
         }
     }
 
