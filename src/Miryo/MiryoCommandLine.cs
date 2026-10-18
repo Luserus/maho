@@ -340,16 +340,16 @@ public static class MiryoCommandLine
             mahocArgs.Add(outputDir);
         }
 
-        stdout.WriteLine($"Building {displayProjectName}:");
+        stdout.WriteLine($"Building '{displayProjectName}'");
+        stdout.WriteLine($"From: {fullTargetPath}");
+        stdout.WriteLine();
         StartPipelineStage(stdout, "Analyzing project configuration...");
         var configurationTimer = Stopwatch.StartNew();
 
         if (noProject)
         {
             if (File.Exists(fullTargetPath) || Directory.Exists(fullTargetPath))
-            {
                 mahocArgs.Add(fullTargetPath);
-            }
             else
             {
                 configurationTimer.Stop();
@@ -369,9 +369,7 @@ public static class MiryoCommandLine
         {
             string projectFilePath;
             if (File.Exists(fullTargetPath) && string.Equals(Path.GetExtension(fullTargetPath), ".mhpr", StringComparison.OrdinalIgnoreCase))
-            {
                 projectFilePath = fullTargetPath;
-            }
             else if (Directory.Exists(fullTargetPath))
             {
                 string? found = MiryoBuildSystem.FindProjectFile(fullTargetPath);
@@ -449,12 +447,15 @@ public static class MiryoCommandLine
                 }
 
                 var refArgs = new List<string> { refPath };
+
                 if (colorMode is not null)
                 {
                     refArgs.Add("--color");
                     refArgs.Add(colorMode);
                 }
+
                 int refExit = ExecuteBuild([.. refArgs], stdout, stderr, checkOnly);
+
                 if (refExit != 0)
                     return refExit;
             }
@@ -517,7 +518,7 @@ public static class MiryoCommandLine
         configurationTimer.Stop();
         CompletePipelineStage(stdout, success: true, configurationTimer.Elapsed, useColors);
 
-        StartPipelineStage(stdout, "executing core compile...");
+        StartPipelineStage(stdout, "Executing core compile...");
         var compileTimer = Stopwatch.StartNew();
 
         try
@@ -552,6 +553,7 @@ public static class MiryoCommandLine
             {
                 foreach (string sourcePath in explicitSourcePaths)
                     process.StandardInput.WriteLine(sourcePath);
+
                 process.StandardInput.Close();
             }
 
@@ -560,11 +562,13 @@ public static class MiryoCommandLine
             using var pipeTimeout = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(5));
             Task pipeConnection = resultPipe.WaitForConnectionAsync(pipeTimeout.Token);
             Task processExit = process.WaitForExitAsync();
+
             if (Task.WhenAny(pipeConnection, processExit).GetAwaiter().GetResult() == processExit)
             {
                 string compilerDiagnostics = diagnosticsTask.GetAwaiter().GetResult();
                 throw new InvalidDataException($"{FormatError("error", useColors)}: mahoc exited before writing its result pipe (exit code {process.ExitCode}). {compilerDiagnostics}".TrimEnd());
             }
+
             pipeConnection.GetAwaiter().GetResult();
             using var resultReader = new StreamReader(resultPipe, Encoding.UTF8, leaveOpen: true);
             string resultJson = resultReader.ReadToEnd();
@@ -577,14 +581,18 @@ public static class MiryoCommandLine
             long elapsedTicks = compileTimer.Elapsed.Ticks;
             bool hasErrors = process.ExitCode != 0;
             bool laterStagesNotImplemented = false;
+
             if (!string.IsNullOrWhiteSpace(resultJson))
             {
                 using JsonDocument result = JsonDocument.Parse(resultJson);
                 var root = result.RootElement;
+
                 if (root.TryGetProperty("elapsedTicks", out JsonElement ticks))
                     elapsedTicks = ticks.GetInt64();
+
                 if (root.TryGetProperty("hasErrors", out JsonElement errors))
                     hasErrors = errors.GetBoolean();
+
                 laterStagesNotImplemented = root.TryGetProperty("pipelineError", out JsonElement pipeline) &&
                     pipeline.ValueKind == JsonValueKind.String &&
                     pipeline.GetString()?.Contains("lowering and code-generation", StringComparison.OrdinalIgnoreCase) == true;
@@ -609,9 +617,7 @@ public static class MiryoCommandLine
             }
 
             if (laterStagesNotImplemented)
-            {
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} due to later stages not being implemented");
-            }
 
             stdout.WriteLine();
             stdout.WriteLine($"build {FormatStatus(process.ExitCode == 0, useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
@@ -637,12 +643,15 @@ public static class MiryoCommandLine
     private static string ToKebabCase(string value)
     {
         var result = new StringBuilder(value.Length + 8);
+
         for (int i = 0; i < value.Length; i++)
         {
             if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
                 result.Append('-');
+
             result.Append(char.ToLowerInvariant(value[i]));
         }
+
         return result.ToString();
     }
 
@@ -654,6 +663,7 @@ public static class MiryoCommandLine
             return $"{elapsed.TotalMilliseconds:0.##}\u00A0ms";
         if (elapsed.TotalMicroseconds >= 1)
             return $"{elapsed.TotalMicroseconds:0.##}\u00A0µs";
+
         return $"{elapsed.Ticks * 100:n0}\u00A0ns";
     }
 
@@ -664,6 +674,7 @@ public static class MiryoCommandLine
         string[] runtimeArgs;
 
         int dashDashIdx = Array.IndexOf(args, "--");
+
         if (dashDashIdx >= 0)
         {
             buildArgs = args[..dashDashIdx];
@@ -676,10 +687,9 @@ public static class MiryoCommandLine
         }
 
         int buildExit = ExecuteBuild(buildArgs, stdout, stderr, checkOnly: false);
+
         if (buildExit != 0)
-        {
             return buildExit;
-        }
 
         bool useColors = ShouldUseColors(null);
         stderr.WriteLine($"{FormatError("error", useColors)}: run {FormatFailed("failed", useColors)}: Native code execution pipeline not implemented yet.");
@@ -693,6 +703,7 @@ public static class MiryoCommandLine
     {
         string? configPath = null;
         bool useColors = ShouldUseColors(null);
+
         if (args.Length == 0 || !string.Equals(args[0], "shutdown", StringComparison.OrdinalIgnoreCase))
         {
             stderr.WriteLine("Usage: miryo compiler-server shutdown [--config <path>]");
@@ -734,6 +745,7 @@ public static class MiryoCommandLine
         process.WaitForExit();
         stdout.Write(toolOutput);
         stderr.Write(toolErrors);
+
         return process.ExitCode;
     }
 

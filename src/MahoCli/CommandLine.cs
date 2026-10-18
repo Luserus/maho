@@ -282,7 +282,13 @@ public static class CommandLine
     private static string FindCompilerServerExecutable()
     {
         string name = OperatingSystem.IsWindows() ? "mahoc-server.exe" : "mahoc-server";
-        return Path.Combine(AppContext.BaseDirectory, name);
+        string exePath = Path.Combine(AppContext.BaseDirectory, name);
+        if (File.Exists(exePath))
+            return exePath;
+        string dllPath = Path.Combine(AppContext.BaseDirectory, "mahoc-server.dll");
+        if (File.Exists(dllPath))
+            return dllPath;
+        return exePath;
     }
 
     private static string ToKebabCase(string value)

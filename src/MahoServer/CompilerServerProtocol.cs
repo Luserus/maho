@@ -45,18 +45,62 @@ public sealed record CompilerPackageManifest(
 
     public static CompilerPackageManifest Load(string packageDirectory)
     {
-        string manifestPath = Path.Combine(Path.GetFullPath(packageDirectory), FileName);
-        if (!File.Exists(manifestPath))
-            throw new FileNotFoundException("The compiler package manifest was not found.", manifestPath);
+        string fullPackageDir = Path.GetFullPath(packageDirectory);
+        string manifestPath = Path.Combine(fullPackageDir, FileName);
+        if (File.Exists(manifestPath))
+        {
+            var manifest = JsonSerializer.Deserialize<CompilerPackageManifest>(File.ReadAllText(manifestPath), JsonOptions) ?? throw new InvalidDataException("The compiler package manifest was empty.");
+            if (manifest.FormatVersion != CurrentFormatVersion)
+                throw new InvalidDataException($"Unsupported compiler package format {manifest.FormatVersion}.");
+            if (string.IsNullOrWhiteSpace(manifest.CompilerVersion) || string.IsNullOrWhiteSpace(manifest.CompilerAssembly) ||
+                string.IsNullOrWhiteSpace(manifest.HostCommand) || manifest.HostArguments is null)
+                throw new InvalidDataException("The compiler package manifest is missing required fields.");
 
-        var manifest = JsonSerializer.Deserialize<CompilerPackageManifest>(File.ReadAllText(manifestPath), JsonOptions) ?? throw new InvalidDataException("The compiler package manifest was empty.");
-        if (manifest.FormatVersion != CurrentFormatVersion)
-            throw new InvalidDataException($"Unsupported compiler package format {manifest.FormatVersion}.");
-        if (string.IsNullOrWhiteSpace(manifest.CompilerVersion) || string.IsNullOrWhiteSpace(manifest.CompilerAssembly) ||
-            string.IsNullOrWhiteSpace(manifest.HostCommand) || manifest.HostArguments is null)
-            throw new InvalidDataException("The compiler package manifest is missing required fields.");
+            return manifest;
+        }
 
-        return manifest;
+        string compilerAssembly = Path.Combine(fullPackageDir, "Maho.dll");
+        if (File.Exists(compilerAssembly))
+        {
+            var compilerIdentity = CompilerIdentity.FromCompilerAssembly(compilerAssembly);
+            string exeName = OperatingSystem.IsWindows() ? "maho-comp-host.exe" : "maho-comp-host";
+            string hostExe = Path.Combine(fullPackageDir, exeName);
+            string hostDll = Path.Combine(fullPackageDir, "maho-comp-host.dll");
+            string oldHostDll = Path.Combine(fullPackageDir, "Maho.CompilerHost.dll");
+
+            string hostCommand;
+            IReadOnlyList<string> hostArguments;
+
+            if (File.Exists(hostDll))
+            {
+                hostCommand = "dotnet";
+                hostArguments = ["maho-comp-host.dll"];
+            }
+            else if (File.Exists(hostExe))
+            {
+                hostCommand = $"./{exeName}";
+                hostArguments = [];
+            }
+            else if (File.Exists(oldHostDll))
+            {
+                hostCommand = "dotnet";
+                hostArguments = ["Maho.CompilerHost.dll"];
+            }
+            else
+            {
+                throw new FileNotFoundException("Could not locate maho-comp-host in package directory.", hostExe);
+            }
+
+            return new CompilerPackageManifest(
+                CurrentFormatVersion,
+                compilerIdentity.Version,
+                CompilerHostProtocol.Version,
+                "Maho.dll",
+                hostCommand,
+                hostArguments);
+        }
+
+        throw new FileNotFoundException("The compiler package manifest was not found.", manifestPath);
     }
 }
 
