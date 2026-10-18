@@ -342,7 +342,7 @@ public sealed class MiryoTests
 
         Assert.Equal(1, exitCode);
         string errOutput = swErr.ToString();
-        Assert.Contains("Unknown command 'dir'. Expected a command keyword.", errOutput);
+        Assert.Contains("unknown command 'dir'. Expected a command keyword.", errOutput);
         Assert.Contains("Commands:", errOutput);
         Assert.Contains("build [path]", errOutput);
         Assert.Contains("run [path]", errOutput);
@@ -360,7 +360,7 @@ public sealed class MiryoTests
 
         Assert.Equal(1, exitCode);
         string errOutput = swErr.ToString();
-        Assert.Contains("Unknown option '--foo'.", errOutput);
+        Assert.Contains("unknown option '--foo'.", errOutput);
         Assert.Contains("Commands:", errOutput);
         Assert.Contains("build [path]", errOutput);
     }

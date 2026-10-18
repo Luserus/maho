@@ -1,18 +1,18 @@
-using Maho.Server.Protocol;
+using Maho.Server;
 using Maho;
-using DiagnosticColorMode = Maho.Server.Protocol.CompilerDiagnosticColorMode;
-using DiagnosticPathStyle = Maho.Server.Protocol.CompilerDiagnosticPathStyle;
-using DiagnosticSeverity = Maho.Server.Protocol.CompilerDiagnosticSeverity;
-using DiagnosticLabelStyle = Maho.Server.Protocol.CompilerDiagnosticLabelStyle;
-using TextLocation = Maho.Server.Protocol.CompilerTextLocation;
-using TextSpanInfo = Maho.Server.Protocol.CompilerTextSpan;
-using DiagnosticInfo = Maho.Server.Protocol.CompilerDiagnostic;
-using DiagnosticLabelInfo = Maho.Server.Protocol.CompilerDiagnosticLabel;
-using DiagnosticNoteInfo = Maho.Server.Protocol.CompilerDiagnosticNote;
-using DiagnosticHelpInfo = Maho.Server.Protocol.CompilerDiagnosticHelp;
-using DiagnosticSuggestionInfo = Maho.Server.Protocol.CompilerDiagnosticSuggestion;
-using TextEditInfo = Maho.Server.Protocol.CompilerTextEdit;
-using MacroExpansionTraceInfo = Maho.Server.Protocol.CompilerMacroTrace;
+using DiagnosticColorMode = Maho.Server.CompilerDiagnosticColorMode;
+using DiagnosticPathStyle = Maho.Server.CompilerDiagnosticPathStyle;
+using DiagnosticSeverity = Maho.Server.CompilerDiagnosticSeverity;
+using DiagnosticLabelStyle = Maho.Server.CompilerDiagnosticLabelStyle;
+using TextLocation = Maho.Server.CompilerTextLocation;
+using TextSpanInfo = Maho.Server.CompilerTextSpan;
+using DiagnosticInfo = Maho.Server.CompilerDiagnostic;
+using DiagnosticLabelInfo = Maho.Server.CompilerDiagnosticLabel;
+using DiagnosticNoteInfo = Maho.Server.CompilerDiagnosticNote;
+using DiagnosticHelpInfo = Maho.Server.CompilerDiagnosticHelp;
+using DiagnosticSuggestionInfo = Maho.Server.CompilerDiagnosticSuggestion;
+using TextEditInfo = Maho.Server.CompilerTextEdit;
+using MacroExpansionTraceInfo = Maho.Server.CompilerMacroTrace;
 
 namespace MahoRendererTests;
 
