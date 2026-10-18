@@ -19,13 +19,16 @@
     <ProjectReference Include="../../src/MahoCli/MahoCli.csproj" />
     <ProjectReference Include="../../src/Miryo/Miryo.csproj" />
     <ProjectReference Include="../../src/MahoServerHost/MahoServerHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/MahoCompilerHost/MahoCompilerHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyCompilerServerForCommandLineTests" AfterTargets="Build">
     <ItemGroup>
       <CompilerServerFiles Include="../../src/MahoServerHost/bin/$(Configuration)/$(TargetFramework)/*" />
+      <CompilerHostFiles Include="../../src/MahoCompilerHost/bin/$(Configuration)/$(TargetFramework)/*" />
     </ItemGroup>
     <Copy SourceFiles="@(CompilerServerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CompilerHostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Maho.Server.Protocol;
+using Maho.Server;
 
 namespace Maho;
 

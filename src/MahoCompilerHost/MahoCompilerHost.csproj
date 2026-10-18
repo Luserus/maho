@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Every published compiler package has a package-local launcher. It
+         uses the installed runtime for framework-dependent packages and the
+         bundled runtime for self-contained packages. -->
+    <UseAppHost>true</UseAppHost>
+    <AssemblyName>Maho.CompilerHost</AssemblyName>
+    <RootNamespace>Maho.CompilerHost</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The host has a normal static reference for compile-time safety, but
+         single-file publish leaves this API assembly beside the bundle so it
+         is both the host's dependency and a public tool-consumption API. -->
+    <ProjectReference Include="../Maho/Maho.csproj">
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </ProjectReference>
+    <None Include="compiler.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

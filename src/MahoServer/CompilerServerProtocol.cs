@@ -5,13 +5,59 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using System.Text.Json;
 
-namespace Maho.Server.Protocol;
+namespace Maho.Server;
 
 /// <summary>Version of the stable client/server wire contract.</summary>
 public static class CompilerProtocol
 {
     public const int Version = 1;
+}
+
+/// <summary>
+/// Version of the newline-delimited JSON contract between the generic daemon
+/// and a compiler-package host process. Compiler packages implement this
+/// contract without referencing this assembly.
+/// </summary>
+public static class CompilerHostProtocol
+{
+    public const int Version = 1;
+}
+
+/// <summary>
+/// Describes a compiler package that can be hosted by a generic mahoc-server.
+/// <see cref="CompilerAssembly"/> is relative to the manifest. A host command
+/// starting with <c>./</c> or <c>.\\</c> is resolved relative to the package,
+/// allowing a self-contained package-local host executable.
+/// </summary>
+public sealed record CompilerPackageManifest(
+    int FormatVersion,
+    string CompilerVersion,
+    int CompilerHostProtocolVersion,
+    string CompilerAssembly,
+    string HostCommand,
+    IReadOnlyList<string> HostArguments)
+{
+    private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    public const string FileName = "compiler.json";
+    public const int CurrentFormatVersion = 1;
+
+    public static CompilerPackageManifest Load(string packageDirectory)
+    {
+        string manifestPath = Path.Combine(Path.GetFullPath(packageDirectory), FileName);
+        if (!File.Exists(manifestPath))
+            throw new FileNotFoundException("The compiler package manifest was not found.", manifestPath);
+
+        var manifest = JsonSerializer.Deserialize<CompilerPackageManifest>(File.ReadAllText(manifestPath), JsonOptions) ?? throw new InvalidDataException("The compiler package manifest was empty.");
+        if (manifest.FormatVersion != CurrentFormatVersion)
+            throw new InvalidDataException($"Unsupported compiler package format {manifest.FormatVersion}.");
+        if (string.IsNullOrWhiteSpace(manifest.CompilerVersion) || string.IsNullOrWhiteSpace(manifest.CompilerAssembly) ||
+            string.IsNullOrWhiteSpace(manifest.HostCommand) || manifest.HostArguments is null)
+            throw new InvalidDataException("The compiler package manifest is missing required fields.");
+
+        return manifest;
+    }
 }
 
 [Flags]
@@ -80,6 +126,66 @@ public sealed record CompilerServerFileResult(string SourcePath, string? LexerJs
 
 public sealed record CompilerServerResponse(string ProjectName, CompilerServerFileResult[] Files, string? EntryFile,
     long ElapsedTicks, bool HasErrors, bool LaterStagesNotImplemented, string CompilerVersion, string CompilerFingerprint);
+
+/// <summary>Control message carried over a compiler daemon pipe.</summary>
+public sealed record CompilerServerControlRequest(int ProtocolVersion, string Method);
+public sealed record CompilerServerControlResponse(bool Success, string? Message = null);
+
+/// <summary>
+/// Tracks live daemon endpoints for the current user. The registry is only
+/// discovery metadata: every control operation still authenticates itself by
+/// connecting to the user-specific named pipe.
+/// </summary>
+public sealed record CompilerServerRegistration(string PipeName, string CompilerVersion, string CompilerFingerprint);
+
+public static class CompilerServerRegistry
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static string DirectoryPath
+    {
+        get
+        {
+            string userHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Environment.UserName))).ToLowerInvariant()[..16];
+            return Path.Combine(Path.GetTempPath(), "maho", "compiler-servers", userHash);
+        }
+    }
+
+    public static void Register(CompilerServerRegistration registration)
+    {
+        Directory.CreateDirectory(DirectoryPath);
+        File.WriteAllText(Path.Combine(DirectoryPath, registration.PipeName + ".json"), JsonSerializer.Serialize(registration, JsonOptions));
+    }
+
+    public static void Unregister(string pipeName)
+    {
+        string path = Path.Combine(DirectoryPath, pipeName + ".json");
+        if (File.Exists(path))
+            File.Delete(path);
+    }
+
+    public static IReadOnlyList<CompilerServerRegistration> GetRegistrations()
+    {
+        if (!Directory.Exists(DirectoryPath))
+            return [];
+
+        var registrations = new List<CompilerServerRegistration>();
+        foreach (string path in Directory.GetFiles(DirectoryPath, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                var registration = JsonSerializer.Deserialize<CompilerServerRegistration>(File.ReadAllText(path), JsonOptions);
+                if (registration is not null && !string.IsNullOrWhiteSpace(registration.PipeName))
+                    registrations.Add(registration);
+            }
+            catch (JsonException)
+            {
+                File.Delete(path);
+            }
+        }
+        return registrations;
+    }
+}
 
 /// <summary>Identity of the compiler package hosting a server daemon.</summary>
 public sealed record CompilerIdentity(string Version, string Fingerprint)

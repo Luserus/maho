@@ -6,14 +6,13 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Pipes;
-using Maho.Server.Client;
-using Maho.Server.Protocol;
-using AnalysisOutput = Maho.Server.Protocol.CompilerDebugOutput;
-using DiagnosticColorMode = Maho.Server.Protocol.CompilerDiagnosticColorMode;
-using DiagnosticFormat = Maho.Server.Protocol.CompilerDiagnosticFormat;
-using DiagnosticInfo = Maho.Server.Protocol.CompilerDiagnostic;
-using DiagnosticPathStyle = Maho.Server.Protocol.CompilerDiagnosticPathStyle;
-using DiagnosticSeverity = Maho.Server.Protocol.CompilerDiagnosticSeverity;
+using Maho.Server;
+using AnalysisOutput = Maho.Server.CompilerDebugOutput;
+using DiagnosticColorMode = Maho.Server.CompilerDiagnosticColorMode;
+using DiagnosticFormat = Maho.Server.CompilerDiagnosticFormat;
+using DiagnosticInfo = Maho.Server.CompilerDiagnostic;
+using DiagnosticPathStyle = Maho.Server.CompilerDiagnosticPathStyle;
+using DiagnosticSeverity = Maho.Server.CompilerDiagnosticSeverity;
 
 namespace Maho;
 
@@ -44,6 +43,7 @@ public static class CommandLine
         bool WarningsAsErrors,
         bool ShowHelp,
         bool ShowVersion,
+        bool ShutdownServers,
         string? OutputDestination,
         IReadOnlyList<string> SourceInputs,
         string? Pattern,
@@ -59,7 +59,8 @@ public static class CommandLine
         string? ModuleName = null,
         string? ProjectDirectory = null,
         bool SourcePathsStdin = false,
-        string? ServerPath = null);
+        string? ServerPath = null,
+        string? CompilerPackagePath = null);
 
     // Terminal views contain protocol data only, so mahoc does not load a
     // particular compiler assembly merely to render its response.
@@ -113,6 +114,13 @@ public static class CommandLine
         if (options.ShowVersion)
         {
             PrintVersion(Console.Out);
+            return 0;
+        }
+
+        if (options.ShutdownServers)
+        {
+            int stopped = CompilerServerClient.ShutdownAllServers();
+            Console.Out.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}." );
             return 0;
         }
 
@@ -260,7 +268,7 @@ public static class CommandLine
         string moduleName = cliOptions.ModuleName ?? ToKebabCase(projectName);
         var request = new CompilerServerRequest(CompilerProtocol.Version, projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.DebugOutput, cliOptions.CheckOnly);
         string serverPath = cliOptions.ServerPath ?? FindCompilerServerExecutable();
-        CompilerServerPackage package = CompilerServerClient.LoadPackage(serverPath);
+        CompilerServerPackage package = CompilerServerClient.LoadPackage(serverPath, cliOptions.CompilerPackagePath);
         CompilerServerResponse response = CompilerServerClient.Compile(package, request);
 
         var batch = response.Files.Select(file => new CompilerBatchFileResult(
@@ -566,6 +574,7 @@ public static class CommandLine
         bool warningsAsErrors = false;
         bool showHelp = false;
         bool showVersion = false;
+        bool shutdownServers = false;
         string? generalOutput = null;
         var sourceInputs = new List<string>();
         string? pattern = null;
@@ -582,6 +591,7 @@ public static class CommandLine
         string? projectDirectory = null;
         bool sourcePathsStdin = false;
         string? serverPath = null;
+        string? compilerPackagePath = null;
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -597,6 +607,10 @@ public static class CommandLine
                 case "-v":
                 case "--version":
                     showVersion = true;
+                    break;
+
+                case "--shutdown-servers":
+                    shutdownServers = true;
                     break;
 
                 case "-o":
@@ -798,6 +812,15 @@ public static class CommandLine
                     }
                     break;
 
+                case "--compiler-package":
+                case "--compiler-package-path":
+                    if (!TryReadValue(args, ref index, argument, out compilerPackagePath, out errorMessage))
+                    {
+                        options = default;
+                        return false;
+                    }
+                    break;
+
                 case string arg when arg.StartsWith("--implicit-toplevel=", StringComparison.OrdinalIgnoreCase):
                     string boolStr = arg[(arg.IndexOf('=') + 1)..];
                     if (bool.TryParse(boolStr, out bool parsedBool))
@@ -869,6 +892,7 @@ public static class CommandLine
             warningsAsErrors,
             showHelp,
             showVersion,
+            shutdownServers,
             generalOutput,
             sourceInputs,
             pattern,
@@ -884,7 +908,8 @@ public static class CommandLine
             moduleName,
             projectDirectory,
             sourcePathsStdin,
-            serverPath);
+            serverPath,
+            compilerPackagePath);
 
         errorMessage = null;
         return true;
@@ -1077,6 +1102,8 @@ public static class CommandLine
         writer.WriteLine("  --module-name <kebab-case>                                  Compiled module identity supplied by the build system.");
         writer.WriteLine("  --project-directory <path>                                  Directory watched by the compiler server.");
         writer.WriteLine("  --server-path <path>                                        Compiler server executable; defaults beside mahoc.");
+        writer.WriteLine("  --compiler-package <path>                                   Compiler package directory or compiler.json manifest.");
+        writer.WriteLine("  --shutdown-servers                                          Stop all compiler daemons owned by this user.");
         writer.WriteLine("  --reference-project <path>                                  Referenced project metadata/source path supplied by Miryo.");
         writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
         writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");

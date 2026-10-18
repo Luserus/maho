@@ -49,6 +49,7 @@ public sealed class MiryoConfiguration
 
         config.SetRaw("tools", "mahoc", new ConfigValue.ArrayValue(["./mahoc", "./dist/mahoc", "mahoc"]));
         config.SetRaw("tools", "mahoc_server", new ConfigValue.ArrayValue(["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]));
+        config.SetRaw("tools", "mahoc_compiler", new ConfigValue.ArrayValue(["./compilers/0.1.0", "./dist/compilers/0.1.0"]));
         config.SetRaw("tools", "il2llvmir", new ConfigValue.ArrayValue(["./il2llvmir", "./dist/il2llvmir", "il2llvmir"]));
         config.SetRaw("tools", "llvm_opt", new ConfigValue.ArrayValue(["opt", "/usr/bin/opt"]));
         config.SetRaw("tools", "llvm_clang", new ConfigValue.ArrayValue(["clang", "/usr/bin/clang"]));
@@ -161,6 +162,25 @@ public sealed class MiryoConfiguration
                 return resolved;
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a configured directory relative to the configuration file.
+    /// Compiler packages are deliberately not searched on PATH: the project
+    /// toolchain configuration chooses the exact compiler build.
+    /// </summary>
+    public string? FindDirectory(string name, IReadOnlyDictionary<string, string>? variables = null)
+    {
+        foreach (string candidate in GetToolCandidates(name, variables))
+        {
+            string expanded = Environment.ExpandEnvironmentVariables(candidate);
+            string path = Path.IsPathRooted(expanded)
+                ? expanded
+                : Path.GetFullPath(Path.Combine(ConfigDirectory, expanded));
+            if (Directory.Exists(path))
+                return path;
+        }
         return null;
     }
 
