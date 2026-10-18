@@ -8,7 +8,7 @@
          uses the installed runtime for framework-dependent packages and the
          bundled runtime for self-contained packages. -->
     <UseAppHost>true</UseAppHost>
-    <AssemblyName>Maho.CompilerHost</AssemblyName>
+    <AssemblyName>maho-comp-host</AssemblyName>
     <RootNamespace>Maho.CompilerHost</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
@@ -18,6 +18,5 @@
     <ProjectReference Include="../Maho/Maho.csproj">
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </ProjectReference>
-    <None Include="compiler.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -1,8 +1,0 @@
-{
-  "formatVersion": 1,
-  "compilerVersion": "0.1.0",
-  "compilerHostProtocolVersion": 1,
-  "compilerAssembly": "Maho.dll",
-  "hostCommand": "dotnet",
-  "hostArguments": ["Maho.CompilerHost.dll"]
-}

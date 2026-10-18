@@ -134,11 +134,11 @@ publish_target() {
     local compiler_host_props=("-p:GenerateDependencyFile=true")
     local compiler_host_args=()
     local package_dir="$out_dir/compilers/0.1.0"
-    local compiler_host_command="./Maho.CompilerHost"
+    local compiler_host_command="./maho-comp-host"
     local compiler_host_arguments='[]'
 
     if [[ "$rid" == win-* ]]; then
-        compiler_host_command="./Maho.CompilerHost.exe"
+        compiler_host_command="./maho-comp-host.exe"
     fi
 
     if [ "$debug_mode" = true ]; then
