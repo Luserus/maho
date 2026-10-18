@@ -47,6 +47,7 @@ public sealed record CompilerPackageManifest(
     {
         string fullPackageDir = Path.GetFullPath(packageDirectory);
         string manifestPath = Path.Combine(fullPackageDir, FileName);
+
         if (File.Exists(manifestPath))
         {
             var manifest = JsonSerializer.Deserialize<CompilerPackageManifest>(File.ReadAllText(manifestPath), JsonOptions) ?? throw new InvalidDataException("The compiler package manifest was empty.");
@@ -59,6 +60,7 @@ public sealed record CompilerPackageManifest(
             return manifest;
         }
 
+#if DEBUG
         string compilerAssembly = Path.Combine(fullPackageDir, "Maho.dll");
         if (File.Exists(compilerAssembly))
         {
@@ -66,7 +68,6 @@ public sealed record CompilerPackageManifest(
             string exeName = OperatingSystem.IsWindows() ? "maho-comp-host.exe" : "maho-comp-host";
             string hostExe = Path.Combine(fullPackageDir, exeName);
             string hostDll = Path.Combine(fullPackageDir, "maho-comp-host.dll");
-            string oldHostDll = Path.Combine(fullPackageDir, "Maho.CompilerHost.dll");
 
             string hostCommand;
             IReadOnlyList<string> hostArguments;
@@ -81,15 +82,8 @@ public sealed record CompilerPackageManifest(
                 hostCommand = $"./{exeName}";
                 hostArguments = [];
             }
-            else if (File.Exists(oldHostDll))
-            {
-                hostCommand = "dotnet";
-                hostArguments = ["Maho.CompilerHost.dll"];
-            }
             else
-            {
                 throw new FileNotFoundException("Could not locate maho-comp-host in package directory.", hostExe);
-            }
 
             return new CompilerPackageManifest(
                 CurrentFormatVersion,
@@ -99,6 +93,7 @@ public sealed record CompilerPackageManifest(
                 hostCommand,
                 hostArguments);
         }
+#endif
 
         throw new FileNotFoundException("The compiler package manifest was not found.", manifestPath);
     }
