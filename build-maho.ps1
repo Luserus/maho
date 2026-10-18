@@ -65,6 +65,7 @@ $RepoRoot = $PSScriptRoot
 $CliProject = Join-Path $RepoRoot "src\MahoCli\MahoCli.csproj"
 $ServerProject = Join-Path $RepoRoot "src\MahoServer\MahoServer.csproj"
 $ServerHostProject = Join-Path $RepoRoot "src\MahoServerHost\MahoServerHost.csproj"
+$CompilerHostProject = Join-Path $RepoRoot "src\MahoCompilerHost\MahoCompilerHost.csproj"
 $MiryoProject = Join-Path $RepoRoot "src\Miryo\Miryo.csproj"
 $MahoProject = Join-Path $RepoRoot "src\Maho\Maho.csproj"
 $DistDir = Join-Path $RepoRoot "dist"
@@ -128,31 +129,45 @@ function Publish-Target([string]$rid, [string]$outDir) {
         throw "dotnet publish mahoc-server failed with exit code $LASTEXITCODE"
     }
 
-    # 3. Publish MahoServer library
-    dotnet publish "$ServerProject" -c $config -o "$outDir" @debugProps --nologo -v q
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish MahoServer failed with exit code $LASTEXITCODE"
-    }
-
-    # 4. Publish miryo
+    # 3. Publish miryo
     dotnet publish "$MiryoProject" -c $config -o "$outDir" @extraArgs --nologo -v q
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish miryo failed with exit code $LASTEXITCODE"
     }
 
-    # 5. Publish Maho library
-    dotnet publish "$MahoProject" -c $config -o "$outDir" @debugProps --nologo -v q
+    # 4. Publish compiler package (0.2.0)
+    $packageDir = Join-Path $outDir "compilers\0.2.0"
+    if (Test-Path $packageDir) {
+        Remove-Item -Recurse -Force $packageDir
+    }
+    New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+
+    $compilerHostCommand = if ($rid -like "win-*") { ".\maho-comp-host.exe" } else { "./maho-comp-host" }
+    dotnet publish "$CompilerHostProject" -c $config -o "$packageDir" @extraArgs --nologo -v q
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish Maho failed with exit code $LASTEXITCODE"
+        throw "dotnet publish compiler host failed with exit code $LASTEXITCODE"
     }
 
-    # 6. Generate miryo.config
+    $manifestContent = @"
+{
+  "formatVersion": 1,
+  "compilerVersion": "0.2.0",
+  "compilerHostProtocolVersion": 1,
+  "compilerAssembly": "Maho.dll",
+  "hostCommand": "$compilerHostCommand",
+  "hostArguments": []
+}
+"@
+    Set-Content -Path (Join-Path $packageDir "compiler.json") -Value $manifestContent
+
+    # 5. Generate miryo.config
     $configContent = @"
 # Miryo Toolchain Configuration
 
 [tools]
 mahoc = ["./mahoc", "mahoc"]
 mahoc_server = ["./mahoc-server", "mahoc-server"]
+mahoc_compiler = ["./compilers/0.2.0"]
 il2llvmir = ["./il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]

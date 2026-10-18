@@ -27,7 +27,7 @@ public static class MiryoCommandLine
                 int plusIndex = informational.IndexOf('+');
                 return plusIndex >= 0 ? informational[..plusIndex] : informational;
             }
-            var ver = typeof(MiryoCommandLine).Assembly.GetName().Version ?? new Version(0, 1, 0);
+            var ver = typeof(MiryoCommandLine).Assembly.GetName().Version ?? new Version(0, 2, 0);
             return ver.ToString(3);
         }
     }
@@ -62,7 +62,7 @@ public static class MiryoCommandLine
                 return 0;
 
             case "-v" or "--version" or "version":
-                stdout.WriteLine($"Miryo: v{VersionString}");
+                stdout.WriteLine(VersionString);
                 return 0;
 
             case "new":
@@ -785,7 +785,7 @@ public static class MiryoCommandLine
 
     private static void PrintUsage(TextWriter writer)
     {
-        writer.WriteLine($"Miryo: v{VersionString}");
+        writer.WriteLine(VersionString);
         writer.WriteLine("The project system and build tool for the Maho programming language.");
         writer.WriteLine();
         writer.WriteLine("Usage: miryo <command> [options]");

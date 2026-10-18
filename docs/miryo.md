@@ -67,7 +67,10 @@ Builds the project and runs the compiled binary:
 - Arguments after `--` are forwarded directly to the running executable.
 
 ### `miryo clean [path]`
-Removes the `target/` build output directory for the specified project.
+Removes the `target/` build output and `obj/` temporary directories for the specified project.
+
+### `miryo compiler-server shutdown [--config <path>]`
+Gracefully stops any active `mahoc-server` background daemons running for the user and toolchain.
 
 ---
 
@@ -87,8 +90,10 @@ Miryo searches for `miryo.config` in:
 # Miryo Toolchain Configuration
 
 [tools]
-# Arrays of search paths tried in order until an existing executable is found
+# Arrays of search paths tried in order until an existing executable or package is found
 mahoc = ["./dist/mahoc", "./src/MahoCli/bin/Debug/net10.0/mahoc.dll", "mahoc"]
+mahoc_server = ["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]
+mahoc_compiler = ["./compilers/0.2.0", "./dist/compilers/0.2.0"]
 il2llvmir = ["./dist/il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]

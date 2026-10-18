@@ -19,6 +19,8 @@ namespace Maho;
 /// <summary> Owns the terminal-facing compiler workflow and explicit debug/diagnostics routing. </summary>
 public static class CommandLine
 {
+    public static string VersionString = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -120,7 +122,7 @@ public static class CommandLine
         if (options.ShutdownServers)
         {
             int stopped = CompilerServerClient.ShutdownAllServers();
-            Console.Out.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}." );
+            Console.Out.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}.");
             return 0;
         }
 
@@ -1087,8 +1089,7 @@ public static class CommandLine
 
     private static void PrintVersion(TextWriter writer)
     {
-        string version = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-        writer.WriteLine($"mahoc: v{version}");
+        writer.WriteLine(VersionString);
     }
 
     private static void PrintUsage(TextWriter writer)

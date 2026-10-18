@@ -121,6 +121,6 @@ public sealed class ImportedSymbolTests
     {
         Assert.NotNull(MahoCompiler.VersionString);
         Assert.NotEmpty(MahoCompiler.VersionString);
-        Assert.Equal("0.1.0", MahoCompiler.VersionString);
+        Assert.Equal("0.2.0", MahoCompiler.VersionString);
     }
 }

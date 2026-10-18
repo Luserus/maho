@@ -22,7 +22,7 @@ public static class MahoCompiler
     /// <summary>
     /// The version of the Maho compiler library.
     /// </summary>
-    public static Version Version => typeof(MahoCompiler).Assembly.GetName().Version ?? new Version(0, 1, 0);
+    public static Version Version => typeof(MahoCompiler).Assembly.GetName().Version ?? new Version(0, 2, 0);
 
     /// <summary>
     /// Human-readable version string for the Maho compiler library.

@@ -32,7 +32,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["--version"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("mahoc: v", sw.ToString());
+            Assert.Contains(CommandLine.VersionString, sw.ToString());
         }
         finally
         {
@@ -51,7 +51,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["-v"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("mahoc: v", sw.ToString());
+            Assert.Contains(CommandLine.VersionString, sw.ToString());
         }
         finally
         {

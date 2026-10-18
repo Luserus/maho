@@ -59,7 +59,6 @@ public sealed class MiryoTests
         int exitCode = MiryoCommandLine.Run(["--help"], sw, sw);
         Assert.Equal(0, exitCode);
         string output = sw.ToString();
-        Assert.Contains("Miryo: v", output);
         Assert.Contains("Usage: miryo", output);
     }
 
@@ -69,7 +68,7 @@ public sealed class MiryoTests
         using var sw = new StringWriter();
         int exitCode = MiryoCommandLine.Run(["--version"], sw, sw);
         Assert.Equal(0, exitCode);
-        Assert.Contains("Miryo: v", sw.ToString());
+        Assert.Contains(MiryoCommandLine.VersionString, sw.ToString());
     }
 
     [Fact]

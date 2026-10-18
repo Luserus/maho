@@ -4,17 +4,20 @@ The repository is organized into focused projects:
 
 ## Core Projects (`src/`)
 
-- [`compiler-library.md`](compiler-library.md) (`src/Maho`): the reusable compiler library containing source text modeling, lexer, parser, AST, diagnostics engine, phase timers, and multi-pass semantic resolver (`SymbolDiscoveryPass` and `DeclarationResolutionPass`).
-- [`miryo.md`](miryo.md) (`src/Miryo`): the project manager and build tool CLI (`miryo`), containing `Miryo.Build` for `.mhpr` project file parsing, source discovery, project-graph dependency management, and toolchain process execution.
+- [`compiler-library.md`](compiler-library.md) (`src/Maho`): the reusable compiler library containing source text modeling, lexer, parser, AST, diagnostics engine, phase timers, macro expansion, and multi-pass semantic resolver (`SymbolDiscoveryPass` and `DeclarationResolutionPass`).
+- `src/MahoServer`: shared compiler-server protocol, package discovery, client transport, and session management.
+- `src/MahoServerHost`: generic background compiler daemon (`mahoc-server`) communicating over named pipes / domain sockets for sub-millisecond compilation caching.
+- `src/MahoCompilerHost`: package-local launcher (`maho-comp-host`) dynamically executing compiler assemblies for versioned packages.
+- [`miryo.md`](miryo.md) (`src/Miryo`): the project manager and build tool CLI (`miryo`), containing `Miryo.Build` for `.mhpr` project file parsing, source discovery, project-graph dependency management, pipeline timing, and toolchain process execution.
 - [`cli.md`](cli.md) (`src/MahoCli`): the executable compiler driver (`mahoc`) and terminal diagnostic renderer.
 
 ## Tests (`tests/`)
 
-- `tests/Maho.Tests`: complete xUnit test suite covering lexer, parser, diagnostics engine, resolution passes, CLI argument parsing, Miryo project loading, and terminal rendering.
+- `tests/Maho.Tests`: complete xUnit test suite (450 automated tests) covering lexer, parser, diagnostics engine, resolution passes, macro expansion, CLI argument parsing, Miryo project loading, and terminal rendering.
 
 ## Distribution & Build (`dist/` & Root Scripts)
 
-- `dist/`: output directory containing compiled binaries (`mahoc`, `miryo`, `Maho.dll`, and platform subdirectories).
+- `dist/`: output directory containing compiled binaries (`mahoc`, `mahoc-server`, `miryo`), configuration (`miryo.config`), and versioned compiler packages (`dist/compilers/0.2.0/`).
 - `miryo.config`: default toolchain configuration defining tool search paths and project templates.
 - `build-maho`: cross-platform Bash build script for Linux, macOS, WSL, and Git Bash.
 - `build-maho.ps1`: PowerShell build script for Windows and PowerShell Core.

@@ -41,29 +41,32 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 ## Current pipeline
 
-The compiler executes a complete front-end pipeline up through declaration resolution:
+The compiler executes a complete front-end pipeline up through declaration resolution and macro expansion:
 
 1. **Build Orchestration (`Miryo` / `miryo`)**:
-   - If managing a project, `miryo` parses the `.mhpr` configuration, resolves inter-project dependencies, determines source files, reads `miryo.config`, and spawns `mahoc` with appropriate flags (e.g. `--entry`, `--unsafe`, `--implicit-toplevel`, `--alias`).
-2. **Compiler Driver (`MahoCli` / `mahoc`)**:
+   - If managing a project, `miryo` parses the `.mhpr` configuration, resolves inter-project dependencies, determines source files, reads `miryo.config`, and executes compilation using versioned compiler packages and the persistent compiler server.
+2. **Compiler Driver & Server IPC (`MahoCli` / `mahoc` & `MahoServer`)**:
    - Direct compiler CLI that accepts `.mh` source files and directories (zero awareness of `.mhpr` project files).
-   - Resolves input files and invokes `MahoCompiler.CompileFiles(...)` (or `AnalyzeFiles(...)`).
+   - Resolves input files, discovers the package directory or `compiler.json`, connects to the persistent background `mahoc-server` daemon over named pipes / domain sockets, and transmits JSON compilation requests.
 3. **Syntax Phase (Lexing + Parsing)**:
    - Source files are parsed in parallel via `Parallel.For`.
    - `SourceText` indexes line offsets and enables absolute and line/column span tracking.
    - `Lexer` tokenizes source into tokens with trivia.
-   - `Parser` constructs strongly-typed `CompilationUnit` ASTs.
+   - `Parser` constructs strongly-typed `CompilationUnit` ASTs, including unified loop expressions (`WhileExpression`).
    - Phase duration is measured and recorded in `CompilationPhaseTimers.Syntax`.
-4. **Semantic Analysis Phase**:
+4. **Macro Expansion Phase (`MacroExpansionPass`)**:
+   - Resolves and expands macros across the syntax tree, validating recursion limits and nesting bounds.
+   - Preserves macro call chains to render diagnostic traceback trees.
+5. **Semantic Analysis Phase**:
    - `Resolver` runs semantic passes across the unified `SyntaxTree`:
      - `SymbolDiscoveryPass`: discovers namespaces, builds the namespace trie, registers types/functions/variables/properties/aliases, assigns modifier flags (including `TypeFlags.Partial` and `FunctionFlags.Partial`), and constructs lexical scopes.
      - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH1004`), checks duplicate non-partial types (`MH1002`), performs partial type canonical merging and kind consistency, enforces partial function body limits and signature matching (`MH1003`), checks duplicate variables (`MH1005`), duplicate properties (`MH1006`), and ambiguous type references (`MH1001`).
    - Phase duration is measured and recorded in `CompilationPhaseTimers.SemanticAnalysis`.
-5. **Lowering & Codegen Phase**:
+6. **Lowering & Codegen Phase**:
    - Currently serves as the lowering boundary (throwing `MH9000` until backend code generation is hooked up).
    - Phase duration is tracked under `CompilationPhaseTimers.Lowering`.
-6. **Diagnostics & Status Output**:
-   - Diagnostics are enriched with primary carets, secondary context spans, notes, and remediation help, then projected into `DiagnosticInfo` payloads.
+7. **Diagnostics & Status Output**:
+   - Diagnostics are enriched with primary carets, secondary context spans, notes, remediation help, and macro tracebacks (`└── from this macro invocation`), then projected into `DiagnosticInfo` payloads.
    - The CLI renders either rich ANSI-colored reports or JSON envelopes for diagnostics.
    - The compiler calculates and returns `analysis.Elapsed` directly, and the CLI prints the status line:
      - `Build succeeded in <time>` (word `succeeded` in green)
