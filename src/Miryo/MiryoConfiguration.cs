@@ -49,7 +49,7 @@ public sealed class MiryoConfiguration
 
         config.SetRaw("tools", "mahoc", new ConfigValue.ArrayValue(["./mahoc", "./dist/mahoc", "mahoc"]));
         config.SetRaw("tools", "mahoc_server", new ConfigValue.ArrayValue(["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]));
-        config.SetRaw("tools", "mahoc_compiler", new ConfigValue.ArrayValue(["./compilers/0.1.0", "./dist/compilers/0.1.0"]));
+        config.SetRaw("tools", "mahoc_compiler", new ConfigValue.ArrayValue(["./compilers/0.2.0", "./dist/compilers/0.2.0"]));
         config.SetRaw("tools", "il2llvmir", new ConfigValue.ArrayValue(["./il2llvmir", "./dist/il2llvmir", "il2llvmir"]));
         config.SetRaw("tools", "llvm_opt", new ConfigValue.ArrayValue(["opt", "/usr/bin/opt"]));
         config.SetRaw("tools", "llvm_clang", new ConfigValue.ArrayValue(["clang", "/usr/bin/clang"]));

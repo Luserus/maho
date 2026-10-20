@@ -19,6 +19,8 @@ namespace Maho;
 /// <summary> Owns the terminal-facing compiler workflow and explicit debug/diagnostics routing. </summary>
 public static class CommandLine
 {
+    public static string VersionString = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -120,7 +122,7 @@ public static class CommandLine
         if (options.ShutdownServers)
         {
             int stopped = CompilerServerClient.ShutdownAllServers();
-            Console.Out.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}." );
+            Console.Out.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}.");
             return 0;
         }
 
@@ -169,7 +171,7 @@ public static class CommandLine
         // Miryo receives pipeline state through its result pipe and owns the final build-stage
         // message. Source diagnostics remain on stderr in both direct and build invocations.
         string? renderedPipelineError = options.ResultPipeName is null ? pipelineError : null;
-        bool includeStatus = options.ResultPipeName is null;
+        bool includeStatus = false;
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
             DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, renderedPipelineError),
@@ -451,7 +453,7 @@ public static class CommandLine
         string? pipelineError,
         DiagnosticColorMode colorMode,
         DiagnosticPathStyle pathStyle,
-        bool includeStatus = true)
+        bool includeStatus = false)
     {
         string projectRoot = GetDisplayRoot(inputPath);
         var renderer = new TerminalDiagnosticRenderer(
@@ -1087,8 +1089,7 @@ public static class CommandLine
 
     private static void PrintVersion(TextWriter writer)
     {
-        string version = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-        writer.WriteLine($"mahoc: v{version}");
+        writer.WriteLine(VersionString);
     }
 
     private static void PrintUsage(TextWriter writer)

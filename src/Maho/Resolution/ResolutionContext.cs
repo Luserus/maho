@@ -9,7 +9,6 @@ namespace Maho.Resolution;
 internal sealed class ResolutionContext
 {
     public IReadOnlyList<SyntaxTree> SyntaxTrees { get; }
-    internal SyntaxTree SyntaxTree => SyntaxTrees[0];
     public ResolvedTree ResolvedTree { get; }
     public DiagnosticsManager Diagnostics { get; }
 

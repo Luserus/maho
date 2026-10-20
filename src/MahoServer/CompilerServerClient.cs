@@ -155,8 +155,13 @@ public static class CompilerServerClient
         // Deliberately do not walk parent directories or consult environment
         // variables: ordinary installs select a package explicitly.
         string colocated = Path.GetDirectoryName(serverPath)!;
+#if DEBUG
         if (File.Exists(Path.Combine(colocated, CompilerPackageManifest.FileName)) || File.Exists(Path.Combine(colocated, "Maho.dll")))
             return colocated;
+#else
+        if (File.Exists(Path.Combine(colocated, CompilerPackageManifest.FileName)))
+            return colocated;
+#endif
 
         throw new FileNotFoundException("No compiler package was selected. Pass --compiler-package or configure mahoc_compiler in miryo.config.",
             Path.Combine(colocated, CompilerPackageManifest.FileName));

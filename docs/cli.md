@@ -57,6 +57,8 @@ Run the compiled executable directly on source files or directories:
 | `--pattern` | `<glob>` | Source file matching glob pattern (defaults to `*.mh`). |
 | `--alias`, `--global-alias` | `<alias>=<target>` | Declares a project-wide type alias (e.g. `--alias int32=Std.Int32`). |
 | `--unsafe` | Flag | Enables unsafe operations globally. |
+| `--compiler-package` | `<path>` | Compiler package directory or `compiler.json` manifest. |
+| `--server-path` | `<path>` | Explicit path to the `mahoc-server` executable. |
 | `--debug` | `(lex\|parse)+` | Selects which debug AST/token JSON views to generate. |
 | `--diagnostics` | `pretty`, `text`, `json` | Diagnostic output formatting. Defaults to `pretty`. |
 | `-np`, `--no-pretty` | Flag | Shortcut to disable pretty terminal styling and colors. |

@@ -100,8 +100,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var property in context.SinkSymbols.PropertySymbols)
             ResolveProperty(property);
 
-        foreach (var root in context.SyntaxTree.Roots)
-            ResolveTopLevelStatements(root);
+        foreach (var tree in context.SyntaxTrees)
+            ResolveTopLevelStatements(tree.Root);
 
         CheckDuplicateTypeDeclarations();
         CheckCyclicTypeHierarchies();

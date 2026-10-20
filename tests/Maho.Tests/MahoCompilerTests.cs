@@ -1,12 +1,12 @@
 using System.Collections.Generic;
-using System.Text.Json;
+using Maho.Syntax;
 using Miryo.Build;
 
 namespace Maho.Tests;
 
 public sealed class MahoCompilerTests
 {
-    private static CompilerProjectAnalysisResult AnalyzeProject(string projectPath)
+    private static Compilation AnalyzeProject(string projectPath)
     {
         var project = MiryoBuildSystem.LoadProject(projectPath);
         var options = new CompilationOptions
@@ -18,13 +18,13 @@ public sealed class MahoCompilerTests
             GlobalAliases = new Dictionary<string, string>((Dictionary<string, string>)project.GlobalAliases),
             ProjectFilePath = project.ProjectFilePath
         };
-        return MahoCompiler.AnalyzeFiles(project.SourceFiles, AnalysisOutput.None, project.ProjectDirectory, options);
+        return MahoCompiler.AnalyzeFiles(project.SourceFiles, project.ProjectDirectory, options);
     }
 
     [Fact]
-    public void AnalyzeText_WithDebugOutputs_ReturnsStructuredPayloads()
+    public void AnalyzeText_ReturnsStructuredPayloads()
     {
-        DebugCompilationOutput result = MahoCompiler.AnalyzeText("""
+        Compilation result = MahoCompiler.AnalyzeText("""
             namespace Basic;
 
             public class Result;
@@ -33,38 +33,28 @@ public sealed class MahoCompilerTests
             {
                 return 0;
             }
-            """, AnalysisOutput.Lexer | AnalysisOutput.Parser, "basic.mh");
+            """, "basic.mh");
 
         Assert.False(result.HasErrors);
-        Assert.NotNull(result.LexerJson);
-        Assert.NotNull(result.ParserJson);
-
-        using JsonDocument lexerJson = JsonDocument.Parse(result.LexerJson!);
-        using JsonDocument parserJson = JsonDocument.Parse(result.ParserJson!);
-
-        Assert.Equal("lexer", lexerJson.RootElement.GetProperty("kind").GetString());
-        Assert.Equal("parser", parserJson.RootElement.GetProperty("kind").GetString());
         Assert.Equal("basic.mh", result.SourcePath);
     }
 
     [Fact]
     public void AnalyzeText_InvalidInput_ReturnsStructuredDiagnostics()
     {
-        DebugCompilationOutput result = MahoCompiler.AnalyzeText("""
+        Compilation result = MahoCompiler.AnalyzeText("""
             public static int Main()
             {
                 §;
                 string text = "unterminated
                 return 0;
             }
-            """, AnalysisOutput.None, "invalid.mh");
+            """, "invalid.mh");
 
         Assert.True(result.HasErrors);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0100");
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "MH0101");
 
-        using JsonDocument diagnosticsJson = JsonDocument.Parse(result.DiagnosticsJson);
-        Assert.True(diagnosticsJson.RootElement.GetArrayLength() >= 2);
     }
 
     [Fact]
@@ -93,15 +83,14 @@ public sealed class MahoCompilerTests
                 }
                 """);
 
-            CompilerProjectAnalysisResult result = MahoCompiler.AnalyzeFiles(
+            Compilation result = MahoCompiler.AnalyzeFiles(
                 [validPath, invalidPath],
-                AnalysisOutput.Parser,
                 "batch-tests");
 
             Assert.Equal("batch-tests", result.ProjectName);
-            Assert.Equal(2, result.Files.Length);
-            Assert.Contains(result.Files, file => file.SourcePath == Path.GetFullPath(validPath) && file.Analysis is not null && !file.HasErrors);
-            Assert.Contains(result.Files, file => file.SourcePath == Path.GetFullPath(invalidPath) && file.Analysis is not null && file.HasErrors);
+            Assert.Equal(2, result.Files.Count);
+            Assert.Contains(result.Files, file => file.FilePath == Path.GetFullPath(validPath) && !file.HasErrors);
+            Assert.Contains(result.Files, file => file.FilePath == Path.GetFullPath(invalidPath) && file.HasErrors);
             Assert.True(result.HasErrors);
         }
         finally
@@ -135,9 +124,9 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
-            CompilerBatchFileResult program = Assert.Single(result.Files);
+            SyntaxTree program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
         }
@@ -175,10 +164,10 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
+            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -202,11 +191,11 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "#pragma toplevel enable\nfirst();");
             File.WriteAllText(secondPath, "#pragma toplevel enable\nsecond();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
             Assert.Equal(Path.GetFullPath(firstPath), result.EntryFile);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
+            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -228,7 +217,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(projectPath, string.Empty);
             File.WriteAllText(programPath, "#pragma toplevel enable\nrun();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
@@ -256,9 +245,9 @@ public sealed class MahoCompilerTests
                 """);
             File.WriteAllText(programPath, "call();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
-            CompilerBatchFileResult program = Assert.Single(result.Files);
+            SyntaxTree program = Assert.Single(result.Files);
             Assert.False(program.HasErrors);
             Assert.Equal(Path.GetFullPath(programPath), result.EntryFile);
         }
@@ -284,7 +273,7 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "public class Point { public struct int; public int X; }");
             File.WriteAllText(secondPath, "run();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
             Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
@@ -311,10 +300,10 @@ public sealed class MahoCompilerTests
             File.WriteAllText(firstPath, "first();");
             File.WriteAllText(secondPath, "second();");
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
+            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
         }
         finally
         {
@@ -342,11 +331,11 @@ public sealed class MahoCompilerTests
                 call();
                 """);
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
-            CompilerBatchFileResult program = Assert.Single(result.Files);
+            SyntaxTree program = Assert.Single(result.Files);
             Assert.True(program.HasErrors);
-            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0160");
+            Assert.Contains(program.Diagnostics, diagnostic => diagnostic.Code == "MH0160");
         }
         finally
         {
@@ -391,10 +380,10 @@ public sealed class MahoCompilerTests
                 }
                 """);
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.False(result.HasErrors);
-            Assert.Equal(2, result.Files.Length);
+            Assert.Equal(2, result.Files.Count);
         }
         finally
         {
@@ -425,11 +414,11 @@ public sealed class MahoCompilerTests
                 }
                 """);
 
-            CompilerProjectAnalysisResult result = AnalyzeProject(projectPath);
+            Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            CompilerBatchFileResult program = Assert.Single(result.Files);
-            Assert.Contains(program.Analysis!.Diagnostics, diagnostic => diagnostic.Code == "MH0500" && diagnostic.Message.Contains("int32"));
+            SyntaxTree program = Assert.Single(result.Files);
+            Assert.Contains(program.Diagnostics, diagnostic => diagnostic.Code == "MH0500" && diagnostic.Message.Contains("int32"));
         }
         finally
         {

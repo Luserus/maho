@@ -23,8 +23,6 @@ public sealed class ScriptingTests
             Assert.False(result.HasErrors);
             Assert.Single(result.Files);
             Assert.Equal(scriptFile, result.EntryFile);
-            Assert.NotNull(result.Compilation);
-            Assert.False(result.Compilation.HasErrors);
         }
         finally
         {
@@ -52,8 +50,8 @@ public sealed class ScriptingTests
 
             Assert.True(result.HasErrors);
             var fileResult = Assert.Single(result.Files);
-            Assert.NotNull(fileResult.Analysis);
-            Assert.Contains(fileResult.Analysis.Diagnostics, d => d.Code == "MH0160");
+            Assert.NotNull(fileResult);
+            Assert.Contains(fileResult.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -84,9 +82,9 @@ public sealed class ScriptingTests
 
             // File1 should fail with MH0011 because implicit top-level is not enabled by default for multi-file batches
             Assert.True(result.HasErrors);
-            var file1Result = Assert.Single(result.Files, f => f.SourcePath == file1);
-            Assert.NotNull(file1Result.Analysis);
-            Assert.Contains(file1Result.Analysis.Diagnostics, d => d.Code == "MH0160");
+            var file1Result = Assert.Single(result.Files, f => f.FilePath == file1);
+            Assert.NotNull(file1Result);
+            Assert.Contains(file1Result.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -117,18 +115,16 @@ public sealed class ScriptingTests
                     """);
             }
 
-            var result = MahoCompiler.AnalyzeFiles(filePaths, AnalysisOutput.Lexer | AnalysisOutput.Parser);
+            var result = MahoCompiler.AnalyzeFiles(filePaths);
 
             Assert.False(result.HasErrors);
-            Assert.Equal(10, result.Files.Length);
+            Assert.Equal(10, result.Files.Count);
 
             // Files must be in exact source order
             for (int i = 0; i < 10; i++)
             {
-                Assert.Equal(filePaths[i], result.Files[i].SourcePath);
-                Assert.NotNull(result.Files[i].DebugOutput);
-                Assert.NotNull(result.Files[i].DebugOutput!.LexerJson);
-                Assert.NotNull(result.Files[i].DebugOutput!.ParserJson);
+                Assert.Equal(filePaths[i], result.Files[i].FilePath);
+                Assert.NotNull(result.Files[i]);
             }
         }
         finally

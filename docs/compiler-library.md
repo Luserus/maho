@@ -44,6 +44,12 @@ The declaration resolution pass validates and binds declarations across the disc
 - **Ambiguous Type References (`MH1001`)**: Identifies collisions when unqualified type names match multiple imported types from different namespaces.
 - **Generic Constraints**: Verifies that type-valued generic arguments satisfy constraints across direct types, base types, and type aliases.
 
+### 2.3 Macro Expansion Pass (`MacroExpansionPass`)
+The macro expansion pass resolves and expands syntactic macros:
+- **Macro Invocations**: Identifies and expands macro expressions across the AST.
+- **Recursion Limits**: Enforces a configurable maximum recursion depth (`MacroRecursionLimit`, defaulting to 128) to prevent infinite macro expansion loops.
+- **Invocation Tracing**: Tracks nested macro invocation chains (`CompilerMacroTrace`) so errors inside expanded code produce rich tree-formatted tracebacks (`└── from this macro invocation`).
+
 ---
 
 ## 3. Runtime Flow Inside the Library
@@ -60,6 +66,10 @@ Source Files (.mh)
    └── SyntaxTree (unified compilation units & AST)
        │
        ▼
+ [Macro Expansion Phase]
+   └── MacroExpansionPass (macro expansion & invocation trace tracking)
+       │
+       ▼
  [Semantic Analysis Phase] (measured by CompilationPhaseTimers.SemanticAnalysis)
    └── Resolver (shared DiagnosticsManager)
         ├── SymbolDiscoveryPass (scopes, trie, symbols, flags, global aliases)
@@ -70,9 +80,10 @@ Source Files (.mh)
    └── Backend lowering (placeholder stage throwing MH9000 until implemented)
        │
        ▼
- Compilation / Analysis Result
-   └── CompilerProjectAnalysisResult / DebugCompilationOutput
-        ├── Diagnostic projections
+ Compilation
+   └── Compilation
+        ├── Diagnostics & GetDiagnostics(filePath)
+        ├── SyntaxTrees / Files (per-file syntax trees and diagnostics)
         ├── CompilationPhaseTimers (Syntax, SemanticAnalysis, Lowering, Total)
         └── Elapsed (total core compilation time)
 ```

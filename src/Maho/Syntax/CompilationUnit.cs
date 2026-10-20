@@ -37,10 +37,4 @@ internal sealed class CompilationUnit : SyntaxNode
         EndToken = endToken;
         EnablesTopLevelStatements = enablesTopLevelStatements;
     }
-
-    /// <summary> Backward-compatible constructor accepting pragmas directly. </summary>
-    public CompilationUnit(IReadOnlyList<PragmaDirective> pragmas, IReadOnlyList<TopLevel> members, Token endToken, bool enablesTopLevelStatements = false)
-        : this(new List<Directive>(pragmas), members, endToken, enablesTopLevelStatements)
-    {
-    }
 }

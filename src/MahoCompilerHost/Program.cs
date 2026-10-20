@@ -74,18 +74,23 @@ internal static class Program
             MacroRecursionLimit = request.Options.MacroRecursionLimit
         };
 
-        var analysis = MahoCompiler.AnalyzeFiles(request.SourcePaths, (AnalysisOutput)request.DebugOutput, request.RootDirectory, options);
-        var files = analysis.Files.Select(file => new HostFileResult(
-            file.SourcePath,
-            file.DebugOutput?.LexerJson,
-            file.DebugOutput?.ParserJson,
-            file.Output?.Diagnostics.Select(ToWireDiagnostic).ToArray() ?? [],
-            file.AnalysisError,
-            file.IsInternalError)).ToArray();
+        var compilation = MahoCompiler.AnalyzeFiles(request.SourcePaths, request.RootDirectory, options);
+        var filesList = compilation.SyntaxTrees.Select(tree => new HostFileResult(
+            tree.FilePath,
+            null,
+            null,
+            tree.Diagnostics.Select(ToWireDiagnostic).ToArray(),
+            null,
+            false)).ToList();
+
+        foreach (var (path, (errorMsg, isInternal)) in compilation.FileErrors)
+        {
+            filesList.Add(new HostFileResult(path, null, null, [], errorMsg, isInternal));
+        }
 
         Assembly assembly = typeof(MahoCompiler).Assembly;
-        return new HostCompileResult(request.ProjectName, files, analysis.EntryFile, analysis.Elapsed.Ticks,
-            analysis.HasErrors, !request.CheckOnly && !analysis.HasErrors,
+        return new HostCompileResult(request.ProjectName, filesList.ToArray(), compilation.EntryFile, compilation.Elapsed.Ticks,
+            compilation.HasErrors, !request.CheckOnly && !compilation.HasErrors,
             assembly.GetName().Version?.ToString(3) ?? "0.0.0", assembly.ManifestModule.ModuleVersionId.ToString("N"));
     }
 
