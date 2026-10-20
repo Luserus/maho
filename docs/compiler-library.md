@@ -80,9 +80,10 @@ Source Files (.mh)
    └── Backend lowering (placeholder stage throwing MH9000 until implemented)
        │
        ▼
- Compilation / Analysis Result
-   └── CompilerProjectAnalysisResult / DebugCompilationOutput
-        ├── Diagnostic projections
+ Compilation
+   └── Compilation
+        ├── Diagnostics & GetDiagnostics(filePath)
+        ├── SyntaxTrees / Files (per-file syntax trees and diagnostics)
         ├── CompilationPhaseTimers (Syntax, SemanticAnalysis, Lowering, Total)
         └── Elapsed (total core compilation time)
 ```

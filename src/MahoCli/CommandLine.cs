@@ -171,7 +171,7 @@ public static class CommandLine
         // Miryo receives pipeline state through its result pipe and owns the final build-stage
         // message. Source diagnostics remain on stderr in both direct and build invocations.
         string? renderedPipelineError = options.ResultPipeName is null ? pipelineError : null;
-        bool includeStatus = options.ResultPipeName is null;
+        bool includeStatus = false;
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
             DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, renderedPipelineError),
@@ -453,7 +453,7 @@ public static class CommandLine
         string? pipelineError,
         DiagnosticColorMode colorMode,
         DiagnosticPathStyle pathStyle,
-        bool includeStatus = true)
+        bool includeStatus = false)
     {
         string projectRoot = GetDisplayRoot(inputPath);
         var renderer = new TerminalDiagnosticRenderer(

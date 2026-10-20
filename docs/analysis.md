@@ -14,15 +14,11 @@ This folder matters because it defines what leaves the compiler:
 - `Compilation.cs`: root compilation coordination object managing source units, referenced compilations, and resolution passes.
 - `AnalysisSession.cs`: stateful incremental compilation session for interactive evaluation and REPL environments.
 - `CompilationPhaseTimers.cs`: measures duration across compilation pipeline phases (`Syntax`, `SemanticAnalysis`, `Lowering`, `Total`).
-- `CompilerAnalysisResult.cs`: immutable single-file result payload.
-- `CompilerBatchFileResult.cs`: one file outcome inside compiler-owned batch analysis.
-- `CompilerProjectAnalysisResult.cs`: ordered batch result returned by `AnalyzeFiles(...)` and `CompileFiles(...)`.
-- `AnalysisOutput.cs`: flags that decide which debug payloads are included.
+- `AnalysisOutput.cs`: flags that decide which compiler outputs are enabled.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
 - `TextLocation.cs`: public line/column pair.
 - `TextSpanInfo.cs`: public span with both absolute offsets and line/column endpoints.
-- `DebugJson.cs`: internal serializer helpers plus debug DTOs for lexer/parser output.
 
 *(Note: Domain-specific `.mhpr` project loading, workspace orchestration, and multi-project dependency resolution are owned by `Miryo` in `src/Miryo/Build`, documented in [`miryo.md`](miryo.md). The core compiler operates purely on source text and files.)*
 
@@ -49,7 +45,7 @@ The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel pa
 - parsed units are united under a single `SyntaxTree`,
 - runs the multi-pass `Resolver` across all compilation units,
 - measures and records execution duration in `CompilationPhaseTimers`,
-- returns a `CompilerProjectAnalysisResult` keeping file results in input order.
+- returns an immutable `Compilation` object keeping file trees in input order.
 
 ### `CompileFiles(...)` and `CompileSource(...)`
 
@@ -57,7 +53,7 @@ These are the compiler entry points used for full compilation runs. They execute
 
 Both methods record phase durations in `CompilationPhaseTimers` and expose `Elapsed` representing total core compilation time.
 
-### `AnalyzeCore(SourceText text, string sourcePath, AnalysisOutput output)`
+### `AnalyzeCore(SourceText text, string sourcePath)`
 
 This is the orchestration seam inside the library:
 
@@ -67,14 +63,7 @@ This is the orchestration seam inside the library:
 4. start resolution, measuring `SemanticAnalysis` duration,
 5. project diagnostics,
 6. record phase timers,
-7. optionally serialize lexer/parser debug views,
-8. return a `CompilerAnalysisResult`.
-3. run the parser,
-4. wrap the parsed root in a `SyntaxTree`,
-5. start resolution only after that syntax-tree boundary exists,
-6. project diagnostics,
-7. optionally serialize lexer/parser debug views,
-8. return a `CompilerAnalysisResult`.
+7. return a `Compilation`.
 
 The lexer/parser internals are intentionally out of scope for these docs, but this method is still important because it defines the analysis contract boundary.
 
@@ -106,50 +95,32 @@ Worth noting:
 - the flags control optional debug payloads only,
 - diagnostics are always produced.
 
-### `CompilerAnalysisResult`
+### `SyntaxTree`
 
-The top-level immutable result returned by `MahoCompiler`.
+Parsed representation of one source file within a compilation.
 
-Fields:
+Fields & Query Methods:
 
-- `SourcePath`: source identity used by the caller and renderer.
-- `LexerJson`: optional debug JSON for the lexer.
-- `ParserJson`: optional debug JSON for the parser.
-- `Diagnostics`: structured diagnostics for normal API use.
-- `DiagnosticsJson`: serialized diagnostics payload for consumers that prefer JSON transport.
+- `FilePath`: normalized path of the source file.
+- `Root`: root compilation unit AST node.
+- `Diagnostics`: ordered diagnostics associated with this source file.
+- `HasErrors`: whether this file produced any fatal or error diagnostics.
 
-#### `HasErrors`
+### `Compilation`
 
-Scans the diagnostics list for any `Error` severity. It is intentionally derived rather than stored so the result cannot drift out of sync with the diagnostics collection.
+Top-level immutable compilation object returned by all compiler APIs (`CompileFiles(...)`, `AnalyzeFiles(...)`, `CompileSource(...)`, `AnalyzeText(...)`, `CreateCompilation(...)`).
 
-### `CompilerBatchFileResult`
+Fields & Query Methods:
 
-One file outcome inside a compiler-owned batch run.
-
-Fields:
-
-- `SourcePath`: normalized file identity.
-- `Analysis`: successful single-file analysis payload, when available.
-- `AnalysisError`: formatted failure text when analysis did not complete.
-- `IsInternalError`: whether the failure should be treated as a compiler fault.
-- `HasErrors`: whether the file contributes to a failing batch.
-
-### `CompilerProjectAnalysisResult`
-
-Top-level immutable batch result returned by `AnalyzeFiles(...)` and `CompileFiles(...)`.
-
-Fields:
-
-- `ProjectName`: friendly identity for the analyzed batch.
-- `Files`: ordered file outcomes.
-- `EntryFile`: configured or unambiguous implicit entry source, when one was selected.
+- `ProjectName`: friendly identity for the compiled unit or batch.
+- `SyntaxTrees` / `Files`: ordered parsed syntax trees for all files.
+- `Diagnostics`: aggregated, source-ordered diagnostics across all files and resolution passes.
+- `GetDiagnostics(string? filePath = null)`: queries diagnostics, optionally filtered by source file.
+- `GetSyntaxTree(string filePath)`: retrieves a specific file's syntax tree.
+- `EntryFile`: selected explicit or unambiguous implicit entry file, when applicable.
 - `PhaseTimers`: breakdown of duration across pipeline phases (`CompilationPhaseTimers`).
 - `Elapsed`: total core compilation duration across all phases (`PhaseTimers.Total`).
-
-#### `HasErrors`
-
-Scans file outcomes for any failing file so callers can branch on batch success without
-re-implementing error aggregation.
+- `HasErrors`: whether any file in the compilation reported error-severity diagnostics.
 
 ### `CompilationPhaseTimers`
 
@@ -176,52 +147,8 @@ Public line/column pair. Used inside `TextSpanInfo`.
 
 Public span type for API consumers. It keeps both raw offsets and line/column endpoints so callers do not need access to the original `SourceText` just to display a location.
 
-## `DebugJson` guide
-
-`DebugJson` is the internal serialization utility for lexer and parser debug payloads.
-
-### `Serialize<T>(T value)`
-
-Serializes with camel-case property names, indentation, and null omission. This is the single serializer configuration for compiler-owned debug payloads.
-
-### `CreateSpan(SourceText text, TextSpan span)`
-
-Projects an internal `TextSpan` into a `DebugTextSpanInfo`. It reuses `MahoCompiler.CreateSpanInfo(...)` so debug payload spans and public diagnostic spans stay consistent.
-
-### `CreateTrivia(SourceText text, IReadOnlyList<SyntaxTrivia> trivias)`
-
-Builds debug trivia items with kind, captured text, and span metadata.
-
-### `GetMatchingKind(MatchingKeywordKind kind)`
-
-Converts `MatchingKeywordKind.None` into `null` instead of the literal string `"None"`, which keeps the serialized payload cleaner.
-
-### `GetDisplayText(Token token)`
-
-Normalizes sentinel token text for debug views:
-
-- `EndToken` becomes `<eof>`
-- `MissingToken` becomes `<missing>`
-
-That makes downstream renderers simpler because they do not need to guess from empty spans or synthetic token kinds.
-
-## Debug DTOs
-
-The rest of `DebugJson.cs` is a serializer-facing schema:
-
-- `DebugTextSpanInfo`
-- `DebugSyntaxTriviaInfo`
-- `DebugLexerTokenInfo`
-- `DebugLexerInfo`
-- `DebugParserChildInfo`
-- `DebugParserNodeInfo`
-- `DebugParserInfo`
-
-These are not compiler-domain nodes. They are transport types designed for inspection, logging, and CLI rendering.
-
 ## Reading tips
 
 - Start with `MahoCompiler.cs` if you want the public API.
-- Start with `DebugJson.cs` if you are changing emitted lexer/parser JSON.
 - Jump to [`source-text.md`](source-text.md) if span math or line/column projection looks wrong.
 - Jump to [`diagnostics.md`](diagnostics.md) if the payload content is wrong before serialization even happens.

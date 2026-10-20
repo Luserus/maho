@@ -142,7 +142,7 @@ public sealed class CommandLineTests
 
             Assert.True(File.Exists(debugFile));
             Assert.True(File.Exists(diagFile));
-            Assert.Contains("\"parser\"", File.ReadAllText(debugFile));
+            Assert.Contains("\"files\"", File.ReadAllText(debugFile));
             Assert.Contains("\"diagnostics\"", File.ReadAllText(diagFile));
         }
         finally
@@ -506,7 +506,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation failed in", output);
+                Assert.Contains("error [MH0530]", output);
             }
             finally
             {
@@ -548,7 +548,6 @@ public sealed class CommandLineTests
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("└── from this macro invocation", output);
-                Assert.Contains("compilation failed in", output);
             }
             finally
             {
@@ -613,7 +612,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run([sourceFile]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation success in", output);
+                Assert.Empty(output);
             }
             finally
             {
@@ -735,7 +734,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", scriptFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation failed in", output);
+                Assert.Contains("error [MH0530]", output);
             }
             finally
             {
@@ -857,7 +856,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--check", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation success in", output);
+                Assert.Empty(output);
             }
             finally
             {

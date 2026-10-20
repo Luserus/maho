@@ -33,10 +33,4 @@ internal sealed class NamespaceBlockBody : NamespaceBody
         Members = members;
         CloseBrace = closeBrace;
     }
-
-    /// <summary> Backward-compatible constructor accepting only members. </summary>
-    public NamespaceBlockBody(Token openBrace, IReadOnlyList<TopLevel> members, Token closeBrace)
-        : this(openBrace, [], members, closeBrace)
-    {
-    }
 }
