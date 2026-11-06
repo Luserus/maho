@@ -14,7 +14,6 @@ This folder matters because it defines what leaves the compiler:
 - `Compilation.cs`: root compilation coordination object managing source units, referenced compilations, and resolution passes.
 - `AnalysisSession.cs`: stateful incremental compilation session for interactive evaluation and REPL environments.
 - `CompilationPhaseTimers.cs`: measures duration across compilation pipeline phases (`Syntax`, `SemanticAnalysis`, `Lowering`, `Total`).
-- `AnalysisOutput.cs`: flags that decide which compiler outputs are enabled.
 - `DiagnosticInfo.cs`: public diagnostic record.
 - `DiagnosticSeverity.cs`: public severity enum.
 - `TextLocation.cs`: public line/column pair.
@@ -24,7 +23,7 @@ This folder matters because it defines what leaves the compiler:
 
 ## `MahoCompiler` function guide
 
-### `AnalyzeFile(string filePath, AnalysisOutput output = AnalysisOutput.None, CompilationOptions? options = null)`
+### `AnalyzeFile(string filePath)`
 
 Loads source from disk, validates the input path argument, and forwards to `AnalyzeCore(...)`.
 
@@ -33,11 +32,11 @@ Important details:
 - text loading happens through `SourceText` and `SourceFile`, not ad hoc file reads,
 - executes the resolution pipeline through `DeclarationResolutionPass`.
 
-### `AnalyzeText(string sourceText, AnalysisOutput output = AnalysisOutput.None, string sourcePath = "<memory>", CompilationOptions? options = null)`
+### `AnalyzeText(string text, string filePath = "source.mh")`
 
 The in-memory companion to `AnalyzeFile(...)`. It is the primary API for unit tests, editor integrations, or any caller with source text in memory. It accepts a `sourcePath` string so downstream diagnostics and spans have a stable virtual identity.
 
-### `AnalyzeFiles(IReadOnlyList<string> filePaths, AnalysisOutput output = AnalysisOutput.None, string rootDirectory = "", CompilationOptions? options = null)`
+### `AnalyzeFiles(IReadOnlyList<string> filePaths, string rootDirectory = "", CompilationOptions? options = null)`
 
 The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel parsing and front-end work across multiple source files:
 - input paths are normalized up front,
@@ -85,15 +84,6 @@ Builds a `TextSpanInfo` that contains:
 That mixed representation is intentional: offsets stay machine-friendly, locations stay human-friendly.
 
 ## Public result types
-
-### `AnalysisOutput`
-
-A `[Flags]` enum with `None`, `Lexer`, and `Parser`.
-
-Worth noting:
-
-- the flags control optional debug payloads only,
-- diagnostics are always produced.
 
 ### `SyntaxTree`
 

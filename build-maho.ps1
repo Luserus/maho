@@ -3,7 +3,7 @@
     Build script for the Maho toolchain (miryo, mahoc, Maho) for Windows and cross-platform PowerShell.
 
 .DESCRIPTION
-    Compiles the Maho toolchain into the dist/ directory.
+    Compiles the Maho toolchain into the dist/ directory following the ~/.maho layout.
     Supports host platform builds, single-file packaging, debug builds, and multi-platform compilation.
 
 .PARAMETER All
@@ -13,29 +13,29 @@
     Compiles for a specific platform target (e.g. linux-arm64, win-x64, osx-arm64).
 
 .PARAMETER SingleFile
-    Packages the toolchain into fast, single-file decoupled binaries (framework-dependent).
-
-.PARAMETER SelfContained
-    Packages the toolchain into standalone self-contained, single-file, trimmed executables.
+    Packages the toolchain for distribution using shared runtime in dist/runtime.
 
 .PARAMETER Debug
     Builds with Debug configuration and emits PDB symbol files.
 
+.PARAMETER Install
+    Installs the built toolchain directly into ~/.maho.
+
 .EXAMPLE
     .\build-maho.ps1
-    Builds the host platform toolchain into dist\.
+    Builds the host platform toolchain into dist\ (fast incremental test build).
+
+.EXAMPLE
+    .\build-maho.ps1 -SingleFile
+    Builds standalone distribution package into dist\.
 
 .EXAMPLE
     .\build-maho.ps1 -Platform win-x64
     Builds the toolchain for Windows x64 into dist\win-x64\.
 
 .EXAMPLE
-    .\build-maho.ps1 -SingleFile
-    Builds single-file executables into dist\.
-
-.EXAMPLE
-    .\build-maho.ps1 -All
-    Builds the toolchain for all major platforms into dist\<platform>\.
+    .\build-maho.ps1 -Install
+    Builds and installs into ~/.maho.
 #>
 
 [CmdletBinding()]
@@ -46,14 +46,14 @@ param(
     [Alias("p")]
     [string]$Platform,
 
-    [Alias("sc", "SelfContained")]
-    [switch]$SelfContained,
-
     [Alias("s", "Single")]
     [switch]$SingleFile,
 
     [Alias("d")]
     [switch]$Debug,
+
+    [Alias("i")]
+    [switch]$Install,
 
     [Alias("h")]
     [switch]$Help
@@ -65,8 +65,8 @@ $RepoRoot = $PSScriptRoot
 $CliProject = Join-Path $RepoRoot "src\MahoCli\MahoCli.csproj"
 $ServerProject = Join-Path $RepoRoot "src\MahoServer\MahoServer.csproj"
 $ServerHostProject = Join-Path $RepoRoot "src\MahoServerHost\MahoServerHost.csproj"
-$CompilerHostProject = Join-Path $RepoRoot "src\MahoCompilerHost\MahoCompilerHost.csproj"
 $MiryoProject = Join-Path $RepoRoot "src\Miryo\Miryo.csproj"
+$MiryoUpdateProject = Join-Path $RepoRoot "src\MiryoUpdate\MiryoUpdate.csproj"
 $MahoProject = Join-Path $RepoRoot "src\Maho\Maho.csproj"
 $DistDir = Join-Path $RepoRoot "dist"
 
@@ -99,78 +99,162 @@ function Find-Binary([string]$dir, [string]$name = "mahoc") {
     return $exePath
 }
 
-$config = if ($Debug) { "Debug" } else { "Release" }
-$debugProps = if ($Debug) {
-    @("-p:DebugType=portable", "-p:GenerateDependencyFile=true")
-} else {
-    @("-p:DebugType=None", "-p:GenerateDependencyFile=false")
-}
-
 function Publish-Target([string]$rid, [string]$outDir) {
-    $extraArgs = @($debugProps)
+    $config = if ($Debug) { "Debug" } else { "Release" }
+    $toolVersion = (Select-String -Path $CliProject -Pattern "<Version>(.*?)</Version>").Matches.Groups[1].Value.Trim()
+    if (-not $toolVersion) { $toolVersion = "0.2.0" }
+    $miryoVersion = (Select-String -Path $MiryoProject -Pattern "<Version>(.*?)</Version>").Matches.Groups[1].Value.Trim()
+    if (-not $miryoVersion) { $miryoVersion = "1.0.0" }
+    $baseArgs = @()
 
-    if ($SelfContained) {
-        $extraArgs += @("-r", $rid, "--self-contained", "-p:PublishSingleFile=true", "-p:PublishTrimmed=true")
-    } elseif ($SingleFile) {
-        $extraArgs += @("-r", $rid, "--no-self-contained", "-p:PublishSingleFile=true")
-    } elseif (-not [string]::IsNullOrEmpty($rid)) {
-        $extraArgs += @("-r", $rid, "--no-self-contained")
+    if ($Debug) {
+        $baseArgs += "-p:DebugType=portable"
+        $baseArgs += "-p:GenerateDependencyFile=true"
+    }
+    else {
+        $baseArgs += "-p:DebugType=None"
+        $baseArgs += "-p:GenerateDependencyFile=false"
     }
 
-    # 1. Publish mahoc
-    dotnet publish "$CliProject" -c $config -o "$outDir" @extraArgs --nologo -v q
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish mahoc failed with exit code $LASTEXITCODE"
+    $binArgs = @($baseArgs)
+    $toolsArgs = @($baseArgs)
+
+    if ($SingleFile) {
+        $binArgs += @("-r", $rid, "--no-self-contained", "-p:PublishSingleFile=true", "-p:AppHostRelativeDotNet=../runtime")
+        $toolsArgs += @("-r", $rid, "--no-self-contained", "-p:PublishSingleFile=true", "-p:AppHostRelativeDotNet=../../runtime")
+    }
+    elseif ($rid) {
+        $binArgs += @("-r", $rid, "--no-self-contained")
+        $toolsArgs += @("-r", $rid, "--no-self-contained")
     }
 
-    # 2. Publish mahoc-server
-    dotnet publish "$ServerHostProject" -c $config -o "$outDir" @extraArgs --nologo -v q
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish mahoc-server failed with exit code $LASTEXITCODE"
+    $binDir = Join-Path $outDir "bin"
+    $toolsDir = Join-Path $outDir "tools\$toolVersion"
+    $shimsDir = Join-Path $outDir "shims"
+    $compilerDir = Join-Path $outDir "compiler\$toolVersion"
+    $runtimeDir = Join-Path $outDir "runtime"
+
+    foreach ($d in @($binDir, $toolsDir, $shimsDir, $compilerDir)) {
+        if (-not (Test-Path $d)) {
+            New-Item -ItemType Directory -Path $d -Force | Out-Null
+        }
     }
 
-    # 3. Publish miryo
-    dotnet publish "$MiryoProject" -c $config -o "$outDir" @extraArgs --nologo -v q
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish miryo failed with exit code $LASTEXITCODE"
-    }
-
-    # 4. Publish compiler package (0.2.0)
-    $packageDir = Join-Path $outDir "compilers\0.2.0"
-    if (Test-Path $packageDir) {
-        Remove-Item -Recurse -Force $packageDir
-    }
-    New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-
-    $compilerHostCommand = if ($rid -like "win-*") { ".\maho-comp-host.exe" } else { "./maho-comp-host" }
-    dotnet publish "$CompilerHostProject" -c $config -o "$packageDir" @extraArgs --nologo -v q
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish compiler host failed with exit code $LASTEXITCODE"
-    }
-
-    $manifestContent = @"
+    # 1. Publish bin tools: miryo and miryo-update
+    dotnet publish "$MiryoProject" -c $config -o "$binDir" @binArgs --nologo -v q
+    dotnet publish "$MiryoUpdateProject" -c $config -o "$binDir" @binArgs --nologo -v q
+    $binManifest = @"
 {
-  "formatVersion": 1,
-  "compilerVersion": "0.2.0",
-  "compilerHostProtocolVersion": 1,
-  "compilerAssembly": "Maho.dll",
-  "hostCommand": "$compilerHostCommand",
-  "hostArguments": []
+  "version": "$miryoVersion",
+  "miryo": "miryo",
+  "miryoUpdate": "miryo-update",
+  "channel": "stable"
 }
 "@
-    Set-Content -Path (Join-Path $packageDir "compiler.json") -Value $manifestContent
+    Set-Content -Path (Join-Path $binDir "manifest.json") -Value $binManifest
 
-    # 5. Generate miryo.config
+    # 2. Publish versioned tools: mahoc and maho-server
+    dotnet publish "$CliProject" -c $config -o "$toolsDir" @toolsArgs --nologo -v q
+    dotnet publish "$ServerHostProject" -c $config -o "$toolsDir" @toolsArgs --nologo -v q
+
+    if ($rid -like "win-*") {
+        Set-Content -Path (Join-Path $toolsDir "maho-ls.cmd") -Value "@echo maho-ls language server is not yet implemented.`r`n@exit /b 1"
+    }
+    else {
+        Set-Content -Path (Join-Path $toolsDir "maho-ls") -Value "#!/usr/bin/env sh`necho `"maho-ls language server is not yet implemented.`" >&2`nexit 1"
+    }
+
+    $toolManifest = @"
+{
+  "version": "$toolVersion",
+  "targetCompilerVersion": "$toolVersion",
+  "tools": {
+    "mahoc": "mahoc",
+    "maho-server": "maho-server",
+    "maho-ls": "maho-ls"
+  }
+}
+"@
+    Set-Content -Path (Join-Path $toolsDir "manifest.json") -Value $toolManifest
+
+    # 3. Publish compiler library: Maho.dll
+    dotnet publish "$MahoProject" -c $config -o "$compilerDir" @baseArgs --nologo -v q
+    $compilerManifest = @"
+{
+  "version": "$toolVersion",
+  "assembly": "Maho.dll"
+}
+"@
+    Set-Content -Path (Join-Path $compilerDir "manifest.json") -Value $compilerManifest
+
+    # 4. If in distribution mode (-s), deploy shared runtime to $runtimeDir
+    if ($SingleFile) {
+        Write-Host "    -> Deploying shared runtime into $runtimeDir..."
+        $sharedDir = Join-Path $runtimeDir "shared"
+        if (-not (Test-Path $sharedDir)) { New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null }
+
+        $dotnetPath = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
+        if (-not $dotnetPath) {
+            if (Test-Path "/home/luserus/Runtimes/dotnet/dotnet") {
+                $dotnetPath = "/home/luserus/Runtimes/dotnet/dotnet"
+            }
+        }
+        if ($dotnetPath) {
+            $dotnetDir = Split-Path $dotnetPath -Parent
+            $hostSrc = Join-Path $dotnetDir "host"
+            $sharedAppSrc = Join-Path $dotnetDir "shared\Microsoft.NETCore.App"
+            if (Test-Path $hostSrc) {
+                Copy-Item -Path $hostSrc -Destination $runtimeDir -Recurse -Force
+            }
+            if (Test-Path $sharedAppSrc) {
+                Copy-Item -Path $sharedAppSrc -Destination $sharedDir -Recurse -Force
+            }
+            $dotnetExe = Join-Path $dotnetDir "dotnet.exe"
+            $dotnetBin = Join-Path $dotnetDir "dotnet"
+            if (Test-Path $dotnetExe) {
+                Copy-Item -Path $dotnetExe -Destination $runtimeDir -Force
+            }
+            elseif (Test-Path $dotnetBin) {
+                Copy-Item -Path $dotnetBin -Destination $runtimeDir -Force
+            }
+        }
+    }
+
+    # 5. Publish server component: MahoServer.dll into server\
+    $serverDir = Join-Path $outDir "server"
+    if (-not (Test-Path $serverDir)) {
+        New-Item -ItemType Directory -Path $serverDir -Force | Out-Null
+    }
+    dotnet publish "$ServerProject" -c $config -o "$serverDir" @baseArgs --nologo -v q
+    $rootManifest = @"
+{
+  "activeCompilerVersion": "$toolVersion",
+  "installedTools": ["$toolVersion"],
+  "installedCompilers": ["$toolVersion"]
+}
+"@
+    Set-Content -Path (Join-Path $serverDir "manifest.json") -Value $rootManifest
+
+    # 6. Generate shims
+    if ($rid -like "win-*") {
+        Set-Content -Path (Join-Path $shimsDir "mahoc.cmd") -Value "@`"%~dp0..\tools\$toolVersion\mahoc.exe`" %*"
+        Set-Content -Path (Join-Path $shimsDir "maho-server.cmd") -Value "@`"%~dp0..\tools\$toolVersion\maho-server.exe`" %*"
+        Set-Content -Path (Join-Path $shimsDir "maho-ls.cmd") -Value "@`"%~dp0..\tools\$toolVersion\maho-ls.cmd`" %*"
+    }
+    else {
+        Set-Content -Path (Join-Path $shimsDir "mahoc") -Value "#!/usr/bin/env sh`nexec `"`$HOME/.maho/tools/$toolVersion/mahoc`" `"`$@`""
+        Set-Content -Path (Join-Path $shimsDir "maho-server") -Value "#!/usr/bin/env sh`nexec `"`$HOME/.maho/tools/$toolVersion/maho-server`" `"`$@`""
+        Set-Content -Path (Join-Path $shimsDir "maho-ls") -Value "#!/usr/bin/env sh`nexec `"`$HOME/.maho/tools/$toolVersion/maho-ls`" `"`$@`""
+    }
+
+    # 7. Generate miryo.config inside bin/ folder alongside miryo
     $configContent = @"
 # Miryo Toolchain Configuration
 
 [tools]
-mahoc = ["./mahoc", "mahoc"]
-mahoc_server = ["./mahoc-server", "mahoc-server"]
-mahoc_compiler = ["./compilers/0.2.0"]
-il2llvmir = ["./il2llvmir", "il2llvmir"]
-llvm_opt = ["opt", "/usr/bin/opt"]
-llvm_clang = ["clang", "/usr/bin/clang"]
+mahoc = ["../tools/$toolVersion/mahoc", "../shims/mahoc", "mahoc"]
+mahoc_server = ["../tools/$toolVersion/maho-server", "../shims/maho-server", "maho-server"]
+mahoc_compiler = ["../compiler/$toolVersion"]
 
 [templates]
 bin_template = "EntryFile : `"src/Program.mh`";\nImplicitTopLevel : true;\n"
@@ -181,7 +265,7 @@ lib_source_path = "src/Lib.mh"
 lib_source = "public struct Lib;\n"
 gitignore = "target/\nbin/\nobj/\ndist/\n"
 "@
-    Set-Content -Path (Join-Path $outDir "miryo.config") -Value $configContent
+    Set-Content -Path (Join-Path $binDir "miryo.config") -Value $configContent
 }
 
 function Normalize-Rid([string]$inputRid) {
@@ -216,74 +300,26 @@ if ($All) {
     foreach ($rid in $platforms) {
         Write-Host "  -> Publishing for $rid..."
         $platformDir = Join-Path $DistDir $rid
-        if (-not (Test-Path $platformDir)) {
-            New-Item -ItemType Directory -Path $platformDir -Force | Out-Null
-        }
-        Publish-Target -rid $rid -outDir $platformDir
+        Publish-Target $rid $platformDir
     }
 
     Write-Host "  -> Publishing for host platform into $DistDir..."
-    Publish-Target -rid $hostRid -outDir $DistDir
-
-    $hostMahoc = Find-Binary $DistDir "mahoc"
-    $hostServer = Find-Binary $DistDir "mahoc-server"
-    $hostMiryo = Find-Binary $DistDir "miryo"
-
-    Write-Host ""
-    Write-Host "Maho toolchain successfully built for all major platforms:" -ForegroundColor Green
-    Write-Host "  Host Compiler (mahoc): $hostMahoc"
-    Write-Host "  Host Server:           $hostServer"
-    Write-Host "  Host Project (miryo):  $hostMiryo"
-    Write-Host ""
-    Write-Host "Execute host toolchain via:"
-    Write-Host "  $hostMiryo [command] [options]"
-    Write-Host "  $hostMahoc [options] [source-paths...]"
-} elseif ($Platform) {
-    $targetPlatform = Normalize-Rid $Platform
-    $targetDir = Join-Path $DistDir $targetPlatform
-    if (-not (Test-Path $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    }
-
-    Write-Host "==> Building Maho toolchain for platform '$targetPlatform'..." -ForegroundColor Cyan
-    Publish-Target -rid $targetPlatform -outDir $targetDir
-
-    $mahocBin = Find-Binary $targetDir "mahoc"
-    $serverBin = Find-Binary $targetDir "mahoc-server"
-    $miryoBin = Find-Binary $targetDir "miryo"
-
-    Write-Host ""
-    Write-Host "Maho toolchain successfully built for $targetPlatform:" -ForegroundColor Green
-    Write-Host "  mahoc:          $mahocBin"
-    Write-Host "  mahoc-server:   $serverBin"
-    Write-Host "  miryo:          $miryoBin"
-    Write-Host "  Core Library:   $(Join-Path $targetDir 'Maho.dll')"
-    Write-Host "  Server Library: $(Join-Path $targetDir 'MahoServer.dll')"
-    Write-Host ""
-    if ($targetPlatform -eq $hostRid) {
-        Write-Host "Execute toolchain via:"
-        Write-Host "  $miryoBin [command] [options]"
-        Write-Host "  $mahocBin [options] [source-paths...]"
-    }
-} else {
+    Publish-Target $hostRid $DistDir
+}
+elseif ($Platform) {
+    $normRid = Normalize-Rid $Platform
+    Write-Host "==> Building Maho toolchain for platform '$normRid'..." -ForegroundColor Cyan
+    $targetDir = Join-Path $DistDir $normRid
+    Publish-Target $normRid $targetDir
+}
+else {
     Write-Host "==> Building Maho toolchain for host platform ($hostRid)..." -ForegroundColor Cyan
+    Publish-Target $hostRid $DistDir
+}
 
-    Publish-Target -rid $hostRid -outDir $DistDir
-
-    $mahocBin = Find-Binary $DistDir "mahoc"
-    $serverBin = Find-Binary $DistDir "mahoc-server"
-    $miryoBin = Find-Binary $DistDir "miryo"
-
-    Write-Host ""
-    Write-Host "Maho toolchain successfully built:" -ForegroundColor Green
-    Write-Host "  mahoc:          $mahocBin"
-    Write-Host "  mahoc-server:   $serverBin"
-    Write-Host "  miryo:          $miryoBin"
-    Write-Host "  Core Library:   $(Join-Path $DistDir 'Maho.dll')"
-    Write-Host "  Server Library: $(Join-Path $DistDir 'MahoServer.dll')"
-    Write-Host "  Configuration:  $(Join-Path $DistDir 'miryo.config')"
-    Write-Host ""
-    Write-Host "Execute toolchain via:"
-    Write-Host "  $miryoBin [command] [options]"
-    Write-Host "  $mahocBin [options] [source-paths...]"
+if ($Install) {
+    $targetHome = if ($env:MAHO_HOME) { $env:MAHO_HOME } else { Join-Path $HOME ".maho" }
+    Write-Host "==> Installing Maho toolchain to $targetHome..." -ForegroundColor Green
+    Copy-Item -Recurse -Force (Join-Path $DistDir "*") $targetHome
+    Write-Host "Installation complete! Add '$targetHome\bin' and '$targetHome\shims' to your PATH." -ForegroundColor Green
 }

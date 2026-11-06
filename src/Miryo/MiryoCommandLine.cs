@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Miryo.Build;
+using Miryo.Toolchain;
 
 namespace Miryo;
 
@@ -27,10 +28,12 @@ public static class MiryoCommandLine
                 int plusIndex = informational.IndexOf('+');
                 return plusIndex >= 0 ? informational[..plusIndex] : informational;
             }
-            var ver = typeof(MiryoCommandLine).Assembly.GetName().Version ?? new Version(0, 2, 0);
+            var ver = typeof(MiryoCommandLine).Assembly.GetName().Version ?? new Version(1, 0, 0);
             return ver.ToString(3);
         }
     }
+
+    public static string ToolchainVersion => Miryo.Toolchain.MahoPaths.NormalizeVersion(VersionString);
 
     public static int Run(string[] args)
     {
@@ -52,10 +55,10 @@ public static class MiryoCommandLine
             return 0;
         }
 
-        string command = args[0].ToLowerInvariant();
-        string[] commandArgs = args.Length > 1 ? args[1..] : [];
+        var toolchain = new LocalToolchainManager();
+        var invocation = MiryoInvocation.Parse(args, defaultVersion: toolchain.ActiveVersion);
 
-        switch (command)
+        switch (invocation.Command)
         {
             case "-h" or "--help" or "help":
                 PrintUsage(stdout);
@@ -65,33 +68,48 @@ public static class MiryoCommandLine
                 stdout.WriteLine(VersionString);
                 return 0;
 
-            case "new":
-                return ExecuteNew(commandArgs, stdout, stderr);
+            case "compile":
+                return ExecuteCompile(invocation, toolchain, stdout, stderr);
 
             case "build":
-                return ExecuteBuild(commandArgs, stdout, stderr);
+                return ExecuteBuild(invocation.Arguments, stdout, stderr, checkOnly: false, invocation: invocation, toolchain: toolchain);
 
             case "run":
-                return ExecuteRun(commandArgs, stdout, stderr);
+                return ExecuteRun(invocation.Arguments, stdout, stderr, invocation: invocation, toolchain: toolchain);
+
+            case "test":
+                return ExecuteTest(invocation, toolchain, stdout, stderr);
+
+            case "ls":
+                return ExecuteLs(invocation, toolchain, stdout, stderr);
+
+            case "tool":
+                return ExecuteTool(invocation, toolchain, stdout, stderr);
+
+            case "update":
+                return ExecuteUpdate(invocation, toolchain, stdout, stderr);
+
+            case "new":
+                return ExecuteNew(invocation.Arguments, stdout, stderr);
 
             case "clean":
-                return ExecuteClean(commandArgs, stdout, stderr);
+                return ExecuteClean(invocation.Arguments, stdout, stderr);
 
             case "check":
-                return ExecuteCheck(commandArgs, stdout, stderr);
+                return ExecuteCheck(invocation.Arguments, stdout, stderr, invocation: invocation, toolchain: toolchain);
 
             case "compiler-server":
-                return ExecuteCompilerServer(commandArgs, stdout, stderr);
+                return ExecuteCompilerServer(invocation.Arguments, stdout, stderr);
 
             default:
                 bool useColors = ShouldUseColors(null);
-                if (command.StartsWith('-'))
+                if (invocation.Command.StartsWith('-'))
                 {
-                    stderr.WriteLine($"{FormatError("error", useColors)}: unknown option '{command}'.");
+                    stderr.WriteLine($"{FormatError("error", useColors)}: unknown option '{invocation.Command}'.");
                 }
                 else
                 {
-                    stderr.WriteLine($"{FormatError("error", useColors)}: unknown command '{args[0]}'. Expected a command keyword.");
+                    stderr.WriteLine($"{FormatError("error", useColors)}: unknown command '{invocation.Command}'. Expected a command keyword.");
                 }
 
                 stderr.WriteLine();
@@ -216,7 +234,13 @@ public static class MiryoCommandLine
         }
     }
 
-    private static int ExecuteBuild(string[] args, TextWriter stdout, TextWriter stderr, bool checkOnly = false)
+    private static int ExecuteBuild(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        bool checkOnly = false,
+        MiryoInvocation? invocation = null,
+        IToolchainManager? toolchain = null)
     {
         string? targetPath = null;
         string? configPath = null;
@@ -305,7 +329,9 @@ public static class MiryoCommandLine
             return 1;
         }
 
-        string? mahocPath = config.FindTool("mahoc");
+        toolchain ??= new LocalToolchainManager();
+        string targetVersion = invocation?.TargetVersion ?? toolchain.ActiveVersion;
+        string? mahocPath = toolchain.FindTool("mahoc", targetVersion) ?? config.FindTool("mahoc");
         if (mahocPath is null)
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: Could not locate 'mahoc' compiler executable.");
@@ -454,7 +480,7 @@ public static class MiryoCommandLine
                     refArgs.Add(colorMode);
                 }
 
-                int refExit = ExecuteBuild([.. refArgs], stdout, stderr, checkOnly);
+                int refExit = ExecuteBuild([.. refArgs], stdout, stderr, checkOnly, invocation, toolchain);
 
                 if (refExit != 0)
                     return refExit;
@@ -667,7 +693,38 @@ public static class MiryoCommandLine
         return $"{elapsed.Ticks * 100:n0}\u00A0ns";
     }
 
-    private static int ExecuteRun(string[] args, TextWriter stdout, TextWriter stderr)
+    private static int ExecuteCompile(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
+    {
+        string? mahocPath = toolchain.FindTool("mahoc", invocation.TargetVersion);
+        bool useColors = ShouldUseColors(null);
+
+        if (mahocPath is null)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: could not locate 'mahoc' compiler executable for version {invocation.TargetVersion}.");
+            return 1;
+        }
+
+        var psi = MiryoConfiguration.CreateProcessStartInfo(mahocPath, invocation.Arguments);
+        psi.RedirectStandardOutput = false;
+        psi.RedirectStandardError = false;
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: failed to start mahoc process.");
+            return 1;
+        }
+
+        process.WaitForExit();
+        return process.ExitCode;
+    }
+
+    private static int ExecuteRun(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        MiryoInvocation? invocation = null,
+        IToolchainManager? toolchain = null)
     {
         // Split args before and after "--"
         string[] buildArgs;
@@ -686,7 +743,7 @@ public static class MiryoCommandLine
             runtimeArgs = [];
         }
 
-        int buildExit = ExecuteBuild(buildArgs, stdout, stderr, checkOnly: false);
+        int buildExit = ExecuteBuild(buildArgs, stdout, stderr, checkOnly: false, invocation: invocation, toolchain: toolchain);
 
         if (buildExit != 0)
             return buildExit;
@@ -696,57 +753,135 @@ public static class MiryoCommandLine
         return 1;
     }
 
-    private static int ExecuteCheck(string[] args, TextWriter stdout, TextWriter stderr) =>
-        ExecuteBuild(args, stdout, stderr, checkOnly: true);
+    private static int ExecuteCheck(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        MiryoInvocation? invocation = null,
+        IToolchainManager? toolchain = null) =>
+        ExecuteBuild(args, stdout, stderr, checkOnly: true, invocation: invocation, toolchain: toolchain);
 
-    private static int ExecuteCompilerServer(string[] args, TextWriter stdout, TextWriter stderr)
+    private static int ExecuteTest(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
     {
-        string? configPath = null;
+        stdout.WriteLine($"Running tests with toolchain v{invocation.TargetVersion}...");
+        return ExecuteBuild(invocation.Arguments, stdout, stderr, checkOnly: true, invocation: invocation, toolchain: toolchain);
+    }
+
+    private static int ExecuteLs(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
+    {
+        string? lsPath = toolchain.FindTool("maho-ls", invocation.TargetVersion);
         bool useColors = ShouldUseColors(null);
 
-        if (args.Length == 0 || !string.Equals(args[0], "shutdown", StringComparison.OrdinalIgnoreCase))
+        if (lsPath is null)
         {
-            stderr.WriteLine("Usage: miryo compiler-server shutdown [--config <path>]");
+            stderr.WriteLine($"{FormatError("error", useColors)}: maho-ls (v{invocation.TargetVersion}) language server is not installed.");
             return 1;
         }
 
-        for (int i = 1; i < args.Length; i++)
-        {
-            if (args[i] == "--config" && i + 1 < args.Length)
-            {
-                configPath = args[++i];
-                continue;
-            }
+        var psi = MiryoConfiguration.CreateProcessStartInfo(lsPath, invocation.Arguments);
+        psi.RedirectStandardOutput = false;
+        psi.RedirectStandardError = false;
 
-            stderr.WriteLine("Usage: miryo compiler-server shutdown [--config <path>]");
-            return 1;
-        }
-
-        MiryoConfiguration config = MiryoConfiguration.Load(configPath);
-        string? mahocPath = config.FindTool("mahoc");
-        if (mahocPath is null)
-        {
-            stderr.WriteLine($"{FormatError("error", useColors)}: unable to find mahoc. Configure [tools].mahoc in miryo.config.");
-            return 1;
-        }
-
-        var psi = MiryoConfiguration.CreateProcessStartInfo(mahocPath, ["--shutdown-servers"]);
-        psi.RedirectStandardOutput = true;
-        psi.RedirectStandardError = true;
         using var process = Process.Start(psi);
         if (process is null)
         {
-            stderr.WriteLine($"{FormatError("error", useColors)}: failed to start mahoc.");
+            stderr.WriteLine($"{FormatError("error", useColors)}: failed to launch maho-ls.");
             return 1;
         }
 
-        string toolOutput = process.StandardOutput.ReadToEnd();
-        string toolErrors = process.StandardError.ReadToEnd();
         process.WaitForExit();
-        stdout.Write(toolOutput);
-        stderr.Write(toolErrors);
-
         return process.ExitCode;
+    }
+
+    private static int ExecuteTool(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
+    {
+        string sub = invocation.Arguments.Length > 0 ? invocation.Arguments[0].ToLowerInvariant() : "list";
+        switch (sub)
+        {
+            case "list":
+                stdout.WriteLine($"Active toolchain: v{toolchain.ActiveVersion}");
+                stdout.WriteLine("Installed versions:");
+                foreach (string v in toolchain.InstalledVersions)
+                {
+                    string marker = v == toolchain.ActiveVersion ? " (active)" : "";
+                    stdout.WriteLine($"  - v{v}{marker}");
+                }
+                return 0;
+
+            case "shims" or "update-shims":
+                toolchain.UpdateShims(invocation.TargetVersion);
+                stdout.WriteLine($"Updated shims for v{invocation.TargetVersion}.");
+                return 0;
+
+            default:
+                stderr.WriteLine($"Unknown tool command '{sub}'. Expected 'list' or 'update-shims'.");
+                return 1;
+        }
+    }
+
+    private static int ExecuteUpdate(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
+    {
+        string currentExe = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "miryo");
+        string binDir = Path.GetDirectoryName(Path.GetFullPath(currentExe))!;
+        string updaterName = OperatingSystem.IsWindows() ? "miryo-update.exe" : "miryo-update";
+        string updaterPath = Path.Combine(binDir, updaterName);
+
+        if (!File.Exists(updaterPath))
+            updaterPath = Path.Combine(AppContext.BaseDirectory, updaterName);
+
+        string? stagedPath = null;
+        for (int i = 0; i < invocation.Arguments.Length; i++)
+        {
+            if (invocation.Arguments[i] == "--source" && i + 1 < invocation.Arguments.Length)
+                stagedPath = invocation.Arguments[++i];
+        }
+
+        if (stagedPath is null || !File.Exists(stagedPath) || !File.Exists(updaterPath))
+        {
+            stdout.WriteLine($"miryo is up to date (version {VersionString}).");
+            return 0;
+        }
+
+        stdout.WriteLine("Applying miryo update...");
+        using var pipeServer = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+        string clientHandle = pipeServer.GetClientHandleAsString();
+
+        var psi = new ProcessStartInfo(updaterPath)
+        {
+            UseShellExecute = false
+        };
+        psi.ArgumentList.Add("--pipe-handle");
+        psi.ArgumentList.Add(clientHandle);
+        psi.ArgumentList.Add("--target");
+        psi.ArgumentList.Add(currentExe);
+        psi.ArgumentList.Add("--source");
+        psi.ArgumentList.Add(stagedPath);
+        psi.ArgumentList.Add("--version");
+        psi.ArgumentList.Add(invocation.TargetVersion);
+
+        using var updateProc = Process.Start(psi);
+        if (updateProc is null)
+        {
+            stderr.WriteLine("error: failed to start miryo-update process.");
+            return 1;
+        }
+
+        pipeServer.DisposeLocalCopyOfClientHandle();
+        stdout.WriteLine("Spawning miryo-update and exiting to apply update.");
+        return 0;
+    }
+
+    private static int ExecuteCompilerServer(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        if (args.Length == 0 || !string.Equals(args[0], "shutdown", StringComparison.OrdinalIgnoreCase))
+        {
+            stderr.WriteLine("Usage: miryo compiler-server shutdown");
+            return 1;
+        }
+
+        int stopped = Maho.Server.CompilerServerClient.ShutdownAllServers();
+        stdout.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}.");
+        return 0;
     }
 
     private static int ExecuteClean(string[] args, TextWriter stdout, TextWriter stderr)
@@ -786,17 +921,25 @@ public static class MiryoCommandLine
     private static void PrintUsage(TextWriter writer)
     {
         writer.WriteLine(VersionString);
-        writer.WriteLine("The project system and build tool for the Maho programming language.");
+        writer.WriteLine("The project system and toolchain manager for the Maho programming language.");
         writer.WriteLine();
-        writer.WriteLine("Usage: miryo <command> [options]");
+        writer.WriteLine("Usage: miryo [props] <command> [options]");
         writer.WriteLine();
         writer.WriteLine("Commands:");
         writer.WriteLine("  new <name>       Create a new Maho project scaffolding (--bin or --lib)");
         writer.WriteLine("  build [path]     Compile the project or directory");
+        writer.WriteLine("  compile [flags]  Directly invoke the compiler (mahoc)");
         writer.WriteLine("  check [path]     Verify syntax and semantics without code generation");
         writer.WriteLine("  run [path]       Build and execute the program");
+        writer.WriteLine("  test [path]      Run test suite for project or directory");
+        writer.WriteLine("  ls [options]     Send request to language server (maho-ls)");
+        writer.WriteLine("  tool [sub]       Manage toolchain tools and shims (list, update-shims)");
+        writer.WriteLine("  update [options] Self-update miryo toolchain manager");
         writer.WriteLine("  clean [path]     Remove build artifact directories (target/, obj/, dist/)");
         writer.WriteLine("  compiler-server shutdown  Stop all compiler daemons owned by this user");
+        writer.WriteLine();
+        writer.WriteLine("Properties:");
+        writer.WriteLine("  [v: <version>]   Specify target major.minor toolchain version (e.g. [v: 1.0])");
         writer.WriteLine();
         writer.WriteLine("General Options:");
         writer.WriteLine("  --config <path>  Specify toolchain configuration file (default: miryo.config)");

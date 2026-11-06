@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
-using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.Json;
 
@@ -15,92 +12,6 @@ public static class CompilerProtocol
     public const int Version = 1;
 }
 
-/// <summary>
-/// Version of the newline-delimited JSON contract between the generic daemon
-/// and a compiler-package host process. Compiler packages implement this
-/// contract without referencing this assembly.
-/// </summary>
-public static class CompilerHostProtocol
-{
-    public const int Version = 1;
-}
-
-/// <summary>
-/// Describes a compiler package that can be hosted by a generic mahoc-server.
-/// <see cref="CompilerAssembly"/> is relative to the manifest. A host command
-/// starting with <c>./</c> or <c>.\\</c> is resolved relative to the package,
-/// allowing a self-contained package-local host executable.
-/// </summary>
-public sealed record CompilerPackageManifest(
-    int FormatVersion,
-    string CompilerVersion,
-    int CompilerHostProtocolVersion,
-    string CompilerAssembly,
-    string HostCommand,
-    IReadOnlyList<string> HostArguments)
-{
-    private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-    public const string FileName = "compiler.json";
-    public const int CurrentFormatVersion = 1;
-
-    public static CompilerPackageManifest Load(string packageDirectory)
-    {
-        string fullPackageDir = Path.GetFullPath(packageDirectory);
-        string manifestPath = Path.Combine(fullPackageDir, FileName);
-
-        if (File.Exists(manifestPath))
-        {
-            var manifest = JsonSerializer.Deserialize<CompilerPackageManifest>(File.ReadAllText(manifestPath), JsonOptions) ?? throw new InvalidDataException("The compiler package manifest was empty.");
-            if (manifest.FormatVersion != CurrentFormatVersion)
-                throw new InvalidDataException($"Unsupported compiler package format {manifest.FormatVersion}.");
-            if (string.IsNullOrWhiteSpace(manifest.CompilerVersion) || string.IsNullOrWhiteSpace(manifest.CompilerAssembly) ||
-                string.IsNullOrWhiteSpace(manifest.HostCommand) || manifest.HostArguments is null)
-                throw new InvalidDataException("The compiler package manifest is missing required fields.");
-
-            return manifest;
-        }
-
-#if DEBUG
-        string compilerAssembly = Path.Combine(fullPackageDir, "Maho.dll");
-        if (File.Exists(compilerAssembly))
-        {
-            var compilerIdentity = CompilerIdentity.FromCompilerAssembly(compilerAssembly);
-            string exeName = OperatingSystem.IsWindows() ? "maho-comp-host.exe" : "maho-comp-host";
-            string hostExe = Path.Combine(fullPackageDir, exeName);
-            string hostDll = Path.Combine(fullPackageDir, "maho-comp-host.dll");
-
-            string hostCommand;
-            IReadOnlyList<string> hostArguments;
-
-            if (File.Exists(hostDll))
-            {
-                hostCommand = "dotnet";
-                hostArguments = ["maho-comp-host.dll"];
-            }
-            else if (File.Exists(hostExe))
-            {
-                hostCommand = $"./{exeName}";
-                hostArguments = [];
-            }
-            else
-                throw new FileNotFoundException("Could not locate maho-comp-host in package directory.", hostExe);
-
-            return new CompilerPackageManifest(
-                CurrentFormatVersion,
-                compilerIdentity.Version,
-                CompilerHostProtocol.Version,
-                "Maho.dll",
-                hostCommand,
-                hostArguments);
-        }
-#endif
-
-        throw new FileNotFoundException("The compiler package manifest was not found.", manifestPath);
-    }
-}
-
-[Flags]
-public enum CompilerDebugOutput { None = 0, Lexer = 1, Parser = 2, All = Lexer | Parser }
 public enum CompilerDiagnosticColorMode : byte { Auto, Always, Never }
 public enum CompilerDiagnosticPathStyle : byte { Relative, ProjectRelative, Full }
 public enum CompilerDiagnosticFormat : byte { Pretty, Short, Json }
@@ -131,7 +42,7 @@ public readonly record struct CompilerTextEdit(CompilerTextSpan Span, string New
 public sealed record CompilerDiagnosticSuggestion(string Description, IReadOnlyList<CompilerTextEdit> Edits);
 public sealed record CompilerMacroTrace(string MacroName, CompilerTextSpan InvocationSpan, string? InvocationFilePath, CompilerTextSpan? DefinitionSpan = null, string? DefinitionFilePath = null, CompilerMacroTrace? Parent = null);
 
-/// <summary>Diagnostics are wire DTOs so CLI and editor clients do not load compiler assemblies.</summary>
+/// <summary>Diagnostics are wire DTOs so CLI and editor clients do not need to directly reference the compiler assembly.</summary>
 public sealed record CompilerDiagnostic(
     string Code,
     string Message,
@@ -157,10 +68,9 @@ public sealed record CompilerServerRequest(
     string RootDirectory,
     string[] SourcePaths,
     CompilerOptions Options,
-    CompilerDebugOutput DebugOutput,
     bool CheckOnly);
 
-public sealed record CompilerServerFileResult(string SourcePath, string? LexerJson, string? ParserJson,
+public sealed record CompilerServerFileResult(string SourcePath,
     IReadOnlyList<CompilerDiagnostic> Diagnostics, string? AnalysisError, bool IsInternalError);
 
 public sealed record CompilerServerResponse(string ProjectName, CompilerServerFileResult[] Files, string? EntryFile,
@@ -171,9 +81,7 @@ public sealed record CompilerServerControlRequest(int ProtocolVersion, string Me
 public sealed record CompilerServerControlResponse(bool Success, string? Message = null);
 
 /// <summary>
-/// Tracks live daemon endpoints for the current user. The registry is only
-/// discovery metadata: every control operation still authenticates itself by
-/// connecting to the user-specific named pipe.
+/// Tracks live daemon endpoints for the current user.
 /// </summary>
 public sealed record CompilerServerRegistration(string PipeName, string CompilerVersion, string CompilerFingerprint);
 
@@ -229,33 +137,38 @@ public static class CompilerServerRegistry
 /// <summary>Identity of the compiler package hosting a server daemon.</summary>
 public sealed record CompilerIdentity(string Version, string Fingerprint)
 {
-    public static CompilerIdentity FromCompilerAssembly(string compilerAssemblyPath)
+    public static CompilerIdentity ForVersion(string version)
     {
-        string fullPath = Path.GetFullPath(compilerAssemblyPath);
-        AssemblyName name = AssemblyName.GetAssemblyName(fullPath);
-        string version = name.Version?.ToString(3) ?? "0.0.0";
-        using var stream = File.OpenRead(fullPath);
-        using var peReader = new PEReader(stream);
-        MetadataReader metadata = peReader.GetMetadataReader();
-        string moduleVersionId = metadata.GetGuid(metadata.GetModuleDefinition().Mvid).ToString("N");
-        return new CompilerIdentity(version, moduleVersionId);
-    }
-
-    public static CompilerIdentity FromCompilerAssembly(Assembly compilerAssembly)
-    {
-        string version = compilerAssembly.GetName().Version?.ToString(3) ?? "0.0.0";
-        return new CompilerIdentity(version, compilerAssembly.ManifestModule.ModuleVersionId.ToString("N"));
+        string norm = CompilerServerEndpoint.NormalizeVersion(version);
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(norm))).ToLowerInvariant()[..16];
+        return new CompilerIdentity(norm, hash);
     }
 }
 
-/// <summary>Builds a user- and compiler-specific daemon endpoint without environment configuration.</summary>
+/// <summary>Builds user- and compiler-specific daemon endpoints.</summary>
 public static class CompilerServerEndpoint
 {
-    public static string CreatePipeName(CompilerIdentity compiler)
+    public static string NormalizeVersion(string version)
     {
-        string user = Environment.UserName;
-        string identity = $"{CompilerProtocol.Version}|{user}|{compiler.Version}|{compiler.Fingerprint}";
-        string suffix = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant()[..20];
-        return $"mahoc-{CompilerProtocol.Version}-{suffix}";
+        if (string.IsNullOrWhiteSpace(version)) return "0.2.0";
+        version = version.Trim();
+        if (version.StartsWith("v", StringComparison.OrdinalIgnoreCase)) version = version[1..].Trim();
+        if (Version.TryParse(version, out var parsed))
+        {
+            int build = parsed.Build >= 0 ? parsed.Build : 0;
+            return $"{parsed.Major}.{Math.Max(0, parsed.Minor)}.{build}";
+        }
+        return version;
     }
+
+    public static string CreatePipeName(string version)
+    {
+        string norm = NormalizeVersion(version);
+        string user = Environment.UserName;
+        string identity = $"{CompilerProtocol.Version}|{user}|{norm}";
+        string suffix = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant()[..16];
+        return $"maho-server-{norm}-{suffix}";
+    }
+
+    public static string CreatePipeName(CompilerIdentity compiler) => CreatePipeName(compiler.Version);
 }

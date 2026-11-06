@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.IO.Pipes;
 using Maho.Server;
-using AnalysisOutput = Maho.Server.CompilerDebugOutput;
 using DiagnosticColorMode = Maho.Server.CompilerDiagnosticColorMode;
 using DiagnosticFormat = Maho.Server.CompilerDiagnosticFormat;
 using DiagnosticInfo = Maho.Server.CompilerDiagnostic;
@@ -19,7 +19,22 @@ namespace Maho;
 /// <summary> Owns the terminal-facing compiler workflow and explicit debug/diagnostics routing. </summary>
 public static class CommandLine
 {
-    public static string VersionString = typeof(CommandLine).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    public static string VersionString
+    {
+        get
+        {
+            var informational = typeof(CommandLine).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informational))
+            {
+                int plusIndex = informational.IndexOf('+');
+                return plusIndex >= 0 ? informational[..plusIndex] : informational;
+            }
+            var ver = typeof(CommandLine).Assembly.GetName().Version ?? new Version(0, 2, 0);
+            return ver.ToString(3);
+        }
+    }
+
+    public static string ToolchainVersion => VersionString;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -35,8 +50,6 @@ public static class CommandLine
     }
 
     private readonly record struct CliOptions(
-        AnalysisOutput DebugOutput,
-        string? DebugDestination,
         bool DiagnosticsRequested,
         DiagnosticsFormat DiagnosticsFormat,
         string? DiagnosticsDestination,
@@ -66,11 +79,7 @@ public static class CommandLine
 
     // Terminal views contain protocol data only, so mahoc does not load a
     // particular compiler assembly merely to render its response.
-    private sealed record DebugCompilationOutput(string SourcePath, string? LexerJson, string? ParserJson, IReadOnlyList<DiagnosticInfo> Diagnostics);
-    private sealed record CompilerBatchFileResult(string SourcePath, DebugCompilationOutput? DebugOutput, string? AnalysisError, bool IsInternalError)
-    {
-        public DebugCompilationOutput? Output => DebugOutput;
-    }
+    private sealed record CompilerBatchFileResult(string SourcePath, IReadOnlyList<DiagnosticInfo> Diagnostics, string? AnalysisError, bool IsInternalError);
 
     private sealed class CompilerProjectAnalysisResult(string projectName, CompilerBatchFileResult[] files, string? entryFile, long elapsedTicks, bool hasErrors)
     {
@@ -162,28 +171,21 @@ public static class CommandLine
 
         bool writeFailed = false;
 
-        if (options.DebugOutput is not AnalysisOutput.None)
-        {
-            string debugOutput = BuildDebugOutput(primaryInput, analysis);
-            writeFailed |= !WriteOutput(options.DebugDestination, debugOutput, Console.Out, "debug output");
-        }
-
         // Miryo receives pipeline state through its result pipe and owns the final build-stage
         // message. Source diagnostics remain on stderr in both direct and build invocations.
         string? renderedPipelineError = options.ResultPipeName is null ? pipelineError : null;
-        bool includeStatus = false;
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
             DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, renderedPipelineError),
-            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, renderedPipelineError, options.PathStyle, includeStatus),
-            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, renderedPipelineError, options.ColorMode, options.PathStyle, includeStatus)
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, renderedPipelineError, options.PathStyle, options.WarningsAsErrors),
+            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, renderedPipelineError, options.ColorMode, options.PathStyle, options.WarningsAsErrors)
         };
 
         if (options.DiagnosticsRequested || !string.IsNullOrEmpty(diagnosticsOutput))
             writeFailed |= !WriteOutput(options.DiagnosticsDestination, diagnosticsOutput, Console.Error, "diagnostics");
 
         bool hasErrors = analysis.HasErrors ||
-            (options.WarningsAsErrors && analysis.Files.Any(f => f.Output?.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning) == true));
+            (options.WarningsAsErrors && analysis.Files.Any(f => f.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Warning)));
 
         bool failed = hasErrors || pipelineError is not null || writeFailed;
         return failed ? 1 : 0;
@@ -233,7 +235,7 @@ public static class CommandLine
     {
         var inputs = cliOptions.SourcePathsStdin
             ? Console.In.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            : cliOptions.SourceInputs.ToArray();
+            : [.. cliOptions.SourceInputs];
         var (files, rootPath) = ResolveFiles(inputs, cliOptions.Pattern ?? "*.mh", cliOptions.NoRecurse);
 
         string? resolvedEntry = null;
@@ -268,29 +270,15 @@ public static class CommandLine
         string projectDirectory = cliOptions.ProjectDirectory ?? rootPath;
         string projectName = cliOptions.ProjectName ?? Path.GetFileName(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         string moduleName = cliOptions.ModuleName ?? ToKebabCase(projectName);
-        var request = new CompilerServerRequest(CompilerProtocol.Version, projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.DebugOutput, cliOptions.CheckOnly);
-        string serverPath = cliOptions.ServerPath ?? FindCompilerServerExecutable();
-        CompilerServerPackage package = CompilerServerClient.LoadPackage(serverPath, cliOptions.CompilerPackagePath);
-        CompilerServerResponse response = CompilerServerClient.Compile(package, request);
+        var request = new CompilerServerRequest(CompilerProtocol.Version, projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.CheckOnly);
+        CompilerServerResponse response = CompilerServerClient.Compile(ToolchainVersion, request);
 
         var batch = response.Files.Select(file => new CompilerBatchFileResult(
             file.SourcePath,
-            new DebugCompilationOutput(file.SourcePath, file.LexerJson, file.ParserJson, file.Diagnostics),
+            file.Diagnostics,
             file.AnalysisError,
             file.IsInternalError)).ToArray();
         return new CompilerProjectAnalysisResult(response.ProjectName, batch, response.EntryFile, response.ElapsedTicks, response.HasErrors);
-    }
-
-    private static string FindCompilerServerExecutable()
-    {
-        string name = OperatingSystem.IsWindows() ? "mahoc-server.exe" : "mahoc-server";
-        string exePath = Path.Combine(AppContext.BaseDirectory, name);
-        if (File.Exists(exePath))
-            return exePath;
-        string dllPath = Path.Combine(AppContext.BaseDirectory, "mahoc-server.dll");
-        if (File.Exists(dllPath))
-            return dllPath;
-        return exePath;
     }
 
     private static string ToKebabCase(string value)
@@ -320,39 +308,6 @@ public static class CommandLine
         }, PipeJsonOptions));
     }
 
-    private static string BuildDebugOutput(string inputPath, CompilerProjectAnalysisResult analysis)
-    {
-        JsonArray files = [];
-
-        foreach (CompilerBatchFileResult file in analysis.Files)
-        {
-            JsonObject fileOutput = new()
-            {
-                ["filePath"] = file.SourcePath
-            };
-
-            if (file.DebugOutput is { } fileAnalysis)
-            {
-                if (fileAnalysis.LexerJson is string lexerJson)
-                    fileOutput["lexer"] = JsonNode.Parse(lexerJson);
-
-                if (fileAnalysis.ParserJson is string parserJson)
-                    fileOutput["parser"] = JsonNode.Parse(parserJson);
-            }
-
-            if (file.AnalysisError is string analysisError)
-                fileOutput["analysisError"] = analysisError;
-
-            files.Add((JsonNode)fileOutput);
-        }
-
-        return new JsonObject
-        {
-            ["inputPath"] = inputPath,
-            ["files"] = files
-        }.ToJsonString(JsonOptions);
-    }
-
     private static string GetDisplayRoot(string? inputPath)
     {
         if (string.IsNullOrWhiteSpace(inputPath))
@@ -379,7 +334,7 @@ public static class CommandLine
         CompilerProjectAnalysisResult analysis,
         string? pipelineError,
         DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative,
-        bool includeStatus = true)
+        bool warningsAsErrors = false)
     {
         StringBuilder output = new();
         string displayRoot = pathStyle switch
@@ -399,29 +354,27 @@ public static class CommandLine
                 _ => Path.GetRelativePath(displayRoot, file.SourcePath)
             };
 
-            if (file.Output is { } fileAnalysis)
+            foreach (DiagnosticInfo diagnostic in file.Diagnostics)
             {
-                foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
-                {
-                    if (diagnostic.Severity == DiagnosticSeverity.Error)
-                        errorCount++;
-                    else if (diagnostic.Severity == DiagnosticSeverity.Warning)
-                        warningCount++;
+                if (diagnostic.Severity == DiagnosticSeverity.Error || (warningsAsErrors && diagnostic.Severity == DiagnosticSeverity.Warning))
+                    errorCount++;
+                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                    warningCount++;
 
-                    output.Append(displayPath);
-                    output.Append('(');
-                    output.Append(diagnostic.Span.StartLocation.Line);
-                    output.Append(',');
-                    output.Append(diagnostic.Span.StartLocation.Column);
-                    output.Append("): ");
-                    output.Append(diagnostic.Severity.ToString().ToLowerInvariant());
-                    output.Append(' ');
-                    output.Append(diagnostic.Code);
-                    output.Append(": ");
-                    output.AppendLine(diagnostic.Message);
-                }
+                output.Append(displayPath);
+                output.Append('(');
+                output.Append(diagnostic.Span.StartLocation.Line);
+                output.Append(',');
+                output.Append(diagnostic.Span.StartLocation.Column);
+                output.Append("): ");
+                output.Append(diagnostic.Severity.ToString().ToLowerInvariant());
+                output.Append(' ');
+                output.Append(diagnostic.Code);
+                output.Append(": ");
+                output.AppendLine(diagnostic.Message);
             }
-            else if (file.AnalysisError is string analysisError)
+
+            if (file.AnalysisError is string analysisError)
             {
                 errorCount++;
                 output.Append(displayPath);
@@ -436,12 +389,9 @@ public static class CommandLine
             output.AppendLine($"error MH9000: {pipelineError}");
         }
 
-        if (includeStatus)
+        if (errorCount > 0)
         {
-            string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
-            output.AppendLine(errorCount > 0
-                ? $"compilation failed in {timeStr}"
-                : $"compilation success in {timeStr}");
+            output.AppendLine($"compilation failed due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
         }
 
         return output.ToString();
@@ -453,7 +403,7 @@ public static class CommandLine
         string? pipelineError,
         DiagnosticColorMode colorMode,
         DiagnosticPathStyle pathStyle,
-        bool includeStatus = false)
+        bool warningsAsErrors = false)
     {
         string projectRoot = GetDisplayRoot(inputPath);
         var renderer = new TerminalDiagnosticRenderer(
@@ -468,19 +418,17 @@ public static class CommandLine
 
         foreach (CompilerBatchFileResult file in analysis.Files)
         {
-            if (file.Output is { } fileAnalysis)
+            foreach (DiagnosticInfo diagnostic in file.Diagnostics)
             {
-                foreach (DiagnosticInfo diagnostic in fileAnalysis.Diagnostics)
-                {
-                    if (diagnostic.Severity == DiagnosticSeverity.Error)
-                        errorCount++;
-                    else if (diagnostic.Severity == DiagnosticSeverity.Warning)
-                        warningCount++;
+                if (diagnostic.Severity == DiagnosticSeverity.Error || (warningsAsErrors && diagnostic.Severity == DiagnosticSeverity.Warning))
+                    errorCount++;
+                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                    warningCount++;
 
-                    sb.Append(renderer.Render(diagnostic));
-                }
+                sb.Append(renderer.Render(diagnostic));
             }
-            else if (file.AnalysisError is string analysisError)
+
+            if (file.AnalysisError is string analysisError)
             {
                 errorCount++;
                 sb.AppendLine($"error[MH9001]: {analysisError}");
@@ -493,12 +441,9 @@ public static class CommandLine
             sb.AppendLine($"error[MH9000]: {pipelineError}");
         }
 
-        if (includeStatus)
+        if (errorCount > 0)
         {
-            string timeStr = TerminalDiagnosticRenderer.FormatTime(analysis.Elapsed);
-            sb.AppendLine(errorCount > 0
-                ? $"compilation failed in {timeStr}"
-                : $"compilation success in {timeStr}");
+            sb.AppendLine($"compilation failed due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
         }
 
         return sb.ToString();
@@ -513,9 +458,7 @@ public static class CommandLine
             JsonObject fileOutput = new()
             {
                 ["filePath"] = file.SourcePath,
-                ["diagnostics"] = file.Output is { } fileAnalysis
-                    ? JsonSerializer.SerializeToNode(fileAnalysis.Diagnostics, JsonOptions)
-                    : new JsonArray()
+                ["diagnostics"] = JsonSerializer.SerializeToNode(file.Diagnostics, JsonOptions)
             };
 
             if (file.AnalysisError is string analysisError)
@@ -572,8 +515,6 @@ public static class CommandLine
 
     private static bool TryParseArguments(string[] args, out CliOptions options, out string? errorMessage)
     {
-        AnalysisOutput debugOutput = AnalysisOutput.None;
-        string? debugDestination = null;
         bool diagnosticsRequested = false;
         DiagnosticsFormat diagnosticsFormat = DiagnosticsFormat.Pretty;
         string? diagnosticsDestination = null;
@@ -639,22 +580,6 @@ public static class CommandLine
 
                     index++;
                     generalOutput = ParseDestination(args[index]);
-                    break;
-
-                case "--debug":
-                    if (debugOutput is not AnalysisOutput.None)
-                    {
-                        options = default;
-                        errorMessage = "The --debug option can only be specified once.";
-                        return false;
-                    }
-
-                    if (!TryReadDebugRequest(args, ref index, out debugOutput, out debugDestination, out errorMessage))
-                    {
-                        options = default;
-                        return false;
-                    }
-
                     break;
 
                 case "--diagnostics":
@@ -886,12 +811,9 @@ public static class CommandLine
             }
         }
 
-        debugDestination ??= generalOutput;
         diagnosticsDestination ??= generalOutput;
 
         options = new CliOptions(
-            debugOutput,
-            debugDestination,
             diagnosticsRequested,
             diagnosticsFormat,
             diagnosticsDestination,
@@ -967,53 +889,6 @@ public static class CommandLine
         }
         value = args[++index];
         errorMessage = null;
-        return true;
-    }
-
-    private static bool TryReadDebugRequest(string[] args, ref int index, out AnalysisOutput output, out string? destination, out string? errorMessage)
-    {
-        output = AnalysisOutput.None;
-        destination = null;
-
-        while (++index < args.Length && !IsOutputOption(args[index]))
-        {
-            AnalysisOutput selector = args[index] switch
-            {
-                "lex" => AnalysisOutput.Lexer,
-                "parse" => AnalysisOutput.Parser,
-                _ => AnalysisOutput.None
-            };
-
-            if (selector is AnalysisOutput.None)
-            {
-                errorMessage = $"Unknown debug selector '{args[index]}'.";
-                return false;
-            }
-
-            output |= selector;
-        }
-
-        if (output is AnalysisOutput.None)
-        {
-            errorMessage = "The --debug option requires one or more of lex and parse.";
-            return false;
-        }
-
-        if (index >= args.Length)
-        {
-            errorMessage = "The --debug option requires -o or --output followed by a destination path or '-'.";
-            return false;
-        }
-
-        if (++index >= args.Length || (args[index] != "-" && args[index].StartsWith('-')))
-        {
-            errorMessage = "The --debug option requires a destination path or '-' after -o or --output.";
-            return false;
-        }
-
-        destination = ParseDestination(args[index]);
-        errorMessage = null;
-
         return true;
     }
 
@@ -1114,7 +989,6 @@ public static class CommandLine
         writer.WriteLine("  --reference-project <path>                                  Referenced project metadata/source path supplied by Miryo.");
         writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
         writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");
-        writer.WriteLine("  --debug (lex|parse)+ (-o|--output) <file|->                 Write selected debug JSON to a file or stdout.");
         writer.WriteLine("  --diagnostics [pretty|text|json] (-o|--output) <file|->     Write diagnostics to a file or stderr (default: pretty).");
         writer.WriteLine("  -o, --output <file|->                                       Output destination path (or '-' for stdout).");
         writer.WriteLine("  --color [auto|always|never]                                 Control ANSI colored diagnostics.");
@@ -1125,6 +999,6 @@ public static class CommandLine
         writer.WriteLine("  -h, --help                                                  Show this help text.");
         writer.WriteLine();
         writer.WriteLine("Source paths can be one or more '.mh' files or directories.");
-        writer.WriteLine("Directories are searched recursively for matching files. '-' selects stdout for debug and stderr for diagnostics.");
+        writer.WriteLine("Directories are searched recursively for matching files. '-' selects stderr for diagnostics.");
     }
 }

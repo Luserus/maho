@@ -6,56 +6,40 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+
 namespace Maho.Server;
 
-/// <summary>Describes a generic server and a separately deployable compiler package.</summary>
-public sealed record CompilerServerPackage(string ServerExecutablePath, string PackageDirectory, CompilerPackageManifest Manifest, CompilerIdentity Compiler);
-
-/// <summary>Shared daemon discovery and request transport for CLI and tooling clients.</summary>
+/// <summary>
+/// Client interface for interacting with versioned compiler server daemons.
+/// Tools like mahoc, maho-ls, and miryo use this to delegate compilation to the appropriate daemon.
+/// </summary>
 public static class CompilerServerClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static CompilerServerPackage LoadPackage(string serverExecutablePath, string? compilerPackagePath = null)
-    {
-        string serverPath = Path.GetFullPath(serverExecutablePath);
-        if (!File.Exists(serverPath))
-            throw new FileNotFoundException("The compiler server executable was not found.", serverPath);
-
-        string packageDirectory = ResolvePackageDirectory(serverPath, compilerPackagePath);
-        CompilerPackageManifest manifest = CompilerPackageManifest.Load(packageDirectory);
-        if (manifest.CompilerHostProtocolVersion != CompilerHostProtocol.Version)
-            throw new InvalidDataException($"The compiler package requires host protocol {manifest.CompilerHostProtocolVersion}, but this tooling supports {CompilerHostProtocol.Version}.");
-
-        string compilerAssembly = Path.Combine(packageDirectory, manifest.CompilerAssembly);
-        if (!File.Exists(compilerAssembly))
-            throw new FileNotFoundException("The compiler library declared by the package manifest was not found.", compilerAssembly);
-
-        CompilerIdentity compiler = CompilerIdentity.FromCompilerAssembly(compilerAssembly);
-        if (!string.Equals(manifest.CompilerVersion, compiler.Version, StringComparison.Ordinal))
-            throw new InvalidDataException($"The compiler package manifest declares version {manifest.CompilerVersion}, but its compiler assembly is version {compiler.Version}.");
-
-        return new CompilerServerPackage(serverPath, packageDirectory, manifest, compiler);
-    }
-
-    public static CompilerServerResponse Compile(CompilerServerPackage package, CompilerServerRequest request)
+    /// <summary>
+    /// Executes a compilation request using the compiler daemon for the specified version.
+    /// Spawns the daemon process if it is not already running.
+    /// </summary>
+    public static CompilerServerResponse Compile(string version, CompilerServerRequest request, string? mahoHome = null)
     {
         if (request.ProtocolVersion != CompilerProtocol.Version)
             throw new InvalidOperationException("The client used an unsupported compiler-server protocol version.");
 
-        string pipeName = CompilerServerEndpoint.CreatePipeName(package.Compiler);
+        string normVersion = CompilerServerEndpoint.NormalizeVersion(version);
+        string pipeName = CompilerServerEndpoint.CreatePipeName(normVersion);
+
         if (!TrySend(pipeName, request, 150, out var response))
         {
-            response = StartOrFindServer(pipeName, package, request);
+            response = StartOrFindServer(pipeName, normVersion, request, mahoHome);
         }
 
-        if (response!.CompilerFingerprint != package.Compiler.Fingerprint)
-            throw new InvalidOperationException("The connected compiler server does not match the requested compiler package.");
-
-        return response;
+        return response!;
     }
 
-    /// <summary>Requests shutdown of every live daemon registered for this user.</summary>
+    /// <summary>
+    /// Requests shutdown of every live daemon registered for this user.
+    /// </summary>
     public static int ShutdownAllServers()
     {
         int stopped = 0;
@@ -63,14 +47,24 @@ public static class CompilerServerClient
         {
             if (TryShutdown(registration.PipeName))
                 stopped++;
-            // A daemon removes its own entry while exiting. Removing here also
-            // clears stale registrations left by a terminated process.
+
             CompilerServerRegistry.Unregister(registration.PipeName);
         }
         return stopped;
     }
 
-    private static CompilerServerResponse StartOrFindServer(string pipeName, CompilerServerPackage package, CompilerServerRequest request)
+    /// <summary>
+    /// Requests shutdown of a specific compiler server daemon by version.
+    /// </summary>
+    public static bool ShutdownServer(string version)
+    {
+        string pipeName = CompilerServerEndpoint.CreatePipeName(version);
+        bool success = TryShutdown(pipeName);
+        CompilerServerRegistry.Unregister(pipeName);
+        return success;
+    }
+
+    private static CompilerServerResponse StartOrFindServer(string pipeName, string version, CompilerServerRequest request, string? mahoHome)
     {
         using var launchGate = new Mutex(initiallyOwned: false, $"{pipeName}-launch", out bool createdNew);
         try
@@ -79,20 +73,17 @@ public static class CompilerServerClient
         }
         catch (AbandonedMutexException)
         {
-            // The previous launcher crashed before it could release the gate.
-            // Ownership has transferred to this client, which can safely retry.
         }
 
         try
         {
-            // The first launcher starts immediately, avoiding a cold-start
-            // probe. Concurrent clients instead wait briefly for it to finish.
             if (!createdNew && TrySend(pipeName, request, 500, out var existing))
                 return existing!;
 
-            StartServer(pipeName, package);
+            StartServer(pipeName, version, mahoHome);
             if (!TrySend(pipeName, request, 5000, out var started))
-                throw new IOException("Could not connect to the compiler server after it was started.");
+                throw new IOException($"Could not connect to the compiler server for version {version} after starting it.");
+
             return started!;
         }
         finally
@@ -100,6 +91,93 @@ public static class CompilerServerClient
             try { launchGate.ReleaseMutex(); }
             catch (ApplicationException) { }
         }
+    }
+
+    private static void StartServer(string pipeName, string version, string? mahoHome)
+    {
+        string serverExe = FindServerExecutable(version, mahoHome);
+
+        var startInfo = new ProcessStartInfo
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        if (serverExe.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            string home = ResolveMahoHome(mahoHome);
+            string runtimeDotNet = Path.Combine(home, "runtime", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+            startInfo.FileName = File.Exists(runtimeDotNet) ? runtimeDotNet : "dotnet";
+            startInfo.ArgumentList.Add(serverExe);
+        }
+        else
+        {
+            startInfo.FileName = serverExe;
+        }
+
+        startInfo.ArgumentList.Add("--pipe");
+        startInfo.ArgumentList.Add(pipeName);
+        startInfo.ArgumentList.Add("--version");
+        startInfo.ArgumentList.Add(version);
+
+        using Process process = Process.Start(startInfo) ?? throw new IOException($"Failed to launch maho-server for version {version}.");
+    }
+
+    private static string ResolveMahoHome(string? mahoHome)
+    {
+        if (!string.IsNullOrWhiteSpace(mahoHome))
+            return Path.GetFullPath(mahoHome);
+
+        string? env = Environment.GetEnvironmentVariable("MAHO_HOME");
+        if (!string.IsNullOrWhiteSpace(env))
+            return Path.GetFullPath(env);
+
+        string baseDir = AppContext.BaseDirectory;
+        string parentDir = Path.GetDirectoryName(baseDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? baseDir;
+        if (Directory.Exists(Path.Combine(parentDir, "tools")) &&
+            (Directory.Exists(Path.Combine(parentDir, "server")) || Directory.Exists(Path.Combine(parentDir, "compiler")) || Directory.Exists(Path.Combine(parentDir, "runtime"))))
+            return Path.GetFullPath(parentDir);
+
+        if (Directory.Exists(Path.Combine(baseDir, "tools")))
+            return Path.GetFullPath(baseDir);
+
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".maho");
+    }
+
+    private static string FindServerExecutable(string version, string? mahoHome)
+    {
+        string normVersion = CompilerServerEndpoint.NormalizeVersion(version);
+        string home = ResolveMahoHome(mahoHome);
+        string toolDir = Path.Combine(home, "tools", normVersion);
+        string exeName = OperatingSystem.IsWindows() ? "maho-server.exe" : "maho-server";
+
+        string toolPath = Path.Combine(toolDir, exeName);
+        if (File.Exists(toolPath))
+            return toolPath;
+
+        string dllPath = Path.Combine(toolDir, "maho-server.dll");
+        if (File.Exists(dllPath))
+            return dllPath;
+
+        // Fallback for development / co-located build output
+        string baseDir = AppContext.BaseDirectory;
+        string colocatedExe = Path.Combine(baseDir, exeName);
+        if (File.Exists(colocatedExe))
+            return colocatedExe;
+
+        string colocatedDll = Path.Combine(baseDir, "maho-server.dll");
+        if (File.Exists(colocatedDll))
+            return colocatedDll;
+
+        // Also check mahoc-server names during migration
+        string oldExe = OperatingSystem.IsWindows() ? "mahoc-server.exe" : "mahoc-server";
+        if (File.Exists(Path.Combine(baseDir, oldExe)))
+            return Path.Combine(baseDir, oldExe);
+
+        throw new FileNotFoundException($"Compiler server executable '{exeName}' was not found for version {version} in '{toolDir}'.", toolPath);
     }
 
     private static bool TrySend(string pipeName, CompilerServerRequest request, int timeoutMs, out CompilerServerResponse? response)
@@ -112,7 +190,11 @@ public static class CompilerServerClient
             using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
             writer.WriteLine(JsonSerializer.Serialize(request, JsonOptions));
-            response = JsonSerializer.Deserialize<CompilerServerResponse>(reader.ReadLine() ?? string.Empty, JsonOptions);
+            string? line = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(line))
+                return false;
+
+            response = JsonSerializer.Deserialize<CompilerServerResponse>(line, JsonOptions);
             return response is not null;
         }
         catch (IOException) { return false; }
@@ -137,62 +219,5 @@ public static class CompilerServerClient
         catch (SocketException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
         catch (TimeoutException) { return false; }
-    }
-
-    private static string ResolvePackageDirectory(string serverPath, string? suppliedPath)
-    {
-        if (!string.IsNullOrWhiteSpace(suppliedPath))
-        {
-            string fullPath = Path.GetFullPath(suppliedPath);
-            if (File.Exists(fullPath) && string.Equals(Path.GetFileName(fullPath), CompilerPackageManifest.FileName, StringComparison.OrdinalIgnoreCase))
-                return Path.GetDirectoryName(fullPath)!;
-            if (Directory.Exists(fullPath))
-                return fullPath;
-            throw new DirectoryNotFoundException($"The compiler package path does not exist: {suppliedPath}");
-        }
-
-        // This is only a convenience for a self-contained development bundle.
-        // Deliberately do not walk parent directories or consult environment
-        // variables: ordinary installs select a package explicitly.
-        string colocated = Path.GetDirectoryName(serverPath)!;
-#if DEBUG
-        if (File.Exists(Path.Combine(colocated, CompilerPackageManifest.FileName)) || File.Exists(Path.Combine(colocated, "Maho.dll")))
-            return colocated;
-#else
-        if (File.Exists(Path.Combine(colocated, CompilerPackageManifest.FileName)))
-            return colocated;
-#endif
-
-        throw new FileNotFoundException("No compiler package was selected. Pass --compiler-package or configure mahoc_compiler in miryo.config.",
-            Path.Combine(colocated, CompilerPackageManifest.FileName));
-    }
-
-    private static void StartServer(string pipeName, CompilerServerPackage package)
-    {
-        // A daemon must not inherit a test runner's captured stdout/stderr.
-        // Such inherited handles keep the runner's output pipe open for the
-        // daemon's five-minute idle lifetime, making the parent appear stuck.
-        var startInfo = new ProcessStartInfo
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        if (package.ServerExecutablePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-        {
-            startInfo.FileName = "dotnet";
-            startInfo.ArgumentList.Add(package.ServerExecutablePath);
-        }
-        else
-        {
-            startInfo.FileName = package.ServerExecutablePath;
-        }
-        startInfo.ArgumentList.Add("--pipe");
-        startInfo.ArgumentList.Add(pipeName);
-        startInfo.ArgumentList.Add("--compiler-package");
-        startInfo.ArgumentList.Add(package.PackageDirectory);
-        using Process process = Process.Start(startInfo) ?? throw new IOException("Failed to launch mahoc-server.");
     }
 }
