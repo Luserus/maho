@@ -11,10 +11,7 @@ internal sealed class ReferenceSemanticType : SemanticType
     public override bool IsResolved => ElementType.IsResolved;
     public override bool IsError => ElementType.IsError;
 
-    public ReferenceSemanticType(TypeRef elementType)
-    {
-        ElementType = elementType;
-    }
+    public ReferenceSemanticType(TypeRef elementType) => ElementType = elementType;
 
     public override bool Equals(SemanticType? other) =>
         other is ReferenceSemanticType reference && ElementType.Equals(reference.ElementType);

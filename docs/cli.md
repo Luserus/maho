@@ -8,7 +8,7 @@
 
 ## 1. Building the Toolchain
 
-The repository includes cross-platform build scripts that compile and publish `mahoc`, `miryo`, and `Maho.dll` into the root `dist/` directory:
+The repository includes cross-platform build scripts that compile and publish `mahoc`, `miryo`, and `Maho.dll` into the root `bin/` directory:
 
 ```bash
 # Linux / macOS / WSL / Git Bash
@@ -23,10 +23,10 @@ build-maho
 
 ### Build Options
 
-- (default): Release build for the host platform into `dist/`, omitting `.pdb` and `.deps.json` files for clean output.
-- `--single-file` (or `-s`): Bundles managed assemblies and runtime configuration into single standalone binary executables (`mahoc`, `miryo`) with zero loose runtime files.
+- (default): Release build for the host platform into `bin/` (`bin/maho/` and `bin/miryo/`), omitting `.pdb` and `.deps.json` files for clean output.
+- `--single-file` (or `-s`): Bundles managed assemblies and runtime configuration into single standalone binary executables with shared runtimes.
 - `--debug` (or `-d`): Builds Debug configuration and emits `.pdb` symbols and `.deps.json`.
-- `--all`: Compiles and publishes for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `dist/<platform>/`.
+- `--all`: Compiles and publishes for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `bin/<platform>/`.
 
 ---
 
@@ -35,12 +35,12 @@ build-maho
 Run the compiled executable directly on source files or directories:
 
 ```bash
-./dist/mahoc [options] [source-paths...]
+./bin/maho/shims/mahoc [options] [source-paths...]
 ```
 
 `source-paths` can be:
 - A single `.mh` source file.
-- Multiple `.mh` source files (e.g. `./dist/mahoc Types.mh Program.mh`).
+- Multiple `.mh` source files (e.g. `./bin/maho/shims/mahoc Types.mh Program.mh`).
 - A directory containing `.mh` source files (searched recursively by default, or shallow with `--no-recurse`).
 - When omitted, `mahoc` defaults to scanning the current working directory (`.`).
 
@@ -57,10 +57,11 @@ Run the compiled executable directly on source files or directories:
 | `--pattern` | `<glob>` | Source file matching glob pattern (defaults to `*.mh`). |
 | `--alias`, `--global-alias` | `<alias>=<target>` | Declares a project-wide type alias (e.g. `--alias int32=Std.Int32`). |
 | `--unsafe` | Flag | Enables unsafe operations globally. |
-| `--debug` | `(lex\|parse)+` | Selects which debug AST/token JSON views to generate. |
+| `--compiler-package` | `<path>` | Compiler package directory or `compiler.json` manifest. |
+| `--server-path` | `<path>` | Explicit path to the `mahoc-server` executable. |
 | `--diagnostics` | `pretty`, `text`, `json` | Diagnostic output formatting. Defaults to `pretty`. |
 | `-np`, `--no-pretty` | Flag | Shortcut to disable pretty terminal styling and colors. |
-| `-o`, `--output` | `<file\|->` | Output target path (`-` selects `stdout` for debug JSON, `stderr` for diagnostics). |
+| `-o`, `--output` | `<file\|->` | Output target path (`-` selects `stderr` for diagnostics). |
 | `--color` | `auto`, `always`, `never` | Controls ANSI color formatting in terminal output. |
 | `--diagnostic-paths` | `relative`, `project`, `full` | Selects whether diagnostic file paths are relative to CWD, relative to project root, or full absolute paths. |
 | `--implicit-toplevel` | `true`, `false` | Controls whether top-level statements are implicitly allowed for entry files without `#pragma toplevel enable`. |
@@ -70,32 +71,19 @@ Run the compiled executable directly on source files or directories:
 
 ---
 
-## 4. Debug and Diagnostics Output Routing
+## 4. Diagnostics Output Routing
 
-Syntax trees and token streams can be inspected via `--debug`:
-
-```bash
-# Output lexer tokens as JSON to a file
-./dist/mahoc --debug lex -o tokens.json src/Program.mh
-
-# Output parser AST as JSON to stdout
-./dist/mahoc --debug parse -o - src/Program.mh
-
-# Output both lexer and parser debug views
-./dist/mahoc --debug lex parse -o debug.json src/
-```
-
-Diagnostics and status lines are written to `stderr` (or an explicit destination provided via `-o`):
+Diagnostics are written to `stderr` by default (or an explicit destination provided via `-o`):
 
 ```bash
 # Pretty-printed ANSI diagnostics with gutters, carets, and notes
-./dist/mahoc src/
+./bin/maho/shims/mahoc src/
 
 # Output machine-readable JSON diagnostics to stderr
-./dist/mahoc --diagnostics json -o - src/
+./bin/maho/shims/mahoc --diagnostics json -o - src/
 
 # Output plain-text diagnostics to a file
-./dist/mahoc --diagnostics text -o report.txt src/
+./bin/maho/shims/mahoc --diagnostics text -o report.txt src/
 ```
 
 ---
@@ -110,33 +98,19 @@ Diagnostics and status lines are written to `stderr` (or an explicit destination
 
 ### Status Line Formatting
 
-At the conclusion of compilation, the compiler outputs a standardized status line with elapsed time measured directly by the core compiler:
+- **Successful compilation**:
+  `mahoc` outputs nothing (silent success) and exits with code `0`.
 
-- **Success with zero warnings**:
+- **Failed compilation**:
+  Diagnostics are displayed followed by a concise failure count:
   ```
-  Build succeeded in 42.15ms
+  compilation failed due to 1 error
   ```
-  *(word `succeeded` formatted in bold green)*
-
-- **Success with warnings**:
+  or:
   ```
-  Build succeeded with 2 warning(s) in 55.10ms
+  compilation failed due to 2 errors
   ```
-  *(word `succeeded` in bold green, `warning(s)` in bold yellow)*
-
-- **Build failure with errors only**:
-  ```
-  Build failed with 1 error(s)
-  ```
-  *(word `error(s)` formatted in bold red)*
-
-- **Build failure with errors and warnings**:
-  ```
-  Build failed with 2 error(s) and 1 warning(s)
-  ```
-  *(word `error(s)` in bold red, `warning(s)` in bold yellow)*
-
-Elapsed time is dynamically rendered with human-readable units: `s` for $\ge 1.0\,\text{s}$, `ms` for $\ge 1.0\,\text{ms}$, and `ns` for sub-millisecond durations.
+  *(Timing metrics and execution durations are owned and formatted by `miryo`, the toolchain manager and build orchestrator).*
 
 ---
 
@@ -147,6 +121,5 @@ Elapsed time is dynamically rendered with human-readable units: `s` for $\ge 1.0
 3. The compiler runs the complete front-end pipeline:
    - **Syntax Phase**: Parallel lexing and parsing across all source files, constructing strongly-typed ASTs and tracking syntax elapsed time (`CompilationPhaseTimers.Syntax`).
    - **Semantic Phase**: Multi-pass resolution (`SymbolDiscoveryPass` and `DeclarationResolutionPass`), tracking semantic elapsed time (`CompilationPhaseTimers.SemanticAnalysis`).
-4. If errors are present, `TerminalDiagnosticRenderer` formats and displays diagnostics on `stderr`.
-5. Upon successful front-end resolution, the driver enters the lowering phase (currently throwing `MH9000: The lowering and code-generation pipeline has not been implemented.` until backend codegen is completed).
-6. The driver renders the status line using `analysis.Elapsed` and exits with code `0` on success or `1` on error.
+4. If errors are present, `TerminalDiagnosticRenderer` formats and displays diagnostics on `stderr`, followed by the failure status line, and exits with code `1`.
+5. Upon successful front-end resolution, the driver enters the lowering phase (currently throwing `MH9000: The lowering and code-generation pipeline has not been implemented.` until backend codegen is completed) or exits silently with code `0`.

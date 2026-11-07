@@ -1,11 +1,12 @@
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Diagnostics;
 using Maho.Text;
 
 namespace Maho.Syntax;
 
 /// <summary>The parsed representation of one source file.</summary>
-internal sealed class SyntaxTree : SyntaxNode
+public sealed class SyntaxTree
 {
     public string FilePath { get; }
     internal SourceText SourceText { get; }
@@ -24,8 +25,7 @@ internal sealed class SyntaxTree : SyntaxNode
         }
     }
 
-    // Retained for internal callers during the single-root migration. A tree stores only Root.
-    internal IReadOnlyList<CompilationUnit> Roots => [Root];
+    public bool HasErrors => Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
 
     internal SyntaxTree(CompilationUnit root, SourceText sourceText, DiagnosticsManager diagnostics, string filePath)
     {

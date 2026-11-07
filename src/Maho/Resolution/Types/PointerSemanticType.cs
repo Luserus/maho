@@ -11,10 +11,7 @@ internal sealed class PointerSemanticType : SemanticType
     public override bool IsResolved => ElementType.IsResolved;
     public override bool IsError => ElementType.IsError;
 
-    public PointerSemanticType(TypeRef elementType)
-    {
-        ElementType = elementType;
-    }
+    public PointerSemanticType(TypeRef elementType) => ElementType = elementType;
 
     public override bool Equals(SemanticType? other) =>
         other is PointerSemanticType pointer && ElementType.Equals(pointer.ElementType);

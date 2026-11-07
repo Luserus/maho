@@ -6,10 +6,7 @@ internal struct ScopeID : IEquatable<ScopeID>
 {
     public int Value;
 
-    public ScopeID(int value)
-    {
-        Value = value;
-    }
+    public ScopeID(int value) => Value = value;
 
     public static implicit operator ScopeID(int value) => new ScopeID(value);
 

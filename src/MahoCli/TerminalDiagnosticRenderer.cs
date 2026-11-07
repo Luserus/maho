@@ -114,9 +114,7 @@ public sealed class TerminalDiagnosticRenderer
                 {
                     if (label.FilePath is not null && diagnostic.SourcePath is not null &&
                         !string.Equals(label.FilePath, diagnostic.SourcePath, StringComparison.OrdinalIgnoreCase))
-                    {
                         continue;
-                    }
 
                     int lLine = label.Span.StartLocation.Line;
                     int lCol = label.Span.StartLocation.Column;
@@ -200,6 +198,7 @@ public sealed class TerminalDiagnosticRenderer
                             {
                                 int startCol = Math.Max(1, ann.StartCol);
                                 int length = Math.Max(1, ann.Length);
+
                                 if (startCol - 1 + length > sourceLine.Length && sourceLine.Length >= startCol)
                                     length = Math.Max(1, sourceLine.Length - startCol + 1);
 
@@ -428,6 +427,7 @@ public sealed class TerminalDiagnosticRenderer
             return $"{elapsed.TotalMicroseconds:0.##}µs";
         if (elapsed.TotalNanoseconds > 0)
             return $"{(long)elapsed.TotalNanoseconds}ns";
+
         return "0ms";
     }
 
@@ -513,8 +513,7 @@ public sealed class TerminalDiagnosticRenderer
         CompilerDiagnosticColorMode.Always => true,
         CompilerDiagnosticColorMode.Never => false,
         CompilerDiagnosticColorMode.Auto => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
-                                    Environment.GetEnvironmentVariable("NO_COLOR") == null &&
-                                    Environment.GetEnvironmentVariable("TERM") != "dumb",
+                                            Environment.GetEnvironmentVariable("NO_COLOR") == null,
         _ => false
     };
 

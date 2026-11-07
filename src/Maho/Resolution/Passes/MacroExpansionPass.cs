@@ -511,14 +511,14 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
 
             Expression? newFinal = block.FinalExpression;
+
             if (block.FinalExpression is not null)
-            {
                 newFinal = ExpandExpression(block.FinalExpression, expander, currentDepth, sourceText, ref changed);
-            }
 
             if (localsChanged || !ReferenceEquals(newFinal, block.FinalExpression))
             {
                 changed = true;
+
                 return new BlockExpression(block.Attributes, block.Modifiers, block.OpenBrace, newLocals, newFinal, block.CloseBrace)
                 {
                     ExpansionOrigin = block.ExpansionOrigin
@@ -583,15 +583,18 @@ internal sealed class MacroExpansionPass : ResolutionPass
             for (int appIdx = 0; appIdx < list.Attributes.Count; appIdx++)
             {
                 var app = list.Attributes[appIdx];
+
                 if (app.IsMacroAttribute)
                 {
                     var optDeclSpan = declNode.GetSpan();
+
                     if (!optDeclSpan.HasValue)
                         return false;
 
                     TextSpan declSpan = optDeclSpan.Value;
 
                     var optExcludeSpan = list.Attributes.Count == 1 ? list.GetSpan() : app.GetSpan();
+
                     if (!optExcludeSpan.HasValue)
                         return false;
 
@@ -617,9 +620,11 @@ internal sealed class MacroExpansionPass : ResolutionPass
                     foreach (var argExpr in app.Arguments)
                     {
                         var optArgSpan = argExpr.GetSpan();
+
                         if (optArgSpan.HasValue)
                         {
                             var argTokens = new Lexer(new SourceText(sourceText.ToString(optArgSpan.Value)), dummyDiags).Lex();
+
                             if (argTokens.Count > 0 && argTokens[^1].Kind is TokenKind.EndToken)
                                 argTokens.RemoveAt(argTokens.Count - 1);
 

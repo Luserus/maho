@@ -67,7 +67,10 @@ Builds the project and runs the compiled binary:
 - Arguments after `--` are forwarded directly to the running executable.
 
 ### `miryo clean [path]`
-Removes the `target/` build output directory for the specified project.
+Removes the `target/` build output and `obj/` temporary directories for the specified project.
+
+### `miryo compiler-server shutdown [--config <path>]`
+Gracefully stops any active `mahoc-server` background daemons running for the user and toolchain.
 
 ---
 
@@ -87,9 +90,11 @@ Miryo searches for `miryo.config` in:
 # Miryo Toolchain Configuration
 
 [tools]
-# Arrays of search paths tried in order until an existing executable is found
-mahoc = ["./dist/mahoc", "./src/MahoCli/bin/Debug/net10.0/mahoc.dll", "mahoc"]
-il2llvmir = ["./dist/il2llvmir", "il2llvmir"]
+# Arrays of search paths tried in order until an existing executable or package is found
+mahoc = ["../maho/tools/0.2/mahoc", "../maho/shims/mahoc", "mahoc"]
+mahoc_server = ["../maho/tools/0.2/maho-server", "../maho/shims/maho-server", "maho-server"]
+mahoc_compiler = ["../maho/compiler/0.2"]
+il2llvmir = ["./il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]
 
@@ -101,7 +106,7 @@ bin_source_path = "src/Program.mh"
 bin_source = "println(\"Hello from Maho!\");\n"
 lib_source_path = "src/Lib.mh"
 lib_source = "public struct Lib;\n"
-gitignore = "target/\nbin/\nobj/\ndist/\n"
+gitignore = "target/\nbin/\nobj/\n"
 ```
 
 ---

@@ -42,7 +42,7 @@ public sealed class ImportedSymbolTests
 
         // Verify that SharedWidget is resolvable via using directive in consumer scope
         var sharedWidgetPart = new SymbolPart("SharedWidget");
-        var appScope = context.GetSyntaxScope(syntaxTree.Roots[0], context.GlobalScope);
+        var appScope = context.GetSyntaxScope(syntaxTree.Root, context.GlobalScope);
         var resolvedSymbols = appScope.GetSymbols(sharedWidgetPart);
         Assert.Single(resolvedSymbols);
         Assert.Equal("SharedWidget", resolvedSymbols[0].Name.ToString());
@@ -84,43 +84,13 @@ public sealed class ImportedSymbolTests
         Assert.Same(localSymbols[0], allSymbols[0]);
     }
 
-    [Fact]
-    public void PolymorphicOutputs_SupportDiagnosticsDebugAndIlVariants()
-    {
-        var diag = new DiagnosticInfo("MH0040", "Test error", DiagnosticSeverity.Error, default);
 
-        CompilationOutput debugOutput = new DebugCompilationOutput(
-            "test.mh",
-            lexerJson: "{\"kind\":\"lexer\"}",
-            parserJson: "{\"kind\":\"parser\"}",
-            diagnostics: [diag]);
-
-        Assert.Equal(CompilationOutputKind.Debug, debugOutput.Kind);
-        Assert.True(debugOutput.HasErrors);
-        Assert.False(debugOutput.Success);
-        Assert.IsType<DebugCompilationOutput>(debugOutput);
-
-        CompilationOutput ilOutput = new IlCompilationOutput(
-            ilBytes: [0x01, 0x02, 0x03],
-            ilDisassembly: "ldc.i4 42\nret",
-            diagnostics: []);
-
-        Assert.Equal(CompilationOutputKind.Il, ilOutput.Kind);
-        Assert.False(ilOutput.HasErrors);
-        Assert.True(ilOutput.Success);
-        var typedIl = Assert.IsType<IlCompilationOutput>(ilOutput);
-        Assert.Equal(3, typedIl.IlBytes!.Length);
-
-        CompilationOutput diagOutput = new DiagnosticsCompilationOutput("test.mh", [diag]);
-        Assert.Equal(CompilationOutputKind.Diagnostics, diagOutput.Kind);
-        Assert.True(diagOutput.HasErrors);
-    }
 
     [Fact]
     public void MahoCompiler_VersionString_ReturnsAssemblyVersion()
     {
         Assert.NotNull(MahoCompiler.VersionString);
         Assert.NotEmpty(MahoCompiler.VersionString);
-        Assert.Equal("0.1.0", MahoCompiler.VersionString);
+        Assert.Equal("0.2.0", MahoCompiler.VersionString);
     }
 }

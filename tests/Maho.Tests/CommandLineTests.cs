@@ -32,7 +32,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["--version"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("mahoc: v", sw.ToString());
+            Assert.Contains(CommandLine.VersionString, sw.ToString());
         }
         finally
         {
@@ -51,7 +51,7 @@ public sealed class CommandLineTests
             Console.SetOut(sw);
             int exitCode = CommandLine.Run(["-v"]);
             Assert.Equal(0, exitCode);
-            Assert.Contains("mahoc: v", sw.ToString());
+            Assert.Contains(CommandLine.VersionString, sw.ToString());
         }
         finally
         {
@@ -102,21 +102,31 @@ public sealed class CommandLineTests
     }
 
     [Fact]
-    public void CommandLine_DebugWithShortOutputFlag_WritesToFile()
+    public void CommandLine_CompilationFailure_ReportsDiagnosticAndFailureCountWithoutTiming()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliDebugShortOutput_" + Guid.NewGuid().ToString("N"));
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliFailStatus_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try
         {
             string sourceFile = Path.Combine(tempDir, "Program.mh");
-            File.WriteAllText(sourceFile, "public struct Widget;");
+            File.WriteAllText(sourceFile, "public struct Widget;\npublic struct Widget;");
 
-            string debugFile = Path.Combine(tempDir, "debug.json");
-            CommandLine.Run(["--debug", "parse", "-o", debugFile, sourceFile]);
-
-            Assert.True(File.Exists(debugFile));
-            string json = File.ReadAllText(debugFile);
-            Assert.Contains("\"files\"", json);
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("compilation failed due to 1 error", output);
+                Assert.DoesNotContain("succeeded", output);
+                Assert.DoesNotContain("compilation failed in", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
         }
         finally
         {
@@ -125,25 +135,31 @@ public sealed class CommandLineTests
     }
 
     [Fact]
-    public void CommandLine_CombinedDebugAndDiagnostics_WithIndividualOutputFlags_WritesBothFiles()
+    public void CommandLine_MultipleErrors_ReportsPluralErrorsWithoutTiming()
     {
-        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliCombinedOutput_" + Guid.NewGuid().ToString("N"));
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliFailStatusMultiple_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try
         {
             string sourceFile = Path.Combine(tempDir, "Program.mh");
-            File.WriteAllText(sourceFile, "public struct Widget;");
+            File.WriteAllText(sourceFile, "public struct Widget;\npublic struct Widget;\npublic struct Item;\npublic struct Item;");
 
-            string debugFile = Path.Combine(tempDir, "debug.json");
-            string diagFile = Path.Combine(tempDir, "diag.json");
-
-            // Put source first to verify positional independence
-            CommandLine.Run([sourceFile, "--debug", "parse", "-o", debugFile, "--diagnostics", "json", "-o", diagFile]);
-
-            Assert.True(File.Exists(debugFile));
-            Assert.True(File.Exists(diagFile));
-            Assert.Contains("\"parser\"", File.ReadAllText(debugFile));
-            Assert.Contains("\"diagnostics\"", File.ReadAllText(diagFile));
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("compilation failed due to 2 errors", output);
+                Assert.DoesNotContain("succeeded", output);
+                Assert.DoesNotContain("compilation failed in", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
         }
         finally
         {
@@ -506,7 +522,8 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", sourceFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation failed in", output);
+                Assert.Contains("error [MH0530]", output);
+                Assert.Contains("compilation failed due to 1 error", output);
             }
             finally
             {
@@ -548,7 +565,6 @@ public sealed class CommandLineTests
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
                 Assert.Contains("└── from this macro invocation", output);
-                Assert.Contains("compilation failed in", output);
             }
             finally
             {
@@ -613,7 +629,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run([sourceFile]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation success in", output);
+                Assert.Empty(output);
             }
             finally
             {
@@ -735,7 +751,8 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--color", "never", scriptFile]);
                 Assert.Equal(1, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation failed in", output);
+                Assert.Contains("error [MH0530]", output);
+                Assert.Contains("compilation failed due to 1 error", output);
             }
             finally
             {
@@ -857,7 +874,7 @@ public sealed class CommandLineTests
                 int exitCode = CommandLine.Run(["--check", "--color", "never", "--alias", "MyFoo=Lib.Foo", sourceA, sourceB]);
                 Assert.Equal(0, exitCode);
                 string output = sw.ToString();
-                Assert.Contains("compilation success in", output);
+                Assert.Empty(output);
             }
             finally
             {

@@ -100,8 +100,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var property in context.SinkSymbols.PropertySymbols)
             ResolveProperty(property);
 
-        foreach (var root in context.SyntaxTree.Roots)
-            ResolveTopLevelStatements(root);
+        foreach (var tree in context.SyntaxTrees)
+            ResolveTopLevelStatements(tree.Root);
 
         CheckDuplicateTypeDeclarations();
         CheckCyclicTypeHierarchies();
@@ -380,9 +380,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol is LocalFunctionSymbol)
         {
             if (symbol.SpecialKind is SpecialFunctionKind.Constructor)
-            {
                 context.Diagnostics.ReportConstructorOutsideType(symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-            }
         }
         else
         {
@@ -390,10 +388,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 var constructorName = ResolutionContext.GetSymbolName(symbol.Syntax.Signature.Identifier).Last.Text;
                 var enclosingTypeName = symbol.Parent is { } parentHandle && context.GetSymbol(parentHandle) is { } parentSymbol ? parentSymbol.Name.Text : null;
+
                 if (enclosingTypeName is not null && constructorName != enclosingTypeName)
-                {
                     context.Diagnostics.ReportConstructorNameMismatch(constructorName, enclosingTypeName, symbol.Syntax.Signature.Identifier.GetSpan() ?? default, symbol.Syntax.GetSource());
-                }
             }
         }
 
@@ -446,6 +443,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (isTupleDestructuring && syntax.Type is TupleType tupleType)
         {
             var matchedElement = tupleType.Elements.FirstOrDefault(e => e.Name != null && context.GetScopedSymbolName(new SimpleName(e.Name)).Last == symbol.Name);
+
             if (matchedElement != null)
                 resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false);
         }
@@ -457,16 +455,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             if (declarator.Identifier is TupleName tupleName)
             {
                 if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
-                {
                     if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
                         ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
-                }
             }
             else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
-            {
                 if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
                     ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
-            }
         }
     }
 
@@ -639,6 +633,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return cached;
 
         var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference);
+
         if (reportDiagnostics || result.IsResolved)
             resolvedTypes[(syntax, scope, allowInference)] = result;
 
@@ -670,14 +665,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             var elemType = ResolveType(uniform.ElementType, scope, reportDiagnostics);
             var elements = new List<TupleElement>(uniform.Elements.Count);
+
             foreach (var elem in uniform.Elements)
                 elements.Add(new TupleElement(elemType, elem.Name.Value));
+
             return TypeRef.Tuple(elements);
         }
 
         if (syntax is ModifiedType modified)
         {
             var innerType = ResolveType(modified.Type, scope, reportDiagnostics);
+
             return modified.Modifier switch
             {
                 PointerTypeModifier => TypeRef.Pointer(innerType),
@@ -781,9 +779,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 : new SymbolName([.. name.Parts.Take(name.Count - 1), nonGenericPart]);
 
             if (ResolveSingle(scope, nonGenericName) is not null)
-            {
                 return $"non-generic type '{nonGenericName}' exists in this scope, but generic type '{name}' with {targetPart.Arity} type argument{(targetPart.Arity == 1 ? "" : "s")} was not found";
-            }
         }
         else
         {
@@ -795,9 +791,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     : new SymbolName([.. name.Parts.Take(name.Count - 1), genericPart]);
 
                 if (ResolveSingle(scope, genericName) is not null)
-                {
                     return $"generic type '{genericName}' exists in this scope with {a} type argument{(a == 1 ? "" : "s")}, but non-generic type '{name}' was not found";
-                }
             }
         }
 
@@ -1153,11 +1147,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 continue;
 
             var key = (type.EnclosingScope, type.Name);
+
             if (!nestedGroups.TryGetValue(key, out var list))
             {
                 list = [];
                 nestedGroups[key] = list;
             }
+
             list.Add(type);
         }
 
@@ -1205,6 +1201,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             for (int i = 1; i < group.Count; i++)
             {
                 var cur = group[i];
+
                 if (cur.TypeKind != first.TypeKind)
                 {
                     var span = cur.Syntax?.Name.GetSpan() ?? cur.Syntax?.GetSpan() ?? default;
@@ -1249,6 +1246,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             for (int i = 1; i < group.Count; i++)
             {
                 var cur = group[i];
+
                 if (cur.TypeKind != first.TypeKind)
                 {
                     var span = cur.Syntax?.Name.GetSpan() ?? cur.Syntax?.GetSpan() ?? default;
@@ -1377,6 +1375,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 continue;
 
             var key = (m.EnclosingScope, m.Name);
+
             if (!methodGroups.TryGetValue(key, out var list))
             {
                 list = [];
@@ -1682,10 +1681,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 if (declarator.Identifier is TupleName tupleName)
                 {
                     foreach (var elem in tupleName.Elements)
-                    {
                         if (context.GetScopedSymbolName(elem).Last == name)
                             return elem.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
-                    }
                 }
                 else if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
                     return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
@@ -1707,6 +1704,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 continue;
 
             var key = (prop.EnclosingScope, prop.Name);
+
             if (!propGroups.TryGetValue(key, out var list))
             {
                 list = [];

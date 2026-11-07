@@ -4,16 +4,16 @@ namespace Maho;
 
 /// <summary>
 /// Intentional placeholder exception thrown when compilation reaches an unimplemented stage.
-/// Holds the analysis outcome produced up to the boundary.
+/// Holds the compilation produced up to the boundary.
 /// </summary>
 public sealed class CompilerPipelineNotImplementedException : Exception
 {
-    /// <summary> The analysis outcome produced prior to reaching the unimplemented stage. </summary>
-    public CompilerProjectAnalysisResult Analysis { get; }
+    /// <summary> The compilation produced prior to reaching the unimplemented stage. </summary>
+    public Compilation Compilation { get; }
 
-    public CompilerPipelineNotImplementedException(string message, CompilerProjectAnalysisResult analysis)
+    public CompilerPipelineNotImplementedException(string message, Compilation compilation)
         : base(message)
     {
-        Analysis = analysis;
+        Compilation = compilation;
     }
 }

@@ -11,10 +11,7 @@ internal sealed class OptionalSemanticType : SemanticType
     public override bool IsResolved => ElementType.IsResolved;
     public override bool IsError => ElementType.IsError;
 
-    public OptionalSemanticType(TypeRef elementType)
-    {
-        ElementType = elementType;
-    }
+    public OptionalSemanticType(TypeRef elementType) => ElementType = elementType;
 
     public override bool Equals(SemanticType? other) =>
         other is OptionalSemanticType optional && ElementType.Equals(optional.ElementType);

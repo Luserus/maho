@@ -109,8 +109,8 @@ public sealed class BuildSystemTests
 
             Assert.False(result.HasErrors);
             Assert.Single(result.Files);
-            Assert.NotNull(result.Compilation);
-            Assert.Single(result.Compilation.Context!.TypeSymbols, t => t.Name.ToString() == "NonMhWidget");
+            Assert.NotNull(result);
+            Assert.Single(result.Context!.TypeSymbols, t => t.Name.ToString() == "NonMhWidget");
         }
         finally
         {
@@ -135,7 +135,7 @@ public sealed class BuildSystemTests
 
             // Expect MH0160 error because top-level is disabled by default for directory/project builds
             Assert.True(result.HasErrors);
-            Assert.Contains(result.Compilation!.Diagnostics, d => d.Code == "MH0160");
+            Assert.Contains(result.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {

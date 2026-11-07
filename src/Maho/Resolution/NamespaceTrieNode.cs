@@ -13,11 +13,13 @@ internal sealed class NamespaceTrieNode
     public void RegisterSymbol(Symbol symbol)
     {
         Symbols.Add(symbol);
+
         if (!SymbolsByName.TryGetValue(symbol.Name, out var list))
         {
             list = [];
             SymbolsByName[symbol.Name] = list;
         }
+
         list.Add(symbol);
     }
 
@@ -27,10 +29,9 @@ internal sealed class NamespaceTrieNode
     public Symbol? GetSymbol(SymbolHandle handle)
     {
         for (int i = 0; i < Symbols.Count; i++)
-        {
             if (ResolutionContext.GetHandle(Symbols[i]) == handle)
                 return Symbols[i];
-        }
+
         return null;
     }
 }
