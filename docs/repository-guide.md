@@ -15,7 +15,7 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
 
 - You want to understand project scaffolding, `.mhpr` configuration, dependencies, or high-level build commands:
   [`miryo.md`](miryo.md)
-- You want to see how `./dist/mahoc` compiles source files and formats output:
+- You want to see how `mahoc` compiles source files and formats output:
   [`cli.md`](cli.md)
 - You want the public analysis API, phase timers, or the result payload contract:
   [`analysis.md`](analysis.md)

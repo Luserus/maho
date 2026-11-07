@@ -112,47 +112,47 @@ build-maho
 
 ### Build Options
 
-- `./build-maho`: clean release build for host platform into `dist/` (omits `.pdb` and `.deps.json` files).
-- `./build-maho --single-file` (or `-s`): packages into single binary executables (`mahoc`, `miryo`) with no loose DLLs or config files.
+- `./build-maho`: clean release build for host platform into `bin/` (`bin/maho/` and `bin/miryo/`).
+- `./build-maho --single-file` (or `-s`): packages standalone distribution using shared runtimes in `bin/maho/runtime` and `bin/miryo/runtime`.
 - `./build-maho --debug` (or `-d`): builds Debug configuration including PDB symbols and dependency JSON files.
-- `./build-maho --all`: compiles for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `dist/<platform>/`.
+- `./build-maho --all`: compiles for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `bin/<platform>/`.
 
 ### Running the Project Manager (`miryo`)
 
 ```bash
 # Create a new binary or library project
-./dist/miryo new MyApp
-./dist/miryo new --lib MyLib
+./bin/miryo/miryo new MyApp
+./bin/miryo/miryo new --lib MyLib
 
 # Build or type-check a project
-./dist/miryo build
-./dist/miryo build --check
+./bin/miryo/miryo build
+./bin/miryo/miryo build --check
 
 # Run a project (passes runtime args after --)
-./dist/miryo run -- arg1 arg2
+./bin/miryo/miryo run -- arg1 arg2
 
-# Clean target and obj output directories
-./dist/miryo clean
+# Clean target, bin, and obj output directories
+./bin/miryo/miryo clean
 
 # Gracefully stop background compiler daemon servers
-./dist/miryo compiler-server shutdown
+./bin/miryo/miryo compiler-server shutdown
 ```
 
 ### Running the Direct Compiler (`mahoc`)
 
 ```bash
 # Compile or type-check source files directly
-./dist/mahoc --check src/Program.mh
-./dist/mahoc --check src/
+./bin/maho/shims/mahoc --check src/Program.mh
+./bin/maho/shims/mahoc --check src/
 
 # Specify an explicit compiler package or server executable
-./dist/mahoc --compiler-package dist/compilers/0.2.0 --check src/Program.mh
+./bin/maho/shims/mahoc --compiler-package bin/maho/compiler/0.2 --check src/Program.mh
 
 # Pass global type aliases
-./dist/mahoc --check --alias int32=Std.Int32 src/
+./bin/maho/shims/mahoc --check --alias int32=Std.Int32 src/
 
 # Inspect AST or tokens as JSON
-./dist/mahoc --debug parse -o - src/Program.mh
+./bin/maho/shims/mahoc --debug parse -o - src/Program.mh
 ```
 
 ## Project Files (`.mhpr`)

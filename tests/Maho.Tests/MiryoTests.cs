@@ -10,8 +10,8 @@ public sealed class MiryoTests
         string ini = """
             # Toolchain configuration
             [tools]
-            mahoc = ["./dist/mahoc", "mahoc"]
-            il2llvmir = ["./dist/il2llvmir"]
+            mahoc = ["../maho/tools/0.2/mahoc", "mahoc"]
+            il2llvmir = ["./il2llvmir"]
 
             [templates]
             bin_template = "EntryFile : \"src/Program.mh\";\n"
@@ -21,7 +21,7 @@ public sealed class MiryoTests
         var candidates = config.GetToolCandidates("mahoc");
 
         Assert.Equal(2, candidates.Count);
-        Assert.Equal("./dist/mahoc", candidates[0]);
+        Assert.Equal("../maho/tools/0.2/mahoc", candidates[0]);
         Assert.Equal("mahoc", candidates[1]);
 
         string tmpl = config.GetTemplate("bin_template");
@@ -310,11 +310,12 @@ public sealed class MiryoTests
     }
 
     [Fact]
-    public void MiryoCommandLine_Clean_RemovesTargetAndObjDirectories()
+    public void MiryoCommandLine_Clean_RemovesTargetBinAndObjDirectories()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Miryo_Clean_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         Directory.CreateDirectory(Path.Combine(tempDir, "target"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "bin"));
         Directory.CreateDirectory(Path.Combine(tempDir, "obj"));
 
         try
@@ -324,6 +325,7 @@ public sealed class MiryoTests
             Assert.Equal(0, exitCode);
 
             Assert.False(Directory.Exists(Path.Combine(tempDir, "target")));
+            Assert.False(Directory.Exists(Path.Combine(tempDir, "bin")));
             Assert.False(Directory.Exists(Path.Combine(tempDir, "obj")));
         }
         finally
@@ -362,5 +364,83 @@ public sealed class MiryoTests
         Assert.Contains("unknown option '--foo'.", errOutput);
         Assert.Contains("Commands:", errOutput);
         Assert.Contains("build [path]", errOutput);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_ColorDefault_OutputsColoredError()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["unknown-command"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        // Default coloring enabled: contains ANSI red "\u001b[31;1merror\u001b[0m:"
+        Assert.Contains("\u001b[31;1merror\u001b[0m: unknown command 'unknown-command'.", errOutput);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_ColorNever_OmitsColorCodes()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["--color", "never", "unknown-command"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.StartsWith("error: unknown command 'unknown-command'.", errOutput);
+        Assert.DoesNotContain("\u001b[", errOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_NewCommand_RespectsColorNever()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["new", "--color", "never"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.StartsWith("error: missing project name.", errOutput);
+        Assert.DoesNotContain("\u001b[", errOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_CleanCommand_RespectsColorNever()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["clean", "/nonexistent_path_test_123", "--color", "never"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.StartsWith("error: directory not found:", errOutput);
+        Assert.DoesNotContain("\u001b[", errOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_ToolCommand_RespectsColorNever()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["tool", "invalid-sub", "--color", "never"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.StartsWith("error: unknown tool command 'invalid-sub'.", errOutput);
+        Assert.DoesNotContain("\u001b[", errOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiryoCommandLine_CompilerServer_RespectsColorNever()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["compiler-server", "invalid", "--color", "never"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        string errOutput = swErr.ToString();
+        Assert.StartsWith("error: invalid arguments for compiler-server.", errOutput);
+        Assert.DoesNotContain("\u001b[", errOutput, StringComparison.Ordinal);
     }
 }

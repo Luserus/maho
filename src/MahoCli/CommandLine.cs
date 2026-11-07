@@ -34,7 +34,22 @@ public static class CommandLine
         }
     }
 
-    public static string ToolchainVersion => VersionString;
+    public static string ToolchainVersion
+    {
+        get
+        {
+            var ver = VersionString;
+            int firstDot = ver.IndexOf('.');
+            if (firstDot > 0)
+            {
+                int secondDot = ver.IndexOf('.', firstDot + 1);
+                if (secondDot > 0)
+                    return ver[..secondDot];
+                return ver;
+            }
+            return ver;
+        }
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -90,6 +105,34 @@ public static class CommandLine
         public bool HasErrors { get; } = hasErrors;
     }
 
+    private const string AnsiReset = "\u001b[0m";
+    private const string AnsiRed = "\u001b[31;1m";
+
+    private static string FormatError(string text, bool useColors) => useColors ? $"{AnsiRed}{text}{AnsiReset}" : text;
+
+    private static string? ExtractColorMode(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--color" && i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                return args[i + 1].ToLowerInvariant();
+            if (args[i] == "--color")
+                return "always";
+            if (args[i].StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+                return args[i][(args[i].IndexOf('=') + 1)..].ToLowerInvariant();
+        }
+        return null;
+    }
+
+    private static bool ShouldUseColors(string? colorMode) => colorMode switch
+    {
+        "never" or "false" or "off" => false,
+        "always" or "true" or "on" => true,
+        "auto" => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
+                  Environment.GetEnvironmentVariable("NO_COLOR") == null,
+        _ => Environment.GetEnvironmentVariable("NO_COLOR") == null
+    };
+
     /// <summary> Executes the compiler driver and returns a process exit code. </summary>
     public static int Run(string[] args)
     {
@@ -110,7 +153,8 @@ public static class CommandLine
 
         if (!TryParseArguments(args, out CliOptions options, out string? argumentError))
         {
-            Console.Error.WriteLine(argumentError);
+            bool useColors = ShouldUseColors(ExtractColorMode(args));
+            Console.Error.WriteLine($"{FormatError("error", useColors)}: {argumentError}");
             Console.Error.WriteLine();
             PrintUsage(Console.Error);
             return 1;
@@ -146,7 +190,8 @@ public static class CommandLine
 
         catch (Exception ex) when (IsUserFacingError(ex))
         {
-            Console.Error.WriteLine($"Failed to compile '{primaryInput}': {FormatPathOrIoError(ex, primaryInput, "compile the input")}");
+            bool useColors = TerminalDiagnosticRenderer.ShouldEnableColors(options.ColorMode);
+            Console.Error.WriteLine($"{FormatError("error", useColors)}: Failed to compile '{primaryInput}': {FormatPathOrIoError(ex, primaryInput, "compile the input")}");
             return 1;
         }
 
@@ -164,7 +209,8 @@ public static class CommandLine
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Failed to write compiler result pipe: {ex.Message}");
+                bool useColors = TerminalDiagnosticRenderer.ShouldEnableColors(options.ColorMode);
+                Console.Error.WriteLine($"{FormatError("error", useColors)}: Failed to write compiler result pipe: {ex.Message}");
                 return 1;
             }
         }
@@ -504,7 +550,8 @@ public static class CommandLine
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to write {outputName} to '{destination}': {FormatPathOrIoError(ex, destination, "write the output")}");
+            bool useColors = ShouldUseColors(null);
+            Console.Error.WriteLine($"{FormatError("error", useColors)}: Failed to write {outputName} to '{destination}': {FormatPathOrIoError(ex, destination, "write the output")}");
             return false;
         }
     }

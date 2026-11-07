@@ -513,8 +513,7 @@ public sealed class TerminalDiagnosticRenderer
         CompilerDiagnosticColorMode.Always => true,
         CompilerDiagnosticColorMode.Never => false,
         CompilerDiagnosticColorMode.Auto => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
-                                    Environment.GetEnvironmentVariable("NO_COLOR") == null &&
-                                    Environment.GetEnvironmentVariable("TERM") != "dumb",
+                                            Environment.GetEnvironmentVariable("NO_COLOR") == null,
         _ => false
     };
 

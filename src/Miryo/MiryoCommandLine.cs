@@ -90,19 +90,19 @@ public static class MiryoCommandLine
                 return ExecuteUpdate(invocation, toolchain, stdout, stderr);
 
             case "new":
-                return ExecuteNew(invocation.Arguments, stdout, stderr);
+                return ExecuteNew(invocation.Arguments, stdout, stderr, invocation);
 
             case "clean":
-                return ExecuteClean(invocation.Arguments, stdout, stderr);
+                return ExecuteClean(invocation.Arguments, stdout, stderr, invocation);
 
             case "check":
                 return ExecuteCheck(invocation.Arguments, stdout, stderr, invocation: invocation, toolchain: toolchain);
 
             case "compiler-server":
-                return ExecuteCompilerServer(invocation.Arguments, stdout, stderr);
+                return ExecuteCompilerServer(invocation.Arguments, stdout, stderr, invocation);
 
             default:
-                bool useColors = ShouldUseColors(null);
+                bool useColors = ShouldUseColors(invocation.ColorMode);
                 if (invocation.Command.StartsWith('-'))
                 {
                     stderr.WriteLine($"{FormatError("error", useColors)}: unknown option '{invocation.Command}'.");
@@ -118,12 +118,13 @@ public static class MiryoCommandLine
         }
     }
 
-    private static int ExecuteNew(string[] args, TextWriter stdout, TextWriter stderr)
+    private static int ExecuteNew(string[] args, TextWriter stdout, TextWriter stderr, MiryoInvocation? invocation = null)
     {
         string? projectName = null;
         bool isLib = false;
         string? configPath = null;
-        bool useColors = ShouldUseColors(null);
+        string? colorMode = invocation?.ColorMode;
+        bool useColors = ShouldUseColors(colorMode);
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -143,6 +144,17 @@ public static class MiryoCommandLine
                         return 1;
                     }
                     configPath = args[++i];
+                    break;
+                case "--color":
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                        colorMode = args[++i].ToLowerInvariant();
+                    else
+                        colorMode = "always";
+                    useColors = ShouldUseColors(colorMode);
+                    break;
+                case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
+                    colorMode = c[(c.IndexOf('=') + 1)..].ToLowerInvariant();
+                    useColors = ShouldUseColors(colorMode);
                     break;
                 case "-h" or "--help":
                     PrintNewUsage(stdout);
@@ -336,7 +348,7 @@ public static class MiryoCommandLine
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: Could not locate 'mahoc' compiler executable.");
             stderr.WriteLine($"searched candidates: {string.Join(", ", config.GetToolCandidates("mahoc"))}");
-            stderr.WriteLine("ensure 'mahoc' is built in dist/ or configure its path in miryo.config.");
+            stderr.WriteLine("ensure 'mahoc' is built in bin/maho/ or configure its path in miryo.config.");
             return 1;
         }
 
@@ -693,10 +705,25 @@ public static class MiryoCommandLine
         return $"{elapsed.Ticks * 100:n0}\u00A0ns";
     }
 
+    private static string? ExtractColorMode(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--color" && i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                return args[i + 1].ToLowerInvariant();
+            if (args[i] == "--color")
+                return "always";
+            if (args[i].StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+                return args[i][(args[i].IndexOf('=') + 1)..].ToLowerInvariant();
+        }
+        return null;
+    }
+
     private static int ExecuteCompile(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
     {
+        string? colorMode = invocation.ColorMode ?? ExtractColorMode(invocation.Arguments);
+        bool useColors = ShouldUseColors(colorMode);
         string? mahocPath = toolchain.FindTool("mahoc", invocation.TargetVersion);
-        bool useColors = ShouldUseColors(null);
 
         if (mahocPath is null)
         {
@@ -748,7 +775,8 @@ public static class MiryoCommandLine
         if (buildExit != 0)
             return buildExit;
 
-        bool useColors = ShouldUseColors(null);
+        string? colorMode = invocation?.ColorMode ?? ExtractColorMode(args);
+        bool useColors = ShouldUseColors(colorMode);
         stderr.WriteLine($"{FormatError("error", useColors)}: run {FormatFailed("failed", useColors)}: Native code execution pipeline not implemented yet.");
         return 1;
     }
@@ -769,8 +797,9 @@ public static class MiryoCommandLine
 
     private static int ExecuteLs(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
     {
+        string? colorMode = invocation.ColorMode ?? ExtractColorMode(invocation.Arguments);
+        bool useColors = ShouldUseColors(colorMode);
         string? lsPath = toolchain.FindTool("maho-ls", invocation.TargetVersion);
-        bool useColors = ShouldUseColors(null);
 
         if (lsPath is null)
         {
@@ -795,7 +824,24 @@ public static class MiryoCommandLine
 
     private static int ExecuteTool(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
     {
-        string sub = invocation.Arguments.Length > 0 ? invocation.Arguments[0].ToLowerInvariant() : "list";
+        string? colorMode = invocation.ColorMode;
+        string? sub = null;
+        for (int i = 0; i < invocation.Arguments.Length; i++)
+        {
+            string arg = invocation.Arguments[i];
+            if (arg == "--color" && i + 1 < invocation.Arguments.Length && !invocation.Arguments[i + 1].StartsWith('-'))
+                colorMode = invocation.Arguments[++i].ToLowerInvariant();
+            else if (arg == "--color")
+                colorMode = "always";
+            else if (arg.StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+                colorMode = arg[(arg.IndexOf('=') + 1)..].ToLowerInvariant();
+            else if (!arg.StartsWith('-') && sub is null)
+                sub = arg.ToLowerInvariant();
+        }
+
+        bool useColors = ShouldUseColors(colorMode);
+        sub ??= "list";
+
         switch (sub)
         {
             case "list":
@@ -814,7 +860,7 @@ public static class MiryoCommandLine
                 return 0;
 
             default:
-                stderr.WriteLine($"Unknown tool command '{sub}'. Expected 'list' or 'update-shims'.");
+                stderr.WriteLine($"{FormatError("error", useColors)}: unknown tool command '{sub}'. Expected 'list' or 'update-shims'.");
                 return 1;
         }
     }
@@ -830,11 +876,21 @@ public static class MiryoCommandLine
             updaterPath = Path.Combine(AppContext.BaseDirectory, updaterName);
 
         string? stagedPath = null;
+        string? colorMode = invocation.ColorMode;
         for (int i = 0; i < invocation.Arguments.Length; i++)
         {
-            if (invocation.Arguments[i] == "--source" && i + 1 < invocation.Arguments.Length)
+            string arg = invocation.Arguments[i];
+            if (arg == "--source" && i + 1 < invocation.Arguments.Length)
                 stagedPath = invocation.Arguments[++i];
+            else if (arg == "--color" && i + 1 < invocation.Arguments.Length && !invocation.Arguments[i + 1].StartsWith('-'))
+                colorMode = invocation.Arguments[++i].ToLowerInvariant();
+            else if (arg == "--color")
+                colorMode = "always";
+            else if (arg.StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+                colorMode = arg[(arg.IndexOf('=') + 1)..].ToLowerInvariant();
         }
+
+        bool useColors = ShouldUseColors(colorMode);
 
         if (stagedPath is null || !File.Exists(stagedPath) || !File.Exists(updaterPath))
         {
@@ -858,11 +914,13 @@ public static class MiryoCommandLine
         psi.ArgumentList.Add(stagedPath);
         psi.ArgumentList.Add("--version");
         psi.ArgumentList.Add(invocation.TargetVersion);
+        psi.ArgumentList.Add("--color");
+        psi.ArgumentList.Add(useColors ? "always" : "never");
 
         using var updateProc = Process.Start(psi);
         if (updateProc is null)
         {
-            stderr.WriteLine("error: failed to start miryo-update process.");
+            stderr.WriteLine($"{FormatError("error", useColors)}: failed to start miryo-update process.");
             return 1;
         }
 
@@ -871,30 +929,117 @@ public static class MiryoCommandLine
         return 0;
     }
 
-    private static int ExecuteCompilerServer(string[] args, TextWriter stdout, TextWriter stderr)
+    private static int ExecuteCompilerServer(string[] args, TextWriter stdout, TextWriter stderr, MiryoInvocation? invocation = null)
     {
-        if (args.Length == 0 || !string.Equals(args[0], "shutdown", StringComparison.OrdinalIgnoreCase))
+        string? colorMode = invocation?.ColorMode;
+        string? sub = null;
+        for (int i = 0; i < args.Length; i++)
         {
-            stderr.WriteLine("Usage: miryo compiler-server shutdown");
+            string arg = args[i];
+            if (arg == "--color" && i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                colorMode = args[++i].ToLowerInvariant();
+            else if (arg == "--color")
+                colorMode = "always";
+            else if (arg.StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+                colorMode = arg[(arg.IndexOf('=') + 1)..].ToLowerInvariant();
+            else if (!arg.StartsWith('-') && sub is null)
+                sub = arg.ToLowerInvariant();
+        }
+
+        bool useColors = ShouldUseColors(colorMode);
+        if (sub != "shutdown")
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: invalid arguments for compiler-server. Usage: miryo compiler-server shutdown [--color <mode>]");
             return 1;
         }
 
-        int stopped = Maho.Server.CompilerServerClient.ShutdownAllServers();
-        stdout.WriteLine($"stopped {stopped} compiler server{(stopped == 1 ? string.Empty : "s")}.");
-        return 0;
+        string? serverManager = MahoPaths.FindServerManager();
+        if (serverManager is null)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: could not locate 'server-manager' executable in server directory.");
+            return 1;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        if (serverManager.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            startInfo.FileName = "dotnet";
+            startInfo.ArgumentList.Add(serverManager);
+        }
+        else
+        {
+            startInfo.FileName = serverManager;
+        }
+
+        startInfo.ArgumentList.Add("shutdown");
+        if (!string.IsNullOrEmpty(colorMode))
+        {
+            startInfo.ArgumentList.Add("--color");
+            startInfo.ArgumentList.Add(colorMode);
+        }
+
+        using Process? process = Process.Start(startInfo);
+        if (process is null)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: failed to execute server-manager.");
+            return 1;
+        }
+
+        string outText = process.StandardOutput.ReadToEnd();
+        string errText = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (!string.IsNullOrWhiteSpace(outText))
+            stdout.Write(outText);
+        if (!string.IsNullOrWhiteSpace(errText))
+            stderr.Write(errText);
+
+        return process.ExitCode;
     }
 
-    private static int ExecuteClean(string[] args, TextWriter stdout, TextWriter stderr)
+    private static int ExecuteClean(string[] args, TextWriter stdout, TextWriter stderr, MiryoInvocation? invocation = null)
     {
-        string targetDir = args.Length > 0 ? Path.GetFullPath(args[0]) : Directory.GetCurrentDirectory();
-        bool useColors = ShouldUseColors(null);
+        string? targetDir = null;
+        string? colorMode = invocation?.ColorMode;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            string arg = args[i];
+            switch (arg)
+            {
+                case "--color":
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                        colorMode = args[++i].ToLowerInvariant();
+                    else
+                        colorMode = "always";
+                    break;
+                case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
+                    colorMode = c[(c.IndexOf('=') + 1)..].ToLowerInvariant();
+                    break;
+                default:
+                    if (!arg.StartsWith('-') && targetDir is null)
+                        targetDir = Path.GetFullPath(arg);
+                    break;
+            }
+        }
+
+        bool useColors = ShouldUseColors(colorMode);
+        targetDir ??= Directory.GetCurrentDirectory();
+
         if (!Directory.Exists(targetDir))
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: directory not found: {targetDir}");
             return 1;
         }
 
-        string[] cleanTargets = ["target", "dist", "bin", "obj"];
+        string[] cleanTargets = ["target", "bin", "obj"];
         int cleanedCount = 0;
 
         foreach (string target in cleanTargets)
@@ -935,7 +1080,7 @@ public static class MiryoCommandLine
         writer.WriteLine("  ls [options]     Send request to language server (maho-ls)");
         writer.WriteLine("  tool [sub]       Manage toolchain tools and shims (list, update-shims)");
         writer.WriteLine("  update [options] Self-update miryo toolchain manager");
-        writer.WriteLine("  clean [path]     Remove build artifact directories (target/, obj/, dist/)");
+        writer.WriteLine("  clean [path]     Remove build artifact directories (target/, bin/, obj/)");
         writer.WriteLine("  compiler-server shutdown  Stop all compiler daemons owned by this user");
         writer.WriteLine();
         writer.WriteLine("Properties:");
@@ -943,6 +1088,7 @@ public static class MiryoCommandLine
         writer.WriteLine();
         writer.WriteLine("General Options:");
         writer.WriteLine("  --config <path>  Specify toolchain configuration file (default: miryo.config)");
+        writer.WriteLine("  --color <mode>   Control ANSI colored output (auto, always, never)");
         writer.WriteLine("  -v, --version    Show Miryo version");
         writer.WriteLine("  -h, --help       Show this help message");
     }
@@ -955,6 +1101,7 @@ public static class MiryoCommandLine
         writer.WriteLine("  --bin            Create an application project (default)");
         writer.WriteLine("  --lib            Create a library project");
         writer.WriteLine("  --config <path>  Specify configuration file for project templates");
+        writer.WriteLine("  --color <mode>   Control ANSI colored output (auto, always, never)");
         writer.WriteLine("  -h, --help       Show this help text");
     }
 
@@ -978,11 +1125,11 @@ public static class MiryoCommandLine
 
     private static bool ShouldUseColors(string? colorMode) => colorMode switch
     {
-        "always" => true,
-        "never" => false,
-        _ => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
-             Environment.GetEnvironmentVariable("NO_COLOR") == null &&
-             Environment.GetEnvironmentVariable("TERM") != "dumb"
+        "never" or "false" or "off" => false,
+        "always" or "true" or "on" => true,
+        "auto" => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
+                  Environment.GetEnvironmentVariable("NO_COLOR") == null,
+        _ => Environment.GetEnvironmentVariable("NO_COLOR") == null
     };
 
     private static string FormatSuccess(string text, bool useColors) => useColors ? $"{AnsiGreen}{text}{AnsiReset}" : text;

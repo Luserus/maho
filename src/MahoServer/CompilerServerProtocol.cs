@@ -150,15 +150,21 @@ public static class CompilerServerEndpoint
 {
     public static string NormalizeVersion(string version)
     {
-        if (string.IsNullOrWhiteSpace(version)) return "0.2.0";
+        if (string.IsNullOrWhiteSpace(version)) return "0.2";
         version = version.Trim();
         if (version.StartsWith("v", StringComparison.OrdinalIgnoreCase)) version = version[1..].Trim();
         if (Version.TryParse(version, out var parsed))
         {
-            int build = parsed.Build >= 0 ? parsed.Build : 0;
-            return $"{parsed.Major}.{Math.Max(0, parsed.Minor)}.{build}";
+            return $"{parsed.Major}.{Math.Max(0, parsed.Minor)}";
         }
-        return version;
+        int firstDot = version.IndexOf('.');
+        if (firstDot > 0)
+        {
+            int secondDot = version.IndexOf('.', firstDot + 1);
+            if (secondDot > 0) return version[..secondDot];
+            return version;
+        }
+        return $"{version}.0";
     }
 
     public static string CreatePipeName(string version)

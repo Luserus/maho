@@ -91,10 +91,10 @@ Miryo searches for `miryo.config` in:
 
 [tools]
 # Arrays of search paths tried in order until an existing executable or package is found
-mahoc = ["./dist/mahoc", "./src/MahoCli/bin/Debug/net10.0/mahoc.dll", "mahoc"]
-mahoc_server = ["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]
-mahoc_compiler = ["./compilers/0.2.0", "./dist/compilers/0.2.0"]
-il2llvmir = ["./dist/il2llvmir", "il2llvmir"]
+mahoc = ["../maho/tools/0.2/mahoc", "../maho/shims/mahoc", "mahoc"]
+mahoc_server = ["../maho/tools/0.2/maho-server", "../maho/shims/maho-server", "maho-server"]
+mahoc_compiler = ["../maho/compiler/0.2"]
+il2llvmir = ["./il2llvmir", "il2llvmir"]
 llvm_opt = ["opt", "/usr/bin/opt"]
 llvm_clang = ["clang", "/usr/bin/clang"]
 
@@ -106,7 +106,7 @@ bin_source_path = "src/Program.mh"
 bin_source = "println(\"Hello from Maho!\");\n"
 lib_source_path = "src/Lib.mh"
 lib_source = "public struct Lib;\n"
-gitignore = "target/\nbin/\nobj/\ndist/\n"
+gitignore = "target/\nbin/\nobj/\n"
 ```
 
 ---

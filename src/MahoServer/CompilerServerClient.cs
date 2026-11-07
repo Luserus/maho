@@ -137,6 +137,11 @@ public static class CompilerServerClient
 
         string baseDir = AppContext.BaseDirectory;
         string parentDir = Path.GetDirectoryName(baseDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? baseDir;
+        string grandparent = Path.GetDirectoryName(parentDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? parentDir;
+        if (Directory.Exists(Path.Combine(grandparent, "tools")) &&
+            (Directory.Exists(Path.Combine(grandparent, "server")) || Directory.Exists(Path.Combine(grandparent, "compiler")) || Directory.Exists(Path.Combine(grandparent, "runtime"))))
+            return Path.GetFullPath(grandparent);
+
         if (Directory.Exists(Path.Combine(parentDir, "tools")) &&
             (Directory.Exists(Path.Combine(parentDir, "server")) || Directory.Exists(Path.Combine(parentDir, "compiler")) || Directory.Exists(Path.Combine(parentDir, "runtime"))))
             return Path.GetFullPath(parentDir);

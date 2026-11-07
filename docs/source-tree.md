@@ -15,9 +15,9 @@ The repository is organized into focused projects:
 
 - `tests/Maho.Tests`: complete xUnit test suite (450 automated tests) covering lexer, parser, diagnostics engine, resolution passes, macro expansion, CLI argument parsing, Miryo project loading, and terminal rendering.
 
-## Distribution & Build (`dist/` & Root Scripts)
+## Distribution & Build (`bin/` & Root Scripts)
 
-- `dist/`: output directory containing compiled binaries (`mahoc`, `mahoc-server`, `miryo`), configuration (`miryo.config`), and versioned compiler packages (`dist/compilers/0.2.0/`).
+- `bin/`: output directory containing compiled toolchains in separate `maho/` and `miryo/` trees (`bin/maho/tools/`, `bin/maho/compiler/`, `bin/maho/server/`, `bin/miryo/`).
 - `miryo.config`: default toolchain configuration defining tool search paths and project templates.
 - `build-maho`: cross-platform Bash build script for Linux, macOS, WSL, and Git Bash.
 - `build-maho.ps1`: PowerShell build script for Windows and PowerShell Core.

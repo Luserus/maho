@@ -6,10 +6,11 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLI_PROJECT="$REPO_ROOT/src/MahoCli/MahoCli.csproj"
 SERVER_HOST_PROJECT="$REPO_ROOT/src/MahoServerHost/MahoServerHost.csproj"
 SERVER_PROJECT="$REPO_ROOT/src/MahoServer/MahoServer.csproj"
+SERVER_MANAGER_PROJECT="$REPO_ROOT/src/MahoServerManager/MahoServerManager.csproj"
 COMPILER_PROJECT="$REPO_ROOT/src/Maho/Maho.csproj"
 MIRYO_PROJECT="$REPO_ROOT/src/Miryo/Miryo.csproj"
 MIRYO_UPDATE_PROJECT="$REPO_ROOT/src/MiryoUpdate/MiryoUpdate.csproj"
-DIST_DIR="$REPO_ROOT/dist"
+BIN_DIR="$REPO_ROOT/bin"
 CLI_VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$CLI_PROJECT" | tr -d ' \r' | head -n 1)"
 CLI_VERSION="${CLI_VERSION:-0.2.0}"
 
@@ -29,14 +30,14 @@ Build script for the Maho toolchain (miryo, mahoc, Maho).
 Options:
   --all, all                     Build toolchain for all major platforms (linux-x64, linux-arm64, win-x64, osx-x64, osx-arm64)
   --platform, -p <platform>      Build toolchain for a specific platform (e.g. linux-arm64, win-x64, osx-arm64)
-  --single-file, -s, single      Produce standalone distribution package using shared runtime in dist/runtime
+  --single-file, -s, single      Produce standalone distribution packages using shared runtime in maho/runtime and miryo/runtime
   --debug, -d                    Build with debug configuration and emit PDB symbol files
   --install, -i                  Install built toolchain to ~/.maho/
   -h, --help                     Show this help message
 
 Default behavior:
   Fast incremental publishing for testing (framework-dependent),
-  omitting PDB symbols and dependency JSON files.
+  omitting PDB symbols and dependency JSON files into bin/ (maho/ and miryo/).
 EOF
 }
 
@@ -143,33 +144,42 @@ publish_target() {
     local tool_version
     tool_version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$CLI_PROJECT" | tr -d ' \r' | head -n 1)"
     tool_version="${tool_version:-0.2.0}"
+    local layout_version
+    layout_version="$(echo "$tool_version" | cut -d. -f1,2)"
+    layout_version="${layout_version:-0.2}"
     local miryo_version
     miryo_version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$MIRYO_PROJECT" | tr -d ' \r' | head -n 1)"
     miryo_version="${miryo_version:-1.0.0}"
 
     local bin_args=("${debug_props[@]}")
     local tools_args=("${debug_props[@]}")
+    local server_mgr_args=("${debug_props[@]}")
 
     if [ "$single_file" = true ]; then
-        bin_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true" "-p:AppHostRelativeDotNet=../runtime")
+        bin_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true" "-p:AppHostRelativeDotNet=runtime")
         tools_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true" "-p:AppHostRelativeDotNet=../../runtime")
+        server_mgr_args+=("-r" "$rid" "--no-self-contained" "-p:PublishSingleFile=true" "-p:AppHostRelativeDotNet=../runtime")
     elif [ -n "$rid" ]; then
         bin_args+=("-r" "$rid" "--no-self-contained")
         tools_args+=("-r" "$rid" "--no-self-contained")
+        server_mgr_args+=("-r" "$rid" "--no-self-contained")
     fi
 
-    local bin_dir="$out_dir/bin"
-    local tools_dir="$out_dir/tools/$tool_version"
-    local shims_dir="$out_dir/shims"
-    local compiler_dir="$out_dir/compiler/$tool_version"
-    local runtime_dir="$out_dir/runtime"
+    local maho_dir="$out_dir/maho"
+    local miryo_dir="$out_dir/miryo"
+    local tools_dir="$maho_dir/tools/$layout_version"
+    local shims_dir="$maho_dir/shims"
+    local compiler_dir="$maho_dir/compiler/$layout_version"
+    local server_dir="$maho_dir/server"
+    local maho_runtime_dir="$maho_dir/runtime"
+    local miryo_runtime_dir="$miryo_dir/runtime"
 
-    mkdir -p "$bin_dir" "$tools_dir" "$shims_dir" "$compiler_dir"
+    mkdir -p "$miryo_dir" "$tools_dir" "$shims_dir" "$compiler_dir" "$server_dir"
 
-    # 1. Publish bin tools: miryo and miryo-update
-    "$DOTNET_BIN" publish "$MIRYO_PROJECT" -c "$config" -o "$bin_dir" "${bin_args[@]}" --nologo -v q
-    "$DOTNET_BIN" publish "$MIRYO_UPDATE_PROJECT" -c "$config" -o "$bin_dir" "${bin_args[@]}" --nologo -v q
-    cat > "$bin_dir/manifest.json" <<EOF
+    # 1. Publish miryo tools: miryo and miryo-update into miryo/
+    "$DOTNET_BIN" publish "$MIRYO_PROJECT" -c "$config" -o "$miryo_dir" "${bin_args[@]}" --nologo -v q
+    "$DOTNET_BIN" publish "$MIRYO_UPDATE_PROJECT" -c "$config" -o "$miryo_dir" "${bin_args[@]}" --nologo -v q
+    cat > "$miryo_dir/manifest.json" <<EOF
 {
   "version": "$miryo_version",
   "miryo": "miryo",
@@ -178,7 +188,7 @@ publish_target() {
 }
 EOF
 
-    # 2. Publish versioned tools: mahoc and maho-server
+    # 2. Publish versioned tools: mahoc and maho-server into maho/tools/{version}
     "$DOTNET_BIN" publish "$CLI_PROJECT" -c "$config" -o "$tools_dir" "${tools_args[@]}" --nologo -v q
     "$DOTNET_BIN" publish "$SERVER_HOST_PROJECT" -c "$config" -o "$tools_dir" "${tools_args[@]}" --nologo -v q
 
@@ -200,7 +210,7 @@ EOF
     cat > "$tools_dir/manifest.json" <<EOF
 {
   "version": "$tool_version",
-  "targetCompilerVersion": "$tool_version",
+  "targetCompilerVersion": "$layout_version",
   "tools": {
     "mahoc": "mahoc",
     "maho-server": "maho-server",
@@ -209,7 +219,7 @@ EOF
 }
 EOF
 
-    # 3. Publish compiler library: Maho.dll
+    # 3. Publish compiler library: Maho.dll into maho/compiler/{version}
     "$DOTNET_BIN" publish "$COMPILER_PROJECT" -c "$config" -o "$compiler_dir" "${debug_props[@]}" --nologo -v q
     cat > "$compiler_dir/manifest.json" <<EOF
 {
@@ -218,66 +228,69 @@ EOF
 }
 EOF
 
-    # 4. If in distribution mode (-s), deploy shared runtime to $runtime_dir
+    # 4. If in distribution mode (-s), deploy shared runtime to both runtime directories
     if [ "$single_file" = true ]; then
-        echo "    -> Deploying shared runtime into $runtime_dir..."
-        mkdir -p "$runtime_dir/shared"
+        echo "    -> Deploying shared runtime into $maho_runtime_dir and $miryo_runtime_dir..."
+        mkdir -p "$maho_runtime_dir/shared" "$miryo_runtime_dir/shared"
 
+        local real_dotnet
+        real_dotnet="$(readlink -f "$DOTNET_BIN" 2>/dev/null || echo "$DOTNET_BIN")"
         local dotnet_dir
-        dotnet_dir="$(cd -- "$(dirname -- "$DOTNET_BIN")" && pwd)"
+        dotnet_dir="$(cd -- "$(dirname -- "$real_dotnet")" && pwd)"
 
-        if [ -d "$dotnet_dir/host" ]; then
-            cp -r "$dotnet_dir/host" "$runtime_dir/"
-        fi
+        for rdir in "$maho_runtime_dir" "$miryo_runtime_dir"; do
+            if [ -d "$dotnet_dir/host" ]; then
+                cp -r "$dotnet_dir/host" "$rdir/"
+            fi
 
-        if [ -d "$dotnet_dir/shared/Microsoft.NETCore.App" ]; then
-            cp -r "$dotnet_dir/shared/Microsoft.NETCore.App" "$runtime_dir/shared/"
-        fi
+            if [ -d "$dotnet_dir/shared/Microsoft.NETCore.App" ]; then
+                cp -r "$dotnet_dir/shared/Microsoft.NETCore.App" "$rdir/shared/"
+            fi
 
-        if [ -f "$dotnet_dir/dotnet" ]; then
-            cp "$dotnet_dir/dotnet" "$runtime_dir/"
-        elif [ -f "$dotnet_dir/dotnet.exe" ]; then
-            cp "$dotnet_dir/dotnet.exe" "$runtime_dir/"
-        fi
+            if [ -f "$dotnet_dir/dotnet" ]; then
+                cp "$dotnet_dir/dotnet" "$rdir/"
+            elif [ -f "$dotnet_dir/dotnet.exe" ]; then
+                cp "$dotnet_dir/dotnet.exe" "$rdir/"
+            fi
+        done
     fi
 
-    # 5. Publish server component: MahoServer.dll into server/
-    local server_dir="$out_dir/server"
-    mkdir -p "$server_dir"
+    # 5. Publish server components: MahoServer.dll and server-manager into maho/server/
     "$DOTNET_BIN" publish "$SERVER_PROJECT" -c "$config" -o "$server_dir" "${debug_props[@]}" --nologo -v q
+    "$DOTNET_BIN" publish "$SERVER_MANAGER_PROJECT" -c "$config" -o "$server_dir" "${server_mgr_args[@]}" --nologo -v q
     cat > "$server_dir/manifest.json" <<EOF
 {
-  "activeCompilerVersion": "$tool_version",
-  "installedTools": ["$tool_version"],
-  "installedCompilers": ["$tool_version"]
+  "activeCompilerVersion": "$layout_version",
+  "installedTools": ["$layout_version"],
+  "installedCompilers": ["$layout_version"]
 }
 EOF
 
-    # 6. Generate shims in shims/
+    # 6. Generate shims in maho/shims/
     if [[ "$rid" == win-* ]]; then
         cat > "$shims_dir/mahoc.cmd" <<EOF
-@"%~dp0..\tools\\$tool_version\mahoc.exe" %*
+@"%~dp0..\tools\\$layout_version\mahoc.exe" %*
 EOF
         cat > "$shims_dir/maho-server.cmd" <<EOF
-@"%~dp0..\tools\\$tool_version\maho-server.exe" %*
+@"%~dp0..\tools\\$layout_version\maho-server.exe" %*
 EOF
         cat > "$shims_dir/maho-ls.cmd" <<EOF
-@"%~dp0..\tools\\$tool_version\maho-ls.cmd" %*
+@"%~dp0..\tools\\$layout_version\maho-ls.cmd" %*
 EOF
     else
-        ln -sf "../tools/$tool_version/mahoc" "$shims_dir/mahoc"
-        ln -sf "../tools/$tool_version/maho-server" "$shims_dir/maho-server"
-        ln -sf "../tools/$tool_version/maho-ls" "$shims_dir/maho-ls"
+        ln -sf "../tools/$layout_version/mahoc" "$shims_dir/mahoc"
+        ln -sf "../tools/$layout_version/maho-server" "$shims_dir/maho-server"
+        ln -sf "../tools/$layout_version/maho-ls" "$shims_dir/maho-ls"
     fi
 
-    # 7. Generate miryo.config inside bin/ folder alongside miryo
-    cat > "$bin_dir/miryo.config" <<EOF
+    # 7. Generate miryo.config inside miryo folder alongside miryo
+    cat > "$miryo_dir/miryo.config" <<EOF
 # Miryo Toolchain Configuration
 
 [tools]
-mahoc = ["../tools/$tool_version/mahoc", "../shims/mahoc", "mahoc"]
-mahoc_server = ["../tools/$tool_version/maho-server", "../shims/maho-server", "maho-server"]
-mahoc_compiler = ["../compiler/$tool_version"]
+mahoc = ["../maho/tools/$layout_version/mahoc", "../maho/shims/mahoc", "mahoc"]
+mahoc_server = ["../maho/tools/$layout_version/maho-server", "../maho/shims/maho-server", "maho-server"]
+mahoc_compiler = ["../maho/compiler/$layout_version"]
 
 [templates]
 bin_template = "EntryFile : \"src/Program.mh\";\nImplicitTopLevel : true;\n"
@@ -286,7 +299,7 @@ bin_source_path = "src/Program.mh"
 bin_source = "println(\"Hello from Maho!\");\n"
 lib_source_path = "src/Lib.mh"
 lib_source = "public struct Lib;\n"
-gitignore = "target/\nbin/\nobj/\ndist/\n"
+gitignore = "target/\nbin/\nobj/\n"
 EOF
 }
 
@@ -303,70 +316,81 @@ find_binary() {
 }
 
 host_rid="$(detect_host_rid)"
+LAYOUT_VERSION="$(echo "$CLI_VERSION" | cut -d. -f1,2)"
+LAYOUT_VERSION="${LAYOUT_VERSION:-0.2}"
 
 if [ "$build_all" = true ]; then
     platforms=("linux-x64" "linux-arm64" "win-x64" "osx-x64" "osx-arm64")
 
     echo "==> Building Maho toolchain for all major platforms..."
-    mkdir -p "$DIST_DIR"
+    mkdir -p "$BIN_DIR"
 
     for rid in "${platforms[@]}"; do
         echo "  -> Publishing for $rid..."
-        mkdir -p "$DIST_DIR/$rid"
-        publish_target "$rid" "$DIST_DIR/$rid"
+        mkdir -p "$BIN_DIR/$rid"
+        publish_target "$rid" "$BIN_DIR/$rid"
     done
 
-    echo "  -> Publishing for host platform into $DIST_DIR..."
-    publish_target "$host_rid" "$DIST_DIR"
+    echo "  -> Publishing for host platform into $BIN_DIR..."
+    publish_target "$host_rid" "$BIN_DIR"
 
-    host_miryo="$(find_binary "$DIST_DIR/bin" "miryo")"
-    host_mahoc="$(find_binary "$DIST_DIR/tools/$CLI_VERSION" "mahoc")"
-    host_server="$(find_binary "$DIST_DIR/tools/$CLI_VERSION" "maho-server")"
+    host_miryo="$(find_binary "$BIN_DIR/miryo" "miryo")"
+    host_mahoc="$(find_binary "$BIN_DIR/maho/tools/$LAYOUT_VERSION" "mahoc")"
+    host_server="$(find_binary "$BIN_DIR/maho/tools/$LAYOUT_VERSION" "maho-server")"
+    host_server_mgr="$(find_binary "$BIN_DIR/maho/server" "server-manager")"
 
     echo ""
     echo "Maho toolchain successfully built for all major platforms:"
-    echo "  Host Toolchain Manager (miryo): $host_miryo"
-    echo "  Host Compiler (mahoc):          $host_mahoc"
-    echo "  Host Server (maho-server):      $host_server"
+    echo "  miryo:          $host_miryo"
+    echo "  mahoc:          $host_mahoc"
+    echo "  maho-server:    $host_server"
+    echo "  server-manager: $host_server_mgr"
+    echo "  Layout:         $BIN_DIR (maho/ and miryo/)"
 elif [ -n "$target_platform" ]; then
     echo "==> Building Maho toolchain for platform '$target_platform'..."
-    target_dir="$DIST_DIR/$target_platform"
+    target_dir="$BIN_DIR/$target_platform"
     mkdir -p "$target_dir"
     publish_target "$target_platform" "$target_dir"
 
-    miryo_bin="$(find_binary "$target_dir/bin" "miryo")"
-    mahoc_bin="$(find_binary "$target_dir/tools/$CLI_VERSION" "mahoc")"
-    server_bin="$(find_binary "$target_dir/tools/$CLI_VERSION" "maho-server")"
+    miryo_bin="$(find_binary "$target_dir/miryo" "miryo")"
+    mahoc_bin="$(find_binary "$target_dir/maho/tools/$LAYOUT_VERSION" "mahoc")"
+    server_bin="$(find_binary "$target_dir/maho/tools/$LAYOUT_VERSION" "maho-server")"
+    server_mgr_bin="$(find_binary "$target_dir/maho/server" "server-manager")"
 
     echo ""
     echo "Maho toolchain successfully built for $target_platform:"
-    echo "  miryo:       $miryo_bin"
-    echo "  mahoc:       $mahoc_bin"
-    echo "  maho-server: $server_bin"
+    echo "  miryo:          $miryo_bin"
+    echo "  mahoc:          $mahoc_bin"
+    echo "  maho-server:    $server_bin"
+    echo "  server-manager: $server_mgr_bin"
+    echo "  Layout:         $target_dir (maho/ and miryo/)"
 else
     echo "==> Building Maho toolchain for host platform ($host_rid)..."
-    mkdir -p "$DIST_DIR"
+    mkdir -p "$BIN_DIR"
 
-    publish_target "$host_rid" "$DIST_DIR"
+    publish_target "$host_rid" "$BIN_DIR"
 
-    miryo_bin="$(find_binary "$DIST_DIR/bin" "miryo")"
-    mahoc_bin="$(find_binary "$DIST_DIR/tools/$CLI_VERSION" "mahoc")"
-    server_bin="$(find_binary "$DIST_DIR/tools/$CLI_VERSION" "maho-server")"
+    miryo_bin="$(find_binary "$BIN_DIR/miryo" "miryo")"
+    mahoc_bin="$(find_binary "$BIN_DIR/maho/tools/$LAYOUT_VERSION" "mahoc")"
+    server_bin="$(find_binary "$BIN_DIR/maho/tools/$LAYOUT_VERSION" "maho-server")"
+    server_mgr_bin="$(find_binary "$BIN_DIR/maho/server" "server-manager")"
 
     echo ""
     echo "Maho toolchain successfully built:"
-    echo "  miryo:       $miryo_bin"
-    echo "  mahoc:       $mahoc_bin"
-    echo "  maho-server: $server_bin"
-    echo "  Layout:      $DIST_DIR"
+    echo "  miryo:          $miryo_bin"
+    echo "  mahoc:          $mahoc_bin"
+    echo "  maho-server:    $server_bin"
+    echo "  server-manager: $server_mgr_bin"
+    echo "  Layout:         $BIN_DIR (maho/ and miryo/)"
 fi
 
 if [ "$install_to_home" = true ]; then
     target_home="${MAHO_HOME:-$HOME/.maho}"
     echo ""
     echo "==> Installing Maho toolchain to $target_home..."
-    mkdir -p "$target_home"
-    cp -r "$DIST_DIR"/* "$target_home/"
+    mkdir -p "$target_home/bin"
+    cp -r "$BIN_DIR/maho"/* "$target_home/"
+    cp -r "$BIN_DIR/miryo"/* "$target_home/bin/"
     echo "Installation complete!"
     echo "Add '$target_home/bin' and '$target_home/shims' to your PATH to use miryo and mahoc directly."
 fi

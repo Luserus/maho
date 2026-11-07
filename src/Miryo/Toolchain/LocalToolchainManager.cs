@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Maho.Server;
 
 namespace Miryo.Toolchain;
 
@@ -34,7 +33,7 @@ public sealed class LocalToolchainManager : IToolchainManager
             if (installed.Count > 0)
                 return installed[^1];
 
-            return "0.2.0";
+            return "0.2";
         }
     }
 
@@ -44,7 +43,7 @@ public sealed class LocalToolchainManager : IToolchainManager
         {
             string toolsDir = MahoPaths.GetToolsDir(MahoHome);
             if (!Directory.Exists(toolsDir))
-                return ["0.2.0"];
+                return ["0.2"];
 
             var list = new List<string>();
             foreach (string dir in Directory.GetDirectories(toolsDir))
@@ -55,7 +54,7 @@ public sealed class LocalToolchainManager : IToolchainManager
             }
 
             list.Sort(StringComparer.Ordinal);
-            return list.Count > 0 ? list : ["0.2.0"];
+            return list.Count > 0 ? list : ["0.2"];
         }
     }
 
@@ -79,7 +78,7 @@ public sealed class LocalToolchainManager : IToolchainManager
         if (File.Exists(shimPath))
             return shimPath;
 
-        // 3. Fallback to co-located binaries in application directory (for development / flat dist)
+        // 3. Fallback to co-located binaries in application directory (for development)
         string baseDir = AppContext.BaseDirectory;
         string colocated = Path.Combine(baseDir, toolName + exeExt);
         if (File.Exists(colocated))

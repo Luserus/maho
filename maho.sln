@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
@@ -20,6 +20,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MahoServerHost", "src\MahoServerHost\MahoServerHost.csproj", "{C14E9E0A-1ED6-4D76-9297-5F1892F31075}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiryoUpdate", "src\MiryoUpdate\MiryoUpdate.csproj", "{E14B7D60-4B11-4FA6-B817-A96DE1D0A820}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MahoServerManager", "src\MahoServerManager\MahoServerManager.csproj", "{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -115,6 +117,18 @@ Global
 		{E14B7D60-4B11-4FA6-B817-A96DE1D0A820}.Release|x64.Build.0 = Release|Any CPU
 		{E14B7D60-4B11-4FA6-B817-A96DE1D0A820}.Release|x86.ActiveCfg = Release|Any CPU
 		{E14B7D60-4B11-4FA6-B817-A96DE1D0A820}.Release|x86.Build.0 = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|x64.Build.0 = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Debug|x86.Build.0 = Debug|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|x64.ActiveCfg = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|x64.Build.0 = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|x86.ActiveCfg = Release|Any CPU
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -127,6 +141,7 @@ Global
 		{4B704373-672F-4270-9F2E-651C40D8FAFE} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C14E9E0A-1ED6-4D76-9297-5F1892F31075} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E14B7D60-4B11-4FA6-B817-A96DE1D0A820} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{6B0186FE-7BA7-465B-B0B4-4C073DDE5899} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {034EBC2F-ED20-4453-BCC6-71FF306D130F}

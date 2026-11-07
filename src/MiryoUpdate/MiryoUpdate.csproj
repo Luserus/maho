@@ -11,8 +11,4 @@
     <RootNamespace>Miryo.Update</RootNamespace>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="../MahoServer/MahoServer.csproj" />
-  </ItemGroup>
-
 </Project>

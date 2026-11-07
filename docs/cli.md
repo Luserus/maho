@@ -8,7 +8,7 @@
 
 ## 1. Building the Toolchain
 
-The repository includes cross-platform build scripts that compile and publish `mahoc`, `miryo`, and `Maho.dll` into the root `dist/` directory:
+The repository includes cross-platform build scripts that compile and publish `mahoc`, `miryo`, and `Maho.dll` into the root `bin/` directory:
 
 ```bash
 # Linux / macOS / WSL / Git Bash
@@ -23,10 +23,10 @@ build-maho
 
 ### Build Options
 
-- (default): Release build for the host platform into `dist/`, omitting `.pdb` and `.deps.json` files for clean output.
-- `--single-file` (or `-s`): Bundles managed assemblies and runtime configuration into single standalone binary executables (`mahoc`, `miryo`) with zero loose runtime files.
+- (default): Release build for the host platform into `bin/` (`bin/maho/` and `bin/miryo/`), omitting `.pdb` and `.deps.json` files for clean output.
+- `--single-file` (or `-s`): Bundles managed assemblies and runtime configuration into single standalone binary executables with shared runtimes.
 - `--debug` (or `-d`): Builds Debug configuration and emits `.pdb` symbols and `.deps.json`.
-- `--all`: Compiles and publishes for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `dist/<platform>/`.
+- `--all`: Compiles and publishes for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `bin/<platform>/`.
 
 ---
 
@@ -35,12 +35,12 @@ build-maho
 Run the compiled executable directly on source files or directories:
 
 ```bash
-./dist/mahoc [options] [source-paths...]
+./bin/maho/shims/mahoc [options] [source-paths...]
 ```
 
 `source-paths` can be:
 - A single `.mh` source file.
-- Multiple `.mh` source files (e.g. `./dist/mahoc Types.mh Program.mh`).
+- Multiple `.mh` source files (e.g. `./bin/maho/shims/mahoc Types.mh Program.mh`).
 - A directory containing `.mh` source files (searched recursively by default, or shallow with `--no-recurse`).
 - When omitted, `mahoc` defaults to scanning the current working directory (`.`).
 
@@ -77,13 +77,13 @@ Diagnostics are written to `stderr` by default (or an explicit destination provi
 
 ```bash
 # Pretty-printed ANSI diagnostics with gutters, carets, and notes
-./dist/mahoc src/
+./bin/maho/shims/mahoc src/
 
 # Output machine-readable JSON diagnostics to stderr
-./dist/mahoc --diagnostics json -o - src/
+./bin/maho/shims/mahoc --diagnostics json -o - src/
 
 # Output plain-text diagnostics to a file
-./dist/mahoc --diagnostics text -o report.txt src/
+./bin/maho/shims/mahoc --diagnostics text -o report.txt src/
 ```
 
 ---

@@ -15,13 +15,15 @@ public sealed class MiryoInvocation
     public IReadOnlyDictionary<string, string> Properties { get; }
     public string[] Arguments { get; }
     public string TargetVersion { get; }
+    public string? ColorMode { get; }
 
-    public MiryoInvocation(string command, IReadOnlyDictionary<string, string> properties, string[] arguments, string targetVersion)
+    public MiryoInvocation(string command, IReadOnlyDictionary<string, string> properties, string[] arguments, string targetVersion, string? colorMode = null)
     {
         Command = command;
         Properties = properties;
         Arguments = arguments;
         TargetVersion = targetVersion;
+        ColorMode = colorMode;
     }
 
     /// <summary>
@@ -34,6 +36,7 @@ public sealed class MiryoInvocation
         var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var remaining = new List<string>();
         string? command = null;
+        string? colorMode = null;
 
         int i = 0;
         while (i < args.Length)
@@ -65,6 +68,36 @@ public sealed class MiryoInvocation
                 continue;
             }
 
+            if (token == "--color")
+            {
+                if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                {
+                    colorMode = args[++i].ToLowerInvariant();
+                    if (command is not null)
+                    {
+                        remaining.Add(token);
+                        remaining.Add(args[i]);
+                    }
+                }
+                else
+                {
+                    colorMode = "always";
+                    if (command is not null)
+                        remaining.Add(token);
+                }
+                i++;
+                continue;
+            }
+
+            if (token.StartsWith("--color=", StringComparison.OrdinalIgnoreCase))
+            {
+                colorMode = token[(token.IndexOf('=') + 1)..].ToLowerInvariant();
+                if (command is not null)
+                    remaining.Add(token);
+                i++;
+                continue;
+            }
+
             if (command is null)
             {
                 command = token;
@@ -78,6 +111,9 @@ public sealed class MiryoInvocation
 
         command ??= "help";
 
+        if (properties.TryGetValue("color", out string? propColor) && !string.IsNullOrWhiteSpace(propColor))
+            colorMode ??= propColor.ToLowerInvariant();
+
         // Determine target version: explicit property takes precedence, followed by default, then fallback
         string version;
         if (properties.TryGetValue("v", out string? propV) && !string.IsNullOrWhiteSpace(propV))
@@ -87,9 +123,9 @@ public sealed class MiryoInvocation
         else if (!string.IsNullOrWhiteSpace(defaultVersion))
             version = MahoPaths.NormalizeVersion(defaultVersion);
         else
-            version = "0.2.0";
+            version = "0.2";
 
-        return new MiryoInvocation(command.ToLowerInvariant(), properties, remaining.ToArray(), version);
+        return new MiryoInvocation(command.ToLowerInvariant(), properties, remaining.ToArray(), version, colorMode);
     }
 
     private static void ParseProperties(string raw, Dictionary<string, string> properties)

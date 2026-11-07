@@ -47,10 +47,10 @@ public sealed class MiryoConfiguration
         string dir = baseDir ?? AppContext.BaseDirectory;
         var config = new MiryoConfiguration(dir, configFilePath: null, isLoadedFromDisk: isLoadedFromDisk, loadWarning: loadWarning);
 
-        config.SetRaw("tools", "mahoc", new ConfigValue.ArrayValue(["./mahoc", "./dist/mahoc", "mahoc"]));
-        config.SetRaw("tools", "mahoc_server", new ConfigValue.ArrayValue(["./mahoc-server", "./dist/mahoc-server", "mahoc-server"]));
-        config.SetRaw("tools", "mahoc_compiler", new ConfigValue.ArrayValue(["./compilers/0.2.0", "./dist/compilers/0.2.0"]));
-        config.SetRaw("tools", "il2llvmir", new ConfigValue.ArrayValue(["./il2llvmir", "./dist/il2llvmir", "il2llvmir"]));
+        config.SetRaw("tools", "mahoc", new ConfigValue.ArrayValue(["./mahoc", "../maho/tools/0.2/mahoc", "../maho/shims/mahoc", "mahoc"]));
+        config.SetRaw("tools", "mahoc_server", new ConfigValue.ArrayValue(["./maho-server", "../maho/tools/0.2/maho-server", "../maho/shims/maho-server", "maho-server"]));
+        config.SetRaw("tools", "mahoc_compiler", new ConfigValue.ArrayValue(["../maho/compiler/0.2", "./compiler/0.2"]));
+        config.SetRaw("tools", "il2llvmir", new ConfigValue.ArrayValue(["./il2llvmir", "il2llvmir"]));
         config.SetRaw("tools", "llvm_opt", new ConfigValue.ArrayValue(["opt", "/usr/bin/opt"]));
         config.SetRaw("tools", "llvm_clang", new ConfigValue.ArrayValue(["clang", "/usr/bin/clang"]));
 
@@ -60,7 +60,7 @@ public sealed class MiryoConfiguration
         config.SetRaw("templates", "bin_source", new ConfigValue.StringLiteral("println(\"Hello from Maho!\");\n"));
         config.SetRaw("templates", "lib_source_path", new ConfigValue.StringLiteral("src/Lib.mh"));
         config.SetRaw("templates", "lib_source", new ConfigValue.StringLiteral("public struct Lib;\n"));
-        config.SetRaw("templates", "gitignore", new ConfigValue.StringLiteral("target/\nbin/\nobj/\ndist/\n"));
+        config.SetRaw("templates", "gitignore", new ConfigValue.StringLiteral("target/\nbin/\nobj/\n"));
 
         return config;
     }
@@ -207,7 +207,7 @@ public sealed class MiryoConfiguration
                 "bin_source" or "bin_source_template" => "println(\"Hello from Maho!\");\n",
                 "lib_source_path" => "src/Lib.mh",
                 "lib_source" or "lib_source_template" => "public struct Lib;\n",
-                "gitignore" or "gitignore_template" => "target/\nbin/\nobj/\ndist/\n",
+                "gitignore" or "gitignore_template" => "target/\nbin/\nobj/\n",
                 _ => string.Empty
             };
         }

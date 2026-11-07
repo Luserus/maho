@@ -17,10 +17,23 @@ namespace Maho.Server;
 public static class MahoServerDaemon
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string AnsiReset = "\u001b[0m";
+    private const string AnsiRed = "\u001b[31;1m";
+
+    private static bool ShouldUseColors(string? colorMode) => colorMode switch
+    {
+        "never" or "false" or "off" => false,
+        "always" or "true" or "on" => true,
+        "auto" => (!Console.IsOutputRedirected || !Console.IsErrorRedirected) &&
+                  Environment.GetEnvironmentVariable("NO_COLOR") == null,
+        _ => Environment.GetEnvironmentVariable("NO_COLOR") == null
+    };
+
+    private static string FormatError(string text, bool useColors) => useColors ? $"{AnsiRed}{text}{AnsiReset}" : text;
 
     public static int Main(string[] args)
     {
-        if (!TryParseArguments(args, out string pipeName, out string version, out TimeSpan? idleTimeout, out bool oneShot))
+        if (!TryParseArguments(args, out string pipeName, out string version, out TimeSpan? idleTimeout, out bool oneShot, out bool useColors))
             return 1;
 
         var identity = CompilerIdentity.ForVersion(version);
@@ -90,7 +103,7 @@ public static class MahoServerDaemon
 
                 Task connection = Task.Run(() =>
                 {
-                    HandleConnection(pipe, identity, shutdown);
+                    HandleConnection(pipe, identity, shutdown, useColors);
                 });
 
                 connections.Add(connection);
@@ -108,7 +121,7 @@ public static class MahoServerDaemon
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"maho-server error: {ex.Message}");
+            Console.Error.WriteLine($"{FormatError("error", useColors)}: {ex.Message}");
             return 1;
         }
         finally
@@ -117,7 +130,7 @@ public static class MahoServerDaemon
         }
     }
 
-    private static void HandleConnection(NamedPipeServerStream pipe, CompilerIdentity identity, CancellationTokenSource shutdown)
+    private static void HandleConnection(NamedPipeServerStream pipe, CompilerIdentity identity, CancellationTokenSource shutdown, bool useColors)
     {
         using (pipe)
         using (var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true))
@@ -203,17 +216,18 @@ public static class MahoServerDaemon
                     identity.Fingerprint);
 
                 writer.WriteLine(JsonSerializer.Serialize(errResponse, JsonOptions));
-                Console.Error.WriteLine($"maho-server connection error: {ex.Message}");
+                Console.Error.WriteLine($"{FormatError("error", useColors)}: connection error: {ex.Message}");
             }
         }
     }
 
-    private static bool TryParseArguments(string[] args, out string pipeName, out string version, out TimeSpan? idleTimeout, out bool oneShot)
+    private static bool TryParseArguments(string[] args, out string pipeName, out string version, out TimeSpan? idleTimeout, out bool oneShot, out bool useColors)
     {
         pipeName = string.Empty;
         version = "1.0";
         idleTimeout = TimeSpan.FromMinutes(5);
         oneShot = false;
+        string? colorMode = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -233,11 +247,23 @@ public static class MahoServerDaemon
                     idleTimeout = null;
                     oneShot = false;
                     break;
+                case "--color" when i + 1 < args.Length && !args[i + 1].StartsWith('-'):
+                    colorMode = args[++i].ToLowerInvariant();
+                    break;
+                case "--color":
+                    colorMode = "always";
+                    break;
+                case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
+                    colorMode = c[(c.IndexOf('=') + 1)..].ToLowerInvariant();
+                    break;
                 default:
-                    Console.Error.WriteLine("Usage: maho-server --pipe <name> [--version <major.minor>] [--idle-timeout <seconds>|--no-timeout]");
+                    useColors = ShouldUseColors(colorMode);
+                    Console.Error.WriteLine($"{FormatError("error", useColors)}: invalid arguments. Usage: maho-server --pipe <name> [--version <major.minor>] [--idle-timeout <seconds>|--no-timeout] [--color <mode>]");
                     return false;
             }
         }
+
+        useColors = ShouldUseColors(colorMode);
 
         if (string.IsNullOrWhiteSpace(pipeName))
         {
