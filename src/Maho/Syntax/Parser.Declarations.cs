@@ -50,6 +50,7 @@ internal sealed partial class Parser
         Token equals = ExpectToken(TokenKind.Equals, "'='", "after the alias name or constraints");
         TypeSyntax target = ParseTypeSyntax();
         Token semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the alias target", MissingTokenAnchor.AfterPrevious);
+
         return new AliasDeclaration(keyword, name, constraints, equals, target, semicolon);
     }
 
@@ -151,9 +152,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(ParseAttributeApplication());
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -177,6 +176,7 @@ internal sealed partial class Parser
         Token openParen = Consume();
         SeparatedSyntaxList<Expression> arguments = ParseExpressionArgumentList();
         Token closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the attribute argument list");
+
         return new AttributeApplication(dollarToken, name, openParen, arguments, closeParen);
     }
 
@@ -197,9 +197,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(type);
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -226,9 +224,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(constraint);
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -252,6 +248,7 @@ internal sealed partial class Parser
             members.Add(member);
             RecoverMemberIfStalled(start);
         }
+
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the type body");
 
         return new TypeBlockBody(openBrace, members, closeBrace);
@@ -271,7 +268,6 @@ internal sealed partial class Parser
     private TopLevelTypeDeclaration ParseTopLevelTypeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var type = ParseType(attributes, modifiers);
-
         return new TopLevelTypeDeclaration(type);
     }
 
@@ -357,6 +353,7 @@ internal sealed partial class Parser
             members.Add(member);
             RecoverMemberIfStalled(start);
         }
+
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the member block");
 
         return new MemberBlockDeclaration(attributes, modifiers, openBrace, members, closeBrace);
@@ -419,18 +416,14 @@ internal sealed partial class Parser
             bool isFinal = false;
 
             if (CurrentToken.Kind is TokenKind.Semicolon)
-            {
                 semicolon = Consume();
-            }
             else if (parseMode is StatementParseMode.AllowFinalExpression && CurrentToken.Kind is TokenKind.RightBrace or TokenKind.EndToken)
             {
                 semicolon = CreateMissingToken();
                 isFinal = true;
             }
             else
-            {
                 semicolon = CreateMissingToken();
-            }
 
             return new LocalExpressionStatement(blockExpr, semicolon, isFinalExpression: isFinal);
         }
@@ -530,17 +523,11 @@ internal sealed partial class Parser
             else
             {
                 if (firstIdentifier is null && nodesAndSeparators.Count == 0 && IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
-                {
                     identifier = CreateTupleNameFromTupleType((TupleType)type);
-                }
                 else if (CurrentToken.Kind is TokenKind.LeftParen)
-                {
                     identifier = ParseTupleName();
-                }
                 else if (CurrentToken.Kind is TokenKind.Identifier)
-                {
                     identifier = ParseNamedSyntax();
-                }
                 else
                 {
                     diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
@@ -595,9 +582,7 @@ internal sealed partial class Parser
             NamedSyntax identifier;
 
             if (CurrentToken.Kind is TokenKind.Identifier)
-            {
                 identifier = ParseNamedSyntax();
-            }
             else
             {
                 diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the parameter name");
@@ -620,9 +605,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(variableDecl);
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -781,9 +764,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(new SimpleName(ident));
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -801,17 +782,14 @@ internal sealed partial class Parser
         {
             var element = ParseTypeSyntax();
             Token? name = null;
+
             if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
-            {
                 name = Consume();
-            }
 
             nodesAndSeparators.Add(new TupleTypeElement(element, name));
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -831,9 +809,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(new SimpleName(ident));
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -859,14 +835,17 @@ internal sealed partial class Parser
     private static TupleName CreateTupleNameFromTupleType(TupleType tupleType)
     {
         var nodesAndSeparators = new List<SyntaxNode>();
+
         for (int i = 0; i < tupleType.Elements.Count; i++)
         {
             var elem = tupleType.Elements[i];
             nodesAndSeparators.Add(new SimpleName(elem.Name!));
             var separator = tupleType.Elements.GetSeparator(i);
+
             if (separator is not null)
                 nodesAndSeparators.Add(separator);
         }
+
         return new TupleName(tupleType.OpenParen, new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators), tupleType.CloseParen);
     }
 
@@ -1046,9 +1025,7 @@ internal sealed partial class Parser
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
 
             if (CurrentToken.Kind is TokenKind.Comma)
-            {
                 nodesAndSeparators.Add(Consume());
-            }
             else
                 break;
         }
@@ -1075,6 +1052,7 @@ internal sealed partial class Parser
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the constructor parameter list");
 
         List<TypeConstraintClause> constraints = [];
+
         while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
             constraints.Add(ParseTypeConstraintClause());
 
@@ -1152,6 +1130,7 @@ internal sealed partial class Parser
                 depth++;
             else if (tokens[probe].Kind is TokenKind.RightParen)
                 depth--;
+
             probe++;
         }
 
@@ -1162,6 +1141,7 @@ internal sealed partial class Parser
         while (probe < tokens.Count && tokens[probe].MatchingKind is MatchingKeywordKind.Where)
         {
             probe++;
+
             while (probe < tokens.Count &&
                    tokens[probe].Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken &&
                    tokens[probe].MatchingKind is not MatchingKeywordKind.Where)

@@ -107,6 +107,7 @@ public static class CompilerServerRegistry
     public static void Unregister(string pipeName)
     {
         string path = Path.Combine(DirectoryPath, pipeName + ".json");
+
         if (File.Exists(path))
             File.Delete(path);
     }
@@ -117,11 +118,13 @@ public static class CompilerServerRegistry
             return [];
 
         var registrations = new List<CompilerServerRegistration>();
+
         foreach (string path in Directory.GetFiles(DirectoryPath, "*.json", SearchOption.TopDirectoryOnly))
         {
             try
             {
                 var registration = JsonSerializer.Deserialize<CompilerServerRegistration>(File.ReadAllText(path), JsonOptions);
+
                 if (registration is not null && !string.IsNullOrWhiteSpace(registration.PipeName))
                     registrations.Add(registration);
             }
@@ -141,6 +144,7 @@ public sealed record CompilerIdentity(string Version, string Fingerprint)
     {
         string norm = CompilerServerEndpoint.NormalizeVersion(version);
         string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(norm))).ToLowerInvariant()[..16];
+
         return new CompilerIdentity(norm, hash);
     }
 }
@@ -150,20 +154,27 @@ public static class CompilerServerEndpoint
 {
     public static string NormalizeVersion(string version)
     {
-        if (string.IsNullOrWhiteSpace(version)) return "0.2";
+        if (string.IsNullOrWhiteSpace(version))
+            return "0.2";
+
         version = version.Trim();
+
         if (version.StartsWith("v", StringComparison.OrdinalIgnoreCase)) version = version[1..].Trim();
+
         if (Version.TryParse(version, out var parsed))
         {
             return $"{parsed.Major}.{Math.Max(0, parsed.Minor)}";
         }
+
         int firstDot = version.IndexOf('.');
+
         if (firstDot > 0)
         {
             int secondDot = version.IndexOf('.', firstDot + 1);
             if (secondDot > 0) return version[..secondDot];
             return version;
         }
+
         return $"{version}.0";
     }
 
@@ -173,6 +184,7 @@ public static class CompilerServerEndpoint
         string user = Environment.UserName;
         string identity = $"{CompilerProtocol.Version}|{user}|{norm}";
         string suffix = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant()[..16];
+
         return $"maho-server-{norm}-{suffix}";
     }
 

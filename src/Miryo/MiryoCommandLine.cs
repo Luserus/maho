@@ -23,11 +23,13 @@ public static class MiryoCommandLine
         get
         {
             var informational = typeof(MiryoCommandLine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
             if (!string.IsNullOrWhiteSpace(informational))
             {
                 int plusIndex = informational.IndexOf('+');
                 return plusIndex >= 0 ? informational[..plusIndex] : informational;
             }
+
             var ver = typeof(MiryoCommandLine).Assembly.GetName().Version ?? new Version(1, 0, 0);
             return ver.ToString(3);
         }
@@ -103,17 +105,15 @@ public static class MiryoCommandLine
 
             default:
                 bool useColors = ShouldUseColors(invocation.ColorMode);
+
                 if (invocation.Command.StartsWith('-'))
-                {
                     stderr.WriteLine($"{FormatError("error", useColors)}: unknown option '{invocation.Command}'.");
-                }
                 else
-                {
                     stderr.WriteLine($"{FormatError("error", useColors)}: unknown command '{invocation.Command}'. Expected a command keyword.");
-                }
 
                 stderr.WriteLine();
                 PrintUsage(stderr);
+
                 return 1;
         }
     }
@@ -129,6 +129,7 @@ public static class MiryoCommandLine
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
+
             switch (arg)
             {
                 case "--lib":
@@ -189,6 +190,7 @@ public static class MiryoCommandLine
         }
 
         string targetDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), projectName));
+
         if (Directory.Exists(targetDir) && Directory.EnumerateFileSystemEntries(targetDir).Any())
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: directory '{targetDir}' already exists and is not empty.");
@@ -201,9 +203,7 @@ public static class MiryoCommandLine
 
             MiryoConfiguration config = MiryoConfiguration.Load(configPath);
             if (!config.IsLoadedFromDisk && !string.IsNullOrWhiteSpace(config.LoadWarning))
-            {
                 stdout.WriteLine(config.LoadWarning);
-            }
 
             var templateVars = new Dictionary<string, string>
             {
@@ -232,9 +232,7 @@ public static class MiryoCommandLine
 
             string gitignoreContent = config.GetTemplate("gitignore", templateVars);
             if (!string.IsNullOrEmpty(gitignoreContent))
-            {
                 File.WriteAllText(Path.Combine(targetDir, ".gitignore"), gitignoreContent);
-            }
 
             stdout.WriteLine($"Created Maho {(isLib ? "library" : "application")} project '{projectName}' successfully.");
             return 0;
@@ -265,6 +263,7 @@ public static class MiryoCommandLine
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
+
             switch (arg)
             {
                 case "--config":
@@ -273,6 +272,7 @@ public static class MiryoCommandLine
                         stderr.WriteLine($"{FormatError("error", useColors)}: the --config option requires a configuration file path.");
                         return 1;
                     }
+
                     configPath = args[++i];
                     break;
                 case "-np" or "--no-project" or "--allow-no-project":
@@ -286,13 +286,10 @@ public static class MiryoCommandLine
                     break;
                 case "--color":
                     if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
-                    {
                         colorMode = args[++i].ToLowerInvariant();
-                    }
                     else
-                    {
                         colorMode = "always";
-                    }
+
                     useColors = ShouldUseColors(colorMode);
                     break;
                 case string c when c.StartsWith("--color=", StringComparison.OrdinalIgnoreCase):
@@ -305,6 +302,7 @@ public static class MiryoCommandLine
                         stderr.WriteLine($"{FormatError("error", useColors)}: the -o/--output option requires a destination path.");
                         return 1;
                     }
+
                     outputDir = args[++i];
                     break;
                 case "-h" or "--help":
@@ -321,6 +319,7 @@ public static class MiryoCommandLine
                         stderr.WriteLine($"{FormatError("error", useColors)}: only one target directory or project file can be specified.");
                         return 1;
                     }
+
                     targetPath = arg;
                     break;
             }
@@ -344,19 +343,23 @@ public static class MiryoCommandLine
         toolchain ??= new LocalToolchainManager();
         string targetVersion = invocation?.TargetVersion ?? toolchain.ActiveVersion;
         string? mahocPath = toolchain.FindTool("mahoc", targetVersion) ?? config.FindTool("mahoc");
+
         if (mahocPath is null)
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: Could not locate 'mahoc' compiler executable.");
             stderr.WriteLine($"searched candidates: {string.Join(", ", config.GetToolCandidates("mahoc"))}");
             stderr.WriteLine("ensure 'mahoc' is built in bin/maho/ or configure its path in miryo.config.");
+
             return 1;
         }
 
         var mahocArgs = new List<string>();
         string displayProjectName = Path.GetFileNameWithoutExtension(fullTargetPath);
+
         if (!noProject && Directory.Exists(fullTargetPath))
         {
             string? foundProject = MiryoBuildSystem.FindProjectFile(fullTargetPath);
+
             if (foundProject is not null)
                 displayProjectName = Path.GetFileNameWithoutExtension(foundProject);
         }
@@ -406,11 +409,13 @@ public static class MiryoCommandLine
         else
         {
             string projectFilePath;
+
             if (File.Exists(fullTargetPath) && string.Equals(Path.GetExtension(fullTargetPath), ".mhpr", StringComparison.OrdinalIgnoreCase))
                 projectFilePath = fullTargetPath;
             else if (Directory.Exists(fullTargetPath))
             {
                 string? found = MiryoBuildSystem.FindProjectFile(fullTargetPath);
+
                 if (found is null)
                 {
                     configurationTimer.Stop();
@@ -425,6 +430,7 @@ public static class MiryoCommandLine
                     stdout.Flush();
                     return 1;
                 }
+
                 projectFilePath = found;
             }
             else
@@ -439,6 +445,7 @@ public static class MiryoCommandLine
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
                 stdout.Flush();
+
                 return 1;
             }
 
@@ -459,6 +466,7 @@ public static class MiryoCommandLine
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
                 stdout.Flush();
+
                 return 1;
             }
 
@@ -481,6 +489,7 @@ public static class MiryoCommandLine
                     stdout.WriteLine();
                     stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
                     stdout.Flush();
+
                     return 1;
                 }
 
@@ -507,9 +516,7 @@ public static class MiryoCommandLine
             mahocArgs.Add($"--implicit-toplevel={(project.ImplicitTopLevel ? "true" : "false")}");
 
             if (project.GlobalUnsafeEnabled)
-            {
                 mahocArgs.Add("--unsafe");
-            }
 
             foreach (var (aliasName, target) in project.GlobalAliases)
             {
@@ -540,6 +547,7 @@ public static class MiryoCommandLine
         // a directory rather than a PATH command because its exact version is
         // part of the selected build toolchain.
         string? serverPath = config.FindTool("mahoc_server");
+
         if (serverPath is not null)
         {
             mahocArgs.Add("--server-path");
@@ -547,6 +555,7 @@ public static class MiryoCommandLine
         }
 
         string? compilerPackagePath = config.FindDirectory("mahoc_compiler");
+
         if (compilerPackagePath is not null)
         {
             mahocArgs.Add("--compiler-package");
@@ -572,6 +581,7 @@ public static class MiryoCommandLine
 
             using var resultPipe = new NamedPipeServerStream(resultPipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             using var process = Process.Start(psi);
+
             if (process is null)
             {
                 compileTimer.Stop();
@@ -660,6 +670,7 @@ public static class MiryoCommandLine
             stdout.WriteLine();
             stdout.WriteLine($"build {FormatStatus(process.ExitCode == 0, useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
             stdout.Flush();
+
             return process.ExitCode;
         }
         catch (Exception ex)
@@ -674,6 +685,7 @@ public static class MiryoCommandLine
             stdout.WriteLine();
             stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
             stdout.Flush();
+
             return 1;
         }
     }
@@ -736,6 +748,7 @@ public static class MiryoCommandLine
         psi.RedirectStandardError = false;
 
         using var process = Process.Start(psi);
+
         if (process is null)
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: failed to start mahoc process.");
@@ -778,6 +791,7 @@ public static class MiryoCommandLine
         string? colorMode = invocation?.ColorMode ?? ExtractColorMode(args);
         bool useColors = ShouldUseColors(colorMode);
         stderr.WriteLine($"{FormatError("error", useColors)}: run {FormatFailed("failed", useColors)}: Native code execution pipeline not implemented yet.");
+
         return 1;
     }
 
@@ -812,6 +826,7 @@ public static class MiryoCommandLine
         psi.RedirectStandardError = false;
 
         using var process = Process.Start(psi);
+
         if (process is null)
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: failed to launch maho-ls.");
@@ -826,9 +841,11 @@ public static class MiryoCommandLine
     {
         string? colorMode = invocation.ColorMode;
         string? sub = null;
+
         for (int i = 0; i < invocation.Arguments.Length; i++)
         {
             string arg = invocation.Arguments[i];
+
             if (arg == "--color" && i + 1 < invocation.Arguments.Length && !invocation.Arguments[i + 1].StartsWith('-'))
                 colorMode = invocation.Arguments[++i].ToLowerInvariant();
             else if (arg == "--color")
@@ -847,16 +864,19 @@ public static class MiryoCommandLine
             case "list":
                 stdout.WriteLine($"Active toolchain: v{toolchain.ActiveVersion}");
                 stdout.WriteLine("Installed versions:");
+
                 foreach (string v in toolchain.InstalledVersions)
                 {
                     string marker = v == toolchain.ActiveVersion ? " (active)" : "";
                     stdout.WriteLine($"  - v{v}{marker}");
                 }
+
                 return 0;
 
             case "shims" or "update-shims":
                 toolchain.UpdateShims(invocation.TargetVersion);
                 stdout.WriteLine($"Updated shims for v{invocation.TargetVersion}.");
+
                 return 0;
 
             default:
@@ -877,9 +897,11 @@ public static class MiryoCommandLine
 
         string? stagedPath = null;
         string? colorMode = invocation.ColorMode;
+
         for (int i = 0; i < invocation.Arguments.Length; i++)
         {
             string arg = invocation.Arguments[i];
+
             if (arg == "--source" && i + 1 < invocation.Arguments.Length)
                 stagedPath = invocation.Arguments[++i];
             else if (arg == "--color" && i + 1 < invocation.Arguments.Length && !invocation.Arguments[i + 1].StartsWith('-'))
@@ -926,6 +948,7 @@ public static class MiryoCommandLine
 
         pipeServer.DisposeLocalCopyOfClientHandle();
         stdout.WriteLine("Spawning miryo-update and exiting to apply update.");
+
         return 0;
     }
 
@@ -933,6 +956,7 @@ public static class MiryoCommandLine
     {
         string? colorMode = invocation?.ColorMode;
         string? sub = null;
+
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
@@ -947,6 +971,7 @@ public static class MiryoCommandLine
         }
 
         bool useColors = ShouldUseColors(colorMode);
+
         if (sub != "shutdown")
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: invalid arguments for compiler-server. Usage: miryo compiler-server shutdown [--color <mode>]");
@@ -986,6 +1011,7 @@ public static class MiryoCommandLine
         }
 
         using Process? process = Process.Start(startInfo);
+
         if (process is null)
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: failed to execute server-manager.");
@@ -1012,6 +1038,7 @@ public static class MiryoCommandLine
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
+
             switch (arg)
             {
                 case "--color":
@@ -1026,6 +1053,7 @@ public static class MiryoCommandLine
                 default:
                     if (!arg.StartsWith('-') && targetDir is null)
                         targetDir = Path.GetFullPath(arg);
+
                     break;
             }
         }
@@ -1045,6 +1073,7 @@ public static class MiryoCommandLine
         foreach (string target in cleanTargets)
         {
             string dir = Path.Combine(targetDir, target);
+
             if (Directory.Exists(dir))
             {
                 try

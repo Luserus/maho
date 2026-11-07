@@ -334,6 +334,7 @@ public static class CommandLine
         {
             if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
                 output.Append('-');
+
             output.Append(char.ToLowerInvariant(value[i]));
         }
         return output.ToString();
@@ -488,9 +489,7 @@ public static class CommandLine
         }
 
         if (errorCount > 0)
-        {
             sb.AppendLine($"compilation failed due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
-        }
 
         return sb.ToString();
     }

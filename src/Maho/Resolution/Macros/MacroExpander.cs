@@ -644,9 +644,7 @@ internal sealed class MacroExpander
                 var varPart = new SymbolPart(templateTokens[i + 1]);
 
                 if (!bindings.ContainsKey(varPart) && !packBindings.ContainsKey(varPart))
-                {
                     localNames.Add(varPart);
-                }
             }
         }
 

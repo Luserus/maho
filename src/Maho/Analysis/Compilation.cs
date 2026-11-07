@@ -146,6 +146,7 @@ public sealed class Compilation
         {
             var refContexts = referencedCompilations.Where(c => c.Context != null).Select(c => c.Context!).ToList();
             var emptyContext = new Resolver().Resolve([], refContexts, diagnostics: new DiagnosticsManager(), options: options);
+
             return new Compilation(
                 resolvedProjectName,
                 [],
@@ -226,12 +227,11 @@ public sealed class Compilation
                  string.Equals(Path.GetFileName(validPaths[i]), options.EntryFile, StringComparison.OrdinalIgnoreCase));
 
             if (pragmaState == false)
-            {
                 unit.EnablesTopLevelStatements = false;
-            }
             else if (pragmaState == true)
             {
                 unit.EnablesTopLevelStatements = true;
+
                 if (hasStatements)
                     filesWithTopLevel.Add((i, unit, validFileDms[i]));
             }
@@ -263,9 +263,7 @@ public sealed class Compilation
                     }
                 }
                 else
-                {
                     unit.EnablesTopLevelStatements = false;
-                }
             }
         }
 
@@ -278,6 +276,7 @@ public sealed class Compilation
         else if (pathsList.Count == 1 && options.RootDirectory == null && effectiveEntryFile == null)
         {
             effectiveEntryFile = pathsList[0];
+
             if (validRoots.Count > 0 && PragmaDirective.GetTopLevelPragmaState(validRoots[0].Pragmas) != false)
                 validRoots[0].EnablesTopLevelStatements = true;
         }
@@ -295,6 +294,7 @@ public sealed class Compilation
         };
 
         var syntaxTrees = new SyntaxTree[validRoots.Count];
+
         for (int i = 0; i < validRoots.Count; i++)
             syntaxTrees[i] = new SyntaxTree(validRoots[i], validSourceTexts[i], validFileDms[i], validPaths[i]);
 
@@ -310,6 +310,7 @@ public sealed class Compilation
         foreach (var diag in resolutionDm.Diagnostics)
         {
             int targetIdx = -1;
+
             for (int k = 0; k < validSourceTexts.Count; k++)
             {
                 if (ReferenceEquals(diag.Source, validSourceTexts[k]))
@@ -318,6 +319,7 @@ public sealed class Compilation
                     break;
                 }
             }
+
             if (targetIdx >= 0)
                 validFileDms[targetIdx].Report(diag);
             else if (validFileDms.Count > 0)
@@ -335,6 +337,7 @@ public sealed class Compilation
         }
 
         var fileErrorsMap = new Dictionary<string, (string ErrorMessage, bool IsInternal)>(StringComparer.OrdinalIgnoreCase);
+
         for (int i = 0; i < pathsList.Count; i++)
         {
             if (fileReadErrors[i] is { } err)
@@ -423,8 +426,10 @@ public sealed class Compilation
         string filePath)
     {
         var result = new List<DiagnosticInfo>(diagnostics.Count);
+
         foreach (var diag in diagnostics)
             result.Add(DiagnosticInfo.FromDiagnostic(diag, sourceText, filePath));
+
         return DiagnosticInfo.OrderDiagnostics(result);
     }
 }

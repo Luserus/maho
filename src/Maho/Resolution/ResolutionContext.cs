@@ -161,6 +161,7 @@ internal sealed class ResolutionContext
             foreach (var store in ImportedProjectSymbols)
             {
                 var importedScope = CreateScopeFromSymbolStore(store);
+
                 if (!GlobalScope.ImportedScopes.Contains(importedScope))
                     GlobalScope.ImportedScopes.Add(importedScope);
             }
@@ -189,15 +190,14 @@ internal sealed class ResolutionContext
     {
         var scope = new Scope(null);
         CreateScopeFromSymbolStoreAndRegister(store, scope);
+
         return scope;
     }
 
     private static void MergeNamespaceTrie(NamespaceTrieNode target, NamespaceTrieNode source)
     {
         foreach (var symbol in source.Symbols)
-        {
             target.RegisterSymbol(symbol);
-        }
 
         foreach (var (key, value) in source.Next)
         {
@@ -215,6 +215,7 @@ internal sealed class ResolutionContext
     {
         var scope = new Scope(parent);
         Scopes.Add(scope);
+
         return scope;
     }
 
@@ -225,9 +226,7 @@ internal sealed class ResolutionContext
         TypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
-        {
             symbol = new ProductTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
-        }
         else
             symbol = new SumTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
 
@@ -237,9 +236,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             TypeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -252,9 +249,7 @@ internal sealed class ResolutionContext
         MemberTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
-        {
             symbol = new MemberProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
-        }
         else
             symbol = new MemberSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
@@ -264,9 +259,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             NestedTypeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -279,9 +272,7 @@ internal sealed class ResolutionContext
         LocalTypeSymbol symbol;
 
         if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
-        {
             symbol = new LocalProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
-        }
         else
             symbol = new LocalSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
@@ -291,9 +282,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             NestedTypeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -311,9 +300,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             AttributeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -331,9 +318,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             NestedAttributeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -351,9 +336,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             NestedAttributeSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -371,9 +354,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             FunctionSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -391,9 +372,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             MethodSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -411,9 +390,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             MethodSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -431,9 +408,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             GlobalVariableSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -471,9 +446,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             ParameterSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -514,6 +487,7 @@ internal sealed class ResolutionContext
             var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
             func.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
+
             return symbol;
         }
         else if (parent is { Kind: SymbolKind.Method, ID: var methodId } && (int)methodId >= 0 && (int)methodId < MethodSymbols.Count)
@@ -523,12 +497,14 @@ internal sealed class ResolutionContext
             var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
             method.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
+
             return symbol;
         }
         else
         {
             var symbol = new LocalVariableSymbol(0, enclosingScope, name, parent, syntax);
             Register(enclosingScope, symbol);
+
             return symbol;
         }
     }
@@ -545,9 +521,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             PropertySymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -565,9 +539,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             GenericParameterSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -585,9 +557,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             LabelSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -605,9 +575,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             AliasSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -625,9 +593,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             AliasSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -645,9 +611,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             MacroSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol);
         return symbol;
@@ -665,9 +629,7 @@ internal sealed class ResolutionContext
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
         }
         else
-        {
             MacroSymbols.Add(symbol);
-        }
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -854,8 +816,10 @@ internal sealed class ResolutionContext
         while (current.Kind == TypeRefKind.Resolved && current.Handle is { Kind: SymbolKind.Alias } aliasHandle && visited.Add(aliasHandle))
         {
             var alias = GetAliasSymbol(aliasHandle);
+
             if (alias is null || !alias.Target.IsResolved)
                 break;
+
             current = alias.Target;
         }
 
@@ -872,6 +836,7 @@ internal sealed class ResolutionContext
         if (containingNamespace != null && containingNamespace != GlobalNamespace)
         {
             containingNamespace.RegisterSymbol(symbol);
+
             if (symbol is AliasSymbol)
             {
                 ref var symbols = ref CollectionsMarshal.GetValueRefOrAddDefault(scope.SymbolsByName, symbol.Name, out _);
@@ -895,6 +860,7 @@ internal sealed class ResolutionContext
         {
             var newNode = new NamespaceTrieNode { Name = ns, Parent = trieNode };
             trieNode.Next[ns] = newNode;
+
             return newNode;
         }
 

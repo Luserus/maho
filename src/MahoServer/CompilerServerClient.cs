@@ -30,9 +30,7 @@ public static class CompilerServerClient
         string pipeName = CompilerServerEndpoint.CreatePipeName(normVersion);
 
         if (!TrySend(pipeName, request, 150, out var response))
-        {
             response = StartOrFindServer(pipeName, normVersion, request, mahoHome);
-        }
 
         return response!;
     }
@@ -43,6 +41,7 @@ public static class CompilerServerClient
     public static int ShutdownAllServers()
     {
         int stopped = 0;
+
         foreach (CompilerServerRegistration registration in CompilerServerRegistry.GetRegistrations())
         {
             if (TryShutdown(registration.PipeName))
@@ -50,6 +49,7 @@ public static class CompilerServerClient
 
             CompilerServerRegistry.Unregister(registration.PipeName);
         }
+
         return stopped;
     }
 
@@ -61,12 +61,14 @@ public static class CompilerServerClient
         string pipeName = CompilerServerEndpoint.CreatePipeName(version);
         bool success = TryShutdown(pipeName);
         CompilerServerRegistry.Unregister(pipeName);
+
         return success;
     }
 
     private static CompilerServerResponse StartOrFindServer(string pipeName, string version, CompilerServerRequest request, string? mahoHome)
     {
         using var launchGate = new Mutex(initiallyOwned: false, $"{pipeName}-launch", out bool createdNew);
+
         try
         {
             launchGate.WaitOne();
@@ -81,6 +83,7 @@ public static class CompilerServerClient
                 return existing!;
 
             StartServer(pipeName, version, mahoHome);
+
             if (!TrySend(pipeName, request, 5000, out var started))
                 throw new IOException($"Could not connect to the compiler server for version {version} after starting it.");
 
@@ -114,9 +117,7 @@ public static class CompilerServerClient
             startInfo.ArgumentList.Add(serverExe);
         }
         else
-        {
             startInfo.FileName = serverExe;
-        }
 
         startInfo.ArgumentList.Add("--pipe");
         startInfo.ArgumentList.Add(pipeName);
@@ -132,6 +133,7 @@ public static class CompilerServerClient
             return Path.GetFullPath(mahoHome);
 
         string? env = Environment.GetEnvironmentVariable("MAHO_HOME");
+
         if (!string.IsNullOrWhiteSpace(env))
             return Path.GetFullPath(env);
 
@@ -160,25 +162,30 @@ public static class CompilerServerClient
         string exeName = OperatingSystem.IsWindows() ? "maho-server.exe" : "maho-server";
 
         string toolPath = Path.Combine(toolDir, exeName);
+
         if (File.Exists(toolPath))
             return toolPath;
 
         string dllPath = Path.Combine(toolDir, "maho-server.dll");
+
         if (File.Exists(dllPath))
             return dllPath;
 
         // Fallback for development / co-located build output
         string baseDir = AppContext.BaseDirectory;
         string colocatedExe = Path.Combine(baseDir, exeName);
+
         if (File.Exists(colocatedExe))
             return colocatedExe;
 
         string colocatedDll = Path.Combine(baseDir, "maho-server.dll");
+
         if (File.Exists(colocatedDll))
             return colocatedDll;
 
         // Also check mahoc-server names during migration
         string oldExe = OperatingSystem.IsWindows() ? "mahoc-server.exe" : "mahoc-server";
+
         if (File.Exists(Path.Combine(baseDir, oldExe)))
             return Path.Combine(baseDir, oldExe);
 
@@ -188,6 +195,7 @@ public static class CompilerServerClient
     private static bool TrySend(string pipeName, CompilerServerRequest request, int timeoutMs, out CompilerServerResponse? response)
     {
         response = null;
+
         try
         {
             using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.None);
@@ -196,10 +204,12 @@ public static class CompilerServerClient
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
             writer.WriteLine(JsonSerializer.Serialize(request, JsonOptions));
             string? line = reader.ReadLine();
+
             if (string.IsNullOrWhiteSpace(line))
                 return false;
 
             response = JsonSerializer.Deserialize<CompilerServerResponse>(line, JsonOptions);
+
             return response is not null;
         }
         catch (IOException) { return false; }
@@ -218,6 +228,7 @@ public static class CompilerServerClient
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
             writer.WriteLine(JsonSerializer.Serialize(new CompilerServerControlRequest(CompilerProtocol.Version, "shutdown"), JsonOptions));
             var response = JsonSerializer.Deserialize<CompilerServerControlResponse>(reader.ReadLine() ?? string.Empty, JsonOptions);
+
             return response?.Success == true;
         }
         catch (IOException) { return false; }

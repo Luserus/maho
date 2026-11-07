@@ -76,6 +76,7 @@ public static class CompilationJsonExtensions
     {
         options ??= DefaultJsonOptions;
         var node = syntaxTree.ToJsonNode();
+
         return node.ToJsonString(options);
     }
 

@@ -17,7 +17,9 @@ public sealed record CompilerManifest(
     {
         if (!File.Exists(path))
             return new CompilerManifest("0.2.0", "Maho.dll");
+
         string json = File.ReadAllText(path);
+
         return JsonSerializer.Deserialize<CompilerManifest>(json, JsonOptions)
             ?? new CompilerManifest("0.2.0", "Maho.dll");
     }
@@ -25,8 +27,10 @@ public sealed record CompilerManifest(
     public void Save(string path)
     {
         string? dir = Path.GetDirectoryName(path);
+
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
+
         File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
     }
 }

@@ -347,8 +347,10 @@ public sealed class MiryoConfiguration
             public override string EvaluateString(IReadOnlyDictionary<string, string> variables)
             {
                 var sb = new StringBuilder();
+
                 foreach (var part in Parts)
                     sb.Append(part.EvaluateString(variables));
+
                 return sb.ToString();
             }
 
@@ -395,9 +397,11 @@ public sealed class MiryoConfiguration
                 else if (template[i] == '{' && i + 1 < template.Length)
                 {
                     int close = template.IndexOf('}', i + 1);
+
                     if (close > i + 1)
                     {
                         string varName = template.Substring(i + 1, close - (i + 1));
+
                         if (variables.TryGetValue(varName, out string? val))
                         {
                             sb.Append(val);
@@ -428,10 +432,12 @@ public sealed class MiryoConfiguration
             while (!IsAtEnd)
             {
                 SkipWhitespaceAndComments();
+
                 if (IsAtEnd)
                     break;
 
                 char ch = Peek();
+
                 if (ch == '[')
                 {
                     currentSection = ParseSectionHeader();
@@ -458,8 +464,10 @@ public sealed class MiryoConfiguration
             SkipWhitespaceOnly();
             string name = ParseIdentifier();
             SkipWhitespaceOnly();
+
             if (!Match(']'))
                 throw new FormatException($"Expected ']' after section name '{name}' at position {current}.");
+
             return name;
         }
 

@@ -11,10 +11,7 @@ internal sealed class SpanSemanticType : SemanticType
     public override bool IsResolved => ElementType.IsResolved;
     public override bool IsError => ElementType.IsError;
 
-    public SpanSemanticType(TypeRef elementType)
-    {
-        ElementType = elementType;
-    }
+    public SpanSemanticType(TypeRef elementType) => ElementType = elementType;
 
     public override bool Equals(SemanticType? other) =>
         other is SpanSemanticType span && ElementType.Equals(span.ElementType);

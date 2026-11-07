@@ -68,9 +68,7 @@ public static class MahoServerDaemon
                     acceptCts = new CancellationTokenSource(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
                 }
                 else
-                {
                     acceptCts = new CancellationTokenSource();
-                }
 
                 var pipe = new NamedPipeServerStream(
                     pipeName,
@@ -92,8 +90,10 @@ public static class MahoServerDaemon
                 catch (OperationCanceledException)
                 {
                     pipe.Dispose();
+
                     if (servedRequest && connections.Count == 0)
                         return 0;
+
                     continue;
                 }
                 finally
@@ -139,13 +139,16 @@ public static class MahoServerDaemon
             try
             {
                 string? line = reader.ReadLine();
+
                 if (string.IsNullOrWhiteSpace(line))
                     return;
 
                 using JsonDocument doc = JsonDocument.Parse(line);
+
                 if (doc.RootElement.TryGetProperty("method", out _))
                 {
                     var control = JsonSerializer.Deserialize<CompilerServerControlRequest>(line, JsonOptions);
+
                     if (control is not null && string.Equals(control.Method, "shutdown", StringComparison.OrdinalIgnoreCase))
                     {
                         var controlResponse = new CompilerServerControlResponse(true, "Shutdown requested.");
@@ -156,6 +159,7 @@ public static class MahoServerDaemon
                 }
 
                 var request = JsonSerializer.Deserialize<CompilerServerRequest>(line, JsonOptions);
+
                 if (request is null)
                     return;
 
@@ -187,9 +191,7 @@ public static class MahoServerDaemon
                     false)).ToList();
 
                 foreach (var (path, (errorMsg, isInternal)) in compilation.FileErrors)
-                {
                     filesList.Add(new CompilerServerFileResult(path, [], errorMsg, isInternal));
-                }
 
                 var response = new CompilerServerResponse(
                     request.ProjectName,
@@ -266,9 +268,7 @@ public static class MahoServerDaemon
         useColors = ShouldUseColors(colorMode);
 
         if (string.IsNullOrWhiteSpace(pipeName))
-        {
             pipeName = CompilerServerEndpoint.CreatePipeName(version);
-        }
 
         return true;
     }

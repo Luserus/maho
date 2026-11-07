@@ -49,6 +49,7 @@ internal sealed class Scope
             for (int i = 0; i < current.ImportedScopes.Count; i++)
             {
                 var imported = current.ImportedScopes[i].GetChildScope(handle);
+
                 if (imported is not null)
                     return imported;
             }
@@ -65,6 +66,7 @@ internal sealed class Scope
         for (var current = this; current != null; current = current.Parent)
         {
             var locals = current.GetLocalSymbols(name);
+
             if (locals.Count != 0)
                 return locals;
         }
@@ -75,12 +77,15 @@ internal sealed class Scope
             if (current.UsingNamespaces.Count != 0)
             {
                 List<Symbol>? found = null;
+
                 for (int i = 0; i < current.UsingNamespaces.Count; i++)
                 {
                     var matches = current.UsingNamespaces[i].GetSymbols(name);
+
                     if (matches.Count != 0)
                     {
                         found ??= [];
+
                         for (int j = 0; j < matches.Count; j++)
                             found.Add(matches[j]);
                     }
@@ -97,12 +102,15 @@ internal sealed class Scope
             if (current.ImportedScopes.Count != 0)
             {
                 List<Symbol>? imported = null;
+
                 for (int i = 0; i < current.ImportedScopes.Count; i++)
                 {
                     var matches = current.ImportedScopes[i].GetSymbols(name);
+
                     if (matches.Count != 0)
                     {
                         imported ??= [];
+
                         for (int j = 0; j < matches.Count; j++)
                             imported.Add(matches[j]);
                     }
@@ -129,6 +137,7 @@ internal sealed class Scope
             for (int i = 0; i < current.UsingNamespaces.Count; i++)
             {
                 var nsSymbol = current.UsingNamespaces[i].GetSymbol(handle);
+
                 if (nsSymbol != null)
                     return nsSymbol;
             }
@@ -139,6 +148,7 @@ internal sealed class Scope
             for (int i = 0; i < current.ImportedScopes.Count; i++)
             {
                 var importedSymbol = current.ImportedScopes[i].GetSymbol(handle);
+
                 if (importedSymbol != null)
                     return importedSymbol;
             }
@@ -159,6 +169,7 @@ internal sealed class Scope
         {
             // Check if name begins with a namespace (e.g. Std.Int32 or Std.Collections.List)
             var nsNode = ResolveNamespace(scope, name[0]);
+
             if (nsNode != null)
                 return ResolveInNamespace(scope, nsNode, name, 1);
 
@@ -190,13 +201,9 @@ internal sealed class Scope
     {
         // 1. Check namespaces imported via using directives in this scope or parent scopes
         for (var current = scope; current != null; current = current.Parent)
-        {
             for (int i = 0; i < current.UsingNamespaces.Count; i++)
-            {
                 if (current.UsingNamespaces[i].Next.TryGetValue(name, out var childNs))
                     return childNs;
-            }
-        }
 
         // 2. Check root namespace
         if (scope.GlobalNamespace != null && scope.GlobalNamespace.Next.TryGetValue(name, out var rootNs))
@@ -230,12 +237,14 @@ internal sealed class Scope
             // More components follow (e.g. Type.NestedType)
             var symbol = symbols[0];
             var childScope = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+
             if (childScope is null)
                 return [];
 
             scope = childScope;
             index++;
             var nextSymbols = scope.GetLocalSymbols(name[index]);
+
             if (nextSymbols.Count == 0)
                 return [];
 
@@ -243,10 +252,13 @@ internal sealed class Scope
             {
                 var nextSymbol = nextSymbols[0];
                 var nextChild = scope.GetChildScope((nextSymbol.Kind, nextSymbol.ID)) ?? nextSymbol.EnclosingScope?.GetChildScope((nextSymbol.Kind, nextSymbol.ID));
+
                 if (nextChild is null)
                     return [];
+
                 scope = nextChild;
                 nextSymbols = scope.GetLocalSymbols(name[i + 1]);
+
                 if (nextSymbols.Count == 0)
                     return [];
             }

@@ -19,10 +19,7 @@ internal sealed class TupleSemanticType : SemanticType
     public override bool IsResolved => Elements.Count > 0 && Elements.All(e => e.Type.IsResolved);
     public override bool IsError => Elements.Any(e => e.Type.IsError);
 
-    public TupleSemanticType(IReadOnlyList<TupleElement> elements)
-    {
-        Elements = elements;
-    }
+    public TupleSemanticType(IReadOnlyList<TupleElement> elements) => Elements = elements;
 
     public override bool Equals(SemanticType? other)
     {
@@ -46,11 +43,13 @@ internal sealed class TupleSemanticType : SemanticType
         var hash = new HashCode();
         hash.Add(Kind);
         hash.Add(Elements.Count);
+
         foreach (var element in Elements)
         {
             hash.Add(element.Type);
             hash.Add(element.Name);
         }
+
         return hash.ToHashCode();
     }
 

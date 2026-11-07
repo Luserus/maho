@@ -7,8 +7,5 @@ internal sealed class SimpleType : TypeSyntax
     public Token Name { get; }
 
     /// <summary> Creates one simple type node. </summary>
-    public SimpleType(Token name)
-    {
-        Name = name;
-    }
+    public SimpleType(Token name) => Name = name;
 }
