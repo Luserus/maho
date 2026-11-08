@@ -14,6 +14,8 @@ internal sealed class ResolutionContext
 
     public NamespaceTrieNode GlobalNamespace { get; }
 
+    public DiscoveredIntrinsics DiscoveredIntrinsics { get; }
+
     public List<AttributeSymbol> AttributeSymbols { get; }
     public List<NestedAttributeSymbol> NestedAttributeSymbols { get; }
     public List<TypeSymbol> TypeSymbols { get; }
@@ -98,12 +100,14 @@ internal sealed class ResolutionContext
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
         IReadOnlyList<SymbolStore>? importedSymbols = null,
         DiagnosticsManager? diagnostics = null,
-        CompilationOptions? options = null)
+        CompilationOptions? options = null,
+        DiscoveredIntrinsics? discoveredIntrinsics = null)
     {
         SyntaxTrees = syntaxTrees;
         ResolvedTree = resolvedTree;
         Diagnostics = diagnostics ?? new DiagnosticsManager();
         Options = options ?? new CompilationOptions();
+        DiscoveredIntrinsics = discoveredIntrinsics ?? new DiscoveredIntrinsics();
 
         GlobalNamespace = globalNamespace;
         Scopes = scopes;
@@ -743,12 +747,38 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    public FieldSymbol? GetFieldSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Field)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < FieldSymbols.Count)
+            return FieldSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FieldSymbol f)
+            return f;
+
+        return null;
+    }
+
+    public PropertySymbol? GetPropertySymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Property)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < PropertySymbols.Count)
+            return PropertySymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is PropertySymbol p)
+            return p;
+
+        return null;
+    }
+
     public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
     {
         SymbolKind.Type => GetTypeSymbol(handle),
         SymbolKind.NestedType => GetNestedTypeSymbol(handle),
         SymbolKind.Function => GetFunctionSymbol(handle),
         SymbolKind.Method => GetMethodSymbol(handle),
+        SymbolKind.Field => GetFieldSymbol(handle),
+        SymbolKind.Property => GetPropertySymbol(handle),
         SymbolKind.Alias => GetAliasSymbol(handle),
         SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
         SymbolKind.Parameter => GetParameterSymbol(handle),

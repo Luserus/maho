@@ -10,6 +10,7 @@ internal sealed class Resolver
     [
         new MacroExpansionPass(),
         new SymbolDiscoveryPass(),
+        new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass()
     ];
 
@@ -62,7 +63,8 @@ internal sealed class Resolver
             referencedProjects ?? baseContext?.ReferencedProjects,
             baseContext?.ImportedProjectSymbols,
             diagnostics ?? baseContext?.Diagnostics,
-            options ?? baseContext?.Options);
+            options ?? baseContext?.Options,
+            baseContext?.DiscoveredIntrinsics.Clone());
 
         foreach (var pass in passes)
             pass.Resolve(context);

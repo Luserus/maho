@@ -269,10 +269,11 @@ public sealed class MacroTests
             public class Host
             {
                 public struct void;
+                public struct List;
 
                 public void Test()
                 {
-                    var arr = $wrap(10, 20, 30);
+                    List arr = $wrap(10, 20, 30);
                 }
             }
             """);
@@ -640,8 +641,8 @@ public sealed class MacroTests
         var compilation = Compilation.FromSource("""
             public macro $declare_variables {
                 () => {
-                    var a = 10;
-                    var b = 20;
+                    int32 a = 10;
+                    int32 b = 20;
                 };
             }
 
@@ -925,7 +926,7 @@ public sealed class MacroTests
 
                 public void Test()
                 {
-                    var x = 42;
+                    int32 x = 42;
                     var name = nameof(x);
                 }
             }

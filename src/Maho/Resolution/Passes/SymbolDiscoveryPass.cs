@@ -15,9 +15,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         this.context = context;
 
         if (context.Options?.GlobalAliases is { Count: > 0 } globalAliases)
-        {
             RegisterGlobalAliases(globalAliases);
-        }
 
         foreach (var tree in context.SyntaxTrees)
             ResolveCompilationUnit(tree.Root);
@@ -39,6 +37,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             {
                 foreach (var diag in dm.Diagnostics)
                     context.Diagnostics?.Report(diag);
+
                 continue;
             }
 

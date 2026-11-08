@@ -470,4 +470,54 @@ internal sealed class DiagnosticsManager
         BuildError("MH0604", $"macro '${macroName}' participates in a circular dependency or expansion deadlock", span, source)
             .WithPrimaryLabel(span, $"circular macro expansion involves '${macroName}' here", source)
             .Report();
+
+    /// <summary> Reports an unknown intrinsic attribute name declared with the intrinsic modifier. </summary>
+    public void ReportUnknownIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
+        BuildError("MH0540", $"unknown intrinsic attribute '{attributeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{attributeName}' is not a recognized compiler intrinsic attribute", source)
+            .WithHelp("only compiler-known intrinsic attributes (such as 'IntrinsicType') can be declared with the 'intrinsic' modifier")
+            .Report();
+
+    /// <summary> Reports an invalid signature for the IntrinsicType attribute declaration. </summary>
+    public void ReportInvalidIntrinsicAttributeSignature(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH0541", $"invalid signature for intrinsic attribute 'IntrinsicType': {message}", span, source)
+            .WithPrimaryLabel(span, message, source)
+            .Report();
+
+    /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
+    public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
+        BuildError("MH0542", $"unknown intrinsic type '{intrinsicLiteral}'", span, source)
+            .WithPrimaryLabel(span, $"'{intrinsicLiteral}' is not a recognized compiler intrinsic type", source)
+            .Report();
+
+    /// <summary> Reports a duplicate intrinsic type declaration. </summary>
+    public void ReportDuplicateIntrinsicType(
+        string intrinsicName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError("MH0543", $"intrinsic type '{intrinsicName}' is already declared", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"duplicate declaration of intrinsic '{intrinsicName}' here", redeclSource);
+
+        if (firstDeclSpan is { } firstSpan)
+            builder.WithSecondaryLabel(firstSpan, $"previous declaration of intrinsic '{intrinsicName}' here", firstSource);
+
+        builder.WithHelp($"intrinsic types can only be declared once across the project and its referenced libraries")
+            .Report();
+    }
+
+    /// <summary> Reports that an intrinsic type does not satisfy its required ABI contract. </summary>
+    public void ReportIntrinsicAbiMismatch(TextSpan span, string typeName, string intrinsicName, string reason, SourceText? source = null) =>
+        BuildError("MH0544", $"type '{typeName}' does not satisfy the ABI contract for intrinsic '{intrinsicName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports that syntax requires an intrinsic type that was not declared or failed verification. </summary>
+    public void ReportMissingIntrinsicForSyntax(TextSpan span, string syntaxDescription, string requiredIntrinsic, SourceText? source = null) =>
+        BuildError("MH0240", $"{syntaxDescription} requires intrinsic type '{requiredIntrinsic}' to be declared", span, source)
+            .WithPrimaryLabel(span, $"requires intrinsic '{requiredIntrinsic}'", source)
+            .WithHelp($"declare a type with [IntrinsicType(\"{requiredIntrinsic}\")] or reference a library that defines it")
+            .Report();
 }

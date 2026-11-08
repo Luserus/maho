@@ -448,7 +448,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false);
         }
 
-        setType(resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference));
+        var actualType = resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference);
+        setType(actualType);
+
+        bool isInferred = actualType.IsInferred;
 
         foreach (var declarator in syntax.Declarators)
         {
@@ -456,11 +459,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
                     if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                    {
+                        CheckInferredInitializer(initExpr, isInferred);
                         ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+                    }
             }
             else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
                 if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                {
+                    CheckInferredInitializer(initExpr, isInferred);
                     ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+                }
         }
     }
 
@@ -519,7 +528,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveDeclarationSyntax(VariableDeclaration syntax, Scope scope, SymbolHandle containingFunction)
     {
-        ResolveType(syntax.Type, scope, allowInference: true);
+        var resolvedType = ResolveType(syntax.Type, scope, allowInference: true);
+        bool isInferred = resolvedType.IsInferred;
 
         if (!resolvedVariableAttributes.TryGetValue((syntax, scope), out _))
         {
@@ -531,7 +541,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var declarator in syntax.Declarators)
         {
             if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+            {
+                CheckInferredInitializer(initExpr, isInferred);
                 ResolveExpression(initExpr, scope, containingFunction);
+            }
         }
     }
 
@@ -678,10 +691,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             return modified.Modifier switch
             {
-                PointerTypeModifier => TypeRef.Pointer(innerType),
-                ReferenceTypeModifier => TypeRef.Reference(innerType),
+                PointerTypeModifier => ResolvePointerModifier(modified, innerType, reportDiagnostics),
+                ReferenceTypeModifier => ResolveReferenceModifier(modified, innerType, reportDiagnostics),
                 OptionalTypeModifier => TypeRef.Optional(innerType),
-                ArrayTypeModifier array => ResolveArrayOrSpanModifier(array, innerType, scope),
+                ArrayTypeModifier array => ResolveArrayOrSpanModifier(array, innerType, scope, reportDiagnostics),
                 _ => TypeRef.Error
             };
         }
@@ -843,15 +856,91 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return handle;
     }
 
-    private TypeRef ResolveArrayOrSpanModifier(ArrayTypeModifier array, TypeRef innerType, Scope scope)
+    private TypeRef ResolvePointerModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer))
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "pointer type syntax", KnownIntrinsics.Pointer, modified.GetSource());
+        }
+
+        return TypeRef.Pointer(innerType);
+    }
+
+    private TypeRef ResolveReferenceModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference))
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "reference type syntax", KnownIntrinsics.Reference, modified.GetSource());
+        }
+
+        return TypeRef.Reference(innerType);
+    }
+
+    private TypeRef ResolveArrayOrSpanModifier(ArrayTypeModifier array, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
     {
         if (array.Size is { } size)
         {
+            if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+            {
+                var span = array.GetSpan() ?? default;
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "fixed-size array type syntax", KnownIntrinsics.FixedArray, array.GetSource());
+            }
+
             ResolveExpression(size, scope, default);
             return TypeRef.Array(innerType, size);
         }
 
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
+        {
+            var span = array.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "array type syntax", KnownIntrinsics.Array, array.GetSource());
+        }
+
         return TypeRef.Span(innerType);
+    }
+
+    private void CheckInferredInitializer(Expression expr, bool isInferred)
+    {
+        if (expr is CollectionExpression collection && isInferred)
+        {
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
+            {
+                var span = collection.GetSpan() ?? default;
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "inferred collection expression", KnownIntrinsics.Array, collection.GetSource());
+            }
+        }
+        else if (expr is LiteralExpression literal && !literal.HasSuffix && isInferred)
+        {
+            CheckUnsuffixedLiteral(literal);
+        }
+    }
+
+    private void CheckUnsuffixedLiteral(LiteralExpression literal)
+    {
+        string? required = literal.Literal.Kind switch
+        {
+            TokenKind.Integer => KnownIntrinsics.Int32,
+            TokenKind.Float => KnownIntrinsics.Float64,
+            TokenKind.String => KnownIntrinsics.Str,
+            TokenKind.Char => KnownIntrinsics.Char,
+            _ => null
+        };
+
+        if (required is not null && !context.DiscoveredIntrinsics.Contains(required))
+        {
+            string desc = literal.Literal.Kind switch
+            {
+                TokenKind.Integer => "unsuffixed integer literal",
+                TokenKind.Float => "unsuffixed float literal",
+                TokenKind.String => "unsuffixed string literal",
+                TokenKind.Char => "unsuffixed char literal",
+                _ => "literal"
+            };
+
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(literal.Literal.Span, desc, required, literal.Literal.Source);
+        }
     }
 
     private void ResolveTypeChildren(TypeSyntax syntax, Scope scope)
