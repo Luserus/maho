@@ -37,9 +37,10 @@ internal static class KnownIntrinsics
     public const string Pointer = "Pointer";
     public const string Reference = "Reference";
 
-    // Arrays
+    // Arrays and Spans
     public const string FixedArray = "FixedArray";
     public const string Array = "Array";
+    public const string Span = "Span";
 
     public static readonly HashSet<string> AllKnownTypes =
     [
@@ -48,7 +49,7 @@ internal static class KnownIntrinsics
         Float16, Float32, Float64, Float128,
         Bool, Char, Str,
         Pointer, Reference,
-        FixedArray, Array
+        FixedArray, Array, Span
     ];
 
     public static readonly HashSet<string> ZeroInstanceFieldPrimitives =

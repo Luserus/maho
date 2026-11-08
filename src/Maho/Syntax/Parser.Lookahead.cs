@@ -360,6 +360,16 @@ internal sealed partial class Parser
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
     private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseTypeSyntax()
     {
+        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+        {
+            var ampersand = LookaheadConsume();
+            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
+            if (!innerSuccess)
+                return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), false, innerContext);
+
+            return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), true, LookaheadResultContext.Success);
+        }
+
         var (type, success) = LookaheadParsePrimaryType();
 
         if (!success)
@@ -578,7 +588,7 @@ internal sealed partial class Parser
         {
             var (modifier, success) = LookaheadCurrentToken.Kind switch
             {
-                TokenKind.LeftBracket => ((PostfixTypeModifier, bool))LookaheadParseArrayTypeModifier(),
+                TokenKind.LeftBracket => LookaheadParseArrayOrFixedArrayTypeModifier(),
                 TokenKind.QuestionMark => ((PostfixTypeModifier, bool))LookaheadParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParsePointerTypeModifier(),
                 TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseReferenceTypeModifier(),
@@ -594,17 +604,37 @@ internal sealed partial class Parser
         return (type, true);
     }
 
-    /// <summary> Speculatively parses an array type modifier. </summary>
-    private (ArrayTypeModifier Type, bool Success) LookaheadParseArrayTypeModifier()
+    /// <summary> Speculatively parses an array or fixed-size array type modifier. </summary>
+    private (PostfixTypeModifier Type, bool Success) LookaheadParseArrayOrFixedArrayTypeModifier()
     {
         var openBracket = LookaheadConsume();
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
-            return (new ArrayTypeModifier(openBracket, null, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+        {
+            int depth = 1;
+            while (LookaheadCurrentToken.Kind is not TokenKind.EndToken)
+            {
+                if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket)
+                    depth++;
+                else if (LookaheadCurrentToken.Kind is TokenKind.RightBracket)
+                {
+                    depth--;
+                    if (depth == 0)
+                        break;
+                }
 
-        var closeBracket = LookaheadConsume();
+                LookaheadConsume();
+            }
 
-        return (new ArrayTypeModifier(openBracket, null, closeBracket), true);
+            if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
+                return (new FixedArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+
+            var closeBracket = LookaheadConsume();
+            return (new FixedArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), closeBracket), true);
+        }
+
+        var rightBracket = LookaheadConsume();
+        return (new ArrayTypeModifier(openBracket, rightBracket), true);
     }
 
     /// <summary> Speculatively parses a pointer type modifier. </summary>

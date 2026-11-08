@@ -1459,7 +1459,7 @@ public sealed class ParserTests
                 public T Value;
                 public class Nested;
 
-                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested, TInput input) where TInput: Extra.Nested
+                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
@@ -1471,6 +1471,7 @@ public sealed class ParserTests
 
                     int local = 1;
                     int[] numbers = new int[3] { 1, 2, 3 };
+                    int[3] fixedNumbers;
                     (int, int) pair = (1, 2);
                     PointerLocal * localPointer;
                     ReferenceLocal & localReference;
@@ -1569,14 +1570,17 @@ public sealed class ParserTests
             typeof(GenericType),
             typeof(QualifiedType),
             typeof(ModifiedType),
+            typeof(PrefixModifiedType),
             typeof(TupleType),
             typeof(TypeBaseClause),
             typeof(TypeConstraintClause),
             typeof(TypeTypeConstraint),
             typeof(ArrayTypeModifier),
+            typeof(FixedArrayTypeModifier),
             typeof(PointerTypeModifier),
             typeof(OptionalTypeModifier),
             typeof(ReferenceTypeModifier),
+            typeof(SpanTypeModifier),
             typeof(LiteralExpression),
             typeof(IdentifierNameExpression),
             typeof(GenericNameExpression),
@@ -2229,5 +2233,56 @@ public sealed class ParserTests
         Assert.Equal(TokenKind.SuffixedInteger, arg1.Literal.Kind);
         Assert.Equal("u8", arg1.Suffix);
         Assert.Equal("0b1010", arg1.ValueWithoutSuffix);
+    }
+
+    [Fact]
+    public void Parse_SpanDeclarationInDeclarationContext_ParsesAsVariableDeclaration()
+    {
+        Local local = ParseSingleLocal("&int32 x;", typeof(LocalVariableDeclarationStatement));
+        var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        var prefix = Assert.IsType<PrefixModifiedType>(variable.Declaration.Type);
+        Assert.IsType<SpanTypeModifier>(prefix.Modifier);
+        var simple = Assert.IsType<SimpleType>(prefix.Type);
+        Assert.Equal("int32", simple.Name.Value);
+        Assert.Equal("x", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_PrefixAmpersandInDeclarationContext_WhenNotFollowedByIdentifier_ParsesAsExpressionStatement()
+    {
+        Local local = ParseSingleLocal("&T + 1;", typeof(LocalExpressionStatement));
+        var stmt = Assert.IsType<LocalExpressionStatement>(local);
+        var unary = Assert.IsType<UnaryExpression>(stmt.Expression);
+        Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
+        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_PrefixAmpersandInExpressionContext_AlwaysParsesAsUnaryExpression()
+    {
+        Local local = ParseSingleLocal("var x = &T + 1;", typeof(LocalVariableDeclarationStatement));
+        var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        var init = variable.Declaration.Declarators[0].Initializer!.Initializer;
+        var unary = Assert.IsType<UnaryExpression>(init);
+        Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
+        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_ArrayTypeModifier_Vs_FixedArrayTypeModifier()
+    {
+        Local dynamicArr = ParseSingleLocal("int32[] x;", typeof(LocalVariableDeclarationStatement));
+        var dynamicVar = Assert.IsType<LocalVariableDeclarationStatement>(dynamicArr);
+        var dynamicMod = Assert.IsType<ModifiedType>(dynamicVar.Declaration.Type);
+        Assert.IsType<ArrayTypeModifier>(dynamicMod.Modifier);
+
+        Local fixedArr = ParseSingleLocal("int32[10] y;", typeof(LocalVariableDeclarationStatement));
+        var fixedVar = Assert.IsType<LocalVariableDeclarationStatement>(fixedArr);
+        var fixedMod = Assert.IsType<ModifiedType>(fixedVar.Declaration.Type);
+        var fixedArrMod = Assert.IsType<FixedArrayTypeModifier>(fixedMod.Modifier);
+        var sizeLit = Assert.IsType<LiteralExpression>(fixedArrMod.Size);
+        Assert.Equal("10", sizeLit.Literal.Value);
     }
 }

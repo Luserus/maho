@@ -13,11 +13,12 @@ public sealed class ScriptingTests
             string scriptFile = Path.Combine(tempDir, "Script.mh");
             File.WriteAllText(scriptFile, """
                 attribute IntrinsicType(Str name);
-                [IntrinsicType("Str")] struct Str { Int8* p; Int64 l; }
                 [IntrinsicType("Int8")] struct Int8;
                 [IntrinsicType("Int64")] struct Int64;
                 [IntrinsicType("NUInt")] struct NUInt;
+                [IntrinsicType("Reference")] struct Reference<T> { NUInt p; }
                 [IntrinsicType("Pointer")] struct Pointer<T> { NUInt p; }
+                [IntrinsicType("Str")] struct Str { Int8& p; Int64 l; }
                 [IntrinsicType("Int32")] struct Int32;
 
                 var x = 10;

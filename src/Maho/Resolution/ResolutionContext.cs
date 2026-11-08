@@ -959,6 +959,10 @@ internal sealed class ResolutionContext
                 AddTypeNameParts(modified.Type, parts);
                 break;
 
+            case PrefixModifiedType prefixModified:
+                AddTypeNameParts(prefixModified.Type, parts);
+                break;
+
             case TupleType:
             case UniformTupleType:
                 parts.Add(new SymbolPart(string.Empty));

@@ -420,20 +420,38 @@ internal sealed partial class Parser
 
         var type = ParseTypeSyntax();
 
-        if (type is ModifiedType { Modifier: ArrayTypeModifier arrayModifier } arrayType && CurrentToken.Kind is not TokenKind.LeftParen)
+        if (type is ModifiedType modified && CurrentToken.Kind is not TokenKind.LeftParen)
         {
-            var elementType = arrayType.Type;
-            TypeInitializer? initializer = null;
+            if (modified.Modifier is ArrayTypeModifier arrayModifier)
+            {
+                var elementType = modified.Type;
+                TypeInitializer? initializer = null;
 
-            if (CurrentToken.Kind is TokenKind.LeftBrace)
-                initializer = ParseTypeInitializer();
+                if (CurrentToken.Kind is TokenKind.LeftBrace)
+                    initializer = ParseTypeInitializer();
 
-            ObjectWithClause? withClause = null;
+                ObjectWithClause? withClause = null;
 
-            if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
-                withClause = ParseObjectWithClause();
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
+                    withClause = ParseObjectWithClause();
 
-            return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer, withClause);
+                return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, null, arrayModifier.RightBracket, initializer, withClause);
+            }
+            else if (modified.Modifier is FixedArrayTypeModifier fixedModifier)
+            {
+                var elementType = modified.Type;
+                TypeInitializer? initializer = null;
+
+                if (CurrentToken.Kind is TokenKind.LeftBrace)
+                    initializer = ParseTypeInitializer();
+
+                ObjectWithClause? withClause = null;
+
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
+                    withClause = ParseObjectWithClause();
+
+                return new ArrayCreationExpression(keyword, kind, elementType, fixedModifier.LeftBracket, fixedModifier.Size, fixedModifier.RightBracket, initializer, withClause);
+            }
         }
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", GetObjectCreationContext(keyword.MatchingKind));
 

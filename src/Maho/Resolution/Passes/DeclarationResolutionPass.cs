@@ -291,6 +291,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 return GetGenericArguments(qualified.Right);
             case ModifiedType modified:
                 return GetGenericArguments(modified.Type);
+            case PrefixModifiedType prefixModified:
+                return GetGenericArguments(prefixModified.Type);
             default:
                 return [];
         }
@@ -694,7 +696,19 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 PointerTypeModifier => ResolvePointerModifier(modified, innerType, reportDiagnostics),
                 ReferenceTypeModifier => ResolveReferenceModifier(modified, innerType, reportDiagnostics),
                 OptionalTypeModifier => TypeRef.Optional(innerType),
-                ArrayTypeModifier array => ResolveArrayOrSpanModifier(array, innerType, scope, reportDiagnostics),
+                ArrayTypeModifier => ResolveArrayModifier(modified, innerType, reportDiagnostics),
+                FixedArrayTypeModifier fixedArray => ResolveFixedArrayModifier(modified, fixedArray, innerType, scope, reportDiagnostics),
+                _ => TypeRef.Error
+            };
+        }
+
+        if (syntax is PrefixModifiedType prefixModified)
+        {
+            var innerType = ResolveType(prefixModified.Type, scope, reportDiagnostics);
+
+            return prefixModified.Modifier switch
+            {
+                SpanTypeModifier => ResolveSpanModifier(prefixModified, innerType, reportDiagnostics),
                 _ => TypeRef.Error
             };
         }
@@ -878,27 +892,38 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return TypeRef.Reference(innerType);
     }
 
-    private TypeRef ResolveArrayOrSpanModifier(ArrayTypeModifier array, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
+    private TypeRef ResolveSpanModifier(PrefixModifiedType prefixModified, TypeRef innerType, bool reportDiagnostics)
     {
-        if (array.Size is { } size)
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span))
         {
-            if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
-            {
-                var span = array.GetSpan() ?? default;
-                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "fixed-size array type syntax", KnownIntrinsics.FixedArray, array.GetSource());
-            }
-
-            ResolveExpression(size, scope, default);
-            return TypeRef.Array(innerType, size);
-        }
-
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
-        {
-            var span = array.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "array type syntax", KnownIntrinsics.Array, array.GetSource());
+            var span = prefixModified.Modifier.GetSpan() ?? prefixModified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "span type syntax", KnownIntrinsics.Span, prefixModified.GetSource());
         }
 
         return TypeRef.Span(innerType);
+    }
+
+    private TypeRef ResolveArrayModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics = true)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "array type syntax", KnownIntrinsics.Array, modified.GetSource());
+        }
+
+        return TypeRef.Array(innerType);
+    }
+
+    private TypeRef ResolveFixedArrayModifier(ModifiedType modified, FixedArrayTypeModifier fixedArray, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+        {
+            var span = fixedArray.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "fixed-size array type syntax", KnownIntrinsics.FixedArray, modified.GetSource());
+        }
+
+        ResolveExpression(fixedArray.Size, scope, default);
+        return TypeRef.FixedArray(innerType, fixedArray.Size);
     }
 
     private void CheckInferredInitializer(Expression expr, bool isInferred)
@@ -952,6 +977,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case QualifiedType qualified:
                 ResolveType(qualified.Left, scope);
                 ResolveType(qualified.Right, scope);
+                break;
+            case ModifiedType modified:
+                ResolveTypeChildren(modified.Type, scope);
+                break;
+            case PrefixModifiedType prefixModified:
+                ResolveTypeChildren(prefixModified.Type, scope);
                 break;
         }
     }
@@ -1647,8 +1678,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 (SpanSemanticType sA, SpanSemanticType sB) =>
                     ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
                 (ArraySemanticType aA, ArraySemanticType aB) =>
-                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null) &&
-                    (aA.Size == aB.Size || Nullable.Equals(aA.Size.GetSpan(), aB.Size.GetSpan())),
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null),
+                (FixedArraySemanticType fA, FixedArraySemanticType fB) =>
+                    ParameterTypesMatch(fA.ElementType, genericParamsA, fB.ElementType, genericParamsB, null, null) &&
+                    (fA.Size == fB.Size || Nullable.Equals(fA.Size.GetSpan(), fB.Size.GetSpan())),
                 (OptionalSemanticType oA, OptionalSemanticType oB) =>
                     ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
                 (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>

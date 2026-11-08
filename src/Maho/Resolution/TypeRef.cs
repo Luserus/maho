@@ -19,7 +19,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Resolved => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -27,7 +27,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Unresolved => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -53,8 +53,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Reference(TypeRef element) =>
         new TypeRef(TypeRefKind.Reference, null, new ReferenceSemanticType(element));
 
-    public static TypeRef Array(TypeRef element, Expression size) =>
-        new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element, size));
+    public static TypeRef Array(TypeRef element) =>
+        new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element));
+
+    public static TypeRef FixedArray(TypeRef element, Expression size) =>
+        new TypeRef(TypeRefKind.FixedArray, null, new FixedArraySemanticType(element, size));
 
     public static TypeRef Span(TypeRef element) =>
         new TypeRef(TypeRefKind.Span, null, new SpanSemanticType(element));
@@ -108,7 +111,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Inferred => "var",
         TypeRefKind.Error => "<error>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
 }

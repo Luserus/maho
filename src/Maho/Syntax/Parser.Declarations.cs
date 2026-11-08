@@ -717,6 +717,13 @@ internal sealed partial class Parser
 
     private TypeSyntax ParseTypeSyntax()
     {
+        if (CurrentToken.Kind is TokenKind.Ampersand)
+        {
+            var ampersand = Consume();
+            var innerType = ParseTypeSyntax();
+            return new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType);
+        }
+
         var type = ParsePrimaryType();
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
@@ -872,7 +879,7 @@ internal sealed partial class Parser
         {
             PostfixTypeModifier modifier = CurrentToken.Kind switch
             {
-                TokenKind.LeftBracket => ParseArrayTypeModifier(),
+                TokenKind.LeftBracket => ParseArrayOrFixedArrayTypeModifier(),
                 TokenKind.QuestionMark => ParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ParsePointerTypeModifier(),
                 TokenKind.Ampersand => ParseReferenceTypeModifier(),
@@ -885,17 +892,19 @@ internal sealed partial class Parser
         return type;
     }
 
-    private ArrayTypeModifier ParseArrayTypeModifier()
+    private PostfixTypeModifier ParseArrayOrFixedArrayTypeModifier()
     {
         var openBracket = Consume();
-        Expression? size = null;
 
         if (CurrentToken.Kind is not TokenKind.RightBracket)
-            size = ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious);
+        {
+            var size = ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious);
+            var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the array type modifier");
+            return new FixedArrayTypeModifier(openBracket, size, closeBracket);
+        }
 
-        var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the array type modifier");
-
-        return new ArrayTypeModifier(openBracket, size, closeBracket);
+        var rightBracket = Consume();
+        return new ArrayTypeModifier(openBracket, rightBracket);
     }
 
     private PointerTypeModifier ParsePointerTypeModifier()

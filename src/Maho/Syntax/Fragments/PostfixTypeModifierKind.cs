@@ -4,6 +4,7 @@ namespace Maho.Syntax;
 internal enum PostfixTypeModifierKind
 {
     Array,
+    FixedArray,
     Pointer,
     Optional,
     Reference

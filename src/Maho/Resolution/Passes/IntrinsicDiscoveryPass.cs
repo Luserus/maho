@@ -235,11 +235,12 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         ValidatePointerLike(KnownIntrinsics.Pointer, typesByIntrinsic);
         ValidatePointerLike(KnownIntrinsics.Reference, typesByIntrinsic);
 
-        // Group 3: Str (requires Int8, Pointer, Int64)
+        // Group 3: Str (requires Int8, Reference, Int64)
         ValidateStr(typesByIntrinsic);
 
-        // Group 4: Array (requires Pointer, Int64)
+        // Group 4: Array (requires Pointer, Int64) and Span (requires Reference, Int64)
         ValidateArray(typesByIntrinsic);
+        ValidateSpan(typesByIntrinsic);
     }
 
     private bool VerifyZeroFieldPrimitiveContract(Symbol symbol, string intrinsicName)
@@ -321,11 +322,11 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         var syntax = GetSyntax(symbol);
 
         if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int8) ||
-            !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer) ||
+            !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference) ||
             !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int64))
         {
             var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, $"requires '{KnownIntrinsics.Int8}', '{KnownIntrinsics.Pointer}', and '{KnownIntrinsics.Int64}' to be declared first", syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, $"requires '{KnownIntrinsics.Int8}', '{KnownIntrinsics.Reference}', and '{KnownIntrinsics.Int64}' to be declared first", syntax?.GetSource());
             return;
         }
 
@@ -341,19 +342,19 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         if (instanceFields.Count != 2)
         {
             var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, "must have exactly 2 instance fields (Int8* and Int64)", syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, "must have exactly 2 instance fields (Int8& and Int64)", syntax?.GetSource());
             return;
         }
 
-        // Field 1: Int8* or Pointer<Int8>
+        // Field 1: Int8& or Reference<Int8>
         var field1 = instanceFields[0];
         var field1Type = field1.Syntax?.Type;
         context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int8, out var int8Handle);
 
-        if (!IsPointerTo(field1Type, field1.EnclosingScope, int8Handle))
+        if (!IsReferenceTo(field1Type, field1.EnclosingScope, int8Handle))
         {
             var span = field1.Syntax?.Type.GetSpan() ?? field1.Syntax?.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, "first field must be a pointer type pointing to 'Int8' (e.g. Int8* or Pointer<Int8>)", field1.Syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Str, "first field must be a reference type pointing to 'Int8' (e.g. Int8& or Reference<Int8>)", field1.Syntax?.GetSource());
             return;
         }
 
@@ -441,6 +442,115 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         }
 
         context.DiscoveredIntrinsics.Register(KnownIntrinsics.Array, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
+    }
+
+    private void ValidateSpan(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
+    {
+        if (!typesByIntrinsic.TryGetValue(KnownIntrinsics.Span, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span))
+            return;
+
+        var entry = list[0];
+        var symbol = entry.Symbol;
+        var syntax = GetSyntax(symbol);
+
+        if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference) ||
+            !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int64))
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, $"requires '{KnownIntrinsics.Reference}' and '{KnownIntrinsics.Int64}' to be declared first", syntax?.GetSource());
+            return;
+        }
+
+        if (GetGenericParameterCount(symbol) != 1)
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, "must have exactly 1 generic parameter", syntax?.GetSource());
+            return;
+        }
+
+        var instanceFields = GetInstanceFields(symbol);
+        if (instanceFields.Count != 2)
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, "must have exactly 2 instance fields (T& and Int64)", syntax?.GetSource());
+            return;
+        }
+
+        var genericParamHandle = GetFirstGenericParameter(symbol);
+        var genericParamSymbol = genericParamHandle is { } gph ? context.GetGenericParameterSymbol(gph) : null;
+
+        if (genericParamSymbol is null)
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, "generic parameter could not be resolved", syntax?.GetSource());
+            return;
+        }
+
+        // Field 1: T& or Reference<T>
+        var field1 = instanceFields[0];
+        var field1Type = field1.Syntax?.Type;
+        var genericParamTargetHandle = ResolutionContext.GetHandle(genericParamSymbol);
+
+        if (!IsReferenceTo(field1Type, field1.EnclosingScope, genericParamTargetHandle, genericParamSymbol))
+        {
+            var span = field1.Syntax?.Type.GetSpan() ?? field1.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, "first field must be a reference type pointing to generic parameter 'T' (e.g. T& or Reference<T>)", field1.Syntax?.GetSource());
+            return;
+        }
+
+        // Field 2: Int64
+        var field2 = instanceFields[1];
+        var field2Type = field2.Syntax?.Type;
+        var field2Handle = ResolveTypeSymbol(field2Type, field2.EnclosingScope);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var int64Handle);
+
+        if (field2Handle != int64Handle)
+        {
+            var span = field2Type?.GetSpan() ?? field2.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Span, $"second field must be of type '{KnownIntrinsics.Int64}'", field2.Syntax?.GetSource());
+            return;
+        }
+
+        context.DiscoveredIntrinsics.Register(KnownIntrinsics.Span, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
+    }
+
+    private bool IsReferenceTo(TypeSyntax? syntax, Scope scope, SymbolHandle expectedTargetHandle, GenericParameterSymbol? genericParam = null)
+    {
+        if (syntax is null)
+            return false;
+
+        // Case 1: T& syntax (ModifiedType with ReferenceTypeModifier)
+        if (syntax is ModifiedType { Modifier: ReferenceTypeModifier } refType)
+        {
+            if (genericParam is not null && refType.Type is SimpleType simple && simple.Name.Value == genericParam.Name.Text)
+                return true;
+
+            var innerHandle = ResolveGenericOrTypeSymbol(refType.Type, scope);
+            return innerHandle == expectedTargetHandle;
+        }
+
+        // Case 2: Reference<T> syntax (GenericType)
+        if (syntax is GenericType gen && gen.GenericArguments.Count == 1)
+        {
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle))
+            {
+                var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, gen.GenericArguments.Count);
+                var targetSym = context.GetSymbol(refHandle);
+
+                if (baseHandle == refHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
+                {
+                    var argName = GetGenericArgumentName(gen.GenericArguments[0]);
+
+                    if (genericParam is not null && argName == genericParam.Name.Text)
+                        return true;
+
+                    var innerHandle = ResolveGenericOrTypeSymbol(gen.GenericArguments[0], scope);
+                    return innerHandle == expectedTargetHandle;
+                }
+            }
+        }
+
+        return false;
     }
 
     private bool IsPointerTo(TypeSyntax? syntax, Scope scope, SymbolHandle expectedTargetHandle, GenericParameterSymbol? genericParam = null)
@@ -700,7 +810,25 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
     private SymbolHandle? ResolveGenericOrTypeSymbol(TypeSyntax? syntax, Scope scope)
     {
-        if (syntax is SimpleType simple)
+        if (syntax is NamedExpressionGenericArgument named)
+        {
+            var symbols = scope[new SymbolName(new SymbolPart(named.Expression.Identifier.Value))];
+
+            if (symbols.Count == 1)
+            {
+                var sym = symbols[0];
+
+                if (sym is GenericParameterSymbol or TypeSymbol or NestedTypeSymbol)
+                    return ResolutionContext.GetHandle(sym);
+
+                if (sym is AliasSymbol alias)
+                {
+                    EnsureAliasResolved(alias);
+                    return alias.Target.Handle;
+                }
+            }
+        }
+        else if (syntax is SimpleType simple)
         {
             var name = ResolutionContext.GetSymbolName(simple);
             var symbols = scope[name];
