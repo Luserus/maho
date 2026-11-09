@@ -2,6 +2,7 @@ global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.Sy
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -19,7 +20,8 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Resolved => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
+        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -27,7 +29,8 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Unresolved => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
+        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -68,6 +71,25 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Tuple(IReadOnlyList<TupleElement> elements) =>
         new TypeRef(TypeRefKind.Tuple, null, new TupleSemanticType(elements));
 
+    public static TypeRef Union(IReadOnlyList<TypeRef> constituents, bool isUntagged = false)
+    {
+        var semantic = new UnionSemanticType(constituents, isUntagged);
+        return new TypeRef(TypeRefKind.Union, null, semantic);
+    }
+
+    public static TypeRef Untagged(TypeRef inner)
+    {
+        if (inner.SpecialType is UnionSemanticType u)
+            return Union(u.Variants, isUntagged: true);
+
+        if (inner.Kind == TypeRefKind.Untagged)
+            return inner;
+
+        return new TypeRef(TypeRefKind.Untagged, null, new UntaggedSemanticType(inner));
+    }
+
+    public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
+
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
 
     public bool Equals(TypeRef other)
@@ -105,13 +127,53 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     /// </summary>
     public TypeRef UnwrapAlias(ResolutionContext context) => context.UnwrapAlias(this);
 
+    public bool IsAssignableFrom(TypeRef source, ResolutionContext context)
+    {
+        if (Equals(source))
+            return true;
+
+        if (SpecialType is UnionSemanticType targetUnion)
+        {
+            if (source.SpecialType is UnionSemanticType sourceUnion)
+                return sourceUnion.Variants.All(sv => targetUnion.Variants.Any(tv => tv.IsAssignableFrom(sv, context)));
+
+            return targetUnion.Variants.Any(v => v.IsAssignableFrom(source, context));
+        }
+
+        if (Handle is { } thisHandle && context.GetTypeSymbol(thisHandle) is ISumTypeSymbol sumType && sumType.UnionConstituents.Count > 0)
+        {
+            return sumType.UnionConstituents.Any(c => c.IsAssignableFrom(source, context));
+        }
+
+        return false;
+    }
+
     public override string ToString() => Kind switch
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
         TypeRefKind.Inferred => "var",
         TypeRefKind.Error => "<error>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
-        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
+        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
+
+    public string ToDisplayString(ResolutionContext? context = null)
+    {
+        if (context is not null && Kind == TypeRefKind.Resolved && Handle is { } handle)
+        {
+            if (context.GetTypeSymbol(handle) is { } typeSym)
+                return typeSym.Name.Text;
+            if (context.GetGenericParameterSymbol(handle) is { } gpSym)
+                return gpSym.Name.Text;
+            if (context.GetAliasSymbol(handle) is { } aliasSym)
+                return aliasSym.Name.Text;
+        }
+
+        if (SpecialType is not null)
+            return SpecialType.ToDisplayString(context);
+
+        return ToString();
+    }
 }

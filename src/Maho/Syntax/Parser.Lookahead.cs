@@ -370,6 +370,16 @@ internal sealed partial class Parser
             return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), true, LookaheadResultContext.Success);
         }
 
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
+        {
+            var untagged = LookaheadConsume();
+            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
+            if (!innerSuccess)
+                return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), false, innerContext);
+
+            return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), true, LookaheadResultContext.Success);
+        }
+
         var (type, success) = LookaheadParsePrimaryType();
 
         if (!success)
@@ -527,6 +537,38 @@ internal sealed partial class Parser
             {
                 lookaheadCurrent = saved;
                 return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+            }
+
+            if (LookaheadCurrentToken.Kind is TokenKind.VerticalBar)
+            {
+                var unionNodesAndSeparators = new List<SyntaxNode> { elemType, LookaheadConsume() };
+                bool unionSuccess = true;
+
+                while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+                {
+                    var (nextElemType, nextSuccess, _) = LookaheadParseTypeSyntax();
+                    if (!nextSuccess)
+                    {
+                        unionSuccess = false;
+                        break;
+                    }
+
+                    unionNodesAndSeparators.Add(nextElemType);
+
+                    if (LookaheadCurrentToken.Kind is TokenKind.VerticalBar)
+                        unionNodesAndSeparators.Add(LookaheadConsume());
+                    else
+                        break;
+                }
+
+                if (!unionSuccess || LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+                {
+                    lookaheadCurrent = saved;
+                    return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+                }
+
+                var unionCloseParen = LookaheadConsume();
+                return (new UnionType(openParen, new SeparatedSyntaxList<TypeSyntax>(unionNodesAndSeparators), unionCloseParen), true);
             }
 
             Token? name = null;

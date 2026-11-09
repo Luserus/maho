@@ -105,6 +105,19 @@ internal sealed partial class Parser
         };
 
         var name = ParseNamedSyntax(allowQualified: true, allowGenericQualifiedParts: false);
+        TypeSyntax? discriminantType = null;
+        SeparatedSyntaxList<TypeSyntax>? unionConstituents = null;
+
+        if (kind == TypeKind.Enum && CurrentToken.MatchingKind is MatchingKeywordKind.With)
+        {
+            Consume(); // consume 'with'
+            discriminantType = ParseTypeSyntax();
+        }
+        else if (kind == TypeKind.Union && CurrentToken.Kind is TokenKind.LeftParen)
+        {
+            unionConstituents = ParseUnionConstituentList();
+        }
+
         TypeBaseClause? baseClause = null;
 
         if (CurrentToken.Kind is TokenKind.Colon)
@@ -118,7 +131,7 @@ internal sealed partial class Parser
         TypeBody body;
 
         if (CurrentToken.Kind is TokenKind.LeftBrace)
-            body = ParseTypeBlockBody();
+            body = kind == TypeKind.Enum ? ParseEnumTypeBlockBody() : ParseTypeBlockBody();
         else if (CurrentToken.Kind is TokenKind.Semicolon)
             body = ParseTypeEmptyBody();
         else
@@ -127,7 +140,7 @@ internal sealed partial class Parser
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
-        return new TypeDeclaration(attributes, modifiers, keyword, kind, name, baseClause, constraints, body);
+        return new TypeDeclaration(attributes, modifiers, keyword, kind, name, baseClause, constraints, body, discriminantType, unionConstituents);
     }
 
     /// <summary> Parses every bracketed attribute list attached to the current declaration. </summary>
@@ -255,6 +268,124 @@ internal sealed partial class Parser
     }
 
     private TypeEmptyBody ParseTypeEmptyBody() => new TypeEmptyBody(Consume());
+
+    private TypeEnumBody ParseEnumTypeBlockBody()
+    {
+        var openBrace = Consume();
+        var variants = new List<EnumVariant>();
+        var members = new List<Member>();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            if (IsCurrentTokenModifier || LooksLikeEnumMemberDeclaration())
+                break;
+
+            var variantAttrs = ParseAttributeLists();
+            if (CurrentToken.Kind is not TokenKind.Identifier)
+                break;
+
+            var variantName = ParseNamedSyntax();
+            EnumVariant variant;
+
+            if (CurrentToken.Kind is TokenKind.LeftParen)
+            {
+                var openParen = Consume();
+                var parameters = ParseParameterList();
+                var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple variant parameters");
+                Token? equalsToken = null;
+                Expression? explicitValue = null;
+                if (CurrentToken.Kind is TokenKind.Equals)
+                {
+                    equalsToken = Consume();
+                    explicitValue = ParseExpression();
+                }
+                variant = new EnumTupleVariant(variantAttrs, variantName, openParen, parameters, closeParen, equalsToken, explicitValue);
+            }
+            else if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                var openVariantBrace = Consume();
+                var fields = new List<MemberFieldDeclaration>();
+                while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+                {
+                    var fieldAttrs = ParseAttributeLists();
+                    var fieldModifiers = ParseModifiers();
+                    var fieldType = ParseTypeSyntax();
+                    var fieldName = ParseNamedSyntax();
+                    var semicolon = ExpectToken(TokenKind.Semicolon, ";", "after struct variant field");
+                    fields.Add(new MemberFieldDeclaration(new VariableDeclaration(fieldAttrs, fieldModifiers, fieldType, new SeparatedSyntaxList<VariableDeclarator>([new VariableDeclarator(fieldName, null)])), semicolon));
+                }
+                var closeVariantBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close struct variant body");
+                Token? equalsToken = null;
+                Expression? explicitValue = null;
+                if (CurrentToken.Kind is TokenKind.Equals)
+                {
+                    equalsToken = Consume();
+                    explicitValue = ParseExpression();
+                }
+                variant = new EnumStructVariant(variantAttrs, variantName, openVariantBrace, fields, closeVariantBrace, equalsToken, explicitValue);
+            }
+            else
+            {
+                Token? equalsToken = null;
+                Expression? explicitValue = null;
+                if (CurrentToken.Kind is TokenKind.Equals)
+                {
+                    equalsToken = Consume();
+                    explicitValue = ParseExpression();
+                }
+                variant = new EnumUnitVariant(variantAttrs, variantName, equalsToken, explicitValue);
+            }
+
+            variants.Add(variant);
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+                Consume();
+            else if (CurrentToken.Kind is TokenKind.Semicolon)
+                Consume();
+        }
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var start = current;
+            var member = ParseMember();
+            members.Add(member);
+            RecoverMemberIfStalled(start);
+        }
+
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the enum body");
+        return new TypeEnumBody(openBrace, variants, members, closeBrace);
+    }
+
+    private bool LooksLikeEnumMemberDeclaration()
+    {
+        if (IsCurrentTokenModifier)
+            return true;
+
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Identifier)
+            return true;
+
+        return false;
+    }
+
+    private SeparatedSyntaxList<TypeSyntax> ParseUnionConstituentList()
+    {
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "for union constituent types");
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var type = ParseTypeSyntax();
+            nodesAndSeparators.Add(type);
+
+            if (CurrentToken.Kind is TokenKind.VerticalBar)
+                nodesAndSeparators.Add(Consume());
+            else
+                break;
+        }
+
+        ExpectToken(TokenKind.RightParen, "')'", "to close union constituent types");
+        return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
+    }
 
 
     private TopLevelAttributeDeclaration ParseTopLevelAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
@@ -724,6 +855,13 @@ internal sealed partial class Parser
             return new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType);
         }
 
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
+        {
+            var untagged = Consume();
+            var innerType = ParseTypeSyntax();
+            return new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType);
+        }
+
         var type = ParsePrimaryType();
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
@@ -738,7 +876,7 @@ internal sealed partial class Parser
     private TypeSyntax ParsePrimaryType()
     {
         if (CurrentToken.Kind is TokenKind.LeftParen)
-            return ParseTupleType();
+            return ParseParenthesizedType();
 
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
@@ -780,29 +918,62 @@ internal sealed partial class Parser
         return new UniformTupleType(elementType, openParen, new SeparatedSyntaxList<SimpleName>(nodesAndSeparators), closeParen);
     }
 
-    private TupleType ParseTupleType()
+    private TypeSyntax ParseParenthesizedType()
     {
         var openParen = Consume();
         var nodesAndSeparators = new List<SyntaxNode>();
 
-        while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        var firstType = ParseTypeSyntax();
+
+        if (CurrentToken.Kind is TokenKind.VerticalBar)
         {
-            var element = ParseTypeSyntax();
-            Token? name = null;
+            nodesAndSeparators.Add(firstType);
+            nodesAndSeparators.Add(Consume());
 
-            if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
-                name = Consume();
+            while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+            {
+                var nextType = ParseTypeSyntax();
+                nodesAndSeparators.Add(nextType);
 
-            nodesAndSeparators.Add(new TupleTypeElement(element, name));
+                if (CurrentToken.Kind is TokenKind.VerticalBar)
+                    nodesAndSeparators.Add(Consume());
+                else
+                    break;
+            }
 
-            if (CurrentToken.Kind is TokenKind.Comma)
-                nodesAndSeparators.Add(Consume());
-            else
-                break;
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the union type");
+            return new UnionType(openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen);
         }
 
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple type");
-        return new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), closeParen);
+        Token? firstName = null;
+        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
+            firstName = Consume();
+
+        nodesAndSeparators.Add(new TupleTypeElement(firstType, firstName));
+
+        if (CurrentToken.Kind is TokenKind.Comma)
+        {
+            nodesAndSeparators.Add(Consume());
+
+            while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+            {
+                var element = ParseTypeSyntax();
+                Token? name = null;
+
+                if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
+                    name = Consume();
+
+                nodesAndSeparators.Add(new TupleTypeElement(element, name));
+
+                if (CurrentToken.Kind is TokenKind.Comma)
+                    nodesAndSeparators.Add(Consume());
+                else
+                    break;
+            }
+        }
+
+        var tupleCloseParen = ExpectToken(TokenKind.RightParen, "')'", "to close the tuple type");
+        return new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), tupleCloseParen);
     }
 
     private TupleName ParseTupleName()

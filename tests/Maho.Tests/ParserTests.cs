@@ -1459,7 +1459,7 @@ public sealed class ParserTests
                 public T Value;
                 public class Nested;
 
-                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, Extra.Nested nested, TInput input) where TInput: Extra.Nested
+                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, untagged int untaggedParam, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
@@ -1484,6 +1484,20 @@ public sealed class ParserTests
                     local = put Box<int>(local).Value;
                     local = if (local) local else 0;
                     local = identity<int>(value: local);
+                    (int | string) anonUnion;
+                    untagged (int | string) untaggedUnion;
+                    Box<untagged int> boxOfUntagged;
+                    untagged int untaggedLocal = 0;
+                    local = match (local)
+                    {
+                        MyEnum.UnitVar => 1,
+                        MyEnum.TupleVar(val) => val,
+                        MyEnum.StructVar { x } => x,
+                        1 => 2,
+                        int t => t,
+                        _ => 0
+                    };
+                    var created = MyEnum.StructVar { x = local };
 
                     if (int testCond = local; testCond) local = 1; else local = 2;
                     ;
@@ -1496,6 +1510,19 @@ public sealed class ParserTests
                 {
                     void UnsafeFunc() { }
                 }
+            }
+
+            public enum MyEnum with int
+            {
+                UnitVar = 1,
+                TupleVar(int x) = 2,
+                StructVar { int x; } = 3;
+                public void Method() { }
+            }
+
+            public union MyUnion (int | string)
+            {
+                public void Method() { }
             }
 
             public static int identity<T>(T value) where T: Extra.Nested
@@ -1603,7 +1630,22 @@ public sealed class ParserTests
             typeof(ArrayCreationExpression),
             typeof(ObjectWithClause),
             typeof(TypeInitializer),
-            typeof(NamedArgumentExpression));
+            typeof(NamedArgumentExpression),
+            typeof(EnumUnitVariant),
+            typeof(EnumTupleVariant),
+            typeof(EnumStructVariant),
+            typeof(TypeEnumBody),
+            typeof(UnionType),
+            typeof(MatchExpression),
+            typeof(MatchArm),
+            typeof(VariantCreationExpression),
+            typeof(WildcardPattern),
+            typeof(LiteralPattern),
+            typeof(FieldPatternSyntax),
+            typeof(EnumVariantPattern),
+            typeof(TypePattern),
+            typeof(VariablePattern),
+            typeof(UntaggedTypeModifier));
     }
 
     [Fact]

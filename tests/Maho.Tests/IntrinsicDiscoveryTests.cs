@@ -41,7 +41,7 @@ public sealed class IntrinsicDiscoveryTests
     {
         var compilation = Compilation.FromSource("");
         Assert.False(compilation.HasErrors);
-        Assert.Empty(compilation.Context!.DiscoveredIntrinsics.All);
+        Assert.Empty(compilation.Context.DiscoveredIntrinsics.All);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.Empty(compilation.Context!.DiscoveredIntrinsics.All);
+        Assert.Empty(compilation.Context.DiscoveredIntrinsics.All);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class IntrinsicDiscoveryTests
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude);
 
         Assert.False(compilation.HasErrors);
-        Assert.NotNull(compilation.Context!.DiscoveredIntrinsics.IntrinsicTypeAttribute);
+        Assert.NotNull(compilation.Context.DiscoveredIntrinsics.IntrinsicTypeAttribute);
         Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Str));
         Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int8));
         Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int64));
@@ -459,7 +459,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
     }
 
     [Fact]
@@ -476,7 +476,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
     }
 
     [Fact]
@@ -485,7 +485,7 @@ public sealed class IntrinsicDiscoveryTests
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference));
     }
 
     [Fact]
@@ -502,7 +502,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
     }
 
     [Fact]
@@ -519,7 +519,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
     }
 
     [Fact]
@@ -550,7 +550,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray));
     }
 
     [Fact]
@@ -802,7 +802,7 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int32));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Int32));
     }
 
     [Fact]
@@ -841,9 +841,9 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer));
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference));
-        Assert.True(compilation.Context!.DiscoveredIntrinsics.Contains(KnownIntrinsics.Str));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Str));
     }
 
     [Fact]

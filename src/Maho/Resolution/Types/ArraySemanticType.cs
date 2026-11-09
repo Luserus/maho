@@ -19,4 +19,6 @@ internal sealed class ArraySemanticType : SemanticType
     public override int GetHashCode() => HashCode.Combine(Kind, ElementType);
 
     public override string ToString() => $"{ElementType}[]";
+
+    public override string ToDisplayString(ResolutionContext? context = null) => $"{ElementType.ToDisplayString(context)}[]";
 }

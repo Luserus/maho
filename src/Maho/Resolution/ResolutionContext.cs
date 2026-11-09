@@ -32,6 +32,7 @@ internal sealed class ResolutionContext
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
     public List<MacroSymbol> MacroSymbols { get; }
+    public List<EnumVariantSymbol> EnumVariantSymbols { get; }
 
     public SymbolStore SinkSymbols { get; } = SymbolStore.CreateEmpty();
     private readonly List<LocalVariableSymbol> sinkLocalVariables = [];
@@ -42,6 +43,7 @@ internal sealed class ResolutionContext
             .Concat(sinkLocalVariables);
     private readonly Dictionary<SymbolHandle, Symbol> sinkSymbolsByHandle = [];
     private int sinkID = -1;
+    private int enumVariantID;
 
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
@@ -127,6 +129,7 @@ internal sealed class ResolutionContext
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
         MacroSymbols = symbols.MacroSymbols;
+        EnumVariantSymbols = symbols.EnumVariantSymbols;
 
         ReferencedProjects = referencedProjects ?? [];
         ImportedProjectSymbols = importedSymbols ?? [];
@@ -145,6 +148,7 @@ internal sealed class ResolutionContext
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
         macroID = MacroSymbols.Count;
+        enumVariantID = EnumVariantSymbols.Count;
 
         if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
             InitializeProjectReferences();
@@ -639,6 +643,29 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
+    public EnumVariantSymbol CreateEnumVariantSymbol(
+        Scope enclosingScope,
+        SymbolPart name,
+        EnumVariantKind variantKind,
+        SymbolHandle containingType,
+        EnumVariant? syntax,
+        Expression? explicitValue = null)
+    {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : enumVariantID++;
+        var symbol = new EnumVariantSymbol(id, enclosingScope, name, variantKind, containingType, syntax, explicitValue);
+
+        if (isSink)
+        {
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+            EnumVariantSymbols.Add(symbol);
+
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
     public FunctionSymbol? GetFunctionSymbol(SymbolHandle handle)
     {
         if (handle.Kind != SymbolKind.Function)
@@ -771,6 +798,18 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    public EnumVariantSymbol? GetEnumVariantSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.EnumVariant)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < EnumVariantSymbols.Count)
+            return EnumVariantSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is EnumVariantSymbol v)
+            return v;
+
+        return null;
+    }
+
     public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
     {
         SymbolKind.Type => GetTypeSymbol(handle),
@@ -784,6 +823,7 @@ internal sealed class ResolutionContext
         SymbolKind.Parameter => GetParameterSymbol(handle),
         SymbolKind.Attribute => GetAttributeSymbol(handle),
         SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
+        SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
         _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
     };
 
@@ -801,6 +841,9 @@ internal sealed class ResolutionContext
     /// </summary>
     public SymbolHandle? GetType(TypeRef typeRef)
     {
+        if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
+            return GetType(untagged.InnerType);
+
         if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
             return null;
 
@@ -840,6 +883,9 @@ internal sealed class ResolutionContext
     /// </summary>
     public TypeRef UnwrapAlias(TypeRef typeRef)
     {
+        if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
+            return TypeRef.Untagged(UnwrapAlias(untagged.InnerType));
+
         var current = typeRef;
         var visited = new HashSet<SymbolHandle>();
 

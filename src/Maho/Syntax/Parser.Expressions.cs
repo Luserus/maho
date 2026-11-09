@@ -74,6 +74,12 @@ internal sealed partial class Parser
 
                 continue;
             }
+            else if (CurrentToken.Kind is TokenKind.LeftBrace && left is MemberAccessExpression or IdentifierNameExpression && LooksLikeTypeInitializer())
+            {
+                var initializer = ParseTypeInitializer();
+                left = new VariantCreationExpression(left, initializer);
+                continue;
+            }
 
             var (kind, length) = GetCombinedOperatorData();
 
@@ -153,6 +159,7 @@ internal sealed partial class Parser
             MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
             MatchingKeywordKind.If => ParseIfExpression(),
             MatchingKeywordKind.While => ParseWhileExpression(),
+            MatchingKeywordKind.Match => ParseMatchExpression(),
             MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
             _ => ParseNamedExpression()
         },
@@ -499,5 +506,140 @@ internal sealed partial class Parser
         }
 
         return ParseExpectedExpression("in the argument list", MissingTokenAnchor.AfterPrevious);
+    }
+
+    private bool LooksLikeTypeInitializer()
+    {
+        if (CurrentToken.Kind is not TokenKind.LeftBrace)
+            return false;
+
+        if (Peek().Kind is TokenKind.RightBrace)
+            return true;
+
+        if (Peek().Kind is TokenKind.Identifier && Peek(2).Kind is TokenKind.Equals)
+            return true;
+
+        return false;
+    }
+
+    private MatchExpression ParseMatchExpression()
+    {
+        var matchKeyword = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'match'");
+        var expression = ParseExpectedExpression("for the match expression", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the match condition");
+        var openBrace = ExpectToken(TokenKind.LeftBrace, "'{'", "to open the match body");
+
+        var arms = new List<MatchArm>();
+
+        while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+        {
+            var pattern = ParsePattern();
+            var arrowToken = ConsumeArrow();
+            var armExpr = ParseExpectedExpression("for the match arm body", MissingTokenAnchor.AfterPrevious);
+            Token? commaToken = null;
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+                commaToken = Consume();
+
+            arms.Add(new MatchArm(pattern, arrowToken, armExpr, commaToken));
+        }
+
+        var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the match body");
+        return new MatchExpression(matchKeyword, openParen, expression, closeParen, openBrace, arms, closeBrace);
+    }
+
+    private PatternSyntax ParsePattern()
+    {
+        // 1. Wildcard '_'
+        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && text[CurrentToken.Span.Start] == '_')
+            return new WildcardPattern(Consume());
+
+        // 2. Literal pattern
+        if (IsLiteralTokenKind(CurrentToken.Kind))
+            return new LiteralPattern(ParseLiteralExpression());
+
+        // 3. Identifier-based pattern
+        if (CurrentToken.Kind is TokenKind.Identifier)
+        {
+            TypeSyntax? typeQualifier = null;
+            if (Peek().Kind is TokenKind.Dot)
+            {
+                var typeIdent = Consume();
+                typeQualifier = new SimpleType(typeIdent);
+                Consume(); // consume '.'
+            }
+
+            var nameIdent = Consume();
+            var name = new SimpleName(nameIdent);
+
+            // Check if followed by '(' -> Tuple variant pattern
+            if (CurrentToken.Kind is TokenKind.LeftParen)
+            {
+                var openParen = Consume();
+                var subPatterns = new List<SyntaxNode>();
+                while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+                {
+                    subPatterns.Add(ParsePattern());
+                    if (CurrentToken.Kind is TokenKind.Comma)
+                        subPatterns.Add(Consume());
+                    else
+                        break;
+                }
+                var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close tuple variant pattern");
+                return EnumVariantPattern.Tuple(typeQualifier, name, openParen, new SeparatedSyntaxList<PatternSyntax>(subPatterns), closeParen);
+            }
+
+            // Check if followed by '{' -> Struct variant pattern
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                var openBrace = Consume();
+                var fieldPatterns = new List<FieldPatternSyntax>();
+                while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
+                {
+                    var fieldName = new SimpleName(ExpectIdentifierToken("for struct field pattern name"));
+                    Token? colonToken = null;
+                    PatternSyntax fieldPattern;
+                    if (CurrentToken.Kind is TokenKind.Colon)
+                    {
+                        colonToken = Consume();
+                        fieldPattern = ParsePattern();
+                    }
+                    else
+                    {
+                        fieldPattern = new VariablePattern(fieldName);
+                    }
+                    fieldPatterns.Add(new FieldPatternSyntax(fieldName, colonToken, fieldPattern));
+                    if (CurrentToken.Kind is TokenKind.Comma)
+                        Consume();
+                }
+                var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close struct variant pattern");
+                return EnumVariantPattern.Struct(typeQualifier, name, openBrace, fieldPatterns, closeBrace);
+            }
+
+            // Check if followed by an identifier (and not '=>') -> Type pattern with variable, e.g. A a => ...
+            if (typeQualifier is null && CurrentToken.Kind is TokenKind.Identifier && CurrentToken.MatchingKind is not MatchingKeywordKind.As)
+            {
+                var varIdent = Consume();
+                return new TypePattern(new SimpleType(nameIdent), new SimpleName(varIdent));
+            }
+
+            // Otherwise: Unit variant pattern (which also represents type pattern if used in union)
+            return EnumVariantPattern.Unit(typeQualifier, name);
+        }
+
+        // 4. Parenthesized or complex type pattern: e.g. (int32 | Str) x
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+        {
+            var type = ParseTypeSyntax();
+            NamedSyntax? varName = null;
+            if (CurrentToken.Kind is TokenKind.Identifier)
+                varName = new SimpleName(Consume());
+            return new TypePattern(type, varName);
+        }
+
+        // Fallback: missing pattern
+        diagnostics.ReportExpectedPattern(CurrentToken.Span, GetTokenDisplay(CurrentToken), "in match arm");
+        return new WildcardPattern(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
     }
 }

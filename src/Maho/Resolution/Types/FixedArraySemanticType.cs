@@ -33,5 +33,7 @@ internal sealed class FixedArraySemanticType : SemanticType
     public override int GetHashCode() => HashCode.Combine(Kind, ElementType);
 
     public override string ToString() => $"{ElementType}[{Size}]";
+
+    public override string ToDisplayString(ResolutionContext? context = null) => $"{ElementType.ToDisplayString(context)}[{Size}]";
 }
 

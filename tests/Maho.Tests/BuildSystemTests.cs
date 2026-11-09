@@ -110,7 +110,7 @@ public sealed class BuildSystemTests
             Assert.False(result.HasErrors);
             Assert.Single(result.Files);
             Assert.NotNull(result);
-            Assert.Single(result.Context!.TypeSymbols, t => t.Name.ToString() == "NonMhWidget");
+            Assert.Single(result.Context.TypeSymbols, t => t.Name.ToString() == "NonMhWidget");
         }
         finally
         {

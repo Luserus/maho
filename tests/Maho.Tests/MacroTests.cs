@@ -103,7 +103,7 @@ public sealed class MacroTests
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[2]);
         var declarator = Assert.Single(varDecl.Declaration.Declarators);
         Assert.Equal("temp", declarator.Identifier.ToString());
-        Assert.True(compilation.Context!.GetHygiene(declarator.Identifier).IsMacroGenerated);
+        Assert.True(compilation.Context.GetHygiene(declarator.Identifier).IsMacroGenerated);
 
         var tempSymbol = Assert.Single(compilation.Context.LocalVariableSymbols, s => s.Name.ToString() == "temp");
         Assert.True(tempSymbol.IsMacroGenerated);
@@ -138,7 +138,7 @@ public sealed class MacroTests
             """);
 
         Assert.False(compilation.HasErrors);
-        var tempSymbols = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        var tempSymbols = compilation.Context.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
         Assert.Equal(2, tempSymbols.Count);
 
         var userTemp = Assert.Single(tempSymbols, s => !s.IsMacroGenerated);
@@ -176,7 +176,7 @@ public sealed class MacroTests
             """);
 
         Assert.False(compilation.HasErrors);
-        var tempSymbols = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        var tempSymbols = compilation.Context.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
         Assert.Equal(2, tempSymbols.Count);
 
         var callerTemp = Assert.Single(tempSymbols, s => !s.IsMacroGenerated);
@@ -216,7 +216,7 @@ public sealed class MacroTests
             """);
 
         Assert.False(compilation.HasErrors);
-        var macroTemps = compilation.Context!.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
+        var macroTemps = compilation.Context.LocalVariableSymbols.Where(s => s.Name.ToString() == "temp").ToList();
         Assert.Equal(2, macroTemps.Count);
         Assert.All(macroTemps, s => Assert.True(s.IsMacroGenerated));
         Assert.NotEqual(macroTemps[0].Hygiene, macroTemps[1].Hygiene);

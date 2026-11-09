@@ -16,4 +16,6 @@ internal abstract class SemanticType : IEquatable<SemanticType>
     public abstract override int GetHashCode();
 
     public abstract override string ToString();
+
+    public virtual string ToDisplayString(ResolutionContext? context = null) => ToString();
 }

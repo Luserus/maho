@@ -15,13 +15,27 @@ internal sealed class TypeDeclaration : SyntaxNode
     public TypeKind Kind { get; }
     /// <summary> Declared name, including any generic parameter list. </summary>
     public NamedSyntax Name { get; }
+    /// <summary> Optional discriminant type for enums specified via 'with <Type>'. </summary>
+    public TypeSyntax? DiscriminantType { get; }
+    /// <summary> Constituent types for union declarations, e.g. (A | B | C). </summary>
+    public SeparatedSyntaxList<TypeSyntax>? UnionConstituents { get; }
     /// <summary> Body or terminator for the declaration. </summary>
     public TypeBaseClause? Base { get; }
     public IReadOnlyList<TypeConstraintClause> Constraints { get; }
     public TypeBody Body { get; }
 
     /// <summary> Creates one type declaration from its parsed components. </summary>
-    public TypeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token keyword, TypeKind kind, NamedSyntax name, TypeBaseClause? @base, IReadOnlyList<TypeConstraintClause> constraints, TypeBody body)
+    public TypeDeclaration(
+        IReadOnlyList<AttributeListSyntax> attributes,
+        IReadOnlyList<Token> modifiers,
+        Token keyword,
+        TypeKind kind,
+        NamedSyntax name,
+        TypeBaseClause? @base,
+        IReadOnlyList<TypeConstraintClause> constraints,
+        TypeBody body,
+        TypeSyntax? discriminantType = null,
+        SeparatedSyntaxList<TypeSyntax>? unionConstituents = null)
     {
         Attributes = attributes;
         Modifiers = modifiers;
@@ -31,5 +45,7 @@ internal sealed class TypeDeclaration : SyntaxNode
         Base = @base;
         Constraints = constraints;
         Body = body;
+        DiscriminantType = discriminantType;
+        UnionConstituents = unionConstituents;
     }
 }

@@ -26,5 +26,6 @@ internal enum SymbolKind : byte
     Field,
     GlobalVariable,
     Label,
-    Macro
+    Macro,
+    EnumVariant
 }

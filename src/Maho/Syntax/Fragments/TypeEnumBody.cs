@@ -1,11 +1,20 @@
+using System.Collections.Generic;
+
 namespace Maho.Syntax;
 
-/// <summary> Type body for enum-like declarations that store a separated member list. </summary>
+/// <summary> Type body for enum declarations that store variants and methods. </summary>
 internal sealed class TypeEnumBody : TypeBody
 {
-    /// <summary> Enum members in source order. </summary>
-    public SeparatedSyntaxList<SyntaxNode> Members { get; }
+    public Token OpenBrace { get; }
+    public IReadOnlyList<EnumVariant> Variants { get; }
+    public IReadOnlyList<Member> Members { get; }
+    public Token CloseBrace { get; }
 
-    /// <summary> Creates one enum-body node. </summary>
-    public TypeEnumBody(SeparatedSyntaxList<SyntaxNode> members) => Members = members;
+    public TypeEnumBody(Token openBrace, IReadOnlyList<EnumVariant> variants, IReadOnlyList<Member> members, Token closeBrace)
+    {
+        OpenBrace = openBrace;
+        Variants = variants;
+        Members = members;
+        CloseBrace = closeBrace;
+    }
 }

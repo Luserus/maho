@@ -9,5 +9,7 @@ internal enum SemanticTypeKind : byte
     FixedArray,
     Span,
     Optional,
-    Tuple
+    Tuple,
+    Union,
+    Untagged
 }

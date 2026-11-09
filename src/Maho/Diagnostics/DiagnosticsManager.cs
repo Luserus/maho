@@ -212,6 +212,9 @@ internal sealed class DiagnosticsManager
     public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0126", "a generic parameter", found, span, context, source, unexpectedSpan);
 
+    public void ReportExpectedPattern(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0127", "a pattern", found, span, context, source, unexpectedSpan);
+
     /// <summary> Reports that top-level statements require '#pragma toplevel enable'. </summary>
     public void ReportTopLevelPragmaRequired(TextSpan span, SourceText? source = null) =>
         BuildError("MH0160", "top-level statements require '#pragma toplevel enable' in this file", span, source)
@@ -519,5 +522,45 @@ internal sealed class DiagnosticsManager
         BuildError("MH0240", $"{syntaxDescription} requires intrinsic type '{requiredIntrinsic}' to be declared", span, source)
             .WithPrimaryLabel(span, $"requires intrinsic '{requiredIntrinsic}'", source)
             .WithHelp($"declare a type with [IntrinsicType(\"{requiredIntrinsic}\")] or reference a library that defines it")
+            .Report();
+
+    /// <summary> Reports a non-exhaustive pattern match. </summary>
+    public void ReportNonExhaustiveMatch(TextSpan span, string missingVariant, SourceText? source = null) =>
+        BuildError("MH0605", $"match expression is not exhaustive; missing variant '{missingVariant}'", span, source)
+            .WithPrimaryLabel(span, $"missing pattern arm for variant '{missingVariant}'", source)
+            .WithHelp("add the missing variant arm or a wildcard pattern '_' to make the match exhaustive")
+            .Report();
+
+    /// <summary> Reports an attempt to match on an untagged sum type without discriminant. </summary>
+    public void ReportUntaggedMatchDisallowed(TextSpan span, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0606", $"cannot match on untagged sum type '{sumTypeName}' without discriminant", span, source)
+            .WithPrimaryLabel(span, $"cannot match on '{sumTypeName}' because it is untagged", source)
+            .WithHelp("untagged sum types have no runtime discriminant; access them via untagged methods")
+            .Report();
+
+    /// <summary> Reports an invalid pattern that does not match any variant or constituent of the sum type. </summary>
+    public void ReportInvalidPatternForSumType(TextSpan span, string patternName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0607", $"pattern '{patternName}' is not a valid variant or constituent of sum type '{sumTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{patternName}' does not belong to sum type '{sumTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports invocation of an ordinary method on an untagged sum type receiver. </summary>
+    public void ReportUntaggedMethodMismatch(TextSpan span, string methodName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0608", $"cannot invoke ordinary instance method '{methodName}' on untagged sum type '{sumTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"cannot invoke non-untagged method '{methodName}' on untagged receiver", source)
+            .WithHelp("untagged sum type instances can only invoke methods declared with the 'untagged' modifier")
+            .Report();
+
+    /// <summary> Reports a direct invocation of a variant-level method on a sum type instance. </summary>
+    public void ReportDirectVariantMethodInvocation(TextSpan span, string methodName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0609", $"'{methodName}' is a variant of sum type '{sumTypeName}'; invoke methods via pattern matching", span, source)
+            .WithPrimaryLabel(span, $"cannot call variant method '{methodName}' directly on sum type '{sumTypeName}'", source)
+            .WithHelp("match on the sum type instance to unwrap the variant before invoking variant methods")
+            .Report();
+
+    /// <summary> Reports usage of an untagged-defined type without the untagged modifier. </summary>
+    public void ReportUntaggedDefinitionTaggedUsage(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0610", $"'untagged' type '{typeName}' must be declared with 'untagged' modifier", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' was defined as untagged and must be declared as 'untagged {typeName}'", source)
             .Report();
 }

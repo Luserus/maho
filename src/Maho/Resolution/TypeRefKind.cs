@@ -24,5 +24,9 @@ internal enum TypeRefKind : byte
     /// <summary>Optional type (<c>T?</c>).</summary>
     Optional,
     /// <summary>Tuple type (<c>(T1, T2)</c>).</summary>
-    Tuple
+    Tuple,
+    /// <summary>Union type (<c>(T1 | T2)</c>).</summary>
+    Union,
+    /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
+    Untagged
 }

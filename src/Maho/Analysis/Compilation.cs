@@ -23,7 +23,7 @@ public sealed class Compilation
     public CompilationOptions Options { get; }
     public string? EntryFile => Options.EntryFile;
     public IReadOnlyList<Compilation> ReferencedCompilations { get; }
-    internal ResolutionContext? Context { get; }
+    internal ResolutionContext Context { get; }
     public IReadOnlyList<DiagnosticInfo> Diagnostics { get; }
     public CompiledArtifact Artifact { get; }
     public CompilationPhaseTimers PhaseTimers { get; }
@@ -62,7 +62,7 @@ public sealed class Compilation
         IReadOnlyList<SyntaxTree> syntaxTrees,
         CompilationOptions options,
         IReadOnlyList<Compilation> referencedCompilations,
-        ResolutionContext? context,
+        ResolutionContext context,
         IReadOnlyList<DiagnosticInfo> diagnostics,
         CompiledArtifact? artifact = null,
         CompilationPhaseTimers? phaseTimers = null,

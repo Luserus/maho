@@ -333,6 +333,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(ownerScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -350,6 +352,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -366,6 +370,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -377,11 +383,46 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTypeBody(TypeBody body, Scope scope, SymbolHandle containingType)
     {
-        if (body is not TypeBlockBody block)
-            return;
+        if (body is TypeBlockBody block)
+        {
+            foreach (var member in block.Members)
+                ResolveMember(member, scope, containingType);
+        }
+        else if (body is TypeEnumBody enumBody)
+        {
+            var sumType = context.GetSymbol(containingType) as ISumTypeSymbol;
+            foreach (var variant in enumBody.Variants)
+            {
+                var variantName = ResolutionContext.GetSymbolName(variant.Name).Last;
+                var variantSymbol = context.CreateEnumVariantSymbol(scope, variantName, variant.Kind, containingType, variant, variant.ExplicitValue);
+                var variantHandle = ResolutionContext.GetHandle(variantSymbol);
+                sumType?.EnumVariants.Add(variantHandle);
 
-        foreach (var member in block.Members)
-            ResolveMember(member, scope, containingType);
+                var variantScope = context.CreateScope(scope);
+                ResolutionContext.BindChildScope(scope, variantSymbol, variantScope);
+                context.RegisterSyntaxScope(variant, variantScope);
+
+                if (variant is EnumTupleVariant tuple)
+                {
+                    variantSymbol.Parameters = DiscoverParameters(tuple.Parameters, variantScope, variantHandle);
+                }
+                else if (variant is EnumStructVariant structVar)
+                {
+                    foreach (var memberField in structVar.Fields)
+                    {
+                        ResolveFieldDeclaration(memberField.Declaration, variantScope, variantHandle);
+                    }
+                    foreach (var s in variantScope.Symbols.Values)
+                    {
+                        if (s.Kind == SymbolKind.Field)
+                            variantSymbol.Fields.Add(ResolutionContext.GetHandle(s));
+                    }
+                }
+            }
+
+            foreach (var member in enumBody.Members)
+                ResolveMember(member, scope, containingType);
+        }
     }
 
     private void ResolveMember(Member member, Scope scope, SymbolHandle containingType)
@@ -519,12 +560,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return [];
     }
 
-    private List<SymbolHandle> DiscoverParameters(FunctionSignature signature, Scope scope, SymbolHandle containingFunction)
+    private List<SymbolHandle> DiscoverParameters(FunctionSignature signature, Scope scope, SymbolHandle containingFunction) =>
+        DiscoverParameters(signature.Parameters, scope, containingFunction);
+
+    private List<SymbolHandle> DiscoverParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, SymbolHandle containingSymbol)
     {
-        var list = new List<SymbolHandle>(signature.Parameters.Count);
-        foreach (var param in signature.Parameters)
+        var list = new List<SymbolHandle>(parameters.Count);
+        foreach (var param in parameters)
         {
-            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingFunction, param);
+            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingSymbol, param);
             list.Add(ResolutionContext.GetHandle(symbol));
         }
 
@@ -842,6 +886,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
                 MatchingKeywordKind.Partial => TypeFlags.Partial,
+                MatchingKeywordKind.Untagged => TypeFlags.Untagged,
                 _ => TypeFlags.None
             };
         }
@@ -880,6 +925,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Static => VariableFlags.Static,
                 MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
+                MatchingKeywordKind.Untagged => VariableFlags.Untagged,
                 _ => VariableFlags.None
             };
         }
@@ -903,6 +949,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
+                MatchingKeywordKind.Untagged => FunctionFlags.Untagged,
                 _ => FunctionFlags.None
             };
         }
