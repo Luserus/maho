@@ -10,7 +10,9 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
+            return new TopLevelLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return new TopLevelMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseTopLevelMacroInvocationDeclaration();
@@ -429,7 +431,7 @@ internal sealed partial class Parser
             return ParseTopLevelVariableDeclaration(attributes, modifiers, type, tupleName);
         }
 
-        var identifier = ParseNamedSyntax();
+        var identifier = ParseNamedSyntax(allowQualified: true);
 
         if (identifier is not TupleName && CurrentToken.Kind is TokenKind.LeftParen)
             return ParseTopLevelFunctionDeclaration(attributes, modifiers, type, identifier);
@@ -502,7 +504,7 @@ internal sealed partial class Parser
             return ParseMemberFieldDeclaration(attributes, modifiers, type, tupleName);
         }
 
-        var identifier = ParseNamedSyntax();
+        var identifier = ParseNamedSyntax(allowQualified: true);
 
         if (identifier is not TupleName && CurrentToken.Kind is TokenKind.LeftParen)
             return ParseMemberFunction(attributes, modifiers, type, identifier);
@@ -560,6 +562,8 @@ internal sealed partial class Parser
         }
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
+            return new LocalLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
@@ -864,7 +868,8 @@ internal sealed partial class Parser
 
         var type = ParsePrimaryType();
 
-        if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+            (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
             type = ParseModifiedType(type);
 
         if (CurrentToken.Kind is TokenKind.Dot)
@@ -1046,7 +1051,8 @@ internal sealed partial class Parser
     {
         TypeSyntax type = baseType;
 
-        while (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        while (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+               (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
         {
             PostfixTypeModifier modifier = CurrentToken.Kind switch
             {
@@ -1054,6 +1060,7 @@ internal sealed partial class Parser
                 TokenKind.QuestionMark => ParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ParsePointerTypeModifier(),
                 TokenKind.Ampersand => ParseReferenceTypeModifier(),
+                TokenKind.Dot => ParseVariadicTypeModifier(),
                 _ => throw new InvalidOperationException()
             };
 
@@ -1061,6 +1068,14 @@ internal sealed partial class Parser
         }
 
         return type;
+    }
+
+    private VariadicTypeModifier ParseVariadicTypeModifier()
+    {
+        var dot1 = Consume();
+        var dot2 = ExpectToken(TokenKind.Dot, "'.'", "in the variadic type modifier");
+        var dot3 = ExpectToken(TokenKind.Dot, "'.'", "in the variadic type modifier");
+        return new VariadicTypeModifier([dot1, dot2, dot3]);
     }
 
     private PostfixTypeModifier ParseArrayOrFixedArrayTypeModifier()
@@ -1242,6 +1257,80 @@ internal sealed partial class Parser
 
         return new MemberFunctionDeclaration(
             new FunctionDeclaration(attributes, signature, body, SpecialFunctionKind.Constructor));
+    }
+
+    private LiteralMacroDeclaration ParseLiteralMacroDeclaration(
+        IReadOnlyList<AttributeListSyntax> attributes,
+        IReadOnlyList<Token> modifiers)
+    {
+        var literalKeyword = Consume();
+        var suffix = ExpectIdentifierToken("for the literal suffix");
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the literal suffix");
+
+        var kindToken = CurrentToken;
+        LiteralMacroKind kind;
+        if (kindToken.MatchingKind is MatchingKeywordKind.Int)
+        {
+            kind = LiteralMacroKind.Int;
+            Consume();
+        }
+        else if (kindToken.MatchingKind is MatchingKeywordKind.Float)
+        {
+            kind = LiteralMacroKind.Float;
+            Consume();
+        }
+        else if (kindToken.MatchingKind is MatchingKeywordKind.Str)
+        {
+            kind = LiteralMacroKind.Str;
+            Consume();
+        }
+        else if (kindToken.MatchingKind is MatchingKeywordKind.Char)
+        {
+            kind = LiteralMacroKind.Char;
+            Consume();
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(kindToken.Span, "'int', 'float', 'str', or 'char'", GetTokenDisplay(kindToken), "for the literal kind");
+            kind = LiteralMacroKind.Int;
+        }
+
+        var paramIdentifier = ExpectIdentifierToken("for the literal parameter identifier");
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the literal parameter list");
+
+        Expression body;
+        Token? semicolon = null;
+
+        if (IsArrow())
+        {
+            ConsumeArrow();
+            body = ParseExpression();
+            semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after literal expression body");
+        }
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            Consume();
+            body = ParseExpression();
+            ExpectToken(TokenKind.RightBrace, "'}'", "to close literal macro block");
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'=>' or '{'", GetTokenDisplay(CurrentToken), "for literal macro body");
+            body = ParseExpression();
+        }
+
+        return new LiteralMacroDeclaration(
+            attributes,
+            modifiers,
+            literalKeyword,
+            suffix,
+            openParen,
+            kindToken,
+            kind,
+            paramIdentifier,
+            closeParen,
+            body,
+            semicolon);
     }
 
     /// <summary>

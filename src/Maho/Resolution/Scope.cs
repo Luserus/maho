@@ -60,6 +60,117 @@ internal sealed class Scope
 
     public IReadOnlyList<Symbol> GetLocalSymbols(SymbolPart name) => SymbolsByName.TryGetValue(name, out var symbols) ? symbols : [];
 
+    private static bool IsTypeSymbol(Symbol s) =>
+        s is TypeSymbol or NestedTypeSymbol or GenericParameterSymbol or AliasSymbol;
+
+    public IReadOnlyList<Symbol> GetTypeSymbols(SymbolPart name)
+    {
+        // 1. Lexical declarations: check locals in this scope and all enclosing scopes
+        for (var current = this; current != null; current = current.Parent)
+        {
+            var locals = current.GetLocalSymbols(name);
+            var typeLocals = locals.Where(IsTypeSymbol).ToList();
+
+            if (typeLocals.Count != 0)
+                return typeLocals;
+        }
+
+        // 2. Using namespaces: check imported namespaces from closest enclosing scope outward
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.UsingNamespaces.Count != 0)
+            {
+                List<Symbol>? found = null;
+
+                for (int i = 0; i < current.UsingNamespaces.Count; i++)
+                {
+                    var matches = current.UsingNamespaces[i].GetSymbols(name);
+
+                    for (int j = 0; j < matches.Count; j++)
+                    {
+                        if (IsTypeSymbol(matches[j]))
+                        {
+                            found ??= [];
+                            found.Add(matches[j]);
+                        }
+                    }
+                }
+
+                if (found != null)
+                    return found;
+            }
+        }
+
+        // 3. External module / project imports
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.ImportedScopes.Count != 0)
+            {
+                List<Symbol>? imported = null;
+
+                for (int i = 0; i < current.ImportedScopes.Count; i++)
+                {
+                    var matches = current.ImportedScopes[i].GetSymbols(name);
+
+                    for (int j = 0; j < matches.Count; j++)
+                    {
+                        if (IsTypeSymbol(matches[j]))
+                        {
+                            imported ??= [];
+                            imported.Add(matches[j]);
+                        }
+                    }
+                }
+
+                if (imported != null)
+                    return imported;
+            }
+        }
+
+        return [];
+    }
+
+    public static IReadOnlyList<Symbol> ResolveType(Scope scope, SymbolName name)
+    {
+        if (name.Count == 0)
+            return [];
+
+        // First component: lexical type lookup.
+        var start = scope.GetTypeSymbols(name[0]);
+
+        if (start.Count == 0)
+        {
+            var nsNode = ResolveNamespace(scope, name[0]);
+
+            if (nsNode != null)
+                return ResolveInNamespace(scope, nsNode, name, 1).Where(IsTypeSymbol).ToList();
+
+            return [];
+        }
+
+        for (int i = 0; i < name.Count - 1; i++)
+        {
+            var symbol = start[0];
+
+            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+
+            if (child is null)
+                return [];
+
+            scope = child;
+
+            // Remaining components: local lookup filtered to types.
+            start = scope.GetLocalSymbols(name[i + 1]).Where(IsTypeSymbol).ToList();
+
+            if (start.Count == 0)
+                return [];
+        }
+
+        return start;
+    }
+
+    public IReadOnlyList<Symbol> ResolveType(SymbolName name) => ResolveType(this, name);
+
     public IReadOnlyList<Symbol> GetSymbols(SymbolPart name)
     {
         // 1. Lexical declarations: check locals in this scope and all enclosing scopes

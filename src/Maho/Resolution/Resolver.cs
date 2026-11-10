@@ -11,7 +11,8 @@ internal sealed class Resolver
         new MacroExpansionPass(),
         new SymbolDiscoveryPass(),
         new IntrinsicDiscoveryPass(),
-        new DeclarationResolutionPass()
+        new DeclarationResolutionPass(),
+        new ExpressionResolutionPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();
@@ -64,7 +65,8 @@ internal sealed class Resolver
             baseContext?.ImportedProjectSymbols,
             diagnostics ?? baseContext?.Diagnostics,
             options ?? baseContext?.Options,
-            baseContext?.DiscoveredIntrinsics.Clone());
+            baseContext?.DiscoveredIntrinsics.Clone(),
+            baseContext?.DiscoveredOperators.Clone());
 
         foreach (var pass in passes)
             pass.Resolve(context);

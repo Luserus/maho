@@ -15,5 +15,7 @@ internal enum FunctionFlags : ulong
 
     Unsafe      = 1UL << 8,
     Partial     = 1UL << 9,
-    Untagged    = 1UL << 10
+    Untagged    = 1UL << 10,
+    InterfaceScoped = 1UL << 11,
+    Intrinsic   = 1UL << 12
 }

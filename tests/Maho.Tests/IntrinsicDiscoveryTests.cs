@@ -882,4 +882,231 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.False(consumerCompilation.HasErrors);
     }
+
+    [Fact]
+    public void VoidIntrinsic_ZeroField_RegistersSuccessfully()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct Void;
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.TryGet("Void", out var voidHandle));
+    }
+
+    [Fact]
+    public void VoidIntrinsic_WithInstanceFields_ReportsAbiMismatch()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct Void
+            {
+                Int8 x;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544");
+    }
+
+    [Fact]
+    public void OperatorFunction_ValidSignatures_RegisterSuccessfully()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public struct void;
+            public attribute OperatorFunction(Str fullName);
+
+            public interface Add<TLhs, TRhs, TResult>
+            {
+                [OperatorFunction("Addition")]
+                public static TResult Add(TLhs left, TRhs right);
+            }
+
+            public interface Ctor<TArgs...>
+            {
+                [OperatorFunction("Constructor")]
+                public void Construct(TArgs... args);
+            }
+
+            public interface Dtor
+            {
+                [OperatorFunction("Destructor")]
+                public void Destroy();
+            }
+
+            public interface Index<TIndex, TResult>
+            {
+                [OperatorFunction("IndexerGetter")]
+                public TResult Get(TIndex index);
+            }
+
+            public interface Deref<TResult>
+            {
+                [OperatorFunction("IndirectMemberAccess")]
+                public TResult& Arrow();
+            }
+
+            public interface Assign<TRhs>
+            {
+                [OperatorFunction("Assignment")]
+                public void Assign(TRhs value);
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("Addition", out var addOps));
+        Assert.Single(addOps);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("Constructor", out var ctorOps));
+        Assert.Single(ctorOps);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("Destructor", out var dtorOps));
+        Assert.Single(dtorOps);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("IndexerGetter", out var indexOps));
+        Assert.Single(indexOps);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("IndirectMemberAccess", out var arrowOps));
+        Assert.Single(arrowOps);
+        Assert.True(compilation.Context.DiscoveredOperators.TryGetOperators("Assignment", out var assignOps));
+        Assert.Single(assignOps);
+    }
+
+    [Fact]
+    public void OperatorFunction_BinaryWithThreeParameters_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public interface BadAdd<TLhs, TRhs, TResult>
+            {
+                [OperatorFunction("Addition")]
+                public static TResult Add(TLhs left, TRhs right, TRhs extra);
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept exactly 2 parameters"));
+    }
+
+    [Fact]
+    public void OperatorFunction_IndirectMemberAccessReturningNonReference_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public interface BadDeref<TResult>
+            {
+                [OperatorFunction("IndirectMemberAccess")]
+                public TResult Arrow();
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type must be a reference (&)"));
+    }
+
+    [Fact]
+    public void OperatorFunction_ConstructorStatic_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public interface BadCtor
+            {
+                [OperatorFunction("Constructor")]
+                public static void Construct();
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("constructors cannot be declared static"));
+    }
+
+    [Fact]
+    public void OperatorFunction_IndexerGetterWithZeroParams_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public interface BadIndex<TResult>
+            {
+                [OperatorFunction("IndexerGetter")]
+                public TResult Get();
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept at least 1 index parameter"));
+    }
+
+    [Fact]
+    public void OperatorFunction_DeclaredInStruct_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public struct MyStruct
+            {
+                [OperatorFunction("Addition")]
+                public static MyStruct Add(MyStruct a, MyStruct b) => a;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must be declared in an interface"));
+    }
+
+    [Fact]
+    public void OperatorFunction_UnknownOperatorName_ReportsMH0242()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str fullName);
+
+            public interface BadOp
+            {
+                [OperatorFunction("NotARealOperator")]
+                public void DoSomething();
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("unknown operator function"));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_InIntrinsicType_TagsFunctionFlagsIntrinsic()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute IntrinsicFunction(Str target = "");
+
+            [IntrinsicType("Int32")]
+            public struct Int32
+            {
+                [IntrinsicFunction("i32.add")]
+                public static Int32 Add(Int32 a, Int32 b);
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var int32Sym = compilation.Context.TypeSymbols.First(t => t.Name.Text == "Int32");
+        var addMethodHandle = ((ProductTypeSymbol)int32Sym).Methods[0];
+        var addMethod = compilation.Context.GetMethodSymbol(addMethodHandle);
+        Assert.NotNull(addMethod);
+        Assert.True(addMethod.Flags.HasFlag(FunctionFlags.Intrinsic));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_InNonIntrinsicType_ReportsMH0541()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute IntrinsicFunction(Str target = "");
+
+            public struct UserType
+            {
+                [IntrinsicFunction("foo")]
+                public static void Foo();
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("must be declared in an intrinsic type"));
+    }
 }

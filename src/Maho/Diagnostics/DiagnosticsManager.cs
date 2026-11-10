@@ -96,6 +96,78 @@ internal sealed class DiagnosticsManager
     }
 
     /// <summary>
+    /// Reports an unsupported unary operator on an operand.
+    /// </summary>
+    public void ReportUnaryTypeMismatch(
+        TextSpan opSpan,
+        string op,
+        TextSpan operandSpan,
+        string operandTypeName,
+        string? note = null,
+        string? help = null,
+        SourceText? source = null)
+    {
+        var builder = BuildError("MH2002", $"cannot apply unary operator '{op}' to operand of type '{operandTypeName}'", opSpan, source)
+            .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
+            .WithSecondaryLabel(operandSpan, $"this expression has type '{operandTypeName}'");
+
+        if (note is not null)
+            builder.WithNote(note);
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports an assignment type mismatch. </summary>
+    public void ReportAssignmentTypeMismatch(TextSpan span, string rhsTypeName, string lhsTypeName, SourceText? source = null) =>
+        BuildError("MH2003", $"cannot assign expression of type '{rhsTypeName}' to variable of type '{lhsTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"expression has type '{rhsTypeName}', but target has type '{lhsTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a function/method argument type mismatch. </summary>
+    public void ReportArgumentTypeMismatch(TextSpan span, int index, string argTypeName, string paramTypeName, SourceText? source = null) =>
+        BuildError("MH2004", $"argument {index}: cannot convert from '{argTypeName}' to '{paramTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"has type '{argTypeName}', but expected '{paramTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a call argument count mismatch. </summary>
+    public void ReportArgumentCountMismatch(TextSpan span, int expected, int actual, SourceText? source = null) =>
+        BuildError("MH2005", $"expected {expected} arguments, but received {actual}", span, source)
+            .WithPrimaryLabel(span, $"expected {expected} arguments, but received {actual}", source)
+            .Report();
+
+    /// <summary> Reports a return type mismatch. </summary>
+    public void ReportReturnTypeMismatch(TextSpan span, string exprTypeName, string returnTypeName, SourceText? source = null) =>
+        BuildError("MH2006", $"cannot convert return expression of type '{exprTypeName}' to return type '{returnTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"expression has type '{exprTypeName}', but function returns '{returnTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a condition expression type mismatch. </summary>
+    public void ReportConditionTypeMismatch(TextSpan span, string actualTypeName, SourceText? source = null) =>
+        BuildError("MH2007", $"condition expression must have type 'Bool', but found '{actualTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"condition has type '{actualTypeName}' instead of 'Bool'", source)
+            .Report();
+
+    /// <summary> Reports an uninferrable variable type. </summary>
+    public void ReportCannotInferType(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH2008", $"cannot infer type for variable '{name}' from initializer", span, source)
+            .WithPrimaryLabel(span, $"variable '{name}' requires an explicit type or a typed initializer", source)
+            .Report();
+
+    /// <summary> Reports assignment to a non-lvalue expression. </summary>
+    public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
+        BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)
+            .WithPrimaryLabel(span, "invalid assignment target", source)
+            .Report();
+
+    /// <summary> Reports a tuple destructuring mismatch. </summary>
+    public void ReportTupleDestructureMismatch(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH2010", $"tuple destructuring error: {message}", span, source)
+            .WithPrimaryLabel(span, message, source)
+            .Report();
+
+    /// <summary>
     /// Reports a re-declared symbol in the same scope, pointing to both the re-declaration site
     /// (primary label) and the previous declaration site (secondary label).
     /// </summary>
@@ -481,10 +553,16 @@ internal sealed class DiagnosticsManager
             .WithHelp("only compiler-known intrinsic attributes (such as 'IntrinsicType') can be declared with the 'intrinsic' modifier")
             .Report();
 
-    /// <summary> Reports an invalid signature for the IntrinsicType attribute declaration. </summary>
-    public void ReportInvalidIntrinsicAttributeSignature(TextSpan span, string message, SourceText? source = null) =>
-        BuildError("MH0541", $"invalid signature for intrinsic attribute 'IntrinsicType': {message}", span, source)
+    /// <summary> Reports an invalid signature for an intrinsic attribute declaration. </summary>
+    public void ReportInvalidIntrinsicAttributeSignature(TextSpan span, string message, SourceText? source = null, string attributeName = "IntrinsicType") =>
+        BuildError("MH0541", $"invalid signature for intrinsic attribute '{attributeName}': {message}", span, source)
             .WithPrimaryLabel(span, message, source)
+            .Report();
+
+    /// <summary> Reports an invalid signature for an operator function declaration. </summary>
+    public void ReportInvalidOperatorFunctionSignature(TextSpan span, string operatorName, string reason, SourceText? source = null) =>
+        BuildError("MH0242", $"invalid signature for operator function '{operatorName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
             .Report();
 
     /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>

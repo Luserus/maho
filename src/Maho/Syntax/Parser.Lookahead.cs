@@ -385,7 +385,8 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+            (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
             (type, success) = LookaheadParseModifiedType(type);
 
         if (!success)
@@ -626,7 +627,8 @@ internal sealed partial class Parser
     {
         TypeSyntax type = baseType;
 
-        while (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        while (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+               (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
         {
             var (modifier, success) = LookaheadCurrentToken.Kind switch
             {
@@ -634,6 +636,7 @@ internal sealed partial class Parser
                 TokenKind.QuestionMark => ((PostfixTypeModifier, bool))LookaheadParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParsePointerTypeModifier(),
                 TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseReferenceTypeModifier(),
+                TokenKind.Dot => LookaheadParseVariadicTypeModifier(),
                 _ => throw new System.InvalidOperationException(),
             };
 
@@ -698,6 +701,15 @@ internal sealed partial class Parser
     {
         var ampersand = LookaheadConsume();
         return (new ReferenceTypeModifier(ampersand), true);
+    }
+
+    /// <summary> Speculatively parses a variadic type modifier. </summary>
+    private (VariadicTypeModifier Type, bool Success) LookaheadParseVariadicTypeModifier()
+    {
+        var dot1 = LookaheadConsume();
+        var dot2 = LookaheadConsume();
+        var dot3 = LookaheadConsume();
+        return (new VariadicTypeModifier([dot1, dot2, dot3]), true);
     }
 
     /// <summary> Parses a list of modifiers. </summary>

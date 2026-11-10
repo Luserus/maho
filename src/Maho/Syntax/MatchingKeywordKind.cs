@@ -55,4 +55,7 @@ internal enum MatchingKeywordKind : byte
     Postfix,
     Untagged,
     Match,
+    Literal,
+    Str,
+    Char
 }

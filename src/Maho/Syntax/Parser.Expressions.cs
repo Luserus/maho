@@ -154,6 +154,7 @@ internal sealed partial class Parser
         TokenKind.LeftParen => ParseParenthesizedOrTupleExpression(),
         TokenKind.LeftBrace => ParseBlockExpression(),
         TokenKind.LeftBracket => ParseCollectionExpression(),
+        TokenKind.LessThanSign => ParseTypeAsExpression(),
         TokenKind.Identifier => CurrentToken.MatchingKind switch
         {
             MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
@@ -175,6 +176,26 @@ internal sealed partial class Parser
         var argument = ParseExpression();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'nameof' expression");
         return new NameofExpression(keyword, openParen, argument, closeParen);
+    }
+
+    private TypeAsExpression ParseTypeAsExpression()
+    {
+        var lessThan = Consume();
+        var targetType = ParseTypeSyntax();
+        Token asKeyword;
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
+        {
+            asKeyword = Consume();
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'as'", GetTokenDisplay(CurrentToken), "in '<Type as Interface>' expression");
+            asKeyword = CreateMissingToken();
+        }
+
+        var interfaceType = ParseTypeSyntax();
+        var greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close '<Type as Interface>' expression");
+        return new TypeAsExpression(lessThan, targetType, asKeyword, interfaceType, greaterThan);
     }
 
     /// <summary> Parses a literal expression. </summary>

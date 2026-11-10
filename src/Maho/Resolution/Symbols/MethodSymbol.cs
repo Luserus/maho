@@ -8,6 +8,7 @@ internal abstract class MethodSymbol : Symbol
     public SpecialFunctionKind SpecialKind { get; internal set; }
     public FunctionFlags Flags { get; internal set; }
     public SymbolHandle? Parent { get; }
+    public SymbolName? ExplicitInterfaceName { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }

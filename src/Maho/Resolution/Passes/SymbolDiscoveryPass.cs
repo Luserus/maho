@@ -104,6 +104,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
                 return containingNamespace;
+            case TopLevelLiteralMacroDeclaration:
+                return containingNamespace;
             case TopLevelMacroDeclaration declaration:
                 ResolveTopLevelMacroDeclaration(declaration.Macro, scope, containingNamespace);
                 return containingNamespace;
@@ -440,6 +442,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case MemberAliasDeclaration declaration:
                 ResolveMemberAliasDeclaration(declaration.Alias, scope, containingType);
                 break;
+            case MemberLiteralMacroDeclaration:
+                break;
             case MemberMacroDeclaration declaration:
                 ResolveMemberMacroDeclaration(declaration.Macro, scope, containingType);
                 break;
@@ -478,6 +482,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         symbol.Parameters = DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), containingMethod: null);
@@ -496,6 +501,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+        if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
+        {
+            symbol.Flags |= FunctionFlags.InterfaceScoped;
+            var ifaceParts = new SymbolPart[qual.Parts.Count - 1];
+            for (int i = 0; i < ifaceParts.Length; i++)
+                ifaceParts[i] = ResolutionContext.GetSymbolName(qual.Parts[i]).Last;
+            symbol.ExplicitInterfaceName = new SymbolName(ifaceParts);
+        }
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -517,6 +531,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -652,6 +667,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             case LocalFunctionDeclaration declaration:
                 RegisterLocalFunction(containingSymbol, ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod));
                 break;
+            case LocalLiteralMacroDeclaration:
+                break;
             case LocalMacroDeclaration declaration:
                 ResolveLocalMacroDeclaration(declaration.Macro, scope, containingMethod);
                 break;
@@ -749,6 +766,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         else if (expr is AsExpression asExpr)
         {
             DiscoverBlockExpressions(asExpr.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is TypeAsExpression)
+        {
         }
         else if (expr is WhileExpression whileExpr)
         {

@@ -459,7 +459,9 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
+            return new MemberLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return new MemberMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseMemberMacroInvocationDeclaration();

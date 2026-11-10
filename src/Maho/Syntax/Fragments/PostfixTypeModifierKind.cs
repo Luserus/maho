@@ -7,5 +7,6 @@ internal enum PostfixTypeModifierKind
     FixedArray,
     Pointer,
     Optional,
-    Reference
+    Reference,
+    Variadic
 }

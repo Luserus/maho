@@ -846,7 +846,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private TypeRef ResolveTypeName(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
     {
         var name = ResolutionContext.GetSymbolName(syntax);
-        var symbols = scope[name];
+        var symbols = scope.ResolveType(name);
         if (symbols.Count > 1 && !AreSamePartialType(symbols))
         {
             if (reportDiagnostics)
@@ -859,7 +859,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return TypeRef.Error;
         }
 
-        if (ResolveSingle(scope, name) is not { } symbol)
+        if (symbols.Count == 0)
         {
             if (reportDiagnostics)
             {
@@ -871,6 +871,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             return TypeRef.Error;
         }
+
+        var symbol = symbols[0];
 
         if (symbol is AliasSymbol aliasSymbol && aliasSymbol.IsGlobalAlias && !aliasSymbol.Target.IsResolved)
         {
@@ -1111,6 +1113,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveType(asExpr.Type, scope);
                 ResolveExpression(asExpr.Expression, scope, containingSymbol);
                 break;
+            case TypeAsExpression typeAs:
+                ResolveType(typeAs.TargetType, scope);
+                ResolveType(typeAs.InterfaceType, scope);
+                break;
             case TupleExpression tuple:
                 foreach (var argument in tuple.Arguments)
                     ResolveExpression(argument, scope, containingSymbol);
@@ -1324,122 +1330,81 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         ResolveExpression(access.Expression, scope, containingSymbol);
 
+        if (access.Expression is TypeAsExpression typeAs)
+        {
+            TypeSymbol? asTargetType = null;
+            TypeSymbol? asInterfaceType = null;
+
+            var targetRef = ResolveType(typeAs.TargetType, scope, reportDiagnostics: false);
+            if (targetRef is { Handle: { } targetHandle } && context.GetTypeSymbol(targetHandle) is TypeSymbol ts)
+                asTargetType = ts;
+
+            var ifaceRef = ResolveType(typeAs.InterfaceType, scope, reportDiagnostics: false);
+            if (ifaceRef is { Handle: { } ifaceHandle } && context.GetTypeSymbol(ifaceHandle) is TypeSymbol isym)
+                asInterfaceType = isym;
+
+            if (asTargetType is not null && asInterfaceType is not null)
+            {
+                var targetScope = GetOwnedScope(asTargetType);
+                if (targetScope is not null)
+                {
+                    var memberName = new SymbolPart(access.Identifier);
+                    var candidates = targetScope[new SymbolName(memberName)];
+
+                    MethodSymbol? chosen = null;
+
+                    // Priority 1: interface-scoped method matching interface name
+                    foreach (var cand in candidates)
+                    {
+                        if (cand is MethodSymbol m && m.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                        {
+                            if (m.ExplicitInterfaceName is { } ein && ein.Last.Equals(asInterfaceType.Name))
+                            {
+                                chosen = m;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Priority 2: ordinary method
+                    if (chosen is null)
+                    {
+                        foreach (var cand in candidates)
+                        {
+                            if (cand is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                            {
+                                chosen = m;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (chosen is not null)
+                    {
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(chosen));
+                        return;
+                    }
+                }
+            }
+        }
+
         if (access.Expression is NamedExpression named)
         {
             var sym = ResolveSingle(scope, new SymbolName(new SymbolPart(named.Identifier.Value)));
             if (sym is TypeSymbol typeSym)
             {
                 var typeScope = GetOwnedScope(typeSym);
-                var variantSyms = typeScope[new SymbolName(new SymbolPart(access.Identifier.Value))];
-                if (variantSyms.Count > 0)
+                if (typeScope is not null)
                 {
-                    context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(variantSyms[0]));
-                    return;
-                }
-            }
-        }
-
-        var receiverType = GetExpressionType(access.Expression, scope);
-        if (receiverType is null)
-            return;
-
-        var unwrapped = receiverType.Value;
-        bool isUntagged = unwrapped.IsUntagged;
-        ISumTypeSymbol? sumType = null;
-        UnionSemanticType? unionSemantic = unwrapped.SpecialType as UnionSemanticType;
-
-        if (unwrapped.Kind == TypeRefKind.Untagged && unwrapped.SpecialType is UntaggedSemanticType untagged)
-            unwrapped = untagged.InnerType;
-
-        if (unwrapped.Handle is { } handle && context.GetTypeSymbol(handle) is ISumTypeSymbol s)
-            sumType = s;
-
-        if (sumType is not null || unionSemantic is not null)
-        {
-            MethodSymbol? declaredMethod = null;
-            if (sumType is not null)
-            {
-                foreach (var methodHandle in sumType.Methods)
-                {
-                    if (context.GetMethodSymbol(methodHandle) is { } m && m.Name.Text == access.Identifier.Value)
+                    var memberName = new SymbolPart(access.Identifier);
+                    var variantSyms = typeScope[new SymbolName(memberName)];
+                    var accessible = variantSyms.Where(cand => cand is not MethodSymbol m || !m.Flags.HasFlag(FunctionFlags.InterfaceScoped)).ToList();
+                    if (accessible.Count > 0)
                     {
-                        declaredMethod = m;
-                        break;
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
+                        return;
                     }
                 }
-            }
-
-            if (declaredMethod is not null)
-            {
-                if (isUntagged && !declaredMethod.Flags.HasFlag(FunctionFlags.Untagged))
-                {
-                    context.Diagnostics.ReportUntaggedMethodMismatch(
-                        access.Identifier.Span,
-                        access.Identifier.Value,
-                        receiverType.Value.ToDisplayString(context),
-                        access.GetSource());
-                }
-                context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(declaredMethod));
-                return;
-            }
-
-            bool foundOnVariant = false;
-            if (sumType is not null)
-            {
-                if (sumType.UnionConstituents.Count > 0)
-                {
-                    foreach (var constituent in sumType.UnionConstituents)
-                    {
-                        if (constituent.Handle is { } ch && context.GetTypeSymbol(ch) is { } cTypeSym)
-                        {
-                            var cScope = GetOwnedScope(cTypeSym);
-                            if (cScope[new SymbolName(new SymbolPart(access.Identifier.Value))].Count > 0)
-                            {
-                                foundOnVariant = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    foreach (var vHandle in sumType.EnumVariants)
-                    {
-                        if (context.GetEnumVariantSymbol(vHandle) is { } vSym)
-                        {
-                            var vScope = GetOwnedScope(vSym);
-                            if (vScope[new SymbolName(new SymbolPart(access.Identifier.Value))].Count > 0)
-                            {
-                                foundOnVariant = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            else if (unionSemantic is not null)
-            {
-                foreach (var constituent in unionSemantic.Variants)
-                {
-                    if (constituent.Handle is { } ch && context.GetTypeSymbol(ch) is { } cTypeSym)
-                    {
-                        var cScope = GetOwnedScope(cTypeSym);
-                        if (cScope[new SymbolName(new SymbolPart(access.Identifier.Value))].Count > 0)
-                        {
-                            foundOnVariant = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (foundOnVariant)
-            {
-                context.Diagnostics.ReportDirectVariantMethodInvocation(
-                    access.Identifier.Span,
-                    access.Identifier.Value,
-                    receiverType.Value.ToDisplayString(context),
-                    access.GetSource());
             }
         }
     }
@@ -1447,121 +1412,22 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private void ResolveMatchExpression(MatchExpression match, Scope scope, SymbolHandle containingSymbol)
     {
         ResolveExpression(match.Expression, scope, containingSymbol);
-        var governingType = GetExpressionType(match.Expression, scope);
-
-        bool isUntaggedSumType = false;
-        if (governingType is { } gov)
-        {
-            if (gov.IsUntagged)
-                isUntaggedSumType = true;
-            else if (gov.Handle is { } h && context.GetTypeSymbol(h) is { } ts && ts.Flags.HasFlag(TypeFlags.Untagged))
-                isUntaggedSumType = true;
-        }
-
-        if (isUntaggedSumType)
-        {
-            context.Diagnostics.ReportUntaggedMatchDisallowed(
-                match.Expression.GetSpan() ?? default,
-                governingType?.ToDisplayString(context) ?? "untagged",
-                match.GetSource());
-        }
-
-        ISumTypeSymbol? sumTypeSym = null;
-        TypeSymbol? typeSym = null;
-        UnionSemanticType? unionType = null;
-
-        if (governingType is { } g)
-        {
-            if (g.SpecialType is UnionSemanticType u)
-                unionType = u;
-            else if (g.Handle is { } h)
-            {
-                typeSym = context.GetTypeSymbol(h);
-                sumTypeSym = typeSym as ISumTypeSymbol;
-            }
-        }
-
-        bool hasWildcard = false;
-        var matchedVariants = new HashSet<string>();
-        var matchedTypes = new HashSet<TypeRef>();
 
         foreach (var arm in match.Arms)
         {
             var armScope = context.CreateScope(scope);
             context.RegisterSyntaxScope(arm, armScope);
 
-            ResolvePattern(arm.Pattern, armScope, governingType, sumTypeSym, unionType, ref hasWildcard, matchedVariants, matchedTypes);
+            DeclarePatternVariables(arm.Pattern, armScope);
             ResolveExpression(arm.Expression, armScope, containingSymbol);
-        }
-
-        if (!hasWildcard && !isUntaggedSumType)
-        {
-            if (sumTypeSym is not null && typeSym?.TypeKind == TypeKind.Enum)
-            {
-                foreach (var variantHandle in sumTypeSym.EnumVariants)
-                {
-                    if (context.GetEnumVariantSymbol(variantHandle) is { } vSym)
-                    {
-                        if (!matchedVariants.Contains(vSym.Name.Text))
-                        {
-                            context.Diagnostics.ReportNonExhaustiveMatch(
-                                match.MatchKeyword.Span,
-                                vSym.Name.Text,
-                                match.GetSource());
-                            break;
-                        }
-                    }
-                }
-            }
-            else if (unionType is not null)
-            {
-                foreach (var constituent in unionType.Variants)
-                {
-                    if (!matchedTypes.Any(t => t.Equals(constituent)))
-                    {
-                        context.Diagnostics.ReportNonExhaustiveMatch(
-                            match.MatchKeyword.Span,
-                            constituent.ToDisplayString(context),
-                            match.GetSource());
-                        break;
-                    }
-                }
-            }
-            else if (sumTypeSym is not null && sumTypeSym.UnionConstituents.Count > 0)
-            {
-                foreach (var constituent in sumTypeSym.UnionConstituents)
-                {
-                    if (!matchedTypes.Any(t => t.Equals(constituent)))
-                    {
-                        context.Diagnostics.ReportNonExhaustiveMatch(
-                            match.MatchKeyword.Span,
-                            constituent.ToDisplayString(context),
-                            match.GetSource());
-                        break;
-                    }
-                }
-            }
         }
     }
 
-    private void ResolvePattern(
-        PatternSyntax pattern,
-        Scope armScope,
-        TypeRef? governingType,
-        ISumTypeSymbol? sumTypeSym,
-        UnionSemanticType? unionType,
-        ref bool hasWildcard,
-        HashSet<string> matchedVariants,
-        HashSet<TypeRef> matchedTypes)
+    private void DeclarePatternVariables(PatternSyntax pattern, Scope armScope)
     {
         switch (pattern)
         {
-            case WildcardPattern:
-                hasWildcard = true;
-                break;
-
             case VariablePattern varPat:
-                hasWildcard = true;
                 context.CreateLocalVariableSymbol(
                     armScope,
                     context.GetScopedSymbolName(varPat.Name).Last,
@@ -1574,129 +1440,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 break;
 
             case EnumVariantPattern variantPat:
-                var variantName = context.GetScopedSymbolName(variantPat.Name).Last.Text;
-
-                if (sumTypeSym is not null && sumTypeSym.EnumVariants.Count > 0)
+                if (variantPat.SubPatterns is { } subPatterns)
                 {
-                    EnumVariantSymbol? foundVariant = null;
-                    foreach (var vHandle in sumTypeSym.EnumVariants)
-                    {
-                        if (context.GetEnumVariantSymbol(vHandle) is { } v && v.Name.Text == variantName)
-                        {
-                            foundVariant = v;
-                            break;
-                        }
-                    }
-
-                    if (foundVariant is not null)
-                    {
-                        matchedVariants.Add(variantName);
-
-                        if (variantPat.SubPatterns is { } subPatterns)
-                        {
-                            for (int i = 0; i < subPatterns.Count && i < foundVariant.Parameters.Count; i++)
-                            {
-                                if (subPatterns[i] is VariablePattern subVar)
-                                {
-                                    var paramSym = context.GetParameterSymbol(foundVariant.Parameters[i]);
-                                    var v = context.CreateLocalVariableSymbol(
-                                        armScope,
-                                        context.GetScopedSymbolName(subVar.Name).Last,
-                                        default,
-                                        null);
-                                    v.Type = paramSym?.Type ?? TypeRef.Inferred;
-                                }
-                            }
-                        }
-
-                        if (variantPat.FieldPatterns is { } fieldPatterns)
-                        {
-                            foreach (var fp in fieldPatterns)
-                            {
-                                if (fp.Pattern is VariablePattern fpVar)
-                                {
-                                    FieldSymbol? fieldSym = null;
-                                    foreach (var fHandle in foundVariant.Fields)
-                                    {
-                                        if (context.GetFieldSymbol(fHandle) is { } f && f.Name.Text == context.GetScopedSymbolName(fp.FieldName).Last.Text)
-                                        {
-                                            fieldSym = f;
-                                            break;
-                                        }
-                                    }
-
-                                    var v = context.CreateLocalVariableSymbol(
-                                        armScope,
-                                        context.GetScopedSymbolName(fpVar.Name).Last,
-                                        default,
-                                        null);
-                                    v.Type = fieldSym?.Type ?? TypeRef.Inferred;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        context.Diagnostics.ReportInvalidPatternForSumType(
-                            variantPat.GetSpan() ?? default,
-                            variantName,
-                            (sumTypeSym as Symbol)?.Name.ToString() ?? "Enum",
-                            variantPat.GetSource());
-                    }
+                    foreach (var sub in subPatterns)
+                        DeclarePatternVariables(sub, armScope);
                 }
-                else if (unionType is not null || (sumTypeSym is not null && sumTypeSym.UnionConstituents.Count > 0))
-                {
-                    var constituents = unionType?.Variants ?? sumTypeSym!.UnionConstituents;
-                    TypeRef? matchedConstituent = null;
-                    foreach (var c in constituents)
-                    {
-                        if (c.ToDisplayString(context) == variantName || (c.Handle is { } ch && context.GetTypeSymbol(ch)?.Name.Text == variantName))
-                        {
-                            matchedConstituent = c;
-                            break;
-                        }
-                    }
 
-                    if (matchedConstituent is not null)
-                    {
-                        matchedTypes.Add(matchedConstituent.Value);
-                    }
-                    else
-                    {
-                        string sumTypeName = unionType?.ToDisplayString(context) ?? (sumTypeSym as Symbol)?.Name.ToString() ?? "Union";
-                        context.Diagnostics.ReportInvalidPatternForSumType(
-                            variantPat.GetSpan() ?? default,
-                            variantName,
-                            sumTypeName,
-                            variantPat.GetSource());
-                    }
+                if (variantPat.FieldPatterns is { } fieldPatterns)
+                {
+                    foreach (var fp in fieldPatterns)
+                        DeclarePatternVariables(fp.Pattern, armScope);
                 }
                 break;
 
             case TypePattern typePat:
-                var resolvedType = ResolveType(typePat.Type, armScope, reportDiagnostics: true);
-                var constituentsList = unionType?.Variants ?? sumTypeSym?.UnionConstituents;
-
-                if (constituentsList is not null)
-                {
-                    bool isValidConstituent = constituentsList.Any(c => c.Equals(resolvedType) || (c.Handle is { } ch && resolvedType.Handle is { } rh && ch == rh));
-                    if (isValidConstituent)
-                    {
-                        matchedTypes.Add(resolvedType);
-                    }
-                    else
-                    {
-                        string sumTypeName = unionType?.ToDisplayString(context) ?? (sumTypeSym as Symbol)?.Name.ToString() ?? "Union";
-                        context.Diagnostics.ReportInvalidPatternForSumType(
-                            typePat.GetSpan() ?? default,
-                            resolvedType.ToDisplayString(context),
-                            sumTypeName,
-                            typePat.GetSource());
-                    }
-                }
-
                 if (typePat.Variable is not null)
                 {
+                    var resolvedType = ResolveType(typePat.Type, armScope, reportDiagnostics: false);
                     var varSym = context.CreateLocalVariableSymbol(
                         armScope,
                         context.GetScopedSymbolName(typePat.Variable).Last,
@@ -1705,97 +1465,6 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     varSym.Type = resolvedType;
                 }
                 break;
-        }
-    }
-
-    private TypeRef? GetExpressionType(Expression? expr, Scope scope)
-    {
-        if (expr is null)
-            return null;
-
-        switch (expr)
-        {
-            case NamedExpression named:
-                var hygiene = context.GetHygiene(named);
-                var part = named is GenericNameExpression generic
-                    ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count, hygiene)
-                    : new SymbolPart(named.Identifier, 0, hygiene);
-                var sym = ResolveSingle(scope, new SymbolName(part));
-                return sym switch
-                {
-                    LocalVariableSymbol local => local.Type,
-                    FieldSymbol field => field.Type,
-                    ParameterSymbol param => param.Type,
-                    GlobalVariableSymbol global => global.Type,
-                    TypeSymbol typeSymbol => TypeRef.Resolved(ResolutionContext.GetHandle(typeSymbol)),
-                    _ => null
-                };
-
-            case ParenthesizedExpression paren:
-                return GetExpressionType(paren.Expression, scope);
-
-            case VariantCreationExpression variantCreation:
-                if (variantCreation.Target is MemberAccessExpression acc)
-                {
-                    if (acc.Expression is NamedExpression targetNamed)
-                    {
-                        var targetSym = ResolveSingle(scope, new SymbolName(new SymbolPart(targetNamed.Identifier.Value)));
-                        if (targetSym is TypeSymbol tSym)
-                            return TypeRef.Resolved(ResolutionContext.GetHandle(tSym));
-                    }
-                }
-                return GetExpressionType(variantCreation.Target, scope);
-
-            case MemberAccessExpression memberAccess:
-                if (memberAccess.Expression is NamedExpression typeNamed)
-                {
-                    var symTarget = ResolveSingle(scope, new SymbolName(new SymbolPart(typeNamed.Identifier.Value)));
-                    if (symTarget is TypeSymbol typeSymbol)
-                    {
-                        var owned = GetOwnedScope(typeSymbol);
-                        if (owned[new SymbolName(new SymbolPart(memberAccess.Identifier.Value))].Count > 0)
-                            return TypeRef.Resolved(ResolutionContext.GetHandle(typeSymbol));
-                    }
-                }
-                return null;
-
-            case CallExpression call:
-                if (call.Callee is MemberAccessExpression callAccess)
-                {
-                    var receiver = GetExpressionType(callAccess.Expression, scope);
-                    if (receiver is { } recv && recv.Handle is { } recvHandle)
-                    {
-                        var symRecv = context.GetTypeSymbol(recvHandle);
-                        if (symRecv is ISumTypeSymbol sumRecv)
-                        {
-                            foreach (var methodHandle in sumRecv.Methods)
-                            {
-                                if (context.GetMethodSymbol(methodHandle) is { } m && m.Name.Text == callAccess.Identifier.Value)
-                                    return m.ReturnType;
-                            }
-                        }
-                    }
-                }
-                else if (call.Callee is NamedExpression calleeNamed)
-                {
-                    var symCallee = ResolveSingle(scope, new SymbolName(new SymbolPart(calleeNamed.Identifier.Value)));
-                    if (symCallee is FunctionSymbol fn)
-                        return fn.ReturnType;
-                    if (symCallee is MethodSymbol m)
-                        return m.ReturnType;
-                }
-                return null;
-
-            case AsExpression asExpr:
-                return ResolveType(asExpr.Type, scope, reportDiagnostics: false);
-
-            case MatchExpression match:
-                if (match.Arms.Count > 0)
-                    return GetExpressionType(match.Arms[0].Expression, scope);
-                return null;
-
-            default:
-                return null;
         }
     }
 
@@ -2090,14 +1759,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             ValidateFunctionSignatureGroup(group);
 
         // 2. Member & Local methods
-        var methodGroups = new Dictionary<(Scope, SymbolPart), List<FunctionSignatureInfo>>();
+        var methodGroups = new Dictionary<(Scope, SymbolPart, SymbolName?), List<FunctionSignatureInfo>>();
 
         foreach (var m in context.MethodSymbols)
         {
             if (m.Name.Text == "_")
                 continue;
 
-            var key = (m.EnclosingScope, m.Name);
+            var key = (m.EnclosingScope, m.Name, m.ExplicitInterfaceName);
 
             if (!methodGroups.TryGetValue(key, out var list))
             {

@@ -23,6 +23,12 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
         // 3. Discover all types applying IntrinsicType
         DiscoverAndValidateIntrinsicTypes(candidateAttr);
+
+        // 4. Discover and validate operator functions on interfaces
+        DiscoverAndValidateOperatorFunctions();
+
+        // 5. Discover and validate intrinsic functions
+        DiscoverAndValidateIntrinsicFunctions();
     }
 
     private void ImportReferencedIntrinsics()
@@ -45,6 +51,30 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
                 context.DiscoveredIntrinsics.Register(name, handle, span, source);
             }
+
+            if (context.DiscoveredOperators.OperatorFunctionAttribute is null && project.DiscoveredOperators.OperatorFunctionAttribute is not null)
+                context.DiscoveredOperators.OperatorFunctionAttribute = project.DiscoveredOperators.OperatorFunctionAttribute;
+
+            if (context.DiscoveredOperators.IntrinsicFunctionAttribute is null && project.DiscoveredOperators.IntrinsicFunctionAttribute is not null)
+                context.DiscoveredOperators.IntrinsicFunctionAttribute = project.DiscoveredOperators.IntrinsicFunctionAttribute;
+
+            foreach (var (opKind, list) in project.DiscoveredOperators.AllByKind)
+            {
+                foreach (var op in list)
+                    context.DiscoveredOperators.Register(op.Kind, op.InterfaceHandle, op.MethodHandle, op.Span, op.Source);
+            }
+
+            if (context.DiscoveredOperators.OperatorFunctionAttribute is null && project.DiscoveredOperators.OperatorFunctionAttribute is not null)
+                context.DiscoveredOperators.OperatorFunctionAttribute = project.DiscoveredOperators.OperatorFunctionAttribute;
+
+            if (context.DiscoveredOperators.IntrinsicFunctionAttribute is null && project.DiscoveredOperators.IntrinsicFunctionAttribute is not null)
+                context.DiscoveredOperators.IntrinsicFunctionAttribute = project.DiscoveredOperators.IntrinsicFunctionAttribute;
+
+            foreach (var (opKind, list) in project.DiscoveredOperators.AllByKind)
+            {
+                foreach (var op in list)
+                    context.DiscoveredOperators.Register(op.Kind, op.InterfaceHandle, op.MethodHandle, op.Span, op.Source);
+            }
         }
     }
 
@@ -62,14 +92,47 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
             bool isMarkedIntrinsic = attr.Flags.HasFlag(AttributeFlags.Intrinsic);
 
-            if (isMarkedIntrinsic && attr.Name.Text != KnownIntrinsics.IntrinsicTypeAttribute)
+            if (isMarkedIntrinsic &&
+                attr.Name.Text != KnownIntrinsics.IntrinsicTypeAttribute &&
+                attr.Name.Text != KnownIntrinsics.OperatorFunctionAttribute &&
+                attr.Name.Text != KnownIntrinsics.IntrinsicFunctionAttribute)
             {
                 var span = attr.Syntax?.Name.GetSpan() ?? default;
                 context.Diagnostics.ReportUnknownIntrinsicAttribute(span, attr.Name.Text, attr.Syntax?.GetSource());
                 continue;
             }
 
-            if (attr.Name.Text == KnownIntrinsics.IntrinsicTypeAttribute)
+            if (attr.Name.Text == KnownIntrinsics.OperatorFunctionAttribute)
+            {
+                int paramCount = attr.Syntax?.Parameters?.Parameters.Count ?? 0;
+                if (paramCount != 1)
+                {
+                    if (isMarkedIntrinsic || paramCount > 0)
+                    {
+                        var span = attr.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(span, "must accept exactly one parameter", attr.Syntax?.GetSource(), KnownIntrinsics.OperatorFunctionAttribute);
+                    }
+                    continue;
+                }
+
+                context.DiscoveredOperators.OperatorFunctionAttribute = attr;
+            }
+            else if (attr.Name.Text == KnownIntrinsics.IntrinsicFunctionAttribute)
+            {
+                int paramCount = attr.Syntax?.Parameters?.Parameters.Count ?? 0;
+                if (paramCount > 1)
+                {
+                    if (isMarkedIntrinsic || paramCount > 0)
+                    {
+                        var span = attr.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(span, "must accept at most one parameter", attr.Syntax?.GetSource(), KnownIntrinsics.IntrinsicFunctionAttribute);
+                    }
+                    continue;
+                }
+
+                context.DiscoveredOperators.IntrinsicFunctionAttribute = attr;
+            }
+            else if (attr.Name.Text == KnownIntrinsics.IntrinsicTypeAttribute)
             {
                 if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && context.DiscoveredIntrinsics.IntrinsicTypeAttribute != attr)
                 {
@@ -158,6 +221,40 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
                     candidateAttr.Syntax?.GetSource());
 
                 return null;
+            }
+        }
+
+        if (context.DiscoveredOperators.OperatorFunctionAttribute is { Parameters.Count: 1 } opAttr)
+        {
+            var paramSymbol = context.GetParameterSymbol(opAttr.Parameters[0]);
+            var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
+            var resolvedParamHandle = ResolveTypeSymbol(paramTypeSyntax, opAttr.EnclosingScope);
+
+            if (resolvedParamHandle != candidateStrHandle)
+            {
+                var span = opAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? opAttr.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                    span,
+                    $"parameter type must match the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                    opAttr.Syntax?.GetSource(),
+                    KnownIntrinsics.OperatorFunctionAttribute);
+            }
+        }
+
+        if (context.DiscoveredOperators.IntrinsicFunctionAttribute is { Parameters.Count: 1 } ifnAttr)
+        {
+            var paramSymbol = context.GetParameterSymbol(ifnAttr.Parameters[0]);
+            var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
+            var resolvedParamHandle = ResolveTypeSymbol(paramTypeSyntax, ifnAttr.EnclosingScope);
+
+            if (resolvedParamHandle != candidateStrHandle)
+            {
+                var span = ifnAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? ifnAttr.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                    span,
+                    $"parameter type must match the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                    ifnAttr.Syntax?.GetSource(),
+                    KnownIntrinsics.IntrinsicFunctionAttribute);
             }
         }
 
@@ -733,74 +830,75 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
     private static bool MatchesIntrinsicTypeAttribute(AttributeApplication app, AttributeSymbol? candidateAttr, Scope scope)
     {
-        string name = app.Name switch
+        ReadOnlySpan<char> nameSpan = app.Name switch
         {
-            SimpleName simple => simple.Name.Value,
-            QualifiedName qual when qual.Parts.Count > 0 && qual.Parts[^1] is SimpleName lastSimple => lastSimple.Name.Value,
-            _ => app.Name.ToString() ?? ""
+            SimpleName simple => simple.Name.Source.AsSpan(simple.Name.Span),
+            QualifiedName qual when qual.Parts.Count > 0 && qual.Parts[^1] is SimpleName lastSimple => lastSimple.Name.Source.AsSpan(lastSimple.Name.Span),
+            _ => default
         };
 
-        if (name == KnownIntrinsics.IntrinsicTypeAttribute)
+        if (nameSpan.SequenceEqual(KnownIntrinsics.IntrinsicTypeAttribute.AsSpan()))
             return true;
 
-        if (candidateAttr is not null && name == candidateAttr.Name.Text)
+        if (candidateAttr is not null && nameSpan.SequenceEqual(candidateAttr.Name.AsSpan()))
             return true;
 
         return false;
     }
 
-    private static string? ExtractLiteralString(Expression expression)
+    private static bool TryExtractLiteralSpan(Expression expression, out ReadOnlySpan<char> span)
     {
         if (expression is LiteralExpression lit && (lit.Literal.Kind is TokenKind.String or TokenKind.SuffixedString))
         {
-            string val = lit.Literal.Value;
+            var rawSpan = lit.Literal.Source.AsSpan(lit.Literal.Span);
+            if (rawSpan.Length >= 2 && rawSpan[0] == '"' && rawSpan[^1] == '"')
+            {
+                span = rawSpan.Slice(1, rawSpan.Length - 2);
+                return true;
+            }
 
-            if (val.Length >= 2 && val.StartsWith('"') && val.EndsWith('"'))
-                return val.Substring(1, val.Length - 2);
-
-            return val;
+            span = rawSpan;
+            return true;
         }
 
         if (expression is NameofExpression nameofExpr && nameofExpr.Argument is NamedExpression named)
-            return named.Identifier.Value;
+        {
+            span = named.Identifier.Source.AsSpan(named.Identifier.Span);
+            return true;
+        }
 
-        return null;
+        span = default;
+        return false;
     }
+
+    private static string? ExtractLiteralString(Expression expression) =>
+        TryExtractLiteralSpan(expression, out var span) ? span.ToString() : null;
 
     private SymbolHandle? ResolveTypeSymbol(TypeSyntax? syntax, Scope scope)
     {
         if (syntax is null)
             return null;
 
-        SymbolName? symbolName = null;
+        var symbolName = ResolutionContext.GetSymbolName(syntax);
+        var symbols = scope[symbolName];
 
-        if (syntax is SimpleType simple)
-            symbolName = ResolutionContext.GetSymbolName(simple);
-        else if (syntax is QualifiedType qualified)
-            symbolName = ResolutionContext.GetSymbolName(qualified);
-
-        if (symbolName is not null)
+        if (symbols.Count == 1)
         {
-            var symbols = scope[symbolName.Value];
+            var sym = symbols[0];
 
-            if (symbols.Count == 1)
+            if (sym is TypeSymbol or NestedTypeSymbol)
+                return ResolutionContext.GetHandle(sym);
+
+            if (sym is AliasSymbol alias)
             {
-                var sym = symbols[0];
+                EnsureAliasResolved(alias);
 
-                if (sym is TypeSymbol or NestedTypeSymbol)
-                    return ResolutionContext.GetHandle(sym);
-
-                if (sym is AliasSymbol alias)
+                if (alias.Target.Handle is { } targetHandle)
                 {
-                    EnsureAliasResolved(alias);
+                    var targetSym = context.GetSymbol(targetHandle);
 
-                    if (alias.Target.Handle is { } targetHandle)
-                    {
-                        var targetSym = context.GetSymbol(targetHandle);
-
-                        if (targetSym is TypeSymbol or NestedTypeSymbol)
-                            return targetHandle;
-                    }
+                    if (targetSym is TypeSymbol or NestedTypeSymbol)
+                        return targetHandle;
                 }
             }
         }
@@ -854,5 +952,420 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 
         if (targetHandle is { } h)
             alias.Target = TypeRef.Resolved(h);
+    }
+
+    private void DiscoverAndValidateOperatorFunctions()
+    {
+        var allMethods = context.MethodSymbols;
+
+        foreach (var method in allMethods)
+        {
+            if (method.Syntax?.Attributes is not { Count: > 0 } attrLists)
+                continue;
+
+            foreach (var list in attrLists)
+            {
+                foreach (var app in list.Attributes)
+                {
+                    if (!MatchesAttributeName(app, KnownIntrinsics.OperatorFunctionAttribute, context.DiscoveredOperators.OperatorFunctionAttribute))
+                        continue;
+
+                    ValidateAndRegisterOperatorFunction(method, app);
+                }
+            }
+        }
+    }
+
+    private void ValidateAndRegisterOperatorFunction(MethodSymbol method, AttributeApplication app)
+    {
+        if (method.Parent is null)
+            return;
+
+        var parentSym = context.GetSymbol(method.Parent.Value);
+        if (parentSym is not TypeSymbol parentType || parentType.TypeKind != TypeKind.Interface)
+        {
+            var span = app.GetSpan() ?? method.Syntax?.Signature.Identifier.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidOperatorFunctionSignature(span, "OperatorFunction", "operator functions must be declared in an interface", method.Syntax?.GetSource());
+            return;
+        }
+
+        if (app.Arguments.Count != 1)
+        {
+            var span = app.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidOperatorFunctionSignature(span, "OperatorFunction", "requires exactly one string literal argument", method.Syntax?.GetSource());
+            return;
+        }
+
+        if (!TryExtractLiteralSpan(app.Arguments[0], out var nameSpan) || !KnownIntrinsics.TryGetOperatorKind(nameSpan, out var opKind))
+        {
+            var span = app.Arguments[0].GetSpan() ?? default;
+            string displayVal = nameSpan.Length > 0 ? nameSpan.ToString() : (app.Arguments[0].ToString() ?? "");
+            context.Diagnostics.ReportInvalidOperatorFunctionSignature(span, displayVal, $"unknown operator function '{displayVal}'", method.Syntax?.GetSource());
+            return;
+        }
+
+        string fullName = KnownIntrinsics.GetOperatorName(opKind);
+        bool isStatic = method.Flags.HasFlag(FunctionFlags.Static);
+        int paramCount = method.Syntax?.Signature.Parameters.Count ?? method.Parameters.Count;
+        var returnTypeSyntax = method.Syntax?.Signature.ReturnType;
+        bool isVoidReturn = returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope);
+        bool isRefReturn = returnTypeSyntax is not null && IsReferenceType(returnTypeSyntax, method.EnclosingScope);
+        var sigSpan = method.Syntax?.Signature.Identifier.GetSpan() ?? app.GetSpan() ?? default;
+        var source = method.Syntax?.GetSource();
+
+        switch (opKind)
+        {
+            // Binary operators
+            case OperatorKind.Addition:
+            case OperatorKind.Subtraction:
+            case OperatorKind.Multiplication:
+            case OperatorKind.Division:
+            case OperatorKind.Remainder:
+            case OperatorKind.BitwiseAnd:
+            case OperatorKind.BitwiseOr:
+            case OperatorKind.BitwiseXor:
+            case OperatorKind.LeftShift:
+            case OperatorKind.RightShift:
+            case OperatorKind.RotateLeft:
+            case OperatorKind.RotateRight:
+            case OperatorKind.Equality:
+            case OperatorKind.Inequality:
+            case OperatorKind.LessThan:
+            case OperatorKind.LessThanOrEqual:
+            case OperatorKind.GreaterThan:
+            case OperatorKind.GreaterThanOrEqual:
+            case OperatorKind.LogicalAnd:
+            case OperatorKind.LogicalOr:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount != 2)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // Unary non-mutating
+            case OperatorKind.UnaryNegation:
+            case OperatorKind.UnaryPositive:
+            case OperatorKind.LogicalNot:
+            case OperatorKind.BitwiseNot:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount != 1)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 1 parameter", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // Cast operators
+            case OperatorKind.ImplicitCast:
+            case OperatorKind.ExplicitCast:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount != 1)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 1 parameter", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // Constructor
+            case OperatorKind.Constructor:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "constructors cannot be declared static", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "constructors must return void", source);
+                    return;
+                }
+                break;
+
+            // Destructor
+            case OperatorKind.Destructor:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors cannot be declared static", source);
+                    return;
+                }
+                if (paramCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors cannot accept parameters", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors must return void", source);
+                    return;
+                }
+                break;
+
+            // AddressOf
+            case OperatorKind.AddressOf:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "cannot accept parameters", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // Dereference & IndirectMemberAccess
+            case OperatorKind.Dereference:
+            case OperatorKind.IndirectMemberAccess:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "cannot accept parameters", source);
+                    return;
+                }
+                if (!isRefReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be a reference (&)", source);
+                    return;
+                }
+                break;
+
+            // Increment & Decrement
+            case OperatorKind.PrefixIncrement:
+            case OperatorKind.PostfixIncrement:
+            case OperatorKind.PrefixDecrement:
+            case OperatorKind.PostfixDecrement:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "cannot accept parameters", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // IndexerGetter
+            case OperatorKind.IndexerGetter:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount < 1)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept at least 1 index parameter", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // IndexerSetter
+            case OperatorKind.IndexerSetter:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount < 2)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept a value parameter and at least 1 index parameter", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
+                    return;
+                }
+                break;
+
+            // Assignment & Compound Assignments
+            case OperatorKind.Assignment:
+            case OperatorKind.AdditionAssignment:
+            case OperatorKind.SubtractionAssignment:
+            case OperatorKind.MultiplicationAssignment:
+            case OperatorKind.DivisionAssignment:
+            case OperatorKind.RemainderAssignment:
+            case OperatorKind.BitwiseAndAssignment:
+            case OperatorKind.BitwiseOrAssignment:
+            case OperatorKind.BitwiseXorAssignment:
+            case OperatorKind.LeftShiftAssignment:
+            case OperatorKind.RightShiftAssignment:
+            case OperatorKind.RotateLeftAssignment:
+            case OperatorKind.RotateRightAssignment:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (paramCount != 1)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 1 parameter", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
+                    return;
+                }
+                break;
+        }
+
+        var methodHandle = ResolutionContext.GetHandle(method);
+        var interfaceHandle = method.Parent!.Value;
+        context.DiscoveredOperators.Register(opKind, interfaceHandle, methodHandle, sigSpan, source);
+    }
+
+    private void DiscoverAndValidateIntrinsicFunctions()
+    {
+        var allMethods = context.MethodSymbols;
+
+        foreach (var method in allMethods)
+        {
+            if (method.Syntax?.Attributes is not { Count: > 0 } attrLists)
+                continue;
+
+            foreach (var list in attrLists)
+            {
+                foreach (var app in list.Attributes)
+                {
+                    if (!MatchesAttributeName(app, KnownIntrinsics.IntrinsicFunctionAttribute, context.DiscoveredOperators.IntrinsicFunctionAttribute))
+                        continue;
+
+                    if (method.Parent is null)
+                        continue;
+
+                    var parentSym = context.GetSymbol(method.Parent.Value);
+                    bool isIntrinsicType = false;
+
+                    if (parentSym is TypeSymbol)
+                    {
+                        foreach (var (_, handle) in context.DiscoveredIntrinsics.All)
+                        {
+                            if (handle == method.Parent.Value)
+                            {
+                                isIntrinsicType = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!isIntrinsicType)
+                    {
+                        var span = app.GetSpan() ?? default;
+                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                            span,
+                            $"method '{method.Name.Text}' marked with [IntrinsicFunction] must be declared in an intrinsic type",
+                            method.Syntax?.GetSource(),
+                            KnownIntrinsics.IntrinsicFunctionAttribute);
+                        continue;
+                    }
+
+                    method.Flags |= FunctionFlags.Intrinsic;
+                }
+            }
+        }
+    }
+
+    private bool IsVoidType(TypeSyntax type, Scope scope)
+    {
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Void, out var voidHandle))
+        {
+            var resolved = ResolveTypeSymbol(type, scope);
+            if (resolved == voidHandle)
+                return true;
+        }
+
+        if (type is SimpleType simple && simple.Name.Value.AsSpan().Equals("void".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private bool IsReferenceType(TypeSyntax type, Scope scope)
+    {
+        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier)
+            return true;
+
+        if (type is PrefixModifiedType prefix && prefix.Modifier is SpanTypeModifier)
+            return true;
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle))
+        {
+            var resolved = ResolveTypeSymbol(type, scope);
+            if (resolved == refHandle)
+                return true;
+        }
+
+        if (type is GenericType gen && gen.Name.Value.AsSpan().SequenceEqual(KnownIntrinsics.Reference.AsSpan()))
+            return true;
+
+        return false;
+    }
+
+    private static bool MatchesAttributeName(AttributeApplication app, string expectedName, AttributeSymbol? candidateAttr)
+    {
+        ReadOnlySpan<char> nameSpan = app.Name switch
+        {
+            SimpleName simple => simple.Name.Source.AsSpan(simple.Name.Span),
+            QualifiedName qual when qual.Parts.Count > 0 && qual.Parts[^1] is SimpleName lastSimple => lastSimple.Name.Source.AsSpan(lastSimple.Name.Span),
+            _ => default
+        };
+
+        if (nameSpan.SequenceEqual(expectedName.AsSpan()))
+            return true;
+
+        if (candidateAttr is not null && nameSpan.SequenceEqual(candidateAttr.Name.AsSpan()))
+            return true;
+
+        return false;
     }
 }
