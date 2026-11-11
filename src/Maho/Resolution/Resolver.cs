@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Maho.Diagnostics;
+using Maho.Resolution.Passes;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -12,7 +13,8 @@ internal sealed class Resolver
         new SymbolDiscoveryPass(),
         new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass(),
-        new ExpressionResolutionPass()
+        new ExpressionResolutionPass(),
+        new ControlFlowAndReturnInferencePass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();

@@ -101,6 +101,11 @@ internal static class KnownIntrinsics
     public const string OpDestructor = "Destructor";
     public const string OpImplicitCast = "ImplicitCast";
     public const string OpExplicitCast = "ExplicitCast";
+    public const string OpNew = "New";
+    public const string OpPut = "Put";
+    public const string OpCopy = "Copy";
+    public const string OpMove = "Move";
+    public const string OpCallable = "Callable";
 
     public static readonly HashSet<string> AllKnownTypes =
     [
@@ -138,7 +143,8 @@ internal static class KnownIntrinsics
         OpBitwiseAndAssignment, OpBitwiseOrAssignment, OpBitwiseXorAssignment,
         OpLeftShiftAssignment, OpRightShiftAssignment,
         OpRotateLeftAssignment, OpRotateRightAssignment,
-        OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast
+        OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast,
+        OpNew, OpPut, OpCopy, OpMove, OpCallable
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -195,6 +201,11 @@ internal static class KnownIntrinsics
             case OpDestructor: kind = OperatorKind.Destructor; return true;
             case OpImplicitCast: kind = OperatorKind.ImplicitCast; return true;
             case OpExplicitCast: kind = OperatorKind.ExplicitCast; return true;
+            case OpNew: kind = OperatorKind.New; return true;
+            case OpPut: kind = OperatorKind.Put; return true;
+            case OpCopy: kind = OperatorKind.Copy; return true;
+            case OpMove: kind = OperatorKind.Move; return true;
+            case OpCallable: kind = OperatorKind.Callable; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -253,6 +264,11 @@ internal static class KnownIntrinsics
         OperatorKind.Destructor => OpDestructor,
         OperatorKind.ImplicitCast => OpImplicitCast,
         OperatorKind.ExplicitCast => OpExplicitCast,
+        OperatorKind.New => OpNew,
+        OperatorKind.Put => OpPut,
+        OperatorKind.Copy => OpCopy,
+        OperatorKind.Move => OpMove,
+        OperatorKind.Callable => OpCallable,
         _ => string.Empty
     };
 }

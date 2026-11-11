@@ -4,18 +4,70 @@ namespace Maho.Tests;
 
 public sealed class MacroTests
 {
+    private const string MacroPrelude = """
+        [intrinsic]
+        public attribute IntrinsicType(Str name);
+
+        [intrinsic]
+        public attribute OperatorFunction(Str name);
+
+        [IntrinsicType("Void")]
+        public struct void;
+
+        [IntrinsicType("NUInt")]
+        public struct nuint;
+
+        [IntrinsicType("Int8")]
+        public struct int8;
+
+        [IntrinsicType("Int32")]
+        public struct int32 : Add<int32>, Mul<int32>
+        {
+            public static int32 Add.Add(int32 left, int32 right) { return left; }
+            public static int32 Mul.Mul(int32 left, int32 right) { return left; }
+        }
+
+        [IntrinsicType("Reference")]
+        public struct Reference<T>
+        {
+            nuint raw;
+        }
+
+        [IntrinsicType("Int64")]
+        public struct int64;
+
+        [IntrinsicType("Str")]
+        public struct Str
+        {
+            int8& buffer;
+            int64 length;
+        }
+
+        public interface Add<T>
+        {
+            [OperatorFunction("Addition")]
+            public static int32 Add(int32 left, int32 right);
+        }
+
+        public interface Mul<T>
+        {
+            [OperatorFunction("Multiplication")]
+            public static int32 Mul(int32 left, int32 right);
+        }
+        """;
+
     [Fact]
     public void ExpressionMacro_SimpleExpansion_Succeeds()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{MacroPrelude}}
+
             public macro $add {
                 (@a: expr, @b: expr) => @a + @b;
             }
 
             public class Host
             {
-                public struct int32;
-
                 public int32 Test()
                 {
                     return $add(1, 2);
@@ -24,7 +76,7 @@ public sealed class MacroTests
             """);
 
         Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
-        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
@@ -498,7 +550,9 @@ public sealed class MacroTests
     [Fact]
     public void MacroInNamespace_ResolvesAndExpands()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{MacroPrelude}}
+
             namespace Sample
             {
                 public macro $sq {
@@ -507,8 +561,6 @@ public sealed class MacroTests
 
                 public class Calculator
                 {
-                    public struct int32;
-
                     public int32 Calc()
                     {
                         return $sq(7);
@@ -573,11 +625,11 @@ public sealed class MacroTests
     [Fact]
     public void LocalMacroDeclaration_InFunctionBody_Succeeds()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{MacroPrelude}}
+
             public class Host
             {
-                public struct int32;
-
                 public int32 Test()
                 {
                     macro $local_add {
@@ -590,7 +642,7 @@ public sealed class MacroTests
             """);
 
         Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
-        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
@@ -602,7 +654,9 @@ public sealed class MacroTests
     [Fact]
     public void BlockPattern_InExpressionContext_ExpandsToBlockExpressionAndEvaluatesLastValue()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{MacroPrelude}}
+
             public macro $compute {
                 (@a: expr, @b: expr) => {
                     var x = @a * 2;
@@ -613,8 +667,6 @@ public sealed class MacroTests
 
             public class Host
             {
-                public struct int32;
-
                 public int32 Test()
                 {
                     return $compute(10, 20);
@@ -623,7 +675,7 @@ public sealed class MacroTests
             """);
 
         Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
-        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
@@ -638,7 +690,9 @@ public sealed class MacroTests
     [Fact]
     public void BlockPattern_InStatementContext_ExpandsWithoutBlockInSameScope()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{MacroPrelude}}
+
             public macro $declare_variables {
                 () => {
                     int32 a = 10;
@@ -648,8 +702,6 @@ public sealed class MacroTests
 
             public class Host
             {
-                public struct int32;
-
                 public int32 Test()
                 {
                     $declare_variables();
@@ -659,7 +711,7 @@ public sealed class MacroTests
             """);
 
         Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
-        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);

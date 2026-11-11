@@ -65,10 +65,15 @@ internal enum OperatorKind
     RotateLeftAssignment,
     RotateRightAssignment,
 
-    // Special lifecycle and conversion operators
+    // Special lifecycle, allocation, and conversion operators
     Constructor,
     Destructor,
     ImplicitCast,
-    ExplicitCast
+    ExplicitCast,
+    New,
+    Put,
+    Copy,
+    Move,
+    Callable
 }
 

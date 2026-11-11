@@ -11,7 +11,7 @@ internal sealed partial class Parser
         var modifiers = ParseModifiers();
 
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
-            return new TopLevelLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
+            return new TopLevelFunctionDeclaration(ParseLiteralFunctionDeclaration(attributes, modifiers));
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return new TopLevelMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)
@@ -563,7 +563,7 @@ internal sealed partial class Parser
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseLocalAttributeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
-            return new LocalLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
+            return new LocalFunctionDeclaration(ParseLiteralFunctionDeclaration(attributes, modifiers));
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return ParseLocalMacroDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
@@ -818,6 +818,13 @@ internal sealed partial class Parser
     {
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseFunctionBlockBody();
+        else if (IsArrow())
+        {
+            var arrow = ConsumeArrow();
+            var expr = ParseExpression();
+            var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after expression body");
+            return new FunctionLambdaBody(arrow, new LocalReturnStatement(new ReturnStatement(arrow, expr, semicolon)));
+        }
         else if (CurrentToken.Kind is TokenKind.Semicolon)
             return ParseFunctionEmptyBody();
         else
@@ -1259,78 +1266,41 @@ internal sealed partial class Parser
             new FunctionDeclaration(attributes, signature, body, SpecialFunctionKind.Constructor));
     }
 
-    private LiteralMacroDeclaration ParseLiteralMacroDeclaration(
+    private FunctionDeclaration ParseLiteralFunctionDeclaration(
         IReadOnlyList<AttributeListSyntax> attributes,
         IReadOnlyList<Token> modifiers)
     {
         var literalKeyword = Consume();
         var suffix = ExpectIdentifierToken("for the literal suffix");
+        var identifier = new SimpleName(suffix);
+
+        // Synthesize a missing return type (literal functions return the enclosing type)
+        var missingReturnType = new SimpleType(CreateMissingToken());
+
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after the literal suffix");
-
-        var kindToken = CurrentToken;
-        LiteralMacroKind kind;
-        if (kindToken.MatchingKind is MatchingKeywordKind.Int)
-        {
-            kind = LiteralMacroKind.Int;
-            Consume();
-        }
-        else if (kindToken.MatchingKind is MatchingKeywordKind.Float)
-        {
-            kind = LiteralMacroKind.Float;
-            Consume();
-        }
-        else if (kindToken.MatchingKind is MatchingKeywordKind.Str)
-        {
-            kind = LiteralMacroKind.Str;
-            Consume();
-        }
-        else if (kindToken.MatchingKind is MatchingKeywordKind.Char)
-        {
-            kind = LiteralMacroKind.Char;
-            Consume();
-        }
-        else
-        {
-            diagnostics.ReportExpectedToken(kindToken.Span, "'int', 'float', 'str', or 'char'", GetTokenDisplay(kindToken), "for the literal kind");
-            kind = LiteralMacroKind.Int;
-        }
-
-        var paramIdentifier = ExpectIdentifierToken("for the literal parameter identifier");
+        var parameters = ParseParameterList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the literal parameter list");
 
-        Expression body;
-        Token? semicolon = null;
+        List<TypeConstraintClause> constraints = [];
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
 
-        if (IsArrow())
-        {
-            ConsumeArrow();
-            body = ParseExpression();
-            semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after literal expression body");
-        }
-        else if (CurrentToken.Kind is TokenKind.LeftBrace)
-        {
-            Consume();
-            body = ParseExpression();
-            ExpectToken(TokenKind.RightBrace, "'}'", "to close literal macro block");
-        }
-        else
-        {
-            diagnostics.ReportExpectedToken(CurrentToken.Span, "'=>' or '{'", GetTokenDisplay(CurrentToken), "for literal macro body");
-            body = ParseExpression();
-        }
-
-        return new LiteralMacroDeclaration(
-            attributes,
+        var signature = new FunctionSignature(
             modifiers,
-            literalKeyword,
-            suffix,
+            missingReturnType,
+            identifier,
             openParen,
-            kindToken,
-            kind,
-            paramIdentifier,
+            parameters,
             closeParen,
+            constraints);
+
+        var body = ParseFunctionBody();
+
+        return new FunctionDeclaration(
+            attributes,
+            signature,
             body,
-            semicolon);
+            SpecialFunctionKind.Literal);
     }
 
     /// <summary>

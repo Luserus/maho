@@ -43,7 +43,6 @@ internal sealed class ResolutionContext
             .Concat(SinkSymbols.MethodSymbols.SelectMany(m => m.LocalVariables))
             .Concat(sinkLocalVariables);
     private readonly Dictionary<SymbolHandle, Symbol> sinkSymbolsByHandle = [];
-    private readonly Dictionary<SymbolHandle, LocalVariableSymbol> localVariablesByHandle = [];
     private int sinkID = -1;
     private int enumVariantID;
 
@@ -52,6 +51,7 @@ internal sealed class ResolutionContext
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
     private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
     private readonly Dictionary<Expression, TypeRef> expressionTypes = [];
+    private readonly Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> controlFlowGraphs = [];
 
     public void SetExpressionType(Expression expr, TypeRef type) => expressionTypes[expr] = type;
 
@@ -60,6 +60,14 @@ internal sealed class ResolutionContext
 
     public TypeRef GetRequiredExpressionType(Expression expr) =>
         expressionTypes.TryGetValue(expr, out var type) ? type : TypeRef.Error;
+
+    public void SetControlFlowGraph(SymbolHandle handle, ControlFlow.ControlFlowGraph cfg) =>
+        controlFlowGraphs[handle] = cfg;
+
+    public bool TryGetControlFlowGraph(SymbolHandle handle, out ControlFlow.ControlFlowGraph? cfg) =>
+        controlFlowGraphs.TryGetValue(handle, out cfg);
+
+    public IReadOnlyDictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs => controlFlowGraphs;
 
     public void RegisterHygiene(SyntaxNode node, HygieneId hygiene) => nodeHygiene[node] = hygiene;
 
@@ -481,7 +489,6 @@ internal sealed class ResolutionContext
             var symbol = new LocalVariableSymbol(new SymbolID(sinkID--), enclosingScope, name, parent, syntax);
             sinkLocalVariables.Add(symbol);
             sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
-            localVariablesByHandle[GetHandle(symbol)] = symbol;
 
             if (name.Text != "_")
             {
@@ -509,7 +516,6 @@ internal sealed class ResolutionContext
             var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
             func.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
-            localVariablesByHandle[GetHandle(symbol)] = symbol;
 
             return symbol;
         }
@@ -520,7 +526,6 @@ internal sealed class ResolutionContext
             var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
             method.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
-            localVariablesByHandle[GetHandle(symbol)] = symbol;
 
             return symbol;
         }
@@ -528,7 +533,6 @@ internal sealed class ResolutionContext
         {
             var symbol = new LocalVariableSymbol(0, enclosingScope, name, parent, syntax);
             Register(enclosingScope, symbol);
-            localVariablesByHandle[GetHandle(symbol)] = symbol;
 
             return symbol;
         }
@@ -834,7 +838,7 @@ internal sealed class ResolutionContext
         SymbolKind.Function => GetFunctionSymbol(handle),
         SymbolKind.Method => GetMethodSymbol(handle),
         SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
-        SymbolKind.Variable => localVariablesByHandle.TryGetValue(handle, out var loc) ? loc : (sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null),
+        SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
         SymbolKind.Field => GetFieldSymbol(handle),
         SymbolKind.Property => GetPropertySymbol(handle),
         SymbolKind.Alias => GetAliasSymbol(handle),

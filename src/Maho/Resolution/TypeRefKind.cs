@@ -28,5 +28,7 @@ internal enum TypeRefKind : byte
     /// <summary>Union type (<c>(T1 | T2)</c>).</summary>
     Union,
     /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
-    Untagged
+    Untagged,
+    /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
+    Literal
 }

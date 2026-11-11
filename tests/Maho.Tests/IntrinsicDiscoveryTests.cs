@@ -1109,4 +1109,204 @@ public sealed class IntrinsicDiscoveryTests
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("must be declared in an intrinsic type"));
     }
+
+    [Fact]
+    public void OperatorFunction_New_ValidAndInvalidSignatures()
+    {
+        var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str name);
+
+            public interface New<TTarget, TReturn>
+            {
+                [OperatorFunction("New")]
+                public static TReturn New();
+            }
+            """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
+        Assert.True(valid.Context.DiscoveredOperators.TryGetOperators(OperatorKind.New, out var newOps));
+        Assert.Single(newOps);
+
+        var nonStatic = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str name);
+
+            public interface BadNew<TTarget, TReturn>
+            {
+                [OperatorFunction("New")]
+                public TReturn New();
+            }
+            """);
+        Assert.True(nonStatic.HasErrors);
+        Assert.Contains(nonStatic.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must be declared static"));
+
+        var voidReturn = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str name);
+
+            public interface BadNew<TTarget>
+            {
+                [OperatorFunction("New")]
+                public static void New();
+            }
+            """);
+        Assert.True(voidReturn.HasErrors);
+        Assert.Contains(voidReturn.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type cannot be void"));
+    }
+
+    [Fact]
+    public void OperatorFunction_Put_ValidAndInvalidSignatures()
+    {
+        var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface Put<TTarget>
+            {
+                [OperatorFunction("Put")]
+                public static void Put(TTarget& destination);
+            }
+            """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
+        Assert.True(valid.Context.DiscoveredOperators.TryGetOperators(OperatorKind.Put, out var putOps));
+        Assert.Single(putOps);
+
+        var nonVoid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface BadPut<TTarget>
+            {
+                [OperatorFunction("Put")]
+                public static Int64 Put(TTarget& destination);
+            }
+            """);
+        Assert.True(nonVoid.HasErrors);
+        Assert.Contains(nonVoid.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type must be void"));
+    }
+
+    [Fact]
+    public void OperatorFunction_Copy_And_Move_ValidAndInvalidSignatures()
+    {
+        var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface Copy<T>
+            {
+                [OperatorFunction("Copy")]
+                public static void Copy(T& dest, T& src);
+            }
+
+            public interface Move<T>
+            {
+                [OperatorFunction("Move")]
+                public static void Move(T& dest, T& src);
+            }
+            """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
+        Assert.True(valid.Context.DiscoveredOperators.TryGetOperators(OperatorKind.Copy, out var copyOps));
+        Assert.Single(copyOps);
+        Assert.True(valid.Context.DiscoveredOperators.TryGetOperators(OperatorKind.Move, out var moveOps));
+        Assert.Single(moveOps);
+
+        var badParamCount = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface BadCopy<T>
+            {
+                [OperatorFunction("Copy")]
+                public static void Copy(T& dest);
+            }
+            """);
+        Assert.True(badParamCount.HasErrors);
+        Assert.Contains(badParamCount.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept exactly 2 parameters"));
+    }
+
+    [Fact]
+    public void OperatorFunction_Callable_ValidSignature()
+    {
+        var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            public attribute OperatorFunction(Str name);
+
+            public interface Callable<TReturn, TArg>
+            {
+                [OperatorFunction("Callable")]
+                public TReturn Call(TArg arg);
+            }
+            """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
+        Assert.True(valid.Context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out var callOps));
+        Assert.Single(callOps);
+    }
+
+    [Fact]
+    public void Lifecycle_DestructorNandCopy_ReportsMH0243()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface Destructor
+            {
+                [OperatorFunction("Destructor")]
+                public void Drop();
+            }
+
+            public interface Copy<T>
+            {
+                [OperatorFunction("Copy")]
+                public static void Copy(T& dest, T& src);
+            }
+
+            public struct Resource : Destructor, Copy<Resource>
+            {
+                public void Drop() {}
+                public static void Copy(Resource& dest, Resource& src) {}
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0243" && d.Message.Contains("cannot implement both 'Destructor' and 'Copy'"));
+    }
+
+    [Fact]
+    public void Lifecycle_CopyNandMove_ReportsMH0244()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Void")]
+            public struct void;
+
+            public attribute OperatorFunction(Str name);
+
+            public interface Copy<T>
+            {
+                [OperatorFunction("Copy")]
+                public static void Copy(T& dest, T& src);
+            }
+
+            public interface Move<T>
+            {
+                [OperatorFunction("Move")]
+                public static void Move(T& dest, T& src);
+            }
+
+            public struct Conflicted : Copy<Conflicted>, Move<Conflicted>
+            {
+                public static void Copy(Conflicted& dest, Conflicted& src) {}
+                public static void Move(Conflicted& dest, Conflicted& src) {}
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0244" && d.Message.Contains("cannot implement both 'Copy' and 'Move'"));
+    }
 }

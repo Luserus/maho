@@ -1257,6 +1257,81 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
                     return;
                 }
                 break;
+
+            // New
+            case OperatorKind.New:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
+                    return;
+                }
+                break;
+
+            // Put
+            case OperatorKind.Put:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount < 1)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept at least 1 destination parameter", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
+                    return;
+                }
+                break;
+
+            // Copy
+            case OperatorKind.Copy:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount != 2)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters (dest, source)", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
+                    return;
+                }
+                break;
+
+            // Move
+            case OperatorKind.Move:
+                if (!isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
+                    return;
+                }
+                if (paramCount != 2)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters (dest, source)", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
+                    return;
+                }
+                break;
+
+            // Callable
+            case OperatorKind.Callable:
+                break;
         }
 
         var methodHandle = ResolutionContext.GetHandle(method);

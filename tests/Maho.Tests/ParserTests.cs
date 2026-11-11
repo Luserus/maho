@@ -1061,6 +1061,101 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_ConstructorCall_WithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new<Arena>(pool) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("Arena", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("pool", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_WithAllocationTypeArgumentsOnly_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new<Arena> Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("Arena", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.Null(constructor.AllocationArguments);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_WithAllocationArgumentsOnly_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new(pool) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.Null(constructor.AllocationTypeArguments);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("pool", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_PutWithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = put<StackFrame>(offset) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.Put, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("StackFrame", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("offset", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_LiteralFunctionDeclaration_IntrinsicAndUserDefined_ParsesCorrectly()
+    {
+        var u64Lit = Assert.IsType<MemberFunctionDeclaration>(ParseSingleMember("""
+            [intrinsic]
+            public literal u64(int V);
+            """, typeof(MemberFunctionDeclaration)));
+        Assert.Equal(SpecialFunctionKind.Literal, u64Lit.Function.SpecialKind);
+        Assert.Equal("u64", Assert.IsType<SimpleName>(u64Lit.Function.Signature.Identifier).Name.Value);
+        Assert.Single(u64Lit.Function.Signature.Parameters);
+        Assert.IsType<FunctionEmptyBody>(u64Lit.Function.Body);
+
+        var distLit = Assert.IsType<MemberFunctionDeclaration>(ParseSingleMember("""
+            public literal km(int V) => Distance.FromKm(V);
+            """, typeof(MemberFunctionDeclaration)));
+        Assert.Equal(SpecialFunctionKind.Literal, distLit.Function.SpecialKind);
+        Assert.Equal("km", Assert.IsType<SimpleName>(distLit.Function.Signature.Identifier).Name.Value);
+        Assert.IsType<FunctionLambdaBody>(distLit.Function.Body);
+    }
+
+    [Fact]
     public void Parse_ObjectCreationWithClause_AttachesToArrayCreation()
     {
         LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""

@@ -609,6 +609,51 @@ internal sealed class DiagnosticsManager
             .WithHelp("add the missing variant arm or a wildcard pattern '_' to make the match exhaustive")
             .Report();
 
+    /// <summary> Reports that a type implements both Destructor and Copy. </summary>
+    public void ReportDestructorNandCopy(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0243", $"type '{typeName}' cannot implement both 'Destructor' and 'Copy'; types with destructors must use move semantics", span, source)
+            .WithPrimaryLabel(span, "cannot implement both 'Destructor' and 'Copy'", source)
+            .Report();
+
+    /// <summary> Reports that a type implements both Copy and Move. </summary>
+    public void ReportCopyNandMove(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0244", $"type '{typeName}' cannot implement both 'Copy' and 'Move'; a type must be exclusively Copy or exclusively Move", span, source)
+            .WithPrimaryLabel(span, "cannot implement both 'Copy' and 'Move'", source)
+            .Report();
+
+    /// <summary> Reports incompatible branch types in conditional expression. </summary>
+    public void ReportAmbiguousConditionalBranches(TextSpan span, string thenType, string elseType, SourceText? source = null) =>
+        BuildError("MH2011", $"conditional branches evaluate to different types '{thenType}' and '{elseType}'; explicit cast to a common base type is required", span, source)
+            .WithPrimaryLabel(span, $"branches evaluate to '{thenType}' and '{elseType}'", source)
+            .WithHelp("cast branches explicitly to a common base type or interface")
+            .Report();
+
+    /// <summary> Reports conflicting return types in inferred function. </summary>
+    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null) =>
+        BuildError("MH2012", $"return statement returns type '{actualType}', which conflicts with previous return type '{previousType}'; all return branches must return the exact same type or require explicit return type declaration", span, source)
+            .WithPrimaryLabel(span, $"returns '{actualType}' but previous return yielded '{previousType}'", source)
+            .Report();
+
+    /// <summary> Reports ambiguous literal conversion when multiple literal overloads exist. </summary>
+    public void ReportAmbiguousLiteralConversion(TextSpan span, string typeName, string overloads, SourceText? source = null) =>
+        BuildError("MH2013", $"ambiguous literal conversion for type '{typeName}'; multiple literal overloads exist ({overloads}); explicit suffix required", span, source)
+            .WithPrimaryLabel(span, $"ambiguous literal overloads: {overloads}", source)
+            .WithHelp("provide an explicit literal suffix to select the intended overload")
+            .Report();
+
+    /// <summary> Reports that a member was not found on a type. </summary>
+    public void ReportMemberNotFound(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+        BuildError("MH2014", $"type '{typeName}' does not contain a definition for '{memberName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' not found on '{typeName}'", source)
+            .Report();
+
+    /// <summary> Reports that an expression is not callable or has no matching Call operator overload. </summary>
+    public void ReportTypeNotCallable(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0611", $"type '{typeName}' is not callable or has no matching overload for 'Call'", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' is not callable", source)
+            .WithHelp($"implement 'Callable<TReturn, ...>' to make instances of '{typeName}' invocable")
+            .Report();
+
     /// <summary> Reports an attempt to match on an untagged sum type without discriminant. </summary>
     public void ReportUntaggedMatchDisallowed(TextSpan span, string sumTypeName, SourceText? source = null) =>
         BuildError("MH0606", $"cannot match on untagged sum type '{sumTypeName}' without discriminant", span, source)

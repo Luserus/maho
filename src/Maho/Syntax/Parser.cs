@@ -177,7 +177,9 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Operator
         and not MatchingKeywordKind.If and not MatchingKeywordKind.While
         and not MatchingKeywordKind.Match
-        and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto;
+        and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto
+        and not MatchingKeywordKind.True and not MatchingKeywordKind.False
+        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -460,7 +462,7 @@ internal sealed partial class Parser
         var modifiers = ParseModifiers();
 
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
-            return new MemberLiteralMacroDeclaration(ParseLiteralMacroDeclaration(attributes, modifiers));
+            return new MemberFunctionDeclaration(ParseLiteralFunctionDeclaration(attributes, modifiers));
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return new MemberMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)

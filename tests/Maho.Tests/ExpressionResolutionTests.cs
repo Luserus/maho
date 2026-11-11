@@ -1,8 +1,5 @@
-using System.Linq;
-using Maho.Diagnostics;
 using Maho.Resolution;
 using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
@@ -28,7 +25,47 @@ public sealed class ExpressionResolutionTests
         public struct int16;
 
         [IntrinsicType("Int32")]
-        public struct int32;
+        public struct int32 : Add<int32>, Sub<int32>, Mul<int32>, Div<int32>, Rem<int32>,
+                              BitwiseAnd<int32>, BitwiseOr<int32>, BitwiseXor<int32>, BitwiseNot<int32>,
+                              LeftShift<int32>, RightShift<int32>,
+                              Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
+        {
+            public static int32 Add.Add(int32 l, int32 r) { return l; }
+            public static int32 Sub.Sub(int32 l, int32 r) { return l; }
+            public static int32 Mul.Mul(int32 l, int32 r) { return l; }
+            public static int32 Div.Div(int32 l, int32 r) { return l; }
+            public static int32 Rem.Rem(int32 l, int32 r) { return l; }
+            public static int32 BitwiseAnd.BitwiseAnd(int32 l, int32 r) { return l; }
+            public static int32 BitwiseOr.BitwiseOr(int32 l, int32 r) { return l; }
+            public static int32 BitwiseXor.BitwiseXor(int32 l, int32 r) { return l; }
+            public static int32 BitwiseNot.BitwiseNot(int32 o) { return o; }
+            public static int32 LeftShift.LeftShift(int32 l, int32 r) { return l; }
+            public static int32 RightShift.RightShift(int32 l, int32 r) { return l; }
+            public static bool Eq.Eq(int32 l, int32 r) { return true; }
+            public static bool Neq.Neq(int32 l, int32 r) { return false; }
+            public static bool Lt.Lt(int32 l, int32 r) { return true; }
+            public static bool Le.Le(int32 l, int32 r) { return true; }
+            public static bool Gt.Gt(int32 l, int32 r) { return false; }
+            public static bool Ge.Ge(int32 l, int32 r) { return false; }
+        }
+
+        public interface Add<T> { [OperatorFunction("Addition")] public static int32 Add(int32 l, int32 r); }
+        public interface Sub<T> { [OperatorFunction("Subtraction")] public static int32 Sub(int32 l, int32 r); }
+        public interface Mul<T> { [OperatorFunction("Multiplication")] public static int32 Mul(int32 l, int32 r); }
+        public interface Div<T> { [OperatorFunction("Division")] public static int32 Div(int32 l, int32 r); }
+        public interface Rem<T> { [OperatorFunction("Remainder")] public static int32 Rem(int32 l, int32 r); }
+        public interface BitwiseAnd<T> { [OperatorFunction("BitwiseAnd")] public static int32 BitwiseAnd(int32 l, int32 r); }
+        public interface BitwiseOr<T> { [OperatorFunction("BitwiseOr")] public static int32 BitwiseOr(int32 l, int32 r); }
+        public interface BitwiseXor<T> { [OperatorFunction("BitwiseXor")] public static int32 BitwiseXor(int32 l, int32 r); }
+        public interface BitwiseNot<T> { [OperatorFunction("BitwiseNot")] public static int32 BitwiseNot(int32 o); }
+        public interface LeftShift<T> { [OperatorFunction("LeftShift")] public static int32 LeftShift(int32 l, int32 r); }
+        public interface RightShift<T> { [OperatorFunction("RightShift")] public static int32 RightShift(int32 l, int32 r); }
+        public interface Eq<T> { [OperatorFunction("Equality")] public static bool Eq(int32 l, int32 r); }
+        public interface Neq<T> { [OperatorFunction("Inequality")] public static bool Neq(int32 l, int32 r); }
+        public interface Lt<T> { [OperatorFunction("LessThan")] public static bool Lt(int32 l, int32 r); }
+        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public static bool Le(int32 l, int32 r); }
+        public interface Gt<T> { [OperatorFunction("GreaterThan")] public static bool Gt(int32 l, int32 r); }
+        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public static bool Ge(int32 l, int32 r); }
 
         [IntrinsicType("Int64")]
         public struct int64;
@@ -519,5 +556,484 @@ public sealed class ExpressionResolutionTests
 
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0609");
+    }
+
+    [Fact]
+    public void Literals_LibraryDefinedSuffixFunction_BindsMethodReference()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct Meters
+            {
+                public int32 Value;
+                public literal m(int32 v)
+                {
+                    Meters res;
+                    res.Value = v;
+                    return res;
+                }
+            }
+
+            public class Host
+            {
+                public Meters Test()
+                {
+                    return 50m;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var context = compilation.Context!;
+        var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
+            .First(t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = body.Members.OfType<MemberFunctionDeclaration>().First();
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+        var ret = Assert.Single(funcBody.Locals.OfType<LocalReturnStatement>());
+        var lit = Assert.IsType<LiteralExpression>(ret.Statement.Expression);
+
+        Assert.True(context.ResolvedTree.TryGetReference(lit, out var boundHandle));
+        var boundSym = context.GetSymbol(boundHandle);
+        var litMethod = Assert.IsAssignableFrom<MethodSymbol>(boundSym);
+        Assert.Equal("m", litMethod.Name.Text);
+        Assert.True(litMethod.Flags.HasFlag(FunctionFlags.Literal));
+    }
+
+    [Fact]
+    public void RetroactiveResolution_PropagatesToAllOperations_SucceedsWhenMethodsDefined()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface ConcreteAdd
+            {
+                [OperatorFunction("Addition")]
+                public static Concrete Add(Concrete l, Concrete r);
+            }
+
+            public struct Concrete : ConcreteAdd
+            {
+                public literal int();
+                public static Concrete ConcreteAdd.Add(Concrete l, Concrete r) { return l; }
+                public Concrete Abs() { return this; }
+            }
+
+            public class Host
+            {
+                public void Test()
+                {
+                    var x = 10;
+                    var y = x + 10.Abs();
+                    Concrete c = y;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void RetroactiveResolution_ReportsMH2014_WhenTargetLacksMember()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface ConcreteAdd
+            {
+                [OperatorFunction("Addition")]
+                public static Concrete Add(Concrete l, Concrete r);
+            }
+
+            public struct Concrete : ConcreteAdd
+            {
+                public literal int();
+                public static Concrete ConcreteAdd.Add(Concrete l, Concrete r) { return l; }
+            }
+
+            public class Host
+            {
+                public void Test()
+                {
+                    var x = 10;
+                    var y = x + 10.Abs();
+                    Concrete c = y;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2014" && d.Message.Contains("Abs"));
+    }
+
+    [Fact]
+    public void SequentialCall_CollapsesOnFirstCall_ReportsMH2004OnSecondCall()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public void FromInt32(int32 x) {}
+                public void FromInt64(int64 x) {}
+
+                public void Test()
+                {
+                    var x = 10;
+                    FromInt32(x);
+                    FromInt64(x);
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2004");
+    }
+
+    [Fact]
+    public void UnconstrainedLiteral_CollapsesToDefaultIntrinsic_ReportsMH2014_WhenIntrinsicLacksMember()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public void Test()
+                {
+                    var x = 10;
+                    x.NonExistentMethod();
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2014" && d.Message.Contains("NonExistentMethod") && d.Message.Contains("int32"));
+    }
+
+    [Fact]
+    public void CanonicalBooleans_ParseAsLiteral_ResolveToCanonicalBool()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public void Test()
+                {
+                    var t = true;
+                    var f = false;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
+        var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
+        var varT = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
+        var varF = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
+        Assert.IsType<LiteralExpression>(varT.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.IsType<LiteralExpression>(varF.Declaration.Declarators[0].Initializer!.Initializer);
+    }
+
+    [Fact]
+    public void LiteralAddition_NoConstantFolding_BindsToResolvedOperator()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public void Test()
+                {
+                    var res = 10 + 20;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
+        var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
+        var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
+        var bin = Assert.IsType<BinaryExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.True(compilation.Context.ResolvedTree.TryGetReference(bin, out var opHandle));
+        var opSym = compilation.Context.GetSymbol(opHandle);
+        var method = Assert.IsAssignableFrom<MethodSymbol>(opSym);
+        Assert.Equal("Add", method.Name.Text);
+    }
+
+    [Fact]
+    public void Conditionals_StrictBranchMatching_SameBaseType_ReportsMH2011()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Animal { }
+            public class Dog : Animal { }
+            public class Cat : Animal { }
+
+            public class Host
+            {
+                public void Test(bool cond, Dog d, Cat c)
+                {
+                    var res = if (cond) d else c;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2011");
+    }
+
+    [Fact]
+    public void Conditionals_StrictBranchMatching_ExactMatch_Succeeds()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public int32 Test(bool cond, int32 a, int32 b)
+                {
+                    return if (cond) a else b;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void Allocation_NewAndPut_WithAllocationArgs_ResolvesOperators()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct Arena;
+
+            public interface New
+            {
+                [OperatorFunction("New")]
+                public static Point New(Arena pool);
+            }
+
+            public interface Put
+            {
+                [OperatorFunction("Put")]
+                public static void Put(int32 offset);
+            }
+
+            public struct Point : New, Put
+            {
+                public int32 X;
+                public int32 Y;
+
+                public static Point Construct(int32 x, int32 y)
+                {
+                    Point p;
+                    p.X = x;
+                    p.Y = y;
+                    return p;
+                }
+
+                public static Point New.New(Arena pool)
+                {
+                    Point p;
+                    return p;
+                }
+
+                public static void Put.Put(int32 offset)
+                {
+                }
+            }
+
+            public class Host
+            {
+                public void Test(Arena pool)
+                {
+                    var p1 = new(pool) Point(10, 20);
+                    put(4) Point(30, 40);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void CallableOperator_InvocationOnInstance_Succeeds()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface Callable
+            {
+                [OperatorFunction("Callable")]
+                public int32 Call(int32 x, int32 y);
+            }
+
+            public struct Multiplier : Callable
+            {
+                public int32 Factor;
+
+                public int32 Callable.Call(int32 x, int32 y)
+                {
+                    return x;
+                }
+            }
+
+            public class Host
+            {
+                public int32 Test(Multiplier m)
+                {
+                    return m(10, 20);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void CallableOperator_TypeNotCallable_ReportsMH0611()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct NonCallable;
+
+            public class Host
+            {
+                public void Test(NonCallable n)
+                {
+                    n(1, 2);
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0611");
+    }
+
+    [Fact]
+    public void LiteralOverload_Ambiguity_ReportsMH2013()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct Overloaded
+            {
+                public literal lit1(int32 v);
+                public literal lit2(int32 v);
+            }
+
+            public class Host
+            {
+                public void Test()
+                {
+                    Overloaded o = 42;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2013");
+    }
+
+    [Fact]
+    public void CFG_ControlFlowConstraintPropagation_CollapsesLiteralVariable()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public void ExpectInt64(int64 val) { }
+
+                public void Test()
+                {
+                    var x = 10;
+                    ExpectInt64(x);
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var context = compilation.Context!;
+        Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var hInt64));
+
+        var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
+            .First(t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Test");
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+        var scope = context.GetSyntaxScope(funcBody, context.Scopes[0]);
+
+        var symX = Assert.IsType<LocalVariableSymbol>(scope[new SymbolName(new SymbolPart("x"))][0]);
+        Assert.Equal(hInt64, symX.Type.Handle);
+    }
+
+    [Fact]
+    public void CFG_ReturnInference_ConflictingReturns_ReportsMH2012()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public var Test(bool cond)
+                {
+                    if (cond)
+                    {
+                        return 10;
+                    }
+                    else
+                    {
+                        return true;
+                    }
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2012");
+    }
+
+    [Fact]
+    public void CFG_ReturnInference_UnifiedReturns_InfersExactType()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public var Test(bool cond, int32 a, int32 b)
+                {
+                    if (cond)
+                    {
+                        return a;
+                    }
+                    else
+                    {
+                        return b;
+                    }
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var context = compilation.Context!;
+        Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
+
+        var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
+            .First(t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Test");
+        var methodSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(ResolutionContext.GetHandle(context.MethodSymbols.First(m => m.Name.Text == "Test"))));
+        Assert.Equal(hInt32, methodSym.ReturnType.Handle);
     }
 }

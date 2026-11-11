@@ -57,5 +57,9 @@ internal enum MatchingKeywordKind : byte
     Match,
     Literal,
     Str,
-    Char
+    Char,
+    True,
+    False,
+    Null,
+    This
 }

@@ -162,6 +162,7 @@ internal sealed partial class Parser
             MatchingKeywordKind.While => ParseWhileExpression(),
             MatchingKeywordKind.Match => ParseMatchExpression(),
             MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
+            MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
             _ => ParseNamedExpression()
         },
         TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
@@ -446,6 +447,26 @@ internal sealed partial class Parser
             _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled object creation keyword.")
         };
 
+        Token? allocLessThan = null;
+        SeparatedSyntaxList<TypeSyntax>? allocTypeArguments = null;
+        Token? allocGreaterThan = null;
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
+        {
+            (allocLessThan, allocTypeArguments, allocGreaterThan) = ParseGenerics();
+        }
+
+        Token? allocOpenParen = null;
+        SeparatedSyntaxList<Expression>? allocArguments = null;
+        Token? allocCloseParen = null;
+
+        if (LooksLikeAllocationArguments())
+        {
+            allocOpenParen = Consume();
+            allocArguments = ParseExpressionArgumentList();
+            allocCloseParen = ExpectToken(TokenKind.RightParen, "')'", "to close the allocation argument list");
+        }
+
         var type = ParseTypeSyntax();
 
         if (type is ModifiedType modified && CurrentToken.Kind is not TokenKind.LeftParen)
@@ -490,7 +511,20 @@ internal sealed partial class Parser
         if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
             objectWithClause = ParseObjectWithClause();
 
-        return new ConstructorCallExpression(keyword, kind, type, openParen, arguments, closeParen, objectWithClause);
+        return new ConstructorCallExpression(
+            keyword,
+            kind,
+            allocLessThan,
+            allocTypeArguments,
+            allocGreaterThan,
+            allocOpenParen,
+            allocArguments,
+            allocCloseParen,
+            type,
+            openParen,
+            arguments,
+            closeParen,
+            objectWithClause);
     }
 
     private SeparatedSyntaxList<Expression> ParseExpressionArgumentList()

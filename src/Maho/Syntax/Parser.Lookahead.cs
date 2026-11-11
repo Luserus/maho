@@ -22,6 +22,46 @@ internal sealed partial class Parser
         IsBinaryOperator
     }
 
+    /// <summary> Checks whether the upcoming '(' tokens form allocation arguments followed by a target type and constructor arguments. </summary>
+    private bool LooksLikeAllocationArguments()
+    {
+        if (CurrentToken.Kind is not TokenKind.LeftParen)
+            return false;
+
+        lookaheadCurrent = current;
+        var saved = lookaheadCurrent;
+
+        LookaheadConsume(); // consume '('
+        int depth = 1;
+
+        while (depth > 0 && LookaheadCurrentToken.Kind is not TokenKind.EndToken)
+        {
+            if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
+                depth++;
+            else if (LookaheadCurrentToken.Kind is TokenKind.RightParen)
+                depth--;
+
+            LookaheadConsume();
+        }
+
+        if (depth != 0)
+        {
+            lookaheadCurrent = saved;
+            return false;
+        }
+
+        var (type, success, _) = LookaheadParseTypeSyntax();
+        if (!success || type is null)
+        {
+            lookaheadCurrent = saved;
+            return false;
+        }
+
+        bool result = LookaheadCurrentToken.Kind is TokenKind.LeftParen or TokenKind.LeftBrace;
+        lookaheadCurrent = saved;
+        return result;
+    }
+
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeGenericArguments(bool fromLookahead = false)
     {

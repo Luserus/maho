@@ -18,7 +18,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public bool IsResolved => Kind switch
     {
-        TypeRefKind.Resolved => true,
+        TypeRefKind.Resolved or TypeRefKind.Literal => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
         TypeRefKind.Union or TypeRefKind.Untagged => SpecialType is not null && SpecialType.IsResolved,
@@ -36,6 +36,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public bool IsInferred => Kind == TypeRefKind.Inferred;
 
+    public bool IsLiteral => Kind == TypeRefKind.Literal;
+    public CompileTimeLiteralType? AsLiteral => SpecialType as CompileTimeLiteralType;
+
     public bool IsError => Kind == TypeRefKind.Error || (SpecialType is not null && SpecialType.IsError);
 
     private TypeRef(TypeRefKind kind, SymbolHandle? handle, SemanticType? specialType = null)
@@ -49,6 +52,12 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Inferred => new TypeRef(TypeRefKind.Inferred, null);
     public static TypeRef Error => new TypeRef(TypeRefKind.Error, null);
     public static TypeRef Resolved(SymbolHandle handle) => new TypeRef(TypeRefKind.Resolved, handle);
+
+    public static TypeRef Literal(CompileTimeLiteralType literal) =>
+        new TypeRef(TypeRefKind.Literal, null, literal);
+
+    public static TypeRef Literal(CompileTimeLiteralKind kind, string rawText) =>
+        Literal(new CompileTimeLiteralType(kind, rawText));
 
     public static TypeRef Pointer(TypeRef element) =>
         new TypeRef(TypeRefKind.Pointer, null, new PointerSemanticType(element));
@@ -145,6 +154,89 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return sumType.UnionConstituents.Any(c => c.IsAssignableFrom(source, context));
         }
 
+        if (source.IsLiteral && source.AsLiteral is { } lit)
+        {
+            if (Handle is { } targetHandle)
+            {
+                if (lit.LiteralKind == CompileTimeLiteralKind.Int)
+                {
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var h32) && targetHandle == h32) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var h64) && targetHandle == h64) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int8, out var h8) && targetHandle == h8) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int16, out var h16) && targetHandle == h16) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int128, out var h128) && targetHandle == h128) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.NInt, out var hn) && targetHandle == hn) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt8, out var uh8) && targetHandle == uh8) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt16, out var uh16) && targetHandle == uh16) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt32, out var uh32) && targetHandle == uh32) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt64, out var uh64) && targetHandle == uh64) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt128, out var uh128) && targetHandle == uh128) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.NUInt, out var uhn) && targetHandle == uhn) return true;
+
+                    var sym = context.GetSymbol(targetHandle);
+                    if (sym is TypeSymbol or NestedTypeSymbol)
+                    {
+                        var name = sym.Name.Text;
+                        if (name.Equals("int", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("int32", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("int64", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("int8", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("int16", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("int128", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("uint8", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("uint16", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("uint32", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("uint64", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("uint128", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+                else if (lit.LiteralKind == CompileTimeLiteralKind.Float)
+                {
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Float64, out var f64) && targetHandle == f64) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Float32, out var f32) && targetHandle == f32) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Float16, out var f16) && targetHandle == f16) return true;
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Float128, out var f128) && targetHandle == f128) return true;
+
+                    var sym = context.GetSymbol(targetHandle);
+                    if (sym is TypeSymbol or NestedTypeSymbol)
+                    {
+                        var name = sym.Name.Text;
+                        if (name.Equals("float", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("float32", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("float64", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("float16", StringComparison.OrdinalIgnoreCase) ||
+                            name.Equals("float128", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+                else if (lit.LiteralKind == CompileTimeLiteralKind.Str)
+                {
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Str, out var strHandle) && targetHandle == strHandle) return true;
+
+                    var sym = context.GetSymbol(targetHandle);
+                    if (sym is TypeSymbol or NestedTypeSymbol)
+                    {
+                        var name = sym.Name.Text;
+                        if (name.Equals("str", StringComparison.OrdinalIgnoreCase) || name.Equals("string", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+                else if (lit.LiteralKind == CompileTimeLiteralKind.Char)
+                {
+                    if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Char, out var charHandle) && targetHandle == charHandle) return true;
+
+                    var sym = context.GetSymbol(targetHandle);
+                    if (sym is TypeSymbol or NestedTypeSymbol)
+                    {
+                        var name = sym.Name.Text;
+                        if (name.Equals("char", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+        }
+
         return false;
     }
 
@@ -153,6 +245,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
         TypeRefKind.Inferred => "var",
         TypeRefKind.Error => "<error>",
+        TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
         TypeRefKind.Union or TypeRefKind.Untagged => SpecialType?.ToString() ?? Kind.ToString(),

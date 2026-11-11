@@ -197,6 +197,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
@@ -207,6 +208,61 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             PopulateProductMembers(symbol);
     }
 
+    private void ValidateLifecycleOperatorCombinations(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
+    {
+        bool hasDestructor = false;
+        bool hasCopy = false;
+        bool hasMove = false;
+
+        foreach (var baseType in baseTypes)
+        {
+            if (!baseType.IsResolved || baseType.Handle is not { } ifaceHandle)
+                continue;
+
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Destructor))
+                hasDestructor = true;
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy))
+                hasCopy = true;
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move))
+                hasMove = true;
+        }
+
+        if (HasOperatorOnType(typeHandle, OperatorKind.Destructor))
+            hasDestructor = true;
+        if (HasOperatorOnType(typeHandle, OperatorKind.Copy))
+            hasCopy = true;
+        if (HasOperatorOnType(typeHandle, OperatorKind.Move))
+            hasMove = true;
+
+        if (hasDestructor && hasCopy)
+            context.Diagnostics.ReportDestructorNandCopy(span, typeName, source);
+
+        if (hasCopy && hasMove)
+            context.Diagnostics.ReportCopyNandMove(span, typeName, source);
+    }
+
+    private bool HasOperatorOnInterface(SymbolHandle ifaceHandle, OperatorKind opKind)
+    {
+        var list = context.DiscoveredOperators.GetOperators(opKind);
+        foreach (var op in list)
+        {
+            if (op.InterfaceHandle == ifaceHandle)
+                return true;
+        }
+        return false;
+    }
+
+    private bool HasOperatorOnType(SymbolHandle typeHandle, OperatorKind opKind)
+    {
+        var list = context.DiscoveredOperators.GetOperators(opKind);
+        foreach (var op in list)
+        {
+            if (op.InterfaceHandle == typeHandle)
+                return true;
+        }
+        return false;
+    }
+
     private void ResolveType(NestedTypeSymbol symbol, TypeDeclaration? syntax)
     {
         if (syntax is null)
@@ -215,6 +271,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
@@ -406,7 +463,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
+        if (symbol.SpecialKind is SpecialFunctionKind.Literal)
+        {
+            symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
+            symbol.ReturnType = TypeRef.Inferred;
+        }
+        else if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
@@ -446,7 +508,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
+        if (symbol.SpecialKind is SpecialFunctionKind.Literal)
+        {
+            symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
+            symbol.ReturnType = symbol.Parent is { } parentHandle ? TypeRef.Resolved(parentHandle) : TypeRef.Inferred;
+        }
+        else if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);

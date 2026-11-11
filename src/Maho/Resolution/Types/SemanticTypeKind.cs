@@ -11,5 +11,6 @@ internal enum SemanticTypeKind : byte
     Optional,
     Tuple,
     Union,
-    Untagged
+    Untagged,
+    Literal
 }

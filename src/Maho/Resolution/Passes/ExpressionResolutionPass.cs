@@ -22,6 +22,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
     private readonly HashSet<FunctionBody> visitedBodies = [];
     private readonly HashSet<VariableDeclaration> visitedDeclarations = [];
+    private readonly Dictionary<LocalVariableSymbol, SyntaxNode> uncollapsedLocals = new();
 
     public override void Resolve(ResolutionContext context)
     {
@@ -50,7 +51,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             if (function.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
             {
-                var scope = GetOwnedScope(function);
+                var scope = context.GetSyntaxScope(syntax.Body, GetOwnedScope(function));
                 ResolveFunctionBody(syntax.Body, scope, ResolutionContext.GetHandle(function), function.ReturnType);
             }
         }
@@ -60,7 +61,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             if (method.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
             {
-                var scope = GetOwnedScope(method);
+                var scope = context.GetSyntaxScope(syntax.Body, GetOwnedScope(method));
                 ResolveFunctionBody(syntax.Body, scope, ResolutionContext.GetHandle(method), method.ReturnType);
             }
         }
@@ -220,6 +221,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
 
                 ResolveTopLevelMembers(unit.Members, scope, main ?? default);
+                CollapseRemainingLocals(scope, main ?? default);
             }
         }
     }
@@ -261,6 +263,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             ResolveLocal(lambda.Statement, scope, containingFunction, expectedReturnType);
         }
+
+        CollapseRemainingLocals(scope, containingFunction);
     }
 
     private void ResolveLocal(Local local, Scope scope, SymbolHandle containingFunction, TypeRef expectedReturnType)
@@ -269,6 +273,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             case LocalExpressionStatement exprStmt:
                 var t = ResolveExpression(exprStmt.Expression, scope, containingFunction);
+                if (t.IsLiteral)
+                {
+                    var targetType = exprStmt.IsFinalExpression && !expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError
+                        ? expectedReturnType
+                        : CollapseLiteralToDefault(t);
+                    t = CollapseExpression(exprStmt.Expression, targetType, scope, containingFunction);
+                }
                 if (exprStmt.IsFinalExpression && !expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError && !t.IsUnresolved && !t.IsError)
                 {
                     if (!expectedReturnType.IsAssignableFrom(t, context))
@@ -304,10 +315,23 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             var returnedType = ResolveExpression(expr, scope, containingFunction);
             span = expr.GetSpan() ?? returnStmt.Statement.Keyword.Span;
 
-            if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError &&
-                !returnedType.IsInferred && !returnedType.IsUnresolved && !returnedType.IsError)
+            if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
             {
-                if (!expectedReturnType.IsAssignableFrom(returnedType, context))
+                if (returnedType.IsLiteral)
+                {
+                    var collapsed = CollapseExpression(expr, expectedReturnType, scope, containingFunction);
+                    if (collapsed.IsError)
+                    {
+                        context.Diagnostics.ReportReturnTypeMismatch(
+                            span,
+                            returnedType.ToDisplayString(context),
+                            expectedReturnType.ToDisplayString(context),
+                            returnStmt.GetSource());
+                    }
+                    returnedType = collapsed;
+                }
+                else if (!expectedReturnType.IsAssignableFrom(returnedType, context) &&
+                         !TryResolveImplicitCast(returnedType, expectedReturnType, out _))
                 {
                     context.Diagnostics.ReportReturnTypeMismatch(
                         span,
@@ -336,6 +360,22 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    private TypeRef CollapseLiteralToDefault(TypeRef type)
+    {
+        if (type.IsLiteral && type.SpecialType is CompileTimeLiteralType lit)
+        {
+            return lit.LiteralKind switch
+            {
+                CompileTimeLiteralKind.Int => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                _ => TypeRef.Inferred
+            };
+        }
+        return type;
+    }
+
     private void ResolveVariableDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingFunction)
     {
         foreach (var declarator in declaration.Declarators)
@@ -361,7 +401,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                             var elemName = context.GetScopedSymbolName(tupleName.Elements[i]).Last;
                             var elemSym = ResolveLocalOrFieldSymbol(scope, elemName);
                             if (elemSym is not null && GetVariableSymbolType(elemSym)?.IsInferred == true)
-                                SetVariableSymbolType(elemSym, tupleSemantic.Elements[i].Type);
+                            {
+                                var elemType = CollapseLiteralToDefault(tupleSemantic.Elements[i].Type);
+                                if (elemType.IsResolved || elemType.IsSpecial)
+                                    SetVariableSymbolType(elemSym, elemType);
+                            }
                         }
                     }
                     else if (!initType.IsError && !initType.IsInferred && !initType.IsUnresolved)
@@ -384,23 +428,45 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     var initType = ResolveExpression(initExpr, scope, containingFunction);
                     if (sym is not null && symType?.IsInferred == true)
                     {
-                        // Inferred variable type resolution:
-                        // If initType is known (including Void), infer the variable type:
-                        if (initType.IsResolved || initType.IsSpecial)
+                        if (initType.IsLiteral)
+                        {
                             SetVariableSymbolType(sym, initType);
+                            if (sym is LocalVariableSymbol localSym)
+                                uncollapsedLocals[localSym] = initExpr;
+                        }
+                        else if (initType.IsResolved || initType.IsSpecial)
+                        {
+                            SetVariableSymbolType(sym, initType);
+                        }
                     }
                     else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError &&
                              !initType.IsInferred && !initType.IsUnresolved && !initType.IsError &&
                              initExpr is not CollectionExpression)
                     {
-                        // Type check explicit variable initialization
-                        if (!st.IsAssignableFrom(initType, context))
+                        if (initType.IsLiteral)
                         {
-                            context.Diagnostics.ReportAssignmentTypeMismatch(
-                                initExpr.GetSpan() ?? default,
-                                initType.ToDisplayString(context),
-                                st.ToDisplayString(context),
-                                declaration.GetSource());
+                            var collapsed = CollapseExpression(initExpr, st, scope, containingFunction);
+                            if (collapsed.IsError)
+                            {
+                                context.Diagnostics.ReportAssignmentTypeMismatch(
+                                    initExpr.GetSpan() ?? default,
+                                    initType.ToDisplayString(context),
+                                    st.ToDisplayString(context),
+                                    declaration.GetSource());
+                            }
+                        }
+                        else
+                        {
+                            // Type check explicit variable initialization
+                            if (!st.IsAssignableFrom(initType, context) &&
+                                !TryResolveImplicitCast(initType, st, out _))
+                            {
+                                context.Diagnostics.ReportAssignmentTypeMismatch(
+                                    initExpr.GetSpan() ?? default,
+                                    initType.ToDisplayString(context),
+                                    st.ToDisplayString(context),
+                                    declaration.GetSource());
+                            }
                         }
                     }
                 }
@@ -454,7 +520,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 break;
 
             case NamedExpression named:
-                result = ResolveNamed(named, scope);
+                result = ResolveNamed(named, scope, containingFunction);
                 break;
 
             case ParenthesizedExpression paren:
@@ -552,49 +618,76 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
     private TypeRef ResolveLiteral(LiteralExpression lit)
     {
+        if (lit.Literal.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
+            return boolType;
+
         if (lit.HasSuffix)
         {
-            var suffix = lit.Literal.GetSuffixSpan();
-            if (suffix.SequenceEqual("i8") && hInt8 is { } h1) return TypeRef.Resolved(h1);
-            if (suffix.SequenceEqual("i16") && hInt16 is { } h2) return TypeRef.Resolved(h2);
-            if (suffix.SequenceEqual("i32") && hInt32 is { } h3) return TypeRef.Resolved(h3);
-            if (suffix.SequenceEqual("i64") && hInt64 is { } h4) return TypeRef.Resolved(h4);
-            if (suffix.SequenceEqual("i128") && hInt128 is { } h5) return TypeRef.Resolved(h5);
-            if ((suffix.SequenceEqual("isize") || suffix.SequenceEqual("nint")) && hNInt is { } h6) return TypeRef.Resolved(h6);
+            var suffix = lit.Literal.GetSuffixSpan().ToString();
 
-            if (suffix.SequenceEqual("u8") && hUInt8 is { } uh1) return TypeRef.Resolved(uh1);
-            if (suffix.SequenceEqual("u16") && hUInt16 is { } uh2) return TypeRef.Resolved(uh2);
-            if (suffix.SequenceEqual("u32") && hUInt32 is { } uh3) return TypeRef.Resolved(uh3);
-            if (suffix.SequenceEqual("u64") && hUInt64 is { } uh4) return TypeRef.Resolved(uh4);
-            if (suffix.SequenceEqual("u128") && hUInt128 is { } uh5) return TypeRef.Resolved(uh5);
-            if ((suffix.SequenceEqual("usize") || suffix.SequenceEqual("nuint")) && hNUInt is { } uh6) return TypeRef.Resolved(uh6);
+            // 1. Check for literal functions declared on types or at file level
+            foreach (var m in context.MethodSymbols)
+            {
+                if (m.Flags.HasFlag(FunctionFlags.Literal) && m.Name.Text == suffix)
+                {
+                    context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(m));
+                    return m.ReturnType;
+                }
+            }
 
-            if (suffix.SequenceEqual("f16") && hFloat16 is { } f1) return TypeRef.Resolved(f1);
-            if (suffix.SequenceEqual("f32") && hFloat32 is { } f2) return TypeRef.Resolved(f2);
-            if (suffix.SequenceEqual("f64") && hFloat64 is { } f3) return TypeRef.Resolved(f3);
-            if (suffix.SequenceEqual("f128") && hFloat128 is { } f4) return TypeRef.Resolved(f4);
+            foreach (var fn in context.FunctionSymbols)
+            {
+                if (fn.Flags.HasFlag(FunctionFlags.Literal) && fn.Name.Text == suffix)
+                {
+                    context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(fn));
+                    return fn.ReturnType;
+                }
+            }
 
-            if (suffix.SequenceEqual("s") && hStr is { } s) return TypeRef.Resolved(s);
+            return TypeRef.Unresolved;
         }
 
         return lit.Literal.Kind switch
         {
-            TokenKind.Integer => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Unresolved,
-            TokenKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Unresolved,
-            TokenKind.String => hStr is { } h ? TypeRef.Resolved(h) : TypeRef.Unresolved,
-            TokenKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Unresolved,
+            TokenKind.Integer => TypeRef.Literal(CompileTimeLiteralKind.Int, lit.Literal.Value),
+            TokenKind.Float => TypeRef.Literal(CompileTimeLiteralKind.Float, lit.Literal.Value),
+            TokenKind.String => TypeRef.Literal(CompileTimeLiteralKind.Str, lit.Literal.Value),
+            TokenKind.Char => TypeRef.Literal(CompileTimeLiteralKind.Char, lit.Literal.Value),
             _ => TypeRef.Unresolved
         };
     }
 
-    private TypeRef ResolveNamed(NamedExpression named, Scope scope)
+    private List<MethodSymbol> GetMatchingLiteralMethods(TypeRef targetType, CompileTimeLiteralKind kind)
     {
-        var text = named.Identifier.Value;
-        if (text == "true" || text == "false")
+        var result = new List<MethodSymbol>();
+        if (targetType.Handle is not { } handle || context.GetTypeSymbol(handle) is not { } typeSym)
+            return result;
+
+        var scope = GetOwnedScope(typeSym);
+        foreach (var sym in scope.Symbols.Values)
+        {
+            if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.Literal))
+            {
+                result.Add(method);
+            }
+        }
+        return result;
+    }
+
+    private TypeRef ResolveNamed(NamedExpression named, Scope scope, SymbolHandle containingFunction = default)
+    {
+        if (named.Identifier.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
             return boolType;
 
-        if (context.ResolvedTree.TryGetReference(named, out var handle))
-            return GetTypeFromHandle(handle);
+        if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
+        {
+            if (context.GetSymbol(containingFunction) is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.Static) && m.Parent is { } parentHandle)
+            {
+                context.ResolvedTree.AddReference(named, parentHandle);
+                return TypeRef.Resolved(parentHandle);
+            }
+            return TypeRef.Unresolved;
+        }
 
         var hygiene = context.GetHygiene(named);
         var part = named is GenericNameExpression generic
@@ -608,6 +701,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             context.ResolvedTree.AddReference(named, ResolutionContext.GetHandle(sym));
             return GetTypeFromSymbol(sym);
         }
+
+        if (context.ResolvedTree.TryGetReference(named, out var handle))
+            return GetTypeFromHandle(handle);
 
         return TypeRef.Unresolved;
     }
@@ -640,15 +736,45 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (opKind == OperatorKind.None)
             return TypeRef.Error;
 
-        // 1. Primitive fast-path
-        if (TryResolvePrimitiveBinary(opKind, lhs, rhs, out var primResult))
-            return primResult;
+        // 1. Uncollapsed literals on both sides
+        if (lhs.IsLiteral && rhs.IsLiteral)
+        {
+            var lLit = lhs.AsLiteral!;
+            var rLit = rhs.AsLiteral!;
+            if (lLit.LiteralKind == rLit.LiteralKind)
+            {
+                if (opKind is OperatorKind.Equality or OperatorKind.Inequality or
+                    OperatorKind.LessThan or OperatorKind.LessThanOrEqual or
+                    OperatorKind.GreaterThan or OperatorKind.GreaterThanOrEqual)
+                {
+                    return boolType;
+                }
 
-        // 2. Operator overload lookup through DiscoveredOperators
+                return TypeRef.Literal(lLit.LiteralKind, "");
+            }
+        }
+
+        // 2. Canonical bool operations
+        if ((opKind == OperatorKind.LogicalAnd || opKind == OperatorKind.LogicalOr) && IsBool(lhs) && IsBool(rhs))
+            return boolType;
+
+        // 3. One literal operand and one concrete operand (e.g. 10 + myInt64)
+        if (lhs.IsLiteral && !rhs.IsLiteral && !rhs.IsUnresolved && !rhs.IsError)
+        {
+            if (TryResolveOneLiteralBinary(opKind, binary, binary.LeftExpression, lhs, rhs, isLhsLiteral: true, scope, containingFunction, out var res))
+                return res;
+        }
+        else if (rhs.IsLiteral && !lhs.IsLiteral && !lhs.IsUnresolved && !lhs.IsError)
+        {
+            if (TryResolveOneLiteralBinary(opKind, binary, binary.RightExpression, rhs, lhs, isLhsLiteral: false, scope, containingFunction, out var res))
+                return res;
+        }
+
+        // 4. Operator overload lookup through DiscoveredOperators for concrete operands
         if (TryResolveOperatorOverload(opKind, lhs, rhs, binary, out var overloadResult))
             return overloadResult;
 
-        // 3. Neither primitive nor overload found: report MH2001 if both are concrete
+        // 5. Neither overload found: report MH2001
         if (!lhs.IsUnresolved && !lhs.IsError && !lhs.IsInferred && !rhs.IsUnresolved && !rhs.IsError && !rhs.IsInferred)
         {
             context.Diagnostics.ReportTypeMismatch(
@@ -662,6 +788,60 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         return TypeRef.Error;
+    }
+
+    private bool TryResolveOneLiteralBinary(
+        OperatorKind kind,
+        BinaryExpression binary,
+        Expression literalExpr,
+        TypeRef literalType,
+        TypeRef concreteType,
+        bool isLhsLiteral,
+        Scope scope,
+        SymbolHandle containingFunction,
+        out TypeRef result)
+    {
+        result = TypeRef.Unresolved;
+        if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
+            return false;
+
+        if (concreteType.Handle is not { } cHandle || context.GetTypeSymbol(cHandle) is not { } cTypeSym)
+            return false;
+
+        var typeScope = GetOwnedScope(cTypeSym);
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null) continue;
+
+            foreach (var sym in typeScope.Symbols.Values)
+            {
+                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                {
+                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    {
+                        if (method.Parameters.Count == 2)
+                        {
+                            var p0 = context.GetParameterSymbol(method.Parameters[0]);
+                            var p1 = context.GetParameterSymbol(method.Parameters[1]);
+                            if (p0 is null || p1 is null) continue;
+
+                            var litParam = isLhsLiteral ? p0.Type : p1.Type;
+                            var concParam = isLhsLiteral ? p1.Type : p0.Type;
+
+                            if (concParam.IsAssignableFrom(concreteType, context) && IsLiteralCompatibleWith(literalType, litParam))
+                            {
+                                CollapseExpression(literalExpr, litParam, scope, containingFunction);
+                                context.ResolvedTree.AddReference(binary, ResolutionContext.GetHandle(method));
+                                result = method.ReturnType;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static OperatorKind GetBinaryOperatorKind(TokenKind tokenKind) => tokenKind switch
@@ -687,79 +867,6 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         TokenKind.VerticalBarVerticalBar => OperatorKind.LogicalOr,
         _ => OperatorKind.None
     };
-
-    private bool TryResolvePrimitiveBinary(OperatorKind kind, TypeRef lhs, TypeRef rhs, out TypeRef result)
-    {
-        result = TypeRef.Unresolved;
-
-        switch (kind)
-        {
-            case OperatorKind.Addition:
-            case OperatorKind.Subtraction:
-            case OperatorKind.Multiplication:
-            case OperatorKind.Division:
-            case OperatorKind.Remainder:
-                if (lhs.Equals(rhs) && IsNumeric(lhs))
-                {
-                    result = lhs;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.BitwiseAnd:
-            case OperatorKind.BitwiseOr:
-            case OperatorKind.BitwiseXor:
-                if (lhs.Equals(rhs) && (IsInteger(lhs) || IsBool(lhs)))
-                {
-                    result = lhs;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.LeftShift:
-            case OperatorKind.RightShift:
-            case OperatorKind.RotateLeft:
-            case OperatorKind.RotateRight:
-                if (IsInteger(lhs) && IsInteger(rhs))
-                {
-                    result = lhs;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.Equality:
-            case OperatorKind.Inequality:
-                if (lhs.Equals(rhs) || lhs.IsAssignableFrom(rhs, context) || rhs.IsAssignableFrom(lhs, context))
-                {
-                    result = boolType;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.LessThan:
-            case OperatorKind.LessThanOrEqual:
-            case OperatorKind.GreaterThan:
-            case OperatorKind.GreaterThanOrEqual:
-                if (lhs.Equals(rhs) && IsNumeric(lhs))
-                {
-                    result = boolType;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.LogicalAnd:
-            case OperatorKind.LogicalOr:
-                if (IsBool(lhs) && IsBool(rhs))
-                {
-                    result = boolType;
-                    return true;
-                }
-                return false;
-
-            default:
-                return false;
-        }
-    }
 
     private bool TryResolveOperatorOverload(
         OperatorKind kind,
@@ -795,7 +902,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 {
                     if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
                     {
-                        if (method.ExplicitInterfaceName is { } ein && ein.Last.Equals(ifaceSym.Name))
+                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
                         {
                             // Verify parameter types match operands
                             if (method.Parameters.Count == 2)
@@ -829,11 +936,28 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (opKind == OperatorKind.None)
             return TypeRef.Error;
 
-        // 1. Primitive fast-path
-        if (TryResolvePrimitiveUnary(opKind, operand, out var primResult))
-            return primResult;
+        // 1. Built-in language pointer/reference operations
+        if (opKind == OperatorKind.AddressOf)
+            return TypeRef.Reference(operand);
 
-        // 2. Overload lookup
+        if (opKind == OperatorKind.Dereference)
+        {
+            if (operand.SpecialType is ReferenceSemanticType refType)
+                return refType.ElementType;
+            if (operand.SpecialType is PointerSemanticType ptrType)
+                return ptrType.ElementType;
+            return TypeRef.Error;
+        }
+
+        // 2. Canonical bool
+        if (opKind == OperatorKind.LogicalNot && IsBool(operand))
+            return boolType;
+
+        // 3. Uncollapsed literal unary
+        if (operand.IsLiteral)
+            return operand;
+
+        // 4. Overload lookup through DiscoveredOperators
         if (TryResolveUnaryOverload(opKind, operand, unary, out var overloadResult))
             return overloadResult;
 
@@ -863,77 +987,6 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => OperatorKind.None
     };
 
-    private bool TryResolvePrimitiveUnary(OperatorKind kind, TypeRef operand, out TypeRef result)
-    {
-        result = TypeRef.Unresolved;
-
-        switch (kind)
-        {
-            case OperatorKind.AddressOf:
-                result = TypeRef.Reference(operand);
-                return true;
-
-            case OperatorKind.Dereference:
-                if (operand.SpecialType is ReferenceSemanticType refType)
-                {
-                    result = refType.ElementType;
-                    return true;
-                }
-                if (operand.SpecialType is PointerSemanticType ptrType)
-                {
-                    result = ptrType.ElementType;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.UnaryNegation:
-                if (IsSignedInteger(operand) || IsFloatingPoint(operand))
-                {
-                    result = operand;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.UnaryPositive:
-                if (IsNumeric(operand))
-                {
-                    result = operand;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.LogicalNot:
-                if (IsBool(operand))
-                {
-                    result = boolType;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.BitwiseNot:
-                if (IsInteger(operand))
-                {
-                    result = operand;
-                    return true;
-                }
-                return false;
-
-            case OperatorKind.PrefixIncrement:
-            case OperatorKind.PostfixIncrement:
-            case OperatorKind.PrefixDecrement:
-            case OperatorKind.PostfixDecrement:
-                if (IsNumeric(operand))
-                {
-                    result = operand;
-                    return true;
-                }
-                return false;
-
-            default:
-                return false;
-        }
-    }
-
     private bool TryResolveUnaryOverload(OperatorKind kind, TypeRef operand, SyntaxNode syntax, out TypeRef result)
     {
         result = TypeRef.Unresolved;
@@ -959,7 +1012,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             {
                 if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
                 {
-                    if (method.ExplicitInterfaceName is { } ein && ein.Last.Equals(ifaceSym.Name))
+                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
                     {
                         // Check if instance method on receiver or static unary accepting operand
                         if (method.Parameters.Count == 0 || (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p && p.Type.IsAssignableFrom(operand, context)))
@@ -991,7 +1044,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var opToken = assignment.EqualsOperator.Kind;
         if (opToken == TokenKind.Equals)
         {
+            if (rhs.IsLiteral && !lhs.IsLiteral && !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred)
+            {
+                var collapsed = CollapseExpression(assignment.RhsExpression, lhs, scope, containingFunction);
+                return collapsed.IsError ? TypeRef.Error : lhs;
+            }
+
             if (!lhs.IsAssignableFrom(rhs, context) &&
+                !TryResolveImplicitCast(rhs, lhs, out _) &&
                 !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred &&
                 !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred &&
                 assignment.RhsExpression is not CollectionExpression)
@@ -1021,6 +1081,15 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
     private TypeRef ResolveCall(CallExpression call, Scope scope, SymbolHandle containingFunction)
     {
+        if (call.Callee is MemberAccessExpression access)
+        {
+            var recvType = ResolveExpression(access.Expression, scope, containingFunction);
+            if (recvType.IsLiteral)
+            {
+                return recvType;
+            }
+        }
+
         var calleeType = ResolveExpression(call.Callee, scope, containingFunction);
         var argTypes = new List<TypeRef>(call.Arguments.Count);
         foreach (var arg in call.Arguments)
@@ -1030,12 +1099,70 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             var sym = context.GetSymbol(calleeHandle);
             if (sym is FunctionSymbol fn)
-                return TypeCheckCall(call, fn.Parameters, fn.ReturnType, argTypes);
+                return TypeCheckCall(call, fn.Parameters, fn.ReturnType, argTypes, scope, containingFunction);
             if (sym is MethodSymbol m)
-                return TypeCheckCall(call, m.Parameters, m.ReturnType, argTypes);
+                return TypeCheckCall(call, m.Parameters, m.ReturnType, argTypes, scope, containingFunction);
+        }
+
+        // Check if callee is an instance invoking Callable operator:
+        if (TryResolveCallableOperator(call, calleeType, argTypes, out var callableReturn))
+            return callableReturn;
+
+        if (!calleeType.IsError && !calleeType.IsUnresolved && !calleeType.IsInferred)
+        {
+            context.Diagnostics.ReportTypeNotCallable(call.Callee.GetSpan() ?? default, calleeType.ToDisplayString(context), call.GetSource());
+            return TypeRef.Error;
         }
 
         return calleeType;
+    }
+
+    private bool TryResolveCallableOperator(CallExpression call, TypeRef calleeType, List<TypeRef> argTypes, out TypeRef result)
+    {
+        result = TypeRef.Unresolved;
+        if (calleeType.Handle is not { } typeHandle || context.GetTypeSymbol(typeHandle) is not { } typeSym)
+            return false;
+
+        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out var candidates))
+            return false;
+
+        var typeScope = GetOwnedScope(typeSym);
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null) continue;
+
+            foreach (var sym in typeScope.Symbols.Values)
+            {
+                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                {
+                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    {
+                        if (method.Parameters.Count == argTypes.Count)
+                        {
+                            bool matches = true;
+                            for (int i = 0; i < argTypes.Count; i++)
+                            {
+                                if (context.GetParameterSymbol(method.Parameters[i]) is { } param &&
+                                    !param.Type.IsAssignableFrom(argTypes[i], context))
+                                {
+                                    matches = false;
+                                    break;
+                                }
+                            }
+                            if (matches)
+                            {
+                                context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(method));
+                                result = method.ReturnType;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool IsVariadicParameter(ParameterSymbol p) =>
@@ -1044,7 +1171,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private static bool HasDefaultValue(ParameterSymbol p) =>
         p.Syntax?.Initializer is not null;
 
-    private TypeRef TypeCheckCall(CallExpression call, IReadOnlyList<SymbolHandle> paramHandles, TypeRef returnType, List<TypeRef> argTypes)
+    private TypeRef TypeCheckCall(CallExpression call, IReadOnlyList<SymbolHandle> paramHandles, TypeRef returnType, List<TypeRef> argTypes, Scope scope, SymbolHandle containingFunction)
     {
         var expectedParams = new List<ParameterSymbol>();
         bool isVariadic = false;
@@ -1072,7 +1199,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         for (int i = 0; i < argTypes.Count && i < expectedParams.Count; i++)
         {
             var param = expectedParams[i];
-            if (!param.Type.IsAssignableFrom(argTypes[i], context) &&
+            if (argTypes[i].IsLiteral)
+            {
+                CollapseExpression(call.Arguments[i], param.Type, scope, containingFunction);
+                argTypes[i] = param.Type;
+            }
+            else if (!param.Type.IsAssignableFrom(argTypes[i], context) &&
+                !TryResolveImplicitCast(argTypes[i], param.Type, out _) &&
                 !argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
                 !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsInferred)
             {
@@ -1100,9 +1233,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var receiverType = ResolveExpression(access.Expression, scope, containingFunction);
         var memberName = access.Identifier.Value;
 
+        if (receiverType.IsLiteral)
+        {
+            return receiverType;
+        }
+
         // Check if access.Expression is a TypeSymbol (static access / enum variant)
-        bool isStaticAccessOnType = false;
-        if (access.Expression is NamedExpression namedExpr)
+        bool isStaticAccessOnType = access.Expression is TypeAsExpression;
+        if (!isStaticAccessOnType && access.Expression is NamedExpression namedExpr)
         {
             if (context.ResolvedTree.TryGetReference(namedExpr, out var namedH) && context.GetSymbol(namedH) is TypeSymbol)
                 isStaticAccessOnType = true;
@@ -1218,15 +1356,39 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         // Look up member on receiver type (filtering out InterfaceScoped methods)
-        if (receiverType.Handle is { } recvHandle && context.GetTypeSymbol(recvHandle) is { } recvTypeSym)
+        if (receiverType.Handle is { } recvHandle)
         {
-            var recvScope = GetOwnedScope(recvTypeSym);
-            var syms = recvScope[new SymbolName(new SymbolPart(memberName))];
-            var accessible = syms.Where(cand => cand is not MethodSymbol m || !m.Flags.HasFlag(FunctionFlags.InterfaceScoped)).ToList();
-            if (accessible.Count > 0)
+            var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle) ?? context.GetSymbol(recvHandle);
+            if (typeSymObj is not null)
             {
-                context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
-                return GetTypeFromSymbol(accessible[0]);
+                var recvScope = GetOwnedScope(typeSymObj);
+                var syms = recvScope[new SymbolName(new SymbolPart(memberName))];
+                bool isExplicitInterfaceAccess = access.Expression is TypeAsExpression;
+                var accessible = syms.Where(cand =>
+                {
+                    if (cand is MethodSymbol m)
+                    {
+                        if (isExplicitInterfaceAccess)
+                            return true;
+                        return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
+                    }
+                    return !isExplicitInterfaceAccess;
+                }).ToList();
+                if (accessible.Count > 0)
+                {
+                    context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
+                    return GetTypeFromSymbol(accessible[0]);
+                }
+
+                if (!isStaticAccessOnType)
+                {
+                    context.Diagnostics.ReportMemberNotFound(
+                        access.Identifier.Span,
+                        memberName,
+                        receiverType.ToDisplayString(context),
+                        access.GetSource());
+                    return TypeRef.Error;
+                }
             }
         }
 
@@ -1270,7 +1432,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             {
                 if (context.DiscoveredOperators.TryGetOperators(OperatorKind.IndexerGetter, out var candidates))
                 {
-                    if (candidates.Any(c => method.ExplicitInterfaceName?.Last.Equals(context.GetTypeSymbol(c.InterfaceHandle)?.Name) == true))
+                    if (candidates.Any(c => method.ExplicitInterfaceName?.Last.Equals(context.GetTypeSymbol(c.InterfaceHandle)?.Name) == true ||
+                                            method.ExplicitInterfaceName?.Last.Text == context.GetTypeSymbol(c.InterfaceHandle)?.Name.Text))
                     {
                         context.ResolvedTree.AddReference(index, ResolutionContext.GetHandle(method));
                         result = method.ReturnType;
@@ -1299,11 +1462,42 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         var thenType = ResolveExpression(conditional.ThenExpression, ifScope, containingFunction);
-        var elseType = conditional.ElseExpression is not null
-            ? ResolveExpression(conditional.ElseExpression, ifScope, containingFunction)
-            : voidType;
+        if (conditional.ElseExpression is null)
+            return voidType;
 
-        return thenType.IsAssignableFrom(elseType, context) ? thenType : elseType;
+        var elseType = ResolveExpression(conditional.ElseExpression.Expression, ifScope, containingFunction);
+
+        if (thenType.IsError || elseType.IsError)
+            return TypeRef.Error;
+        if (thenType.IsUnresolved || elseType.IsUnresolved)
+            return TypeRef.Unresolved;
+
+        // Strict exact matching:
+        if (thenType.Equals(elseType))
+            return thenType;
+
+        if (thenType.IsLiteral && elseType.IsLiteral &&
+            thenType.SpecialType is CompileTimeLiteralType l1 &&
+            elseType.SpecialType is CompileTimeLiteralType l2 &&
+            l1.LiteralKind == l2.LiteralKind)
+        {
+            return thenType;
+        }
+
+        if (thenType.IsLiteral && !elseType.IsLiteral && elseType.IsAssignableFrom(thenType, context))
+            return elseType;
+
+        if (!thenType.IsLiteral && elseType.IsLiteral && thenType.IsAssignableFrom(elseType, context))
+            return thenType;
+
+        // Branches mismatch! Do not widen to common base / Object!
+        context.Diagnostics.ReportAmbiguousConditionalBranches(
+            conditional.GetSpan() ?? default,
+            thenType.ToDisplayString(context),
+            elseType.ToDisplayString(context),
+            conditional.GetSource());
+
+        return TypeRef.Error;
     }
 
     private TypeRef ResolveWhile(WhileExpression loop, Scope scope, SymbolHandle containingFunction)
@@ -1328,13 +1522,29 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private TypeRef ResolveBlock(BlockExpression block, Scope scope, SymbolHandle containingFunction)
     {
         var blockScope = context.GetSyntaxScope(block, scope);
+        var expectedReturn = GetFunctionReturnType(containingFunction);
         foreach (var local in block.Locals)
-            ResolveLocal(local, blockScope, containingFunction, voidType);
+            ResolveLocal(local, blockScope, containingFunction, expectedReturn);
 
+        TypeRef result = voidType;
         if (block.FinalExpression is { } finalExpr)
-            return ResolveExpression(finalExpr, blockScope, containingFunction);
+            result = ResolveExpression(finalExpr, blockScope, containingFunction);
 
-        return voidType;
+        CollapseRemainingLocals(blockScope, containingFunction);
+
+        return result;
+    }
+
+    private TypeRef GetFunctionReturnType(SymbolHandle containingFunction)
+    {
+        var sym = context.GetSymbol(containingFunction);
+        return sym switch
+        {
+            FunctionSymbol fn => fn.ReturnType,
+            MethodSymbol m => m.ReturnType,
+            PropertySymbol p => p.Type,
+            _ => voidType
+        };
     }
 
     private TypeRef ResolveMatch(MatchExpression match, Scope scope, SymbolHandle containingFunction)
@@ -1521,11 +1731,115 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
     private TypeRef ResolveConstructorCall(ConstructorCallExpression constructorCall, Scope scope, SymbolHandle containingFunction)
     {
+        var isPut = constructorCall.Kind == ObjectCreationKind.Put;
         var targetType = ResolveTypeSyntax(constructorCall.Type, scope);
-        foreach (var arg in constructorCall.Arguments)
-            ResolveExpression(arg, scope, containingFunction);
 
-        return targetType;
+        var ctorArgTypes = new List<TypeRef>(constructorCall.Arguments.Count);
+        foreach (var arg in constructorCall.Arguments)
+            ctorArgTypes.Add(ResolveExpression(arg, scope, containingFunction));
+
+        var allocArgTypes = new List<TypeRef>();
+        if (constructorCall.AllocationArguments is { } allocArgs)
+        {
+            foreach (var a in allocArgs)
+                allocArgTypes.Add(ResolveExpression(a, scope, containingFunction));
+        }
+
+        // Two-phase allocation resolution:
+        if (isPut)
+        {
+            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Put, out var putCandidates))
+            {
+                foreach (var candidate in putCandidates)
+                {
+                    if (context.GetMethodSymbol(candidate.MethodHandle) is { } putMethod)
+                    {
+                        if (constructorCall.AllocationArguments is { } aArgs)
+                        {
+                            for (int i = 0; i < aArgs.Count && i < putMethod.Parameters.Count; i++)
+                            {
+                                if (allocArgTypes[i].IsLiteral && context.GetParameterSymbol(putMethod.Parameters[i]) is { } p)
+                                    CollapseExpression(aArgs[i], p.Type, scope, containingFunction);
+                            }
+                        }
+                        context.ResolvedTree.AddReference(constructorCall, candidate.MethodHandle);
+                        break;
+                    }
+                }
+            }
+        }
+        else if (allocArgTypes.Count > 0 || constructorCall.AllocationTypeArguments is not null)
+        {
+            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.New, out var newCandidates))
+            {
+                foreach (var candidate in newCandidates)
+                {
+                    if (context.GetMethodSymbol(candidate.MethodHandle) is { } newMethod)
+                    {
+                        if (constructorCall.AllocationArguments is { } aArgs)
+                        {
+                            for (int i = 0; i < aArgs.Count && i < newMethod.Parameters.Count; i++)
+                            {
+                                if (allocArgTypes[i].IsLiteral && context.GetParameterSymbol(newMethod.Parameters[i]) is { } p)
+                                    CollapseExpression(aArgs[i], p.Type, scope, containingFunction);
+                            }
+                        }
+                        context.ResolvedTree.AddReference(constructorCall, candidate.MethodHandle);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Resolve Constructor on targetType:
+        if (targetType.Handle is { } targetHandle && context.GetTypeSymbol(targetHandle) is { } targetSym)
+        {
+            var targetScope = GetOwnedScope(targetSym);
+            foreach (var sym in targetScope.Symbols.Values)
+            {
+                if (sym is MethodSymbol m && (m.SpecialKind == SpecialFunctionKind.Constructor || m.Name.Text == ".ctor" || m.Name.Text == "Construct"))
+                {
+                    if (m.Parameters.Count == ctorArgTypes.Count)
+                    {
+                        bool matches = true;
+                        for (int i = 0; i < ctorArgTypes.Count; i++)
+                        {
+                            if (context.GetParameterSymbol(m.Parameters[i]) is { } param)
+                            {
+                                if (ctorArgTypes[i].IsLiteral)
+                                {
+                                    if (!IsLiteralCompatibleWith(ctorArgTypes[i], param.Type))
+                                    {
+                                        matches = false;
+                                        break;
+                                    }
+                                }
+                                else if (!param.Type.IsAssignableFrom(ctorArgTypes[i], context))
+                                {
+                                    matches = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if (matches)
+                        {
+                            for (int i = 0; i < ctorArgTypes.Count; i++)
+                            {
+                                if (ctorArgTypes[i].IsLiteral && context.GetParameterSymbol(m.Parameters[i]) is { } param)
+                                {
+                                    CollapseExpression(constructorCall.Arguments[i], param.Type, scope, containingFunction);
+                                    ctorArgTypes[i] = param.Type;
+                                }
+                            }
+                            context.ResolvedTree.AddReference(constructorCall, ResolutionContext.GetHandle(m));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return isPut ? voidType : targetType;
     }
 
     private TypeRef ResolveTypeAs(TypeAsExpression typeAs, Scope scope) =>
@@ -1555,5 +1869,405 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return TypeRef.Resolved(ResolutionContext.GetHandle(syms[0]));
 
         return TypeRef.Unresolved;
+    }
+
+    private void CollapseRemainingLocals(Scope scope, SymbolHandle containingFunction)
+    {
+        if (uncollapsedLocals.Count == 0)
+            return;
+
+        var snapshot = uncollapsedLocals.ToList();
+        foreach (var (local, initNode) in snapshot)
+        {
+            if (uncollapsedLocals.ContainsKey(local))
+            {
+                var defaultType = CollapseLiteralToDefault(local.Type);
+                uncollapsedLocals.Remove(local);
+                local.Type = defaultType;
+                CollapseExpression(initNode, defaultType, scope, containingFunction);
+            }
+        }
+    }
+
+    private TypeRef CollapseExpression(
+        SyntaxNode node,
+        TypeRef targetType,
+        Scope scope,
+        SymbolHandle containingFunction)
+    {
+        if (targetType.IsLiteral || targetType.IsInferred || targetType.IsError || targetType.IsUnresolved)
+            return targetType;
+
+        switch (node)
+        {
+            case NamedExpression named:
+                LocalVariableSymbol? local = null;
+                var namedPart = new SymbolPart(named.Identifier, 0, context.GetHygiene(named));
+                var namedSyms = scope[new SymbolName(namedPart)];
+                if (namedSyms.Count > 0 && namedSyms[0] is LocalVariableSymbol ls)
+                    local = ls;
+                else if (context.ResolvedTree.TryGetReference(named, out var handle) &&
+                         context.GetSymbol(handle) is LocalVariableSymbol lh)
+                    local = lh;
+
+                if (local is not null)
+                {
+                    if (uncollapsedLocals.TryGetValue(local, out var initNode))
+                    {
+                        uncollapsedLocals.Remove(local);
+                        local.Type = targetType;
+                        CollapseExpression(initNode, targetType, scope, containingFunction);
+                    }
+                    else
+                    {
+                        local.Type = targetType;
+                    }
+                }
+                context.SetExpressionType(named, targetType);
+                return targetType;
+
+            case LiteralExpression lit:
+                if (lit.Literal.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
+                    return boolType;
+
+                var literalKind = lit.Literal.Kind is TokenKind.Float ? CompileTimeLiteralKind.Float :
+                                  lit.Literal.Kind is TokenKind.String ? CompileTimeLiteralKind.Str :
+                                  lit.Literal.Kind is TokenKind.Char ? CompileTimeLiteralKind.Char : CompileTimeLiteralKind.Int;
+                var literalOverloads = GetMatchingLiteralMethods(targetType, literalKind);
+                if (literalOverloads.Count > 1)
+                {
+                    var overloadNames = string.Join(", ", literalOverloads.Select(m => m.Name.Text));
+                    context.Diagnostics.ReportAmbiguousLiteralConversion(
+                        lit.GetSpan() ?? default,
+                        targetType.ToDisplayString(context),
+                        overloadNames,
+                        lit.GetSource());
+                    context.SetExpressionType(lit, TypeRef.Error);
+                    return TypeRef.Error;
+                }
+                if (literalOverloads.Count == 1)
+                {
+                    context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(literalOverloads[0]));
+                    context.SetExpressionType(lit, targetType);
+                    return targetType;
+                }
+
+                if (!IsLiteralCompatibleWith(lit, targetType))
+                {
+                    return TypeRef.Error;
+                }
+                context.SetExpressionType(lit, targetType);
+                return targetType;
+
+            case BinaryExpression binary:
+                var opKind = GetBinaryOperatorKind(binary.OperatorToken.Kind);
+                if (TryFindOperatorForTarget(opKind, targetType, out var opMethod, out var lhsType, out var rhsType) && opMethod != null)
+                {
+                    CollapseExpression(binary.LeftExpression, lhsType, scope, containingFunction);
+                    CollapseExpression(binary.RightExpression, rhsType, scope, containingFunction);
+                    context.ResolvedTree.AddReference(binary, ResolutionContext.GetHandle(opMethod));
+                    context.SetExpressionType(binary, opMethod.ReturnType);
+                    return opMethod.ReturnType;
+                }
+                else
+                {
+                    context.Diagnostics.ReportTypeMismatch(
+                        binary.OperatorToken.Span,
+                        binary.OperatorToken.Value,
+                        binary.LeftExpression.GetSpan() ?? default,
+                        targetType.ToDisplayString(context),
+                        binary.RightExpression.GetSpan() ?? default,
+                        targetType.ToDisplayString(context),
+                        source: binary.GetSource());
+                    context.SetExpressionType(binary, TypeRef.Error);
+                    return TypeRef.Error;
+                }
+
+            case UnaryExpression unary:
+                var uOpKind = GetUnaryOperatorKind(unary.OperatorToken.Kind, unary.Position);
+                if (TryFindUnaryOperatorForTarget(uOpKind, targetType, out var uOpMethod, out var opParamType) && uOpMethod != null)
+                {
+                    CollapseExpression(unary.Operand, opParamType, scope, containingFunction);
+                    context.ResolvedTree.AddReference(unary, ResolutionContext.GetHandle(uOpMethod));
+                    context.SetExpressionType(unary, uOpMethod.ReturnType);
+                    return uOpMethod.ReturnType;
+                }
+                else
+                {
+                    context.Diagnostics.ReportUnaryTypeMismatch(
+                        unary.OperatorToken.Span,
+                        unary.OperatorToken.Value,
+                        unary.Operand.GetSpan() ?? default,
+                        targetType.ToDisplayString(context),
+                        source: unary.GetSource());
+                    context.SetExpressionType(unary, TypeRef.Error);
+                    return TypeRef.Error;
+                }
+
+            case CallExpression call:
+                if (call.Callee is MemberAccessExpression access)
+                {
+                    CollapseExpression(access.Expression, targetType, scope, containingFunction);
+                    var memberSym = LookupMemberOnType(targetType, access.Identifier.Value);
+                    if (memberSym is MethodSymbol m)
+                    {
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(m));
+                        context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(m));
+                        context.SetExpressionType(call, m.ReturnType);
+                        return m.ReturnType;
+                    }
+                    else
+                    {
+                        context.Diagnostics.ReportMemberNotFound(
+                            access.Identifier.Span,
+                            access.Identifier.Value,
+                            targetType.ToDisplayString(context),
+                            source: access.GetSource());
+                        context.SetExpressionType(call, TypeRef.Error);
+                        return TypeRef.Error;
+                    }
+                }
+                return TypeRef.Unresolved;
+
+            case ParenthesizedExpression paren:
+                var res = CollapseExpression(paren.Expression, targetType, scope, containingFunction);
+                context.SetExpressionType(paren, res);
+                return res;
+
+            default:
+                return targetType;
+        }
+    }
+
+    private bool TryFindOperatorForTarget(
+        OperatorKind kind,
+        TypeRef targetType,
+        out MethodSymbol? opMethod,
+        out TypeRef lhsType,
+        out TypeRef rhsType)
+    {
+        opMethod = null;
+        lhsType = TypeRef.Unresolved;
+        rhsType = TypeRef.Unresolved;
+
+        if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
+            return false;
+
+        if (targetType.Handle is not { } targetHandle)
+            return false;
+
+        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
+        if (targetSym is null)
+            return false;
+
+        var scope = GetOwnedScope(targetSym);
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            foreach (var sym in scope.Symbols.Values)
+            {
+                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                {
+                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    {
+                        if (method.Parameters.Count == 2)
+                        {
+                            var p0 = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
+                            var p1 = context.GetParameterSymbol(method.Parameters[1])?.Type ?? TypeRef.Unresolved;
+                            opMethod = method;
+                            lhsType = p0;
+                            rhsType = p1;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryFindUnaryOperatorForTarget(
+        OperatorKind kind,
+        TypeRef targetType,
+        out MethodSymbol? opMethod,
+        out TypeRef operandType)
+    {
+        opMethod = null;
+        operandType = TypeRef.Unresolved;
+
+        if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
+            return false;
+
+        if (targetType.Handle is not { } targetHandle)
+            return false;
+
+        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
+        if (targetSym is null)
+            return false;
+
+        var scope = GetOwnedScope(targetSym);
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            foreach (var sym in scope.Symbols.Values)
+            {
+                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                {
+                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    {
+                        if (method.Parameters.Count == 1)
+                        {
+                            var p0 = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
+                            opMethod = method;
+                            operandType = p0;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryResolveImplicitCast(TypeRef from, TypeRef to, out MethodSymbol? castMethod)
+    {
+        castMethod = null;
+        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.ImplicitCast, out var candidates))
+            return false;
+
+        var operandHandles = new List<SymbolHandle>();
+        if (from.Handle is { } fh) operandHandles.Add(fh);
+        if (to.Handle is { } th && !operandHandles.Contains(th)) operandHandles.Add(th);
+
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            foreach (var opHandle in operandHandles)
+            {
+                var operandTypeSym = (Symbol?)context.GetTypeSymbol(opHandle) ?? context.GetSymbol(opHandle);
+                if (operandTypeSym is null)
+                    continue;
+
+                var scope = GetOwnedScope(operandTypeSym);
+                foreach (var sym in scope.Symbols.Values)
+                {
+                    if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    {
+                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                        {
+                            if (method.Parameters.Count == 1)
+                            {
+                                var paramType = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
+                                if (paramType.Equals(from) && method.ReturnType.Equals(to))
+                                {
+                                    castMethod = method;
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private Symbol? LookupMemberOnType(TypeRef targetType, string memberName)
+    {
+        if (targetType.Handle is not { } handle)
+            return null;
+
+        var sym = (Symbol?)context.GetTypeSymbol(handle) ?? context.GetSymbol(handle);
+        if (sym is not null)
+        {
+            var scope = GetOwnedScope(sym);
+            var found = scope[new SymbolName(new SymbolPart(memberName))];
+            var accessible = found.Where(cand => cand is not MethodSymbol m || !m.Flags.HasFlag(FunctionFlags.InterfaceScoped)).ToList();
+            if (accessible.Count > 0)
+                return accessible[0];
+        }
+
+        return null;
+    }
+
+    private bool IsLiteralCompatibleWith(LiteralExpression lit, TypeRef targetType)
+    {
+        if (targetType.IsLiteral)
+            return true;
+
+        if (lit.Literal.Kind is TokenKind.Integer)
+        {
+            if (IsNumeric(targetType)) return true;
+        }
+        else if (lit.Literal.Kind is TokenKind.Float)
+        {
+            if (IsNumeric(targetType)) return true;
+        }
+        else if (lit.Literal.Kind is TokenKind.String)
+        {
+            if (hStr is { } hs && targetType.Handle == hs) return true;
+        }
+        else if (lit.Literal.Kind is TokenKind.Char)
+        {
+            if (hChar is { } hc && targetType.Handle == hc) return true;
+        }
+
+        if (targetType.Handle is { } th)
+        {
+            var typeSym = (Symbol?)context.GetTypeSymbol(th) ?? context.GetSymbol(th);
+            if (typeSym is not null)
+            {
+                var scope = GetOwnedScope(typeSym);
+                foreach (var sym in scope.Symbols.Values)
+                {
+                    if (sym is MethodSymbol m && m.Flags.HasFlag(FunctionFlags.Literal))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsLiteralCompatibleWith(TypeRef litType, TypeRef targetType)
+    {
+        if (targetType.IsLiteral)
+            return true;
+
+        if (litType.SpecialType is CompileTimeLiteralType lit)
+        {
+            if (lit.LiteralKind == CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
+            if (lit.LiteralKind == CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
+            if (lit.LiteralKind == CompileTimeLiteralKind.Str && hStr is { } hs && targetType.Handle == hs) return true;
+            if (lit.LiteralKind == CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
+        }
+
+        if (targetType.Handle is { } th)
+        {
+            var typeSym = (Symbol?)context.GetTypeSymbol(th) ?? context.GetSymbol(th);
+            if (typeSym is not null)
+            {
+                var scope = GetOwnedScope(typeSym);
+                foreach (var sym in scope.Symbols.Values)
+                {
+                    if (sym is MethodSymbol m && m.Flags.HasFlag(FunctionFlags.Literal))
+                        return true;
+                }
+            }
+        }
+
+        return false;
     }
 }
