@@ -48,6 +48,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     /// </summary>
     private readonly Dictionary<LocalVariableSymbol, SyntaxNode> uncollapsedLocals = new();
 
+    /// <summary>Expected target types for contextual type propagation into lambdas and expressions.</summary>
+    private readonly Dictionary<Expression, TypeRef> expectedExpressionTypes = new();
+
+    /// <summary>Tracks captured outer symbols for active lambda expressions.</summary>
+    private readonly Stack<HashSet<Symbol>> lambdaCapturedSymbols = new();
+
+    /// <summary>Lexical scopes of currently resolving lambda expressions.</summary>
+    private readonly Stack<Scope> activeLambdaScopes = new();
+
+    /// <summary>Tracks return expression types encountered in lambda block bodies.</summary>
+    private readonly Stack<List<TypeRef>> lambdaReturnTypes = new();
+
     /// <summary>
     /// Executes Pass 5: binds expression types, dispatches operators against library interfaces,
     /// and resolves retroactive literal collapsing across all statements.
@@ -392,6 +404,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             var returnedType = ResolveExpression(expr, scope, containingFunction);
             span = expr.GetSpan() ?? returnStmt.Statement.Keyword.Span;
 
+            if (lambdaReturnTypes.Count > 0)
+                lambdaReturnTypes.Peek().Add(returnedType);
+
             if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
             {
                 if (returnedType.IsLiteral)
@@ -423,6 +438,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             // Bare return statement (return;) must only appear in void-returning functions
             span = returnStmt.Statement.Keyword.Span;
+
+            if (lambdaReturnTypes.Count > 0)
+                lambdaReturnTypes.Peek().Add(voidType);
 
             if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
             {
@@ -525,6 +543,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
                 if (declarator.Initializer?.Initializer is { } initExpr)
                 {
+                    if (symType is { IsInferred: false } targetType)
+                        expectedExpressionTypes[initExpr] = targetType;
+
                     var initType = ResolveExpression(initExpr, scope, containingFunction);
                     if (sym is not null && symType?.IsInferred == true)
                     {
@@ -737,6 +758,10 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 result = hStr is { } hs ? TypeRef.Resolved(hs) : TypeRef.Unresolved;
                 break;
 
+            case LambdaExpression lambda:
+                result = ResolveLambda(lambda, scope, containingFunction);
+                break;
+
             default:
                 break;
         }
@@ -846,6 +871,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             if (context.GetSymbol(containingFunction) is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.Static) && m.Parent is { } parentHandle)
             {
+                if (lambdaCapturedSymbols.Count > 0)
+                    lambdaCapturedSymbols.Peek().Add(m);
+
                 context.ResolvedTree.AddReference(named, parentHandle);
                 return TypeRef.Resolved(parentHandle);
             }
@@ -862,6 +890,16 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (syms.Count > 0)
         {
             var sym = syms[0];
+            if (lambdaCapturedSymbols.Count > 0 && activeLambdaScopes.Count > 0)
+            {
+                var curLambdaScope = activeLambdaScopes.Peek();
+                if (sym is LocalVariableSymbol or ParameterSymbol)
+                {
+                    if (!IsEnclosedBy(sym.EnclosingScope, curLambdaScope))
+                        lambdaCapturedSymbols.Peek().Add(sym);
+                }
+            }
+
             context.ResolvedTree.AddReference(named, ResolutionContext.GetHandle(sym));
             return GetTypeFromSymbol(sym);
         }
@@ -871,6 +909,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return GetTypeFromHandle(handle);
 
         return TypeRef.Unresolved;
+    }
+
+    /// <summary>
+    /// Checks whether an inner scope is enclosed by or identical to a target outer scope.
+    /// </summary>
+    private static bool IsEnclosedBy(Scope? inner, Scope target)
+    {
+        for (var curr = inner; curr != null; curr = curr.Parent)
+        {
+            if (curr == target) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -885,8 +935,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         ParameterSymbol param => param.Type,
         GlobalVariableSymbol global => global.Type,
         TypeSymbol typeSymbol => TypeRef.Resolved(ResolutionContext.GetHandle(typeSymbol)),
-        MethodSymbol method => method.ReturnType,
-        FunctionSymbol fn => fn.ReturnType,
+        MethodSymbol method => method.Type != default && method.Type.Kind != TypeRefKind.Unresolved ? method.Type : (method.Flags.HasFlag(FunctionFlags.Static) ? TypeRef.Function(method.ReturnType, Array.Empty<TypeRef>()) : TypeRef.Delegate(method.ReturnType, Array.Empty<TypeRef>())),
+        FunctionSymbol fn => fn.Type != default && fn.Type.Kind != TypeRefKind.Unresolved ? fn.Type : TypeRef.Function(fn.ReturnType, Array.Empty<TypeRef>()),
         PropertySymbol prop => prop.Type,
         _ => TypeRef.Unresolved
     };
@@ -1308,6 +1358,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private TypeRef ResolveAssignment(AssignmentExpression assignment, Scope scope, SymbolHandle containingFunction)
     {
         var lhs = ResolveExpression(assignment.LhsExpression, scope, containingFunction);
+        if (!lhs.IsInferred && !lhs.IsUnresolved && !lhs.IsError)
+            expectedExpressionTypes[assignment.RhsExpression] = lhs;
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
         // 1. Verify that the LHS expression denotes a valid writable L-value
@@ -1389,26 +1441,81 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         var calleeType = ResolveExpression(call.Callee, scope, containingFunction);
+
+        // Pre-propagate expected parameter types into argument expressions (for lambdas)
+        if (calleeType.SpecialType is FunctionSemanticType fT)
+        {
+            for (int i = 0; i < call.Arguments.Count && i < fT.ParameterTypes.Count; i++)
+                expectedExpressionTypes[call.Arguments[i]] = fT.ParameterTypes[i];
+        }
+        else if (calleeType.SpecialType is DelegateSemanticType dT)
+        {
+            for (int i = 0; i < call.Arguments.Count && i < dT.ParameterTypes.Count; i++)
+                expectedExpressionTypes[call.Arguments[i]] = dT.ParameterTypes[i];
+        }
+        else if (context.ResolvedTree.TryGetReference(call.Callee, out var calleeHandleEarly))
+        {
+            var sym = context.GetSymbol(calleeHandleEarly);
+            IReadOnlyList<SymbolHandle>? paramHandles = sym switch
+            {
+                FunctionSymbol fn => fn.Parameters,
+                MethodSymbol m => m.Parameters,
+                _ => null
+            };
+            if (paramHandles != null)
+            {
+                for (int i = 0; i < call.Arguments.Count && i < paramHandles.Count; i++)
+                {
+                    if (context.GetParameterSymbol(paramHandles[i]) is { } p)
+                        expectedExpressionTypes[call.Arguments[i]] = p.Type;
+                }
+            }
+        }
+
         var argTypes = new List<TypeRef>(call.Arguments.Count);
         foreach (var arg in call.Arguments)
             argTypes.Add(ResolveExpression(arg, scope, containingFunction));
 
-        // 2. Direct function or method invocation
-        if (context.ResolvedTree.TryGetReference(call.Callee, out var calleeHandle))
+        if (calleeType.IsError)
+            return TypeRef.Error;
+        if (calleeType.IsUnresolved)
+            return calleeType;
+
+        // All calls route through Callable operator
+        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out _))
         {
-            var sym = context.GetSymbol(calleeHandle);
-            if (sym is FunctionSymbol fn)
-                return TypeCheckCall(call, fn.Parameters, fn.ReturnType, argTypes, scope, containingFunction);
-            if (sym is MethodSymbol m)
-                return TypeCheckCall(call, m.Parameters, m.ReturnType, argTypes, scope, containingFunction);
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(call.Callee.GetSpan() ?? default, "invocation", KnownIntrinsics.OpCallable, call.GetSource());
+            return TypeRef.Error;
         }
 
-        // 3. Instance invoking user-defined Callable operator: T(...)
+        // 2. Function pointer / static function invocation (routes through Callable.Invoke)
+        if (calleeType.SpecialType is FunctionSemanticType fnType)
+        {
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Function))
+            {
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(call.Callee.GetSpan() ?? default, "function call", KnownIntrinsics.Function, call.GetSource());
+                return TypeRef.Error;
+            }
+            return TypeCheckFunctionTypeCall(call, fnType.ParameterTypes, fnType.ReturnType, argTypes, scope, containingFunction);
+        }
+
+        // 3. Delegate / instance method invocation (routes through Callable.Invoke)
+        if (calleeType.SpecialType is DelegateSemanticType delType)
+        {
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Delegate))
+            {
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(call.Callee.GetSpan() ?? default, "delegate call", KnownIntrinsics.Delegate, call.GetSource());
+                return TypeRef.Error;
+            }
+            return TypeCheckFunctionTypeCall(call, delType.ParameterTypes, delType.ReturnType, argTypes, scope, containingFunction);
+        }
+
+        // 4. Instance invoking user-defined Callable operator: T(...)
         if (TryResolveCallableOperator(call, calleeType, argTypes, out var callableReturn))
             return callableReturn;
 
-        // 4. Non-callable type error reporting: MH2009
-        if (!calleeType.IsError && !calleeType.IsUnresolved && !calleeType.IsInferred)
+        // 5. Non-callable type error reporting: MH0611
+        if (!calleeType.IsInferred)
         {
             context.Diagnostics.ReportTypeNotCallable(call.Callee.GetSpan() ?? default, calleeType.ToDisplayString(context), call.GetSource());
             return TypeRef.Error;
@@ -1442,9 +1549,24 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
             foreach (var sym in typeScope.Symbols.Values)
             {
-                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                if (sym is MethodSymbol method)
                 {
-                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    bool isCandidate = false;
+                    if (method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    {
+                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                            isCandidate = true;
+                    }
+                    else if (typeSym.BaseTypes.Any(b => b.Handle == candidate.InterfaceHandle))
+                    {
+                        if (context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod &&
+                            (method.Name.Text == opMethod.Name.Text || method.Name.Text == "Invoke" || method.Name.Text == "Call"))
+                        {
+                            isCandidate = true;
+                        }
+                    }
+
+                    if (isCandidate)
                     {
                         if (method.Parameters.Count == argTypes.Count)
                         {
@@ -1552,6 +1674,42 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return returnType;
     }
 
+    private TypeRef TypeCheckFunctionTypeCall(CallExpression call, IReadOnlyList<TypeRef> expectedParamTypes, TypeRef returnType, List<TypeRef> argTypes, Scope scope, SymbolHandle containingFunction)
+    {
+        if (argTypes.Count != expectedParamTypes.Count)
+        {
+            context.Diagnostics.ReportArgumentCountMismatch(
+                call.GetSpan() ?? default,
+                expectedParamTypes.Count,
+                argTypes.Count,
+                call.GetSource());
+        }
+
+        for (int i = 0; i < argTypes.Count && i < expectedParamTypes.Count; i++)
+        {
+            var expectedType = expectedParamTypes[i];
+            if (argTypes[i].IsLiteral)
+            {
+                CollapseExpression(call.Arguments[i], expectedType, scope, containingFunction);
+                argTypes[i] = expectedType;
+            }
+            else if (!expectedType.IsAssignableFrom(argTypes[i], context) &&
+                !TryResolveImplicitCast(argTypes[i], expectedType, out _) &&
+                !argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
+                !expectedType.IsError && !expectedType.IsUnresolved && !expectedType.IsInferred)
+            {
+                context.Diagnostics.ReportArgumentTypeMismatch(
+                    call.Arguments[i].GetSpan() ?? default,
+                    i + 1,
+                    argTypes[i].ToDisplayString(context),
+                    expectedType.ToDisplayString(context),
+                    call.GetSource());
+            }
+        }
+
+        return returnType;
+    }
+
     /// <summary>
     /// Resolves a member access expression (<c>receiver.member</c>).
     /// <para>
@@ -1635,7 +1793,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     }
 
                     context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(declaredMethod));
-                    return declaredMethod.ReturnType;
+                    return GetTypeFromSymbol(declaredMethod);
                 }
 
                 // MH0609: Calling variant-level method directly on sum type instance
@@ -1701,9 +1859,28 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         // Look up member on receiver type (filtering out InterfaceScoped methods)
-        if (receiverType.Handle is { } recvHandle)
+        SymbolHandle? recvHandle = receiverType.Handle;
+        if (recvHandle is null)
         {
-            var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle) ?? context.GetSymbol(recvHandle);
+            if (receiverType.SpecialType is FunctionSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH))
+                    recvHandle = fnH;
+                else if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null)
+                    context.Diagnostics.ReportMissingIntrinsicForSyntax(access.Identifier.Span, "function member access", KnownIntrinsics.Function, access.GetSource());
+            }
+            else if (receiverType.SpecialType is DelegateSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH))
+                    recvHandle = delH;
+                else if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null)
+                    context.Diagnostics.ReportMissingIntrinsicForSyntax(access.Identifier.Span, "delegate member access", KnownIntrinsics.Delegate, access.GetSource());
+            }
+        }
+
+        if (recvHandle is not null)
+        {
+            var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
             if (typeSymObj is not null)
             {
                 var recvScope = GetOwnedScope(typeSymObj);
@@ -1921,6 +2098,175 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         CollapseRemainingLocals(blockScope, containingFunction);
 
         return result;
+    }
+
+    /// <summary>
+    /// Resolves a lambda expression, performing bidirectional type inference against expected function/delegate types,
+    /// tracking captured symbols (locals, parameters, 'this'), and validating block body return semantics.
+    /// </summary>
+    /// <param name="lambda">The lambda expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>A <see cref="TypeRef"/> representing a Function or Delegate type.</returns>
+    private TypeRef ResolveLambda(LambdaExpression lambda, Scope scope, SymbolHandle containingFunction)
+    {
+        FunctionSemanticType? expectedFn = null;
+        DelegateSemanticType? expectedDel = null;
+
+        if (expectedExpressionTypes.TryGetValue(lambda, out var expectedType))
+        {
+            if (expectedType.SpecialType is FunctionSemanticType f)
+                expectedFn = f;
+            else if (expectedType.SpecialType is DelegateSemanticType d)
+                expectedDel = d;
+        }
+
+        IReadOnlyList<TypeRef>? contextualParamTypes = expectedFn?.ParameterTypes ?? expectedDel?.ParameterTypes;
+        TypeRef? contextualReturnType = expectedFn?.ReturnType ?? expectedDel?.ReturnType;
+
+        var lambdaScope = context.GetSyntaxScope(lambda, scope);
+        var paramTypes = new List<TypeRef>(lambda.Parameters.Count);
+
+        for (int i = 0; i < lambda.Parameters.Count; i++)
+        {
+            var pSyntax = lambda.Parameters[i];
+            TypeRef pType;
+
+            var paramPart = ResolutionContext.GetSymbolName(pSyntax.Identifier).Last;
+
+            if (pSyntax.Type is not null)
+            {
+                pType = ResolveTypeSyntax(pSyntax.Type, scope);
+            }
+            else if (contextualParamTypes is not null && i < contextualParamTypes.Count)
+            {
+                pType = contextualParamTypes[i];
+            }
+            else
+            {
+                var span = pSyntax.Identifier.GetSpan() ?? default;
+                context.Diagnostics.ReportCannotInferLambdaParameterType(span, paramPart.Text, pSyntax.Identifier.GetSource());
+                pType = TypeRef.Error;
+            }
+
+            paramTypes.Add(pType);
+            var paramSymbol = lambdaScope[paramPart].OfType<ParameterSymbol>().FirstOrDefault()
+                ?? context.CreateParameterSymbol(lambdaScope, paramPart, containingFunction, null);
+            paramSymbol.Type = pType;
+        }
+
+        TypeRef? explicitReturnType = null;
+        if (lambda.ReturnType is not null)
+        {
+            explicitReturnType = ResolveTypeSyntax(lambda.ReturnType, lambdaScope);
+        }
+
+        TypeRef targetReturnType = explicitReturnType ?? contextualReturnType ?? TypeRef.Inferred;
+
+        var captures = new HashSet<Symbol>();
+        lambdaCapturedSymbols.Push(captures);
+        activeLambdaScopes.Push(lambdaScope);
+
+        TypeRef resolvedReturnType = voidType;
+
+        try
+        {
+            if (lambda.Body is BlockExpression block)
+            {
+                if (block.FinalExpression is not null)
+                {
+                    var span = block.FinalExpression.GetSpan() ?? block.CloseBrace.Span;
+                    context.Diagnostics.ReportLambdaBlockBodyTrailingExpression(span, block.CloseBrace.Source);
+                }
+
+                var blockScope = context.GetSyntaxScope(block, lambdaScope);
+                var lambdaReturnList = new List<TypeRef>();
+                lambdaReturnTypes.Push(lambdaReturnList);
+
+                try
+                {
+                    foreach (var local in block.Locals)
+                    {
+                        ResolveLocal(local, blockScope, containingFunction, targetReturnType);
+                    }
+                }
+                finally
+                {
+                    lambdaReturnTypes.Pop();
+                }
+
+                CollapseRemainingLocals(blockScope, containingFunction);
+
+                if (explicitReturnType is { } expRet)
+                {
+                    resolvedReturnType = expRet;
+                }
+                else if (contextualReturnType is { } ctxRet && !ctxRet.IsInferred && !ctxRet.IsUnresolved)
+                {
+                    resolvedReturnType = ctxRet;
+                }
+                else if (lambdaReturnList.Count > 0)
+                {
+                    resolvedReturnType = lambdaReturnList[0];
+                }
+                else
+                {
+                    resolvedReturnType = voidType;
+                }
+            }
+            else
+            {
+                // Expression body
+                if (!targetReturnType.IsInferred && !targetReturnType.IsUnresolved && !targetReturnType.IsError)
+                {
+                    expectedExpressionTypes[lambda.Body] = targetReturnType;
+                }
+
+                var bodyType = ResolveExpression(lambda.Body, lambdaScope, containingFunction);
+
+                if (explicitReturnType is { } expRet)
+                {
+                    if (bodyType.IsLiteral)
+                        bodyType = CollapseExpression(lambda.Body, expRet, lambdaScope, containingFunction);
+
+                    if (!expRet.IsAssignableFrom(bodyType, context) &&
+                        !TryResolveImplicitCast(bodyType, expRet, out _))
+                    {
+                        var span = lambda.Body.GetSpan() ?? lambda.EqualsGreaterThanToken.Span;
+                        context.Diagnostics.ReportReturnTypeMismatch(
+                            span,
+                            bodyType.ToDisplayString(context),
+                            expRet.ToDisplayString(context),
+                            lambda.EqualsGreaterThanToken.Source);
+                    }
+                    resolvedReturnType = expRet;
+                }
+                else if (contextualReturnType is { } ctxRet && !ctxRet.IsInferred && !ctxRet.IsUnresolved)
+                {
+                    if (bodyType.IsLiteral)
+                        bodyType = CollapseExpression(lambda.Body, ctxRet, lambdaScope, containingFunction);
+
+                    resolvedReturnType = ctxRet;
+                }
+                else
+                {
+                    resolvedReturnType = bodyType;
+                }
+            }
+        }
+        finally
+        {
+            activeLambdaScopes.Pop();
+            lambdaCapturedSymbols.Pop();
+        }
+
+        // Non-capturing lambdas yield Function; capturing lambdas yield Delegate
+        if (captures.Count > 0 || expectedDel is not null)
+        {
+            return TypeRef.Delegate(resolvedReturnType, paramTypes);
+        }
+
+        return TypeRef.Function(resolvedReturnType, paramTypes);
     }
 
     /// <summary>
@@ -2232,7 +2578,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             var targetScope = GetOwnedScope(targetSym);
             foreach (var sym in targetScope.Symbols.Values)
             {
-                if (sym is MethodSymbol m && (m.SpecialKind == SpecialFunctionKind.Constructor || m.Name.Text == ".ctor" || m.Name.Text == "Construct"))
+                if (sym is MethodSymbol m && m.Name.Text == "Construct")
                 {
                     if (m.Parameters.Count == ctorArgTypes.Count)
                     {

@@ -799,6 +799,32 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             DiscoverBlockExpressions(whileExpr.Condition, whileScope, containingSymbol, containingMethod);
             DiscoverBlockExpressions(whileExpr.Body, whileScope, containingSymbol, containingMethod);
         }
+        else if (expr is LambdaExpression lambda)
+        {
+            Scope lambdaScope = context.CreateScope(scope);
+            context.RegisterSyntaxScope(lambda, lambdaScope);
+
+            foreach (var p in lambda.Parameters)
+            {
+                var paramPart = ResolutionContext.GetSymbolName(p.Identifier).Last;
+                context.CreateParameterSymbol(lambdaScope, paramPart, containingSymbol, null);
+            }
+
+            if (lambda.Body is BlockExpression lambdaBlock)
+            {
+                Scope blockScope = context.CreateScope(lambdaScope);
+                context.RegisterSyntaxScope(lambdaBlock, blockScope);
+
+                foreach (var child in lambdaBlock.Locals)
+                    ResolveLocal(child, blockScope, containingSymbol, containingMethod);
+
+                DiscoverBlockExpressions(lambdaBlock.FinalExpression, blockScope, containingSymbol, containingMethod);
+            }
+            else
+            {
+                DiscoverBlockExpressions(lambda.Body, lambdaScope, containingSymbol, containingMethod);
+            }
+        }
     }
 
 
@@ -989,14 +1015,6 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return flags;
     }
 
-    /// <summary>
-    /// Returns the symbol name for special function declarations.
-    /// Constructors -> ".ctor". Ordinary functions use their declared name.
-    /// </summary>
     private static SymbolPart GetSpecialFunctionSymbolName(FunctionDeclaration declaration) =>
-        declaration.SpecialKind switch
-        {
-            SpecialFunctionKind.Constructor => new SymbolPart(".ctor"),
-            _ => ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last
-        };
+        ResolutionContext.GetSymbolName(declaration.Signature.Identifier).Last;
 }

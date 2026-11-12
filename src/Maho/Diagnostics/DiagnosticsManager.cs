@@ -341,20 +341,6 @@ internal sealed class DiagnosticsManager
             .WithHelp($"qualify '{typeName}' with its namespace or use an alias")
             .Report();
 
-    /// <summary> Reports that a constructor was declared outside of a type body. </summary>
-    // Possibly syntax error but for some reason inserted into semantic one.
-    public void ReportConstructorOutsideType(TextSpan span, SourceText? source = null) =>
-        BuildError("MH0520", "constructor must be declared inside a type body", span, source)
-            .WithPrimaryLabel(span, "constructor declared outside a type", source)
-            .WithHelp("move the constructor inside a class, struct, or union declaration")
-            .Report();
-
-    /// <summary> Reports that a constructor name does not match the enclosing type name. </summary>
-    public void ReportConstructorNameMismatch(string constructorName, string enclosingTypeName, TextSpan span, SourceText? source = null) =>
-        BuildError("MH0525", $"constructor name '{constructorName}' does not match enclosing type name '{enclosingTypeName}'", span, source)
-            .WithPrimaryLabel(span, $"constructor name must match enclosing type '{enclosingTypeName}'", source)
-            .WithHelp($"rename the constructor to '{enclosingTypeName}' or provide a return type if this is a method")
-            .Report();
 
 
     /// <summary> Reports a duplicate type declaration pointing to both declaration sites. </summary>
@@ -685,5 +671,19 @@ internal sealed class DiagnosticsManager
     public void ReportUntaggedDefinitionTaggedUsage(TextSpan span, string typeName, SourceText? source = null) =>
         BuildError("MH0610", $"'untagged' type '{typeName}' must be declared with 'untagged' modifier", span, source)
             .WithPrimaryLabel(span, $"'{typeName}' was defined as untagged and must be declared as 'untagged {typeName}'", source)
+            .Report();
+
+    /// <summary> Reports an uninferrable lambda parameter type. </summary>
+    public void ReportCannotInferLambdaParameterType(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH2015", $"cannot infer type for lambda parameter '{name}'; an explicit type annotation is required", span, source)
+            .WithPrimaryLabel(span, $"lambda parameter '{name}' requires an explicit type", source)
+            .WithHelp("specify the parameter type explicitly (e.g. (int x) => ...)")
+            .Report();
+
+    /// <summary> Reports a trailing expression in a lambda block body. </summary>
+    public void ReportLambdaBlockBodyTrailingExpression(TextSpan span, SourceText? source = null) =>
+        BuildError("MH2016", "lambda block body must end with an explicit return statement; trailing expressions are not permitted", span, source)
+            .WithPrimaryLabel(span, "trailing expression not permitted in lambda block body", source)
+            .WithHelp("add an explicit 'return' statement")
             .Report();
 }

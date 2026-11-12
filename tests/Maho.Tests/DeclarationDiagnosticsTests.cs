@@ -87,7 +87,8 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialType_MultipleDeclarations_SucceedsWithoutErrors()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
             public partial class Entity;
             public partial class Entity;
             public partial class Entity;
@@ -123,12 +124,12 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialFunction_ZeroBodies_SucceedsWithoutWarningsOrErrors()
     {
-        var compilation = Compilation.FromSource("""
-            public struct void;
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
 
-            public partial void DoWork();
-            public partial void DoWork();
-            public partial void DoWork();
+            public partial func DoWork() -> void;
+            public partial func DoWork() -> void;
+            public partial func DoWork() -> void;
             """);
 
         Assert.False(compilation.HasErrors);
@@ -138,12 +139,11 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialFunction_OneBody_SucceedsWithoutErrors()
     {
-        var compilation = Compilation.FromSource("""
-            public struct void;
-            public struct int;
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
 
-            public partial void Calculate(int x);
-            public partial void Calculate(int x)
+            public partial func Calculate(int32 x) -> void;
+            public partial func Calculate(int32 x) -> void
             {
                 return;
             }
@@ -157,12 +157,15 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialFunction_MultipleBodies_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
-            public partial void Action(int x)
+            public struct void;
+            public struct int;
+
+            public partial func Action(int x) -> void
             {
                 return;
             }
 
-            public partial void Action(int x)
+            public partial func Action(int x) -> void
             {
                 return;
             }
@@ -180,16 +183,18 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialMethod_MultipleBodiesInType_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
+            public struct void;
+
             public partial class Service
             {
-                public partial void Process();
+                public partial func Process() -> void;
 
-                public partial void Process()
+                public partial func Process() -> void
                 {
                     return;
                 }
 
-                public partial void Process()
+                public partial func Process() -> void
                 {
                     return;
                 }
@@ -204,19 +209,19 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialFunction_Overloads_CanEachHaveBody()
     {
-        var compilation = Compilation.FromSource("""
-            public struct void;
-            public struct IntA;
-            public struct IntB;
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            public struct IntA : Struct;
+            public struct IntB : Struct;
 
-            public partial void Compute(IntA a);
-            public partial void Compute(IntA a)
+            public partial func Compute(IntA a) -> void;
+            public partial func Compute(IntA a) -> void
             {
                 return;
             }
 
-            public partial void Compute(IntB b);
-            public partial void Compute(IntB b)
+            public partial func Compute(IntB b) -> void;
+            public partial func Compute(IntB b) -> void
             {
                 return;
             }
@@ -233,8 +238,8 @@ public sealed class DeclarationDiagnosticsTests
             public struct RetA;
             public struct RetB;
 
-            public partial RetA Query();
-            public partial RetB Query();
+            public partial func Query() -> RetA;
+            public partial func Query() -> RetB;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -246,10 +251,11 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateFunction_NonPartial_EmitsMH0532()
     {
         var compilation = Compilation.FromSource("""
+            public struct void;
             public struct Param;
 
-            public void Execute(Param p) { return; }
-            public void Execute(Param p) { return; }
+            public func Execute(Param p) -> void { return; }
+            public func Execute(Param p) -> void { return; }
             """);
 
         Assert.True(compilation.HasErrors);
@@ -385,8 +391,8 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialFunction_MultiFile_MultipleBodies_EmitsMH0533()
     {
-        var (_, _, _, root1) = CompilerTestBed.Parse("public partial void Work() { return; }");
-        var (_, _, _, root2) = CompilerTestBed.Parse("public partial void Work() { return; }");
+        var (_, _, _, root1) = CompilerTestBed.Parse("public partial func Work() -> void { return; }");
+        var (_, _, _, root2) = CompilerTestBed.Parse("public partial func Work() -> void { return; }");
         var context = new Resolver().Resolve([
             SyntaxTree.CreateSingleRoot(root1, "first.mh"),
             SyntaxTree.CreateSingleRoot(root2, "second.mh")
@@ -487,7 +493,7 @@ public sealed class DeclarationDiagnosticsTests
     {
         var compilation = Compilation.FromSource("""
             public struct Unit;
-            public Unit Test()
+            public func Test() -> Unit
             {
                 UnknownType (a, b, c) = (1, 2, 3);
                 return default;
@@ -504,7 +510,7 @@ public sealed class DeclarationDiagnosticsTests
     {
         var compilation = Compilation.FromSource("""
             public struct Unit;
-            public Unit Test()
+            public func Test() -> Unit
             {
                 UnknownType a, b, c;
                 return default;
@@ -515,96 +521,6 @@ public sealed class DeclarationDiagnosticsTests
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0500");
         Assert.Contains("could not resolve type 'UnknownType'", diag.Message);
     }
-
-    [Fact]
-    public void ConstructorOutsideType_TopLevel_EmitsMH0520()
-    {
-        var compilation = Compilation.FromSource("""
-            Foo()
-            {
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
-        Assert.Contains("constructor must be declared inside a type body", diag.Message);
-    }
-
-    [Fact]
-    public void ConstructorOutsideType_InNamespace_EmitsMH0520()
-    {
-        var compilation = Compilation.FromSource("""
-            namespace Sample
-            {
-                public Foo()
-                {
-                }
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
-        Assert.Contains("constructor must be declared inside a type body", diag.Message);
-    }
-
-
-
-    [Fact]
-    public void ConstructorNameMismatch_EmitsMH0525()
-    {
-        var compilation = Compilation.FromSource("""
-            public class Foo
-            {
-                public Bar()
-                {
-                }
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0525");
-        Assert.Contains("constructor name 'Bar' does not match enclosing type name 'Foo'", diag.Message);
-    }
-
-
-
-    [Fact]
-    public void SpecialFunctions_ValidDeclarations_SucceedWithoutErrors()
-    {
-        var compilation = Compilation.FromSource("""
-            public class Box
-            {
-                public Box()
-                {
-                }
-            }
-            """);
-
-        Assert.False(compilation.HasErrors);
-        Assert.Empty(compilation.Diagnostics);
-    }
-
-    [Fact]
-    public void ConstructorOutsideType_Local_EmitsMH0520()
-    {
-        var compilation = Compilation.FromSource("""
-            public class Foo
-            {
-                public void Method()
-                {
-                    Bar()
-                    {
-                    }
-                }
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0520");
-        Assert.Contains("constructor must be declared inside a type body", diag.Message);
-    }
-
-
 }
 
 

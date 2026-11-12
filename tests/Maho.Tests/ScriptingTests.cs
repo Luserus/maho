@@ -20,6 +20,8 @@ public sealed class ScriptingTests
                 [IntrinsicType("Pointer")] struct Pointer<T> { NUInt p; }
                 [IntrinsicType("Str")] struct Str { Int8& p; Int64 l; }
                 [IntrinsicType("Int32")] struct Int32;
+                [IntrinsicType("ValueType")] struct ValType;
+                [IntrinsicType("Struct")] struct Struct : ValType;
 
                 var x = 10;
                 var y = 20;

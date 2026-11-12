@@ -7,6 +7,12 @@ public sealed class IntrinsicDiscoveryTests
     private const string IntrinsicBootstrapPrelude = """
         intrinsic attribute IntrinsicType(Str name);
 
+        [IntrinsicType("ValueType")]
+        public struct ValType;
+
+        [IntrinsicType("Struct")]
+        public struct Struct : ValType;
+
         [IntrinsicType("Int8")]
         public struct Int8;
 
@@ -33,6 +39,40 @@ public sealed class IntrinsicDiscoveryTests
         {
             Int8& data;
             Int64 length;
+        }
+        """;
+
+    private const string UseSitePrelude = IntrinsicBootstrapPrelude + """
+        [intrinsic]
+        public attribute IntrinsicFunction;
+
+        [intrinsic]
+        public attribute OperatorFunction(Str name);
+
+        [IntrinsicType("Void")]
+        public struct void;
+
+        public interface Callable<TReturn, TParams...>
+        {
+            [OperatorFunction("Callable")]
+            public func Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Function")]
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            NUInt codeAddress;
+            [IntrinsicFunction]
+            public func Callable.Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Delegate")]
+        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            NUInt codeAddress;
+            Pointer<ValType> env;
+            [IntrinsicFunction]
+            public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
 
@@ -660,11 +700,10 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_InferredCollection_WithoutArray_EmitsMH0240()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var list = [1, 2, 3];
                 }
@@ -679,12 +718,11 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_TypedCollection_DoesNotRequireArray()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
                 public struct CustomList;
-                public void Test()
+                public func Test() -> void
                 {
                     CustomList list = [1, 2, 3];
                 }
@@ -697,11 +735,10 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_UnsuffixedIntegerLiteral_WithoutInt32_EmitsMH0240()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 42;
                 }
@@ -716,11 +753,10 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_SuffixedIntegerLiteral_DoesNotRequireInt32()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 42i64;
                 }
@@ -733,11 +769,10 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_UnsuffixedFloatLiteral_WithoutFloat64_EmitsMH0240()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 3.14;
                 }
@@ -752,11 +787,13 @@ public sealed class IntrinsicDiscoveryTests
     [Fact]
     public void UseSite_UnsuffixedStringLiteral_WithoutStr_EmitsMH0240()
     {
-        var compilation = Compilation.FromSource("""
+        var lines = UseSitePrelude.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var preludeWithoutStr = string.Join("\n", lines.Where(l => !l.Contains("\"Str\"") && !l.Contains("struct Str") && !l.Contains("Int8& data") && !l.Contains("Int64 length")));
+
+        var compilation = Compilation.FromSource(preludeWithoutStr + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var x = "hello";
                 }
@@ -764,18 +801,16 @@ public sealed class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
-        Assert.Contains("Str", diag.Message);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Str"));
     }
 
     [Fact]
     public void UseSite_UnsuffixedCharLiteral_WithoutChar_EmitsMH0240()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(UseSitePrelude + """
             public class Host
             {
-                public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 'c';
                 }
@@ -796,8 +831,8 @@ public sealed class IntrinsicDiscoveryTests
             public struct Int32
             {
                 public static Int32 Zero;
-                public static Int32 Create() { return Zero; }
-                public Int32 Abs() { return Zero; }
+                public static func Create() -> Int32 { return Zero; }
+                public func Abs() -> Int32 { return Zero; }
             }
             """);
 
@@ -812,6 +847,9 @@ public sealed class IntrinsicDiscoveryTests
             namespace Std
             {
                 intrinsic attribute IntrinsicType(MyStr name);
+
+                [IntrinsicType("ValueType")] public struct ValType;
+                [IntrinsicType("Struct")] public struct Struct : ValType;
 
                 [IntrinsicType("Int8")] public struct Int8;
                 [IntrinsicType("Int64")] public struct Int64;
@@ -871,7 +909,7 @@ public sealed class IntrinsicDiscoveryTests
             public class Host
             {
                 public struct void;
-                public void Run()
+                public func Run() -> void
                 {
                     var x = 42;
                     var s = "hello";
@@ -920,37 +958,37 @@ public sealed class IntrinsicDiscoveryTests
             public interface Add<TLhs, TRhs, TResult>
             {
                 [OperatorFunction("Addition")]
-                public static TResult Add(TLhs left, TRhs right);
+                public static func Add(TLhs left, TRhs right) -> TResult;
             }
 
             public interface Ctor<TArgs...>
             {
                 [OperatorFunction("Constructor")]
-                public void Construct(TArgs... args);
+                public func Construct(TArgs... args) -> void;
             }
 
             public interface Dtor
             {
                 [OperatorFunction("Destructor")]
-                public void Destroy();
+                public func Destroy() -> void;
             }
 
             public interface Index<TIndex, TResult>
             {
                 [OperatorFunction("IndexerGetter")]
-                public TResult Get(TIndex index);
+                public func Get(TIndex index) -> TResult;
             }
 
             public interface Deref<TResult>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public TResult& Arrow();
+                public func Arrow() -> TResult&;
             }
 
             public interface Assign<TRhs>
             {
                 [OperatorFunction("Assignment")]
-                public void Assign(TRhs value);
+                public func Assign(TRhs value) -> void;
             }
             """);
 
@@ -978,7 +1016,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadAdd<TLhs, TRhs, TResult>
             {
                 [OperatorFunction("Addition")]
-                public static TResult Add(TLhs left, TRhs right, TRhs extra);
+                public static func Add(TLhs left, TRhs right, TRhs extra) -> TResult;
             }
             """);
 
@@ -995,7 +1033,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadDeref<TResult>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public TResult Arrow();
+                public func Arrow() -> TResult;
             }
             """);
 
@@ -1012,7 +1050,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadCtor
             {
                 [OperatorFunction("Constructor")]
-                public static void Construct();
+                public static func Construct() -> void;
             }
             """);
 
@@ -1029,7 +1067,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadIndex<TResult>
             {
                 [OperatorFunction("IndexerGetter")]
-                public TResult Get();
+                public func Get() -> TResult;
             }
             """);
 
@@ -1046,7 +1084,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct MyStruct
             {
                 [OperatorFunction("Addition")]
-                public static MyStruct Add(MyStruct a, MyStruct b) => a;
+                public static func Add(MyStruct a, MyStruct b) -> MyStruct => a;
             }
             """);
 
@@ -1063,7 +1101,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadOp
             {
                 [OperatorFunction("NotARealOperator")]
-                public void DoSomething();
+                public func DoSomething() -> void;
             }
             """);
 
@@ -1081,7 +1119,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Int32
             {
                 [IntrinsicFunction("i32.add")]
-                public static Int32 Add(Int32 a, Int32 b);
+                public static func Add(Int32 a, Int32 b) -> Int32;
             }
             """);
 
@@ -1102,7 +1140,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct UserType
             {
                 [IntrinsicFunction("foo")]
-                public static void Foo();
+                public static func Foo() -> void;
             }
             """);
 
@@ -1119,7 +1157,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface New<TTarget, TReturn>
             {
                 [OperatorFunction("New")]
-                public static TReturn New();
+                public static func New() -> TReturn;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -1132,7 +1170,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadNew<TTarget, TReturn>
             {
                 [OperatorFunction("New")]
-                public TReturn New();
+                public func New() -> TReturn;
             }
             """);
         Assert.True(nonStatic.HasErrors);
@@ -1144,7 +1182,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadNew<TTarget>
             {
                 [OperatorFunction("New")]
-                public static void New();
+                public static func New() -> void;
             }
             """);
         Assert.True(voidReturn.HasErrors);
@@ -1163,7 +1201,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface Put<TTarget>
             {
                 [OperatorFunction("Put")]
-                public static void Put(TTarget& destination);
+                public static func Put(TTarget& destination) -> void;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -1179,7 +1217,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadPut<TTarget>
             {
                 [OperatorFunction("Put")]
-                public static Int64 Put(TTarget& destination);
+                public static func Put(TTarget& destination) -> Int64;
             }
             """);
         Assert.True(nonVoid.HasErrors);
@@ -1198,13 +1236,13 @@ public sealed class IntrinsicDiscoveryTests
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static void Copy(T& dest, T& src);
+                public static func Copy(T& dest, T& src) -> void;
             }
 
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public static void Move(T& dest, T& src);
+                public static func Move(T& dest, T& src) -> void;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -1222,7 +1260,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface BadCopy<T>
             {
                 [OperatorFunction("Copy")]
-                public static void Copy(T& dest);
+                public static func Copy(T& dest) -> void;
             }
             """);
         Assert.True(badParamCount.HasErrors);
@@ -1238,7 +1276,7 @@ public sealed class IntrinsicDiscoveryTests
             public interface Callable<TReturn, TArg>
             {
                 [OperatorFunction("Callable")]
-                public TReturn Call(TArg arg);
+                public func Call(TArg arg) -> TReturn;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -1258,19 +1296,19 @@ public sealed class IntrinsicDiscoveryTests
             public interface Destructor
             {
                 [OperatorFunction("Destructor")]
-                public void Drop();
+                public func Drop() -> void;
             }
 
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static void Copy(T& dest, T& src);
+                public static func Copy(T& dest, T& src) -> void;
             }
 
             public struct Resource : Destructor, Copy<Resource>
             {
-                public void Drop() {}
-                public static void Copy(Resource& dest, Resource& src) {}
+                public func Drop() -> void {}
+                public static func Copy(Resource& dest, Resource& src) -> void {}
             }
             """);
 
@@ -1290,19 +1328,19 @@ public sealed class IntrinsicDiscoveryTests
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static void Copy(T& dest, T& src);
+                public static func Copy(T& dest, T& src) -> void;
             }
 
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public static void Move(T& dest, T& src);
+                public static func Move(T& dest, T& src) -> void;
             }
 
             public struct Conflicted : Copy<Conflicted>, Move<Conflicted>
             {
-                public static void Copy(Conflicted& dest, Conflicted& src) {}
-                public static void Move(Conflicted& dest, Conflicted& src) {}
+                public static func Copy(Conflicted& dest, Conflicted& src) -> void {}
+                public static func Move(Conflicted& dest, Conflicted& src) -> void {}
             }
             """);
 

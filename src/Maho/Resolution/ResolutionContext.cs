@@ -867,6 +867,12 @@ internal sealed class ResolutionContext
         if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
             return GetType(untagged.InnerType);
 
+        if (typeRef.Kind == TypeRefKind.Function)
+            return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) ? fnH : null;
+
+        if (typeRef.Kind == TypeRefKind.Delegate)
+            return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) ? delH : null;
+
         if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
             return null;
 

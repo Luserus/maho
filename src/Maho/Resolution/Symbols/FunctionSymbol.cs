@@ -20,6 +20,7 @@ internal sealed class FunctionSymbol : Symbol
     public List<SymbolHandle> LocalTypes { get; internal set; }
 
     public TypeRef ReturnType { get; internal set; } = TypeRef.Unresolved;
+    public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
 
     public FunctionDeclaration? Syntax { get; }
 

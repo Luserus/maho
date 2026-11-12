@@ -37,7 +37,7 @@ This cluster models type-shape decoration without forcing every type node to inl
 
 - `ParameterVariableDeclarator`
 - `AssignmentClause`
-- `FunctionSignature`
+- `FunctionSignature` (holds pre-modifiers, `func` keyword, parameter list, post-modifiers, trailing `-> ReturnType`, and `where` constraints)
 - `ObjectWithClause`
 - `CollectionExpressionModifier`
 - `CollectionConstructorModifier`

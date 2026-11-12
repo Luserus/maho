@@ -397,9 +397,87 @@ internal sealed partial class Parser
         return (lessThan, genericArguments, greaterThan, true);
     }
 
+    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseFunctionType()
+    {
+        var funcKeyword = LookaheadConsume();
+        if (LookaheadCurrentToken.Kind is not TokenKind.LeftParen)
+            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var openParen = LookaheadConsume();
+
+        var nodesAndSeparators = new List<SyntaxNode>();
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var (paramType, success, ctx) = LookaheadParseTypeSyntax();
+            if (!success)
+                return (new SimpleType(funcKeyword), false, ctx);
+            nodesAndSeparators.Add(paramType);
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(LookaheadConsume());
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var closeParen = LookaheadConsume();
+
+        if (LookaheadGetCombinedOperatorData().Kind is not TokenKind.MinusGreaterThan)
+            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var arrowToken = LookaheadConsumeOperator();
+
+        var (returnType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+        if (!retSuccess)
+            return (new SimpleType(funcKeyword), false, retCtx);
+
+        return (new FunctionTypeSyntax(funcKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
+    }
+
+    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseDelegateType()
+    {
+        var delKeyword = LookaheadConsume();
+        if (LookaheadCurrentToken.Kind is not TokenKind.LeftParen)
+            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var openParen = LookaheadConsume();
+
+        var nodesAndSeparators = new List<SyntaxNode>();
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var (paramType, success, ctx) = LookaheadParseTypeSyntax();
+            if (!success)
+                return (new SimpleType(delKeyword), false, ctx);
+            nodesAndSeparators.Add(paramType);
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(LookaheadConsume());
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var closeParen = LookaheadConsume();
+
+        if (LookaheadGetCombinedOperatorData().Kind is not TokenKind.MinusGreaterThan)
+            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var arrowToken = LookaheadConsumeOperator();
+
+        var (returnType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+        if (!retSuccess)
+            return (new SimpleType(delKeyword), false, retCtx);
+
+        return (new DelegateTypeSyntax(delKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
+    }
+
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
     private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseTypeSyntax()
     {
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Func && LookaheadPeek().Kind is TokenKind.LeftParen)
+            return LookaheadParseFunctionType();
+
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Delegate && LookaheadPeek().Kind is TokenKind.LeftParen)
+            return LookaheadParseDelegateType();
+
         if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
         {
             var ampersand = LookaheadConsume();

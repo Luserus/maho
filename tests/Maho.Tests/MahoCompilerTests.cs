@@ -24,12 +24,12 @@ public sealed class MahoCompilerTests
     [Fact]
     public void AnalyzeText_ReturnsStructuredPayloads()
     {
-        Compilation result = MahoCompiler.AnalyzeText("""
+        Compilation result = MahoCompiler.AnalyzeText(CompilerTestBed.FullPrelude + """
             namespace Basic;
 
             public class Result;
 
-            public static Result Main()
+            public static func Main() -> Result
             {
                 return new Result();
             }
@@ -43,7 +43,7 @@ public sealed class MahoCompilerTests
     public void AnalyzeText_InvalidInput_ReturnsStructuredDiagnostics()
     {
         Compilation result = MahoCompiler.AnalyzeText("""
-            public static int Main()
+            public static func Main() -> int
             {
                 §;
                 string text = "unterminated
@@ -68,16 +68,16 @@ public sealed class MahoCompilerTests
             string validPath = Path.Combine(tempDirectory, "Valid.mh");
             string invalidPath = Path.Combine(tempDirectory, "Invalid.mh");
 
-            File.WriteAllText(validPath, """
+            File.WriteAllText(validPath, CompilerTestBed.FullPrelude + """
                 public class Result;
 
-                public static Result Main()
+                public static func Main() -> Result
                 {
                     return new Result();
                 }
                 """);
             File.WriteAllText(invalidPath, """
-                public static dyn Broken()
+                public static func Broken() -> dyn
                 {
                     $;
                 }

@@ -42,6 +42,15 @@ Top-level statement nodes require file-level opt-in through `#pragma toplevel en
 resolution, variables in an opted-in compilation unit are treated as locals of that file's
 implicit `Main` function.
 
+## Scope Directives & Block Scopes
+
+Block declarations support dedicated scope directives:
+- `global { ... }`: Placed at the top level to bypass synthetic `Main` scoping in files with `#pragma toplevel enable`, declaring variables and members directly in namespace/global scope.
+- `const { ... }`: Block scope marking contained declarations or statements for compile-time evaluation context.
+- `{ ... }`: Plain statement block introducing a nested lexical scope.
+
+Arbitrary modifier lists and attribute lists are not supported on block scopes (e.g. `public { ... }` is invalid). Block scopes do not propagate modifiers or attributes to inner declarations; each inner declaration explicitly declares its own modifiers.
+
 Conditional headers in `IfExpression` and `WhileExpression` support either a simple `expression` condition or a `declaration; expression` syntax (e.g. `if (int x = f(); x > 0)` or `while (int x = f(); x > 0)`), scoping any declared variable to both the test expression and the then/body expression.
 
 ## How to traverse this folder

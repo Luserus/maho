@@ -52,7 +52,7 @@ public sealed class AnalysisSessionTests
         Assert.Equal(1, session.SnippetCount);
 
         // Prompt 2: Declare a function referencing the type from prompt 1
-        var snippet2 = session.AnalyzeSnippet("public function Increment(Counter c) { }");
+        var snippet2 = session.AnalyzeSnippet("public func Increment(Counter c) { }");
         Assert.True(snippet2.Success);
         Assert.True(session.CommitSnippet(snippet2));
         Assert.Equal(2, session.SnippetCount);

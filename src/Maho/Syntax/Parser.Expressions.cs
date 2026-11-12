@@ -146,29 +146,142 @@ internal sealed partial class Parser
         return left;
     }
 
+    private bool LooksLikeLambda()
+    {
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals && Peek(2).Kind is TokenKind.GreaterThanSign)
+            return true;
+
+        if (CurrentToken.Kind is not TokenKind.LeftParen)
+            return false;
+
+        int probe = current + 1;
+        int depth = 1;
+
+        while (probe < tokens.Count && depth > 0)
+        {
+            if (tokens[probe].Kind is TokenKind.LeftParen)
+                depth++;
+            else if (tokens[probe].Kind is TokenKind.RightParen)
+                depth--;
+
+            probe++;
+        }
+
+        if (depth != 0 || probe >= tokens.Count)
+            return false;
+
+        bool IsProbeEqualsGreaterThan(int idx) =>
+            idx + 1 < tokens.Count && tokens[idx].Kind is TokenKind.Equals && tokens[idx + 1].Kind is TokenKind.GreaterThanSign;
+
+        bool IsProbeMinusGreaterThan(int idx) =>
+            idx + 1 < tokens.Count && tokens[idx].Kind is TokenKind.Minus && tokens[idx + 1].Kind is TokenKind.GreaterThanSign;
+
+        if (IsProbeEqualsGreaterThan(probe))
+            return true;
+
+        if (IsProbeMinusGreaterThan(probe))
+        {
+            int arrowProbe = probe + 2;
+            while (arrowProbe < tokens.Count && tokens[arrowProbe].Kind is not TokenKind.Semicolon and not TokenKind.RightBrace and not TokenKind.EndToken)
+            {
+                if (IsProbeEqualsGreaterThan(arrowProbe))
+                    return true;
+                arrowProbe++;
+            }
+        }
+
+        return false;
+    }
+
+    private LambdaExpression ParseLambdaExpression()
+    {
+        var parameters = new List<LambdaParameterSyntax>();
+        Token? arrowToken = null;
+        TypeSyntax? returnType = null;
+
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals && Peek(2).Kind is TokenKind.GreaterThanSign)
+        {
+            var ident = ParseNamedSyntax();
+            parameters.Add(new LambdaParameterSyntax(ident, null));
+        }
+        else
+        {
+            ExpectToken(TokenKind.LeftParen, "'('", "in lambda expression");
+
+            while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+            {
+                if (CurrentToken.Kind is TokenKind.Identifier && (Peek().Kind is TokenKind.Comma or TokenKind.RightParen))
+                {
+                    var paramIdent = ParseNamedSyntax();
+                    parameters.Add(new LambdaParameterSyntax(paramIdent, null));
+                }
+                else
+                {
+                    var paramType = ParseTypeSyntax();
+                    var paramIdent = ParseNamedSyntax();
+                    parameters.Add(new LambdaParameterSyntax(paramIdent, paramType));
+                }
+
+                if (CurrentToken.Kind is TokenKind.Comma)
+                    Consume();
+                else
+                    break;
+            }
+
+            ExpectToken(TokenKind.RightParen, "')'", "to close lambda parameters");
+
+            if (IsMinusGreaterThan())
+            {
+                arrowToken = ConsumeOperator();
+                returnType = ParseTypeSyntax();
+            }
+        }
+
+        var equalsGreaterThanToken = ConsumeArrow();
+
+        Expression body;
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            var (openBrace, locals, finalExpression, closeBrace) = ParseBlock(allowFinalExpression: false);
+            body = new BlockExpression(openBrace, locals, finalExpression, closeBrace);
+        }
+        else
+        {
+            body = ParseExpression();
+        }
+
+        return new LambdaExpression(parameters, arrowToken, returnType, equalsGreaterThanToken, body);
+    }
+
     /// <summary> Parses a primary expression without operator involvement. </summary>
     /// <returns> The primary expression node. </returns>
-    private Expression ParsePrimaryExpression() => CurrentToken.Kind switch
+    private Expression ParsePrimaryExpression()
     {
-        TokenKind.Dollar => ParseMacroInvocationExpression(),
-        TokenKind.LeftParen => ParseParenthesizedOrTupleExpression(),
-        TokenKind.LeftBrace => ParseBlockExpression(),
-        TokenKind.LeftBracket => ParseCollectionExpression(),
-        TokenKind.LessThanSign => ParseTypeAsExpression(),
-        TokenKind.Identifier => CurrentToken.MatchingKind switch
+        if (LooksLikeLambda())
+            return ParseLambdaExpression();
+
+        return CurrentToken.Kind switch
         {
-            MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
-            MatchingKeywordKind.If => ParseIfExpression(),
-            MatchingKeywordKind.While => ParseWhileExpression(),
-            MatchingKeywordKind.Match => ParseMatchExpression(),
-            MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
-            MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
-            _ => ParseNamedExpression()
-        },
-        TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
-            or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
-        _ => CreateMissingExpression()
-    };
+            TokenKind.Dollar => ParseMacroInvocationExpression(),
+            TokenKind.LeftParen => ParseParenthesizedOrTupleExpression(),
+            TokenKind.LeftBrace => ParseBlockExpression(),
+            TokenKind.LeftBracket => ParseCollectionExpression(),
+            TokenKind.LessThanSign => ParseTypeAsExpression(),
+            TokenKind.Identifier => CurrentToken.MatchingKind switch
+            {
+                MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
+                MatchingKeywordKind.If => ParseIfExpression(),
+                MatchingKeywordKind.While => ParseWhileExpression(),
+                MatchingKeywordKind.Match => ParseMatchExpression(),
+                MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
+                MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
+                _ => ParseNamedExpression()
+            },
+            TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
+                or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
+            _ => CreateMissingExpression()
+        };
+    }
 
     private NameofExpression ParseNameofExpression()
     {

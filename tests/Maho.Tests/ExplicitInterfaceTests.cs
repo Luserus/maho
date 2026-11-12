@@ -42,6 +42,43 @@ public class ExplicitInterfaceTests
             int8& buffer;
             int64 length;
         }
+        [intrinsic]
+        public attribute IntrinsicFunction;
+
+        [IntrinsicType("Pointer")]
+        public struct Pointer<T>
+        {
+            nuint addr;
+        }
+
+        [IntrinsicType("ValueType")]
+        public struct ValType;
+
+        [IntrinsicType("Struct")]
+        public struct Struct : ValType;
+
+        public interface Callable<TReturn, TParams...>
+        {
+            [OperatorFunction("Callable")]
+            public func Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Function")]
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            [IntrinsicFunction]
+            public func Callable.Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Delegate")]
+        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            Pointer<ValType> env;
+            [IntrinsicFunction]
+            public func Callable.Invoke(TParams args) -> TReturn;
+        }
         """;
 
     [Fact]
@@ -53,6 +90,12 @@ public class ExplicitInterfaceTests
 
             [intrinsic]
             public attribute OperatorFunction(Str name);
+
+            [IntrinsicType("ValueType")]
+            public struct ValType;
+
+            [IntrinsicType("Struct")]
+            public struct Struct : ValType;
 
             [IntrinsicType("NUInt")]
             public struct nuint;
@@ -83,13 +126,13 @@ public class ExplicitInterfaceTests
             public interface Ctor<T>
             {
                 [OperatorFunction("Constructor")]
-                public Unit Construct();
+                public func Construct() -> Unit;
             }
 
             public interface Dtor<T>
             {
                 [OperatorFunction("Destructor")]
-                public Unit Destruct();
+                public func Destruct() -> Unit;
             }
             """);
 
@@ -110,6 +153,12 @@ public class ExplicitInterfaceTests
 
             [intrinsic]
             public attribute OperatorFunction(Str name);
+
+            [IntrinsicType("ValueType")]
+            public struct ValType;
+
+            [IntrinsicType("Struct")]
+            public struct Struct : ValType;
 
             [IntrinsicType("Void")]
             public struct void;
@@ -140,7 +189,7 @@ public class ExplicitInterfaceTests
             public interface Deref<TTarget>
             {
                 [OperatorFunction("Dereference")]
-                public MyRef<TTarget> Deref();
+                public func Deref() -> MyRef<TTarget>;
             }
             """);
 
@@ -159,17 +208,17 @@ public class ExplicitInterfaceTests
             public interface Add<T>
             {
                 [OperatorFunction("Addition")]
-                public static int32 Add(int32 left, int32 right);
+                public static func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add<Int32>
             {
-                public static int32 Add.Add(int32 left, int32 right) { return left; }
+                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     <Int32 as Add<Int32>>.Add(1, 2);
                 }
@@ -200,17 +249,17 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static int32 Add(int32 left, int32 right);
+                public static func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public static int32 Add.Add(int32 left, int32 right) { return left; }
+                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     // Int32.Add should NOT resolve because Add.Add is interface-scoped!
                     Int32.Add(1, 2);
@@ -241,17 +290,17 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static int32 Add(int32 left, int32 right);
+                public static func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public static int32 Add.Add(int32 left, int32 right) { return left; }
+                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -284,21 +333,21 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static int32 Add(int32 left, int32 right);
+                public static func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
                 // Explicit interface implementation (priority 1)
-                public static int32 Add.Add(int32 left, int32 right) { return left; }
+                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
 
                 // Ordinary method with same name (priority 2)
-                public static int32 Add(int32 left, int32 right) { return right; }
+                public static func Add(int32 left, int32 right) -> int32 { return right; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -331,18 +380,18 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static int32 Add(int32 left, int32 right);
+                public static func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
                 // Ordinary method only (no explicit Add.Add)
-                public static int32 Add(int32 left, int32 right) { return left; }
+                public static func Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -375,34 +424,34 @@ public class ExplicitInterfaceTests
             public interface Rot<T>
             {
                 [OperatorFunction("RotateLeft")]
-                public static int32 RotL(int32 val, int32 count);
+                public static func RotL(int32 val, int32 count) -> int32;
 
                 [OperatorFunction("RotateRight")]
-                public static int32 RotR(int32 val, int32 count);
+                public static func RotR(int32 val, int32 count) -> int32;
             }
 
             public interface Mut<T>
             {
                 [OperatorFunction("PrefixIncrement")]
-                public int32 Inc();
+                public func Inc() -> int32;
 
                 [OperatorFunction("AdditionAssignment")]
-                public void AddAssign(int32 rhs);
+                public func AddAssign(int32 rhs) -> void;
             }
 
             public interface Idx<T, TIdx>
             {
                 [OperatorFunction("IndexerGetter")]
-                public int32 Get(int32 index);
+                public func Get(int32 index) -> int32;
 
                 [OperatorFunction("IndexerSetter")]
-                public void Set(int32 val, int32 index);
+                public func Set(int32 val, int32 index) -> void;
             }
 
             public interface Cast<TFrom, TTo>
             {
                 [OperatorFunction("ImplicitCast")]
-                public static int64 ToInt64(int32 val);
+                public static func ToInt64(int32 val) -> int64;
             }
             """);
 
@@ -443,18 +492,18 @@ public class ExplicitInterfaceTests
                 public interface Add
                 {
                     [OperatorFunction("Addition")]
-                    public static int32 Add(int32 a, int32 b);
+                    public static func Add(int32 a, int32 b) -> int32;
                 }
             }
 
             public struct Int32 : Ops.Add
             {
-                public static int32 Ops.Add.Add(int32 a, int32 b) { return a; }
+                public static func Ops.Add.Add(int32 a, int32 b) -> int32 { return a; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     <Int32 as Ops.Add>.Add(1, 2);
                 }

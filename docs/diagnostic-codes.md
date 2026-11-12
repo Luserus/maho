@@ -92,8 +92,6 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0502` | `UnresolvedIdentifier` | Variable, parameter, or member identifier not found in scope. |
 | `MH0503` | `AmbiguousIdentifier` | Identifier matches multiple visible symbols in scope. |
 | `MH0504` | `UnresolvedNamespace` | Namespace in `using` directive or qualified access not found. |
-| `MH0520` | `ConstructorOutsideType` | Constructor must be declared inside a type body. |
-| `MH0525` | `ConstructorNameMismatch` | Constructor name does not match enclosing type name. |
 
 ### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0539`)
 | Code | Name | Description |
@@ -147,17 +145,20 @@ These diagnostics are emitted by Pass 5 (`ExpressionResolutionPass`) and Pass 6 
 | :--- | :--- | :--- |
 | `MH2001` | `BinaryOperatorTypeMismatch` | Binary operator cannot be applied to left and right operand types (no matching operator interface). |
 | `MH2002` | `UnaryOperatorTypeMismatch` | Unary operator cannot be applied to operand type. |
-| `MH2003` | `CannotAssignToNonLValue` | Left-hand side of assignment does not evaluate to a writable L-value. |
-| `MH2004` | `AssignmentTypeMismatch` | Right-hand side type cannot be assigned to target type (no implicit conversion). |
-| `MH2005` | `ReturnTypeMismatch` | Value returned by return statement does not match declared function return type. |
-| `MH2006` | `ConditionTypeMismatch` | Condition expression in `if` or `while` does not evaluate to canonical boolean. |
-| `MH2007` | `CannotInferType` | Type of inferred variable (`var x`) cannot be determined without an initializer. |
-| `MH2008` | `MemberNotFound` | Member name not found on receiver type. |
-| `MH2010` | `ArgumentCountMismatch` | Invocation provides fewer or more arguments than expected by parameter signature. |
+| `MH2003` | `AssignmentTypeMismatch` | Expression type cannot be assigned to target variable type (no implicit conversion). |
+| `MH2004` | `ArgumentTypeMismatch` | Argument type cannot be converted to parameter type. |
+| `MH2005` | `ArgumentCountMismatch` | Invocation provides fewer or more arguments than expected by parameter signature. |
+| `MH2006` | `ReturnTypeMismatch` | Value returned by return statement does not match declared function return type. |
+| `MH2007` | `ConditionTypeMismatch` | Condition expression in `if` or `while` does not evaluate to canonical boolean. |
+| `MH2008` | `CannotInferVariableType` | Type of inferred variable (`var x`) cannot be determined from initializer. |
+| `MH2009` | `CannotAssignToNonLValue` | Left-hand side of assignment must be a variable, field, property or indexer. |
+| `MH2010` | `TupleDestructuringError` | Tuple destructuring count or element type mismatch. |
 | `MH2011` | `AmbiguousConditionalBranches` | Conditional `if-else` branches evaluate to conflicting types (exact matching required; no implicit widening). |
-| `MH2012` | `ConflictingReturnType / DeadCode` | Conflicting inferred return types across branches or unreachable dead code detected in control flow graph. |
+| `MH2012` | `ConflictingReturnType` | Return statement returns a type that conflicts with a previous return type in the same function. |
 | `MH2013` | `AmbiguousLiteralConversion` | Multiple custom literal conversion methods match the literal; explicit suffix is required. |
-| `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse. |
+| `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse or member lookup. |
+| `MH2015` | `CannotInferLambdaParameterType` | Cannot infer type for lambda parameter; explicit type annotation is required. |
+| `MH2016` | `LambdaBlockBodyRequiresReturn` | Lambda block body must end with an explicit return statement; trailing expressions are not permitted. |
 
 ---
 

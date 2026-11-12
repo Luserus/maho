@@ -21,7 +21,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Resolved or TypeRefKind.Literal => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -30,7 +30,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Unresolved => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -97,6 +97,17 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return new TypeRef(TypeRefKind.Untagged, null, new UntaggedSemanticType(inner));
     }
 
+    public static TypeRef Function(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
+        new TypeRef(TypeRefKind.Function, null, new FunctionSemanticType(returnType, parameterTypes));
+
+    public static TypeRef Delegate(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
+        new TypeRef(TypeRefKind.Delegate, null, new DelegateSemanticType(returnType, parameterTypes));
+
+    public bool IsFunction => Kind == TypeRefKind.Function;
+    public bool IsDelegate => Kind == TypeRefKind.Delegate;
+    public FunctionSemanticType? AsFunction => SpecialType as FunctionSemanticType;
+    public DelegateSemanticType? AsDelegate => SpecialType as DelegateSemanticType;
+
     public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
 
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
@@ -149,9 +160,84 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return targetUnion.Variants.Any(v => v.IsAssignableFrom(source, context));
         }
 
+        if (SpecialType is DelegateSemanticType targetDel)
+        {
+            if (source.SpecialType is FunctionSemanticType srcFn)
+            {
+                if (targetDel.ParameterTypes.Count == srcFn.ParameterTypes.Count &&
+                    targetDel.ReturnType.IsAssignableFrom(srcFn.ReturnType, context))
+                {
+                    bool match = true;
+                    for (int i = 0; i < targetDel.ParameterTypes.Count; i++)
+                    {
+                        if (!srcFn.ParameterTypes[i].IsAssignableFrom(targetDel.ParameterTypes[i], context))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) return true;
+                }
+            }
+            else if (source.SpecialType is DelegateSemanticType srcDel)
+            {
+                if (targetDel.ParameterTypes.Count == srcDel.ParameterTypes.Count &&
+                    targetDel.ReturnType.IsAssignableFrom(srcDel.ReturnType, context))
+                {
+                    bool match = true;
+                    for (int i = 0; i < targetDel.ParameterTypes.Count; i++)
+                    {
+                        if (!srcDel.ParameterTypes[i].IsAssignableFrom(targetDel.ParameterTypes[i], context))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) return true;
+                }
+            }
+        }
+
+        if (SpecialType is FunctionSemanticType targetFn && source.SpecialType is FunctionSemanticType srcFn2)
+        {
+            if (targetFn.ParameterTypes.Count == srcFn2.ParameterTypes.Count &&
+                targetFn.ReturnType.IsAssignableFrom(srcFn2.ReturnType, context))
+            {
+                bool match = true;
+                for (int i = 0; i < targetFn.ParameterTypes.Count; i++)
+                {
+                    if (!srcFn2.ParameterTypes[i].IsAssignableFrom(targetFn.ParameterTypes[i], context))
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return true;
+            }
+        }
+
         if (Handle is { } thisHandle && context.GetTypeSymbol(thisHandle) is ISumTypeSymbol sumType && sumType.UnionConstituents.Count > 0)
         {
             return sumType.UnionConstituents.Any(c => c.IsAssignableFrom(source, context));
+        }
+
+        if (Handle is { } targetH)
+        {
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && targetH == valTypeH)
+            {
+                if (source.IsFunction || source.IsDelegate) return true;
+                if (source.Handle is { } srcH)
+                {
+                    if (srcH == valTypeH) return true;
+                    if (IsSubtypeOf(srcH, valTypeH, context)) return true;
+                }
+            }
+
+            if (source.Handle is { } srcH2)
+            {
+                if (srcH2 == targetH) return true;
+                if (IsSubtypeOf(srcH2, targetH, context)) return true;
+            }
         }
 
         if (source.IsLiteral && source.AsLiteral is { } lit)
@@ -240,6 +326,38 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return false;
     }
 
+    private static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
+    {
+        if (subHandle == superHandle)
+            return true;
+
+        visited ??= [];
+        if (!visited.Add(subHandle))
+            return false;
+
+        var sym = context.GetSymbol(subHandle);
+        IReadOnlyList<TypeRef>? bases = sym switch
+        {
+            TypeSymbol ts => ts.BaseTypes,
+            NestedTypeSymbol nts => nts.BaseTypes,
+            _ => null
+        };
+
+        if (bases is not null)
+        {
+            foreach (var b in bases)
+            {
+                if (b.Handle is { } bHandle)
+                {
+                    if (IsSubtypeOf(bHandle, superHandle, context, visited))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public override string ToString() => Kind switch
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
@@ -248,7 +366,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
 

@@ -5,9 +5,7 @@ namespace Maho.Tests;
 
 public sealed class SumTypesTests
 {
-    private const string Prelude = """
-        public struct void;
-        public struct int32;
+    private static readonly string Prelude = CompilerTestBed.FullPrelude + """
         public struct uint8;
         """;
 
@@ -117,7 +115,9 @@ public sealed class SumTypesTests
             Assert.Single(compilation.Context.TypeSymbols, s => s.Name.Text == "Status"));
 
         Assert.NotNull(sumType.DiscriminantType);
-        Assert.Single(sumType.BaseTypes);
+        Assert.Equal(2, sumType.BaseTypes.Count);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH));
+        Assert.Contains(sumType.BaseTypes, b => b.Handle == enumH);
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Run()
+                public func Run() -> void
                 {
                     Shape.Circle { radius = 10 };
                 }
@@ -153,7 +153,7 @@ public sealed class SumTypesTests
             public struct C;
             public union U (A | B | C)
             {
-                public void Foo() { }
+                public func Foo() -> void { }
             }
             """);
 
@@ -168,7 +168,7 @@ public sealed class SumTypesTests
     [Fact]
     public void Union_AnonymousType_Resolved()
     {
-        var compilation = Compilation.FromSource("""
+        var compilation = Compilation.FromSource(Prelude + """
             public struct A;
             public struct B;
             public class Test
@@ -178,7 +178,7 @@ public sealed class SumTypesTests
             """);
 
         Assert.Empty(compilation.Diagnostics);
-        var field = Assert.Single(compilation.Context.FieldSymbols);
+        var field = Assert.Single(compilation.Context.FieldSymbols, f => f.Name.Text == "field");
         Assert.Equal(TypeRefKind.Union, field.Type.Kind);
         var union = Assert.IsType<UnionSemanticType>(field.Type.SpecialType);
         Assert.Equal(2, union.Variants.Count);
@@ -260,7 +260,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Check(E e)
+                public func Check(E e) -> void
                 {
                     match (e)
                     {
@@ -287,7 +287,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Check(E e)
+                public func Check(E e) -> void
                 {
                     match (e)
                     {
@@ -313,7 +313,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Check(E e)
+                public func Check(E e) -> void
                 {
                     match (e)
                     {
@@ -339,7 +339,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Check(E e)
+                public func Check(E e) -> void
                 {
                     match (e)
                     {
@@ -364,7 +364,7 @@ public sealed class SumTypesTests
             public struct B;
             public class Test
             {
-                public void Check((A | B) u)
+                public func Check((A | B) u) -> void
                 {
                     match (u)
                     {
@@ -386,7 +386,7 @@ public sealed class SumTypesTests
             public struct B;
             public class Test
             {
-                public void Check((A | B) u)
+                public func Check((A | B) u) -> void
                 {
                     match (u)
                     {
@@ -454,7 +454,7 @@ public sealed class SumTypesTests
             }
             public class Test
             {
-                public void Check(untagged E e)
+                public func Check(untagged E e) -> void
                 {
                     match (e)
                     {
@@ -478,7 +478,7 @@ public sealed class SumTypesTests
             public struct B;
             public class Test
             {
-                public void Check(untagged (A | B) u)
+                public func Check(untagged (A | B) u) -> void
                 {
                     match (u)
                     {
@@ -505,12 +505,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public void NormalMethod() { }
-                public untagged void UntaggedMethod() { }
+                public func NormalMethod() -> void { }
+                public untagged func UntaggedMethod() -> void { }
             }
             public class Test
             {
-                public void Run(E e)
+                public func Run(E e) -> void
                 {
                     e.NormalMethod();
                     e.UntaggedMethod();
@@ -529,12 +529,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public void NormalMethod() { }
-                public untagged void UntaggedMethod() { }
+                public func NormalMethod() -> void { }
+                public untagged func UntaggedMethod() -> void { }
             }
             public class Test
             {
-                public void Run(untagged E e)
+                public func Run(untagged E e) -> void
                 {
                     e.NormalMethod();
                 }
@@ -554,12 +554,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public void NormalMethod() { }
-                public untagged void UntaggedMethod() { }
+                public func NormalMethod() -> void { }
+                public untagged func UntaggedMethod() -> void { }
             }
             public class Test
             {
-                public void Run(untagged E e)
+                public func Run(untagged E e) -> void
                 {
                     e.UntaggedMethod();
                 }
@@ -575,12 +575,12 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public void MethodOnA() { }
+                public func MethodOnA() -> void { }
             }
             public struct B;
             public class Test
             {
-                public void Run((A | B) u)
+                public func Run((A | B) u) -> void
                 {
                     u.MethodOnA();
                 }
@@ -598,11 +598,11 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public void MethodOnA() { }
+                public func MethodOnA() -> void { }
             }
             public class Test
             {
-                public void Run((A | A) u)
+                public func Run((A | A) u) -> void
                 {
                     u.MethodOnA();
                 }
