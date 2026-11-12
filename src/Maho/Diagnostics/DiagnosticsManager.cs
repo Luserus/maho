@@ -96,6 +96,78 @@ internal sealed class DiagnosticsManager
     }
 
     /// <summary>
+    /// Reports an unsupported unary operator on an operand.
+    /// </summary>
+    public void ReportUnaryTypeMismatch(
+        TextSpan opSpan,
+        string op,
+        TextSpan operandSpan,
+        string operandTypeName,
+        string? note = null,
+        string? help = null,
+        SourceText? source = null)
+    {
+        var builder = BuildError("MH2002", $"cannot apply unary operator '{op}' to operand of type '{operandTypeName}'", opSpan, source)
+            .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
+            .WithSecondaryLabel(operandSpan, $"this expression has type '{operandTypeName}'");
+
+        if (note is not null)
+            builder.WithNote(note);
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports an assignment type mismatch. </summary>
+    public void ReportAssignmentTypeMismatch(TextSpan span, string rhsTypeName, string lhsTypeName, SourceText? source = null) =>
+        BuildError("MH2003", $"cannot assign expression of type '{rhsTypeName}' to variable of type '{lhsTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"expression has type '{rhsTypeName}', but target has type '{lhsTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a function/method argument type mismatch. </summary>
+    public void ReportArgumentTypeMismatch(TextSpan span, int index, string argTypeName, string paramTypeName, SourceText? source = null) =>
+        BuildError("MH2004", $"argument {index}: cannot convert from '{argTypeName}' to '{paramTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"has type '{argTypeName}', but expected '{paramTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a call argument count mismatch. </summary>
+    public void ReportArgumentCountMismatch(TextSpan span, int expected, int actual, SourceText? source = null) =>
+        BuildError("MH2005", $"expected {expected} arguments, but received {actual}", span, source)
+            .WithPrimaryLabel(span, $"expected {expected} arguments, but received {actual}", source)
+            .Report();
+
+    /// <summary> Reports a return type mismatch. </summary>
+    public void ReportReturnTypeMismatch(TextSpan span, string exprTypeName, string returnTypeName, SourceText? source = null) =>
+        BuildError("MH2006", $"cannot convert return expression of type '{exprTypeName}' to return type '{returnTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"expression has type '{exprTypeName}', but function returns '{returnTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports a condition expression type mismatch. </summary>
+    public void ReportConditionTypeMismatch(TextSpan span, string actualTypeName, SourceText? source = null) =>
+        BuildError("MH2007", $"condition expression must have type 'Bool', but found '{actualTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"condition has type '{actualTypeName}' instead of 'Bool'", source)
+            .Report();
+
+    /// <summary> Reports an uninferrable variable type. </summary>
+    public void ReportCannotInferType(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH2008", $"cannot infer type for variable '{name}' from initializer", span, source)
+            .WithPrimaryLabel(span, $"variable '{name}' requires an explicit type or a typed initializer", source)
+            .Report();
+
+    /// <summary> Reports assignment to a non-lvalue expression. </summary>
+    public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
+        BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)
+            .WithPrimaryLabel(span, "invalid assignment target", source)
+            .Report();
+
+    /// <summary> Reports a tuple destructuring mismatch. </summary>
+    public void ReportTupleDestructureMismatch(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH2010", $"tuple destructuring error: {message}", span, source)
+            .WithPrimaryLabel(span, message, source)
+            .Report();
+
+    /// <summary>
     /// Reports a re-declared symbol in the same scope, pointing to both the re-declaration site
     /// (primary label) and the previous declaration site (secondary label).
     /// </summary>
@@ -211,6 +283,9 @@ internal sealed class DiagnosticsManager
     /// <summary> Reports a parser recovery site where generic parameter syntax was required. </summary>
     public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0126", "a generic parameter", found, span, context, source, unexpectedSpan);
+
+    public void ReportExpectedPattern(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
+        ReportExpected("MH0127", "a pattern", found, span, context, source, unexpectedSpan);
 
     /// <summary> Reports that top-level statements require '#pragma toplevel enable'. </summary>
     public void ReportTopLevelPragmaRequired(TextSpan span, SourceText? source = null) =>
@@ -469,5 +544,146 @@ internal sealed class DiagnosticsManager
     public void ReportMacroDependencyCycle(TextSpan span, string macroName, SourceText? source = null) =>
         BuildError("MH0604", $"macro '${macroName}' participates in a circular dependency or expansion deadlock", span, source)
             .WithPrimaryLabel(span, $"circular macro expansion involves '${macroName}' here", source)
+            .Report();
+
+    /// <summary> Reports an unknown intrinsic attribute name declared with the intrinsic modifier. </summary>
+    public void ReportUnknownIntrinsicAttribute(TextSpan span, string attributeName, SourceText? source = null) =>
+        BuildError("MH0540", $"unknown intrinsic attribute '{attributeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{attributeName}' is not a recognized compiler intrinsic attribute", source)
+            .WithHelp("only compiler-known intrinsic attributes (such as 'IntrinsicType') can be declared with the 'intrinsic' modifier")
+            .Report();
+
+    /// <summary> Reports an invalid signature for an intrinsic attribute declaration. </summary>
+    public void ReportInvalidIntrinsicAttributeSignature(TextSpan span, string message, SourceText? source = null, string attributeName = "IntrinsicType") =>
+        BuildError("MH0541", $"invalid signature for intrinsic attribute '{attributeName}': {message}", span, source)
+            .WithPrimaryLabel(span, message, source)
+            .Report();
+
+    /// <summary> Reports an invalid signature for an operator function declaration. </summary>
+    public void ReportInvalidOperatorFunctionSignature(TextSpan span, string operatorName, string reason, SourceText? source = null) =>
+        BuildError("MH0242", $"invalid signature for operator function '{operatorName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
+    public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
+        BuildError("MH0542", $"unknown intrinsic type '{intrinsicLiteral}'", span, source)
+            .WithPrimaryLabel(span, $"'{intrinsicLiteral}' is not a recognized compiler intrinsic type", source)
+            .Report();
+
+    /// <summary> Reports a duplicate intrinsic type declaration. </summary>
+    public void ReportDuplicateIntrinsicType(
+        string intrinsicName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError("MH0543", $"intrinsic type '{intrinsicName}' is already declared", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"duplicate declaration of intrinsic '{intrinsicName}' here", redeclSource);
+
+        if (firstDeclSpan is { } firstSpan)
+            builder.WithSecondaryLabel(firstSpan, $"previous declaration of intrinsic '{intrinsicName}' here", firstSource);
+
+        builder.WithHelp($"intrinsic types can only be declared once across the project and its referenced libraries")
+            .Report();
+    }
+
+    /// <summary> Reports that an intrinsic type does not satisfy its required ABI contract. </summary>
+    public void ReportIntrinsicAbiMismatch(TextSpan span, string typeName, string intrinsicName, string reason, SourceText? source = null) =>
+        BuildError("MH0544", $"type '{typeName}' does not satisfy the ABI contract for intrinsic '{intrinsicName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports that syntax requires an intrinsic type that was not declared or failed verification. </summary>
+    public void ReportMissingIntrinsicForSyntax(TextSpan span, string syntaxDescription, string requiredIntrinsic, SourceText? source = null) =>
+        BuildError("MH0240", $"{syntaxDescription} requires intrinsic type '{requiredIntrinsic}' to be declared", span, source)
+            .WithPrimaryLabel(span, $"requires intrinsic '{requiredIntrinsic}'", source)
+            .WithHelp($"declare a type with [IntrinsicType(\"{requiredIntrinsic}\")] or reference a library that defines it")
+            .Report();
+
+    /// <summary> Reports a non-exhaustive pattern match. </summary>
+    public void ReportNonExhaustiveMatch(TextSpan span, string missingVariant, SourceText? source = null) =>
+        BuildError("MH0605", $"match expression is not exhaustive; missing variant '{missingVariant}'", span, source)
+            .WithPrimaryLabel(span, $"missing pattern arm for variant '{missingVariant}'", source)
+            .WithHelp("add the missing variant arm or a wildcard pattern '_' to make the match exhaustive")
+            .Report();
+
+    /// <summary> Reports that a type implements both Destructor and Copy. </summary>
+    public void ReportDestructorNandCopy(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0243", $"type '{typeName}' cannot implement both 'Destructor' and 'Copy'; types with destructors must use move semantics", span, source)
+            .WithPrimaryLabel(span, "cannot implement both 'Destructor' and 'Copy'", source)
+            .Report();
+
+    /// <summary> Reports that a type implements both Copy and Move. </summary>
+    public void ReportCopyNandMove(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0244", $"type '{typeName}' cannot implement both 'Copy' and 'Move'; a type must be exclusively Copy or exclusively Move", span, source)
+            .WithPrimaryLabel(span, "cannot implement both 'Copy' and 'Move'", source)
+            .Report();
+
+    /// <summary> Reports incompatible branch types in conditional expression. </summary>
+    public void ReportAmbiguousConditionalBranches(TextSpan span, string thenType, string elseType, SourceText? source = null) =>
+        BuildError("MH2011", $"conditional branches evaluate to different types '{thenType}' and '{elseType}'; explicit cast to a common base type is required", span, source)
+            .WithPrimaryLabel(span, $"branches evaluate to '{thenType}' and '{elseType}'", source)
+            .WithHelp("cast branches explicitly to a common base type or interface")
+            .Report();
+
+    /// <summary> Reports conflicting return types in inferred function. </summary>
+    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null) =>
+        BuildError("MH2012", $"return statement returns type '{actualType}', which conflicts with previous return type '{previousType}'; all return branches must return the exact same type or require explicit return type declaration", span, source)
+            .WithPrimaryLabel(span, $"returns '{actualType}' but previous return yielded '{previousType}'", source)
+            .Report();
+
+    /// <summary> Reports ambiguous literal conversion when multiple literal overloads exist. </summary>
+    public void ReportAmbiguousLiteralConversion(TextSpan span, string typeName, string overloads, SourceText? source = null) =>
+        BuildError("MH2013", $"ambiguous literal conversion for type '{typeName}'; multiple literal overloads exist ({overloads}); explicit suffix required", span, source)
+            .WithPrimaryLabel(span, $"ambiguous literal overloads: {overloads}", source)
+            .WithHelp("provide an explicit literal suffix to select the intended overload")
+            .Report();
+
+    /// <summary> Reports that a member was not found on a type. </summary>
+    public void ReportMemberNotFound(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+        BuildError("MH2014", $"type '{typeName}' does not contain a definition for '{memberName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' not found on '{typeName}'", source)
+            .Report();
+
+    /// <summary> Reports that an expression is not callable or has no matching Call operator overload. </summary>
+    public void ReportTypeNotCallable(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0611", $"type '{typeName}' is not callable or has no matching overload for 'Call'", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' is not callable", source)
+            .WithHelp($"implement 'Callable<TReturn, ...>' to make instances of '{typeName}' invocable")
+            .Report();
+
+    /// <summary> Reports an attempt to match on an untagged sum type without discriminant. </summary>
+    public void ReportUntaggedMatchDisallowed(TextSpan span, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0606", $"cannot match on untagged sum type '{sumTypeName}' without discriminant", span, source)
+            .WithPrimaryLabel(span, $"cannot match on '{sumTypeName}' because it is untagged", source)
+            .WithHelp("untagged sum types have no runtime discriminant; access them via untagged methods")
+            .Report();
+
+    /// <summary> Reports an invalid pattern that does not match any variant or constituent of the sum type. </summary>
+    public void ReportInvalidPatternForSumType(TextSpan span, string patternName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0607", $"pattern '{patternName}' is not a valid variant or constituent of sum type '{sumTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{patternName}' does not belong to sum type '{sumTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports invocation of an ordinary method on an untagged sum type receiver. </summary>
+    public void ReportUntaggedMethodMismatch(TextSpan span, string methodName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0608", $"cannot invoke ordinary instance method '{methodName}' on untagged sum type '{sumTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"cannot invoke non-untagged method '{methodName}' on untagged receiver", source)
+            .WithHelp("untagged sum type instances can only invoke methods declared with the 'untagged' modifier")
+            .Report();
+
+    /// <summary> Reports a direct invocation of a variant-level method on a sum type instance. </summary>
+    public void ReportDirectVariantMethodInvocation(TextSpan span, string methodName, string sumTypeName, SourceText? source = null) =>
+        BuildError("MH0609", $"'{methodName}' is a variant of sum type '{sumTypeName}'; invoke methods via pattern matching", span, source)
+            .WithPrimaryLabel(span, $"cannot call variant method '{methodName}' directly on sum type '{sumTypeName}'", source)
+            .WithHelp("match on the sum type instance to unwrap the variant before invoking variant methods")
+            .Report();
+
+    /// <summary> Reports usage of an untagged-defined type without the untagged modifier. </summary>
+    public void ReportUntaggedDefinitionTaggedUsage(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0610", $"'untagged' type '{typeName}' must be declared with 'untagged' modifier", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' was defined as untagged and must be declared as 'untagged {typeName}'", source)
             .Report();
 }

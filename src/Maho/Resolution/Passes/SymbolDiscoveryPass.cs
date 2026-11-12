@@ -6,18 +6,28 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Resolution Pass 1: Symbol Discovery.
+/// <para>
+/// Walks all compilation units in the project syntax trees to discover and declare top-level and nested symbols
+/// (namespaces, classes, structs, interfaces, enums, sum types, methods, fields, properties, functions, and macros).
+/// Constructs the lexical <see cref="Scope"/> hierarchy, populates symbol tables, and binds syntax nodes to their scopes.
+/// </para>
+/// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
     private ResolutionContext context = null!;
 
+    /// <summary>
+    /// Executes symbol discovery across all syntax trees in the compilation.
+    /// </summary>
+    /// <param name="context">The shared compilation resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
 
         if (context.Options?.GlobalAliases is { Count: > 0 } globalAliases)
-        {
             RegisterGlobalAliases(globalAliases);
-        }
 
         foreach (var tree in context.SyntaxTrees)
             ResolveCompilationUnit(tree.Root);
@@ -39,6 +49,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             {
                 foreach (var diag in dm.Diagnostics)
                     context.Diagnostics?.Report(diag);
+
                 continue;
             }
 
@@ -104,6 +115,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 return containingNamespace;
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
+                return containingNamespace;
+            case TopLevelLiteralMacroDeclaration:
                 return containingNamespace;
             case TopLevelMacroDeclaration declaration:
                 ResolveTopLevelMacroDeclaration(declaration.Macro, scope, containingNamespace);
@@ -334,6 +347,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(ownerScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -351,6 +366,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -367,6 +384,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
             typeScope.IsSink = true;
 
         symbol.Flags = ResolveTypeFlags(declaration.Modifiers);
+        if (symbol is ISumTypeSymbol sumSymbol)
+            sumSymbol.IsUntagged = symbol.Flags.HasFlag(TypeFlags.Untagged);
         ResolutionContext.BindChildScope(enclosingScope, symbol, typeScope);
         context.RegisterSyntaxScope(declaration.Body, typeScope);
 
@@ -378,11 +397,46 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
 
     private void ResolveTypeBody(TypeBody body, Scope scope, SymbolHandle containingType)
     {
-        if (body is not TypeBlockBody block)
-            return;
+        if (body is TypeBlockBody block)
+        {
+            foreach (var member in block.Members)
+                ResolveMember(member, scope, containingType);
+        }
+        else if (body is TypeEnumBody enumBody)
+        {
+            var sumType = context.GetSymbol(containingType) as ISumTypeSymbol;
+            foreach (var variant in enumBody.Variants)
+            {
+                var variantName = ResolutionContext.GetSymbolName(variant.Name).Last;
+                var variantSymbol = context.CreateEnumVariantSymbol(scope, variantName, variant.Kind, containingType, variant, variant.ExplicitValue);
+                var variantHandle = ResolutionContext.GetHandle(variantSymbol);
+                sumType?.EnumVariants.Add(variantHandle);
 
-        foreach (var member in block.Members)
-            ResolveMember(member, scope, containingType);
+                var variantScope = context.CreateScope(scope);
+                ResolutionContext.BindChildScope(scope, variantSymbol, variantScope);
+                context.RegisterSyntaxScope(variant, variantScope);
+
+                if (variant is EnumTupleVariant tuple)
+                {
+                    variantSymbol.Parameters = DiscoverParameters(tuple.Parameters, variantScope, variantHandle);
+                }
+                else if (variant is EnumStructVariant structVar)
+                {
+                    foreach (var memberField in structVar.Fields)
+                    {
+                        ResolveFieldDeclaration(memberField.Declaration, variantScope, variantHandle);
+                    }
+                    foreach (var s in variantScope.Symbols.Values)
+                    {
+                        if (s.Kind == SymbolKind.Field)
+                            variantSymbol.Fields.Add(ResolutionContext.GetHandle(s));
+                    }
+                }
+            }
+
+            foreach (var member in enumBody.Members)
+                ResolveMember(member, scope, containingType);
+        }
     }
 
     private void ResolveMember(Member member, Scope scope, SymbolHandle containingType)
@@ -399,6 +453,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 }
             case MemberAliasDeclaration declaration:
                 ResolveMemberAliasDeclaration(declaration.Alias, scope, containingType);
+                break;
+            case MemberLiteralMacroDeclaration:
                 break;
             case MemberMacroDeclaration declaration:
                 ResolveMemberMacroDeclaration(declaration.Macro, scope, containingType);
@@ -438,6 +494,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
         symbol.Parameters = DiscoverParameters(declaration.Signature, functionScope, ResolutionContext.GetHandle(symbol));
         ResolveFunctionBody(declaration.Body, functionScope, ResolutionContext.GetHandle(symbol), containingMethod: null);
@@ -456,6 +513,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+        if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
+        {
+            symbol.Flags |= FunctionFlags.InterfaceScoped;
+            var ifaceParts = new SymbolPart[qual.Parts.Count - 1];
+            for (int i = 0; i < ifaceParts.Length; i++)
+                ifaceParts[i] = ResolutionContext.GetSymbolName(qual.Parts[i]).Last;
+            symbol.ExplicitInterfaceName = new SymbolName(ifaceParts);
+        }
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -477,6 +543,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+
         symbol.GenericParameters = ResolveGenericParameters(declaration.Signature.Identifier, functionScope, symbol);
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -520,12 +587,15 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return [];
     }
 
-    private List<SymbolHandle> DiscoverParameters(FunctionSignature signature, Scope scope, SymbolHandle containingFunction)
+    private List<SymbolHandle> DiscoverParameters(FunctionSignature signature, Scope scope, SymbolHandle containingFunction) =>
+        DiscoverParameters(signature.Parameters, scope, containingFunction);
+
+    private List<SymbolHandle> DiscoverParameters(SeparatedSyntaxList<Parameter> parameters, Scope scope, SymbolHandle containingSymbol)
     {
-        var list = new List<SymbolHandle>(signature.Parameters.Count);
-        foreach (var param in signature.Parameters)
+        var list = new List<SymbolHandle>(parameters.Count);
+        foreach (var param in parameters)
         {
-            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingFunction, param);
+            var symbol = context.CreateParameterSymbol(scope, ResolutionContext.GetSymbolName(param.Declarator.Identifier).Last, containingSymbol, param);
             list.Add(ResolutionContext.GetHandle(symbol));
         }
 
@@ -608,6 +678,8 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 break;
             case LocalFunctionDeclaration declaration:
                 RegisterLocalFunction(containingSymbol, ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod));
+                break;
+            case LocalLiteralMacroDeclaration:
                 break;
             case LocalMacroDeclaration declaration:
                 ResolveLocalMacroDeclaration(declaration.Macro, scope, containingMethod);
@@ -706,6 +778,9 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         else if (expr is AsExpression asExpr)
         {
             DiscoverBlockExpressions(asExpr.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is TypeAsExpression)
+        {
         }
         else if (expr is WhileExpression whileExpr)
         {
@@ -843,6 +918,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
                 MatchingKeywordKind.Partial => TypeFlags.Partial,
+                MatchingKeywordKind.Untagged => TypeFlags.Untagged,
                 _ => TypeFlags.None
             };
         }
@@ -881,6 +957,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Static => VariableFlags.Static,
                 MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
+                MatchingKeywordKind.Untagged => VariableFlags.Untagged,
                 _ => VariableFlags.None
             };
         }
@@ -904,6 +981,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
+                MatchingKeywordKind.Untagged => FunctionFlags.Untagged,
                 _ => FunctionFlags.None
             };
         }

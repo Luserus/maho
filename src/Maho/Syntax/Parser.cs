@@ -162,7 +162,7 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                                    MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global;
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged;
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
@@ -176,7 +176,10 @@ internal sealed partial class Parser
         matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put
         and not MatchingKeywordKind.Operator
         and not MatchingKeywordKind.If and not MatchingKeywordKind.While
-        and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto;
+        and not MatchingKeywordKind.Match
+        and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto
+        and not MatchingKeywordKind.True and not MatchingKeywordKind.False
+        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -458,7 +461,9 @@ internal sealed partial class Parser
         IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
         var modifiers = ParseModifiers();
 
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
+            return new MemberFunctionDeclaration(ParseLiteralFunctionDeclaration(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Macro)
             return new MemberMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseMemberMacroInvocationDeclaration();

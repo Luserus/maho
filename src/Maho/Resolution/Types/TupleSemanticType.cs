@@ -8,6 +8,7 @@ namespace Maho.Resolution;
 internal readonly record struct TupleElement(TypeRef Type, string? Name = null)
 {
     public override string ToString() => Name is null ? Type.ToString() : $"{Type} {Name}";
+    public string ToDisplayString(ResolutionContext? context = null) => Name is null ? Type.ToDisplayString(context) : $"{Type.ToDisplayString(context)} {Name}";
 }
 
 /// <summary>Represents a tuple type (<c>(T1, T2)</c> or <c>(T1 a, T2 b)</c>).</summary>
@@ -54,4 +55,6 @@ internal sealed class TupleSemanticType : SemanticType
     }
 
     public override string ToString() => $"({string.Join(", ", Elements)})";
+
+    public override string ToDisplayString(ResolutionContext? context = null) => $"({string.Join(", ", Elements.Select(e => e.ToDisplayString(context)))})";
 }

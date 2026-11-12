@@ -31,7 +31,7 @@ public sealed class MahoCompilerTests
 
             public static Result Main()
             {
-                return 0;
+                return new Result();
             }
             """, "basic.mh");
 
@@ -73,7 +73,7 @@ public sealed class MahoCompilerTests
 
                 public static Result Main()
                 {
-                    return 0;
+                    return new Result();
                 }
                 """);
             File.WriteAllText(invalidPath, """

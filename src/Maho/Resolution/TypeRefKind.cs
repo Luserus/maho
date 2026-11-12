@@ -15,12 +15,20 @@ internal enum TypeRefKind : byte
     Pointer,
     /// <summary>Reference type (<c>T&amp;</c>).</summary>
     Reference,
-    /// <summary>Fixed-size array type (<c>T[size]</c>).</summary>
+    /// <summary>Dynamic array type (<c>T[]</c>).</summary>
     Array,
-    /// <summary>Unsized span type (<c>T[]</c>).</summary>
+    /// <summary>Fixed-size inline array type (<c>T[size]</c>).</summary>
+    FixedArray,
+    /// <summary>Span type (<c>&amp;T</c>).</summary>
     Span,
     /// <summary>Optional type (<c>T?</c>).</summary>
     Optional,
     /// <summary>Tuple type (<c>(T1, T2)</c>).</summary>
-    Tuple
+    Tuple,
+    /// <summary>Union type (<c>(T1 | T2)</c>).</summary>
+    Union,
+    /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
+    Untagged,
+    /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
+    Literal
 }

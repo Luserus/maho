@@ -881,8 +881,9 @@ public sealed class DeclarationResolutionTests
             public struct Int32;
             public Int32* ptr;
             public Int32& refVal;
-            public Int32[] spanVal;
-            public Int32[42] arrVal;
+            public &Int32 spanVal;
+            public Int32[] arrVal;
+            public Int32[42] fixedArrVal;
             public Int32? optVal;
             public Int32*[] nestedVal;
             """);
@@ -897,6 +898,7 @@ public sealed class DeclarationResolutionTests
         var refVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "refVal");
         var spanVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "spanVal");
         var arrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "arrVal");
+        var fixedArrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "fixedArrVal");
         var optVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "optVal");
         var nestedVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVal");
 
@@ -919,16 +921,20 @@ public sealed class DeclarationResolutionTests
         Assert.True(arrVal.Type.IsResolved);
         var arrSem = Assert.IsType<ArraySemanticType>(arrVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), arrSem.ElementType);
-        Assert.True(arrSem.IsFixedSize);
+
+        Assert.Equal(TypeRefKind.FixedArray, fixedArrVal.Type.Kind);
+        Assert.True(fixedArrVal.Type.IsResolved);
+        var fixedArrSem = Assert.IsType<FixedArraySemanticType>(fixedArrVal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), fixedArrSem.ElementType);
 
         Assert.Equal(TypeRefKind.Optional, optVal.Type.Kind);
         Assert.True(optVal.Type.IsResolved);
         var optSem = Assert.IsType<OptionalSemanticType>(optVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), optSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Span, nestedVal.Type.Kind);
+        Assert.Equal(TypeRefKind.Array, nestedVal.Type.Kind);
         Assert.True(nestedVal.Type.IsResolved);
-        var nestedSem = Assert.IsType<SpanSemanticType>(nestedVal.Type.SpecialType);
+        var nestedSem = Assert.IsType<ArraySemanticType>(nestedVal.Type.SpecialType);
         Assert.Equal(TypeRefKind.Pointer, nestedSem.ElementType.Kind);
         var innerPtrSem = Assert.IsType<PointerSemanticType>(nestedSem.ElementType.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), innerPtrSem.ElementType);
@@ -986,6 +992,7 @@ public sealed class DeclarationResolutionTests
             public struct Int32;
             public void Process(Int32 value) { }
             public void Process(Int32* value) { }
+            public void Process(&Int32 value) { }
             public void Process(Int32[] value) { }
             public void Process(Int32[10] value) { }
             """);
@@ -993,7 +1000,7 @@ public sealed class DeclarationResolutionTests
         Assert.Empty(diagnostics.Diagnostics);
 
         ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
-        Assert.Equal(4, context.FunctionSymbols.Count);
+        Assert.Equal(5, context.FunctionSymbols.Count);
 
         var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
         var int32Handle = ResolutionContext.GetHandle(int32);
@@ -1002,6 +1009,7 @@ public sealed class DeclarationResolutionTests
         var fnPtr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Pointer);
         var fnSpan = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Span);
         var fnArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Array);
+        var fnFixedArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.FixedArray);
     }
 
     [Fact]

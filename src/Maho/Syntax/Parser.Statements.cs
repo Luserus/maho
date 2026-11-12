@@ -70,6 +70,7 @@ internal sealed partial class Parser
         {
             case TokenKind.Identifier:
             case TokenKind.LeftParen:
+            case TokenKind.Ampersand:
                 if (CurrentToken.MatchingKind is MatchingKeywordKind.Return)
                     return ParseLocalReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)

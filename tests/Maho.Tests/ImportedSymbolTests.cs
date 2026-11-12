@@ -72,7 +72,7 @@ public sealed class ImportedSymbolTests
 
         var syntaxTree = appCompilation.SyntaxTrees[0];
         var resolver = new Resolver();
-        var context = resolver.Resolve(syntaxTree, referencedProjects: [libCompilation.Context!]);
+        var context = resolver.Resolve(syntaxTree, referencedProjects: [libCompilation.Context]);
 
         // Local Widget should shadow imported Widget
         var widgetPart = new SymbolPart("Widget");

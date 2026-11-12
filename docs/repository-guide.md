@@ -58,9 +58,13 @@ The compiler executes a complete front-end pipeline up through declaration resol
    - Resolves and expands macros across the syntax tree, validating recursion limits and nesting bounds.
    - Preserves macro call chains to render diagnostic traceback trees.
 5. **Semantic Analysis Phase**:
-   - `Resolver` runs semantic passes across the unified `SyntaxTree`:
+   - `Resolver` runs 6 orchestrated passes across the unified `SyntaxTree`:
+     - `MacroExpansionPass`: expands syntactic macros with token hygiene tracking and invocation stack tracing.
      - `SymbolDiscoveryPass`: discovers namespaces, builds the namespace trie, registers types/functions/variables/properties/aliases, assigns modifier flags (including `TypeFlags.Partial` and `FunctionFlags.Partial`), and constructs lexical scopes.
-     - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH1004`), checks duplicate non-partial types (`MH1002`), performs partial type canonical merging and kind consistency, enforces partial function body limits and signature matching (`MH1003`), checks duplicate variables (`MH1005`), duplicate properties (`MH1006`), and ambiguous type references (`MH1001`).
+     - `IntrinsicDiscoveryPass`: validates compiler intrinsic attribute signatures (`[IntrinsicType]`, `[OperatorFunction]`, `[IntrinsicFunction]`), verifies topological memory ABI contracts on primitive types, and catalogs operator interfaces.
+     - `DeclarationResolutionPass`: binds type references, verifies base type hierarchies, checks cyclic inheritance (`MH0538`), checks duplicate types/functions/variables/properties, and enforces destructor/copy/move mutual exclusivity (`MH0243`, `MH0244`).
+     - `ExpressionResolutionPass`: resolves operator overloads (`<T as Add>::Add`), performs sequential eager collapsing with retroactive literal resolution, resolves two-phase object creation (`Put`/`New`), enforces exact branch matching (`MH2011`), and validates sum types and match patterns.
+     - `ControlFlowAndReturnInferencePass`: constructs basic-block control flow graphs (CFGs), checks reachability and dead code (`MH2012`), and infers function return types from return statements.
    - Phase duration is measured and recorded in `CompilationPhaseTimers.SemanticAnalysis`.
 6. **Lowering & Codegen Phase**:
    - Currently serves as the lowering boundary (throwing `MH9000` until backend code generation is hooked up).

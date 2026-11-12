@@ -6,7 +6,19 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
-/// <summary>Resolves declaration-owned references after every declaration is known.</summary>
+/// <summary>
+/// Resolution Pass 3: Declaration Resolution.
+/// <para>
+/// Resolves declaration-owned references and signatures after all declarations have been discovered:
+/// <list type="bullet">
+/// <item><description>Resolves base types, interface implementations, and sum type constituents.</description></item>
+/// <item><description>Resolves field and global variable declared types.</description></item>
+/// <item><description>Resolves parameter types, return types, and generic parameter constraints on functions and methods.</description></item>
+/// <item><description>Resolves attributes applied to types, functions, parameters, and variables.</description></item>
+/// <item><description>Validates mutual exclusivity of operator semantics (such as Destructor vs. Copy and Copy vs. Move).</description></item>
+/// </list>
+/// </para>
+/// </summary>
 internal sealed class DeclarationResolutionPass : ResolutionPass
 {
     private record struct FunctionSignatureInfo(Symbol Symbol, FunctionFlags Flags, FunctionDeclaration? Syntax, IReadOnlyList<SymbolHandle> GenericParameters, List<SymbolHandle> Parameters, TypeRef ReturnType);
@@ -18,6 +30,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
+    /// <summary>
+    /// Executes declaration resolution across all discovered symbols.
+    /// </summary>
+    /// <param name="context">The shared compilation resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
@@ -197,10 +213,70 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
-        PopulateProductMembers(symbol);
+
+        if (symbol is ISumTypeSymbol sumType)
+            ResolveSumType(sumType, symbol, syntax, scope);
+        else
+            PopulateProductMembers(symbol);
+    }
+
+    private void ValidateLifecycleOperatorCombinations(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
+    {
+        bool hasDestructor = false;
+        bool hasCopy = false;
+        bool hasMove = false;
+
+        foreach (var baseType in baseTypes)
+        {
+            if (!baseType.IsResolved || baseType.Handle is not { } ifaceHandle)
+                continue;
+
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Destructor))
+                hasDestructor = true;
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy))
+                hasCopy = true;
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move))
+                hasMove = true;
+        }
+
+        if (HasOperatorOnType(typeHandle, OperatorKind.Destructor))
+            hasDestructor = true;
+        if (HasOperatorOnType(typeHandle, OperatorKind.Copy))
+            hasCopy = true;
+        if (HasOperatorOnType(typeHandle, OperatorKind.Move))
+            hasMove = true;
+
+        if (hasDestructor && hasCopy)
+            context.Diagnostics.ReportDestructorNandCopy(span, typeName, source);
+
+        if (hasCopy && hasMove)
+            context.Diagnostics.ReportCopyNandMove(span, typeName, source);
+    }
+
+    private bool HasOperatorOnInterface(SymbolHandle ifaceHandle, OperatorKind opKind)
+    {
+        var list = context.DiscoveredOperators.GetOperators(opKind);
+        foreach (var op in list)
+        {
+            if (op.InterfaceHandle == ifaceHandle)
+                return true;
+        }
+        return false;
+    }
+
+    private bool HasOperatorOnType(SymbolHandle typeHandle, OperatorKind opKind)
+    {
+        var list = context.DiscoveredOperators.GetOperators(opKind);
+        foreach (var op in list)
+        {
+            if (op.InterfaceHandle == typeHandle)
+                return true;
+        }
+        return false;
     }
 
     private void ResolveType(NestedTypeSymbol symbol, TypeDeclaration? syntax)
@@ -211,10 +287,47 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
-        PopulateProductMembers(symbol);
+
+        if (symbol is ISumTypeSymbol sumType)
+            ResolveSumType(sumType, symbol, syntax, scope);
+        else
+            PopulateProductMembers(symbol);
+    }
+
+    private void ResolveSumType(ISumTypeSymbol sumType, Symbol symbol, TypeDeclaration syntax, Scope scope)
+    {
+        PopulateSumTypeMembers(sumType, scope);
+
+        if (syntax.DiscriminantType is not null)
+            sumType.DiscriminantType = ResolveType(syntax.DiscriminantType, scope);
+
+        if (syntax.UnionConstituents is { } uConst)
+            sumType.UnionConstituents = ResolveTypes(uConst, scope);
+
+        foreach (var variantHandle in sumType.EnumVariants)
+        {
+            if (context.GetEnumVariantSymbol(variantHandle) is { } vSym)
+            {
+                if (vSym.ExplicitValue is not null)
+                    ResolveExpression(vSym.ExplicitValue, scope, ResolutionContext.GetHandle(symbol));
+
+                var variantScope = GetOwnedScope(vSym);
+                foreach (var paramHandle in vSym.Parameters)
+                {
+                    if (context.GetParameterSymbol(paramHandle) is { } pSym && pSym.Syntax is { } pSyntax)
+                        pSym.Type = ResolveType(pSyntax.Declarator.Type, variantScope);
+                }
+                foreach (var fieldHandle in vSym.Fields)
+                {
+                    if (context.GetFieldSymbol(fieldHandle) is { } fSym && fSym.Syntax is { } fSyntax)
+                        fSym.Type = ResolveType(fSyntax.Type, variantScope);
+                }
+            }
+        }
     }
 
     private void ResolveAlias(AliasSymbol symbol)
@@ -291,6 +404,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 return GetGenericArguments(qualified.Right);
             case ModifiedType modified:
                 return GetGenericArguments(modified.Type);
+            case PrefixModifiedType prefixModified:
+                return GetGenericArguments(prefixModified.Type);
             default:
                 return [];
         }
@@ -364,11 +479,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
+        if (symbol.SpecialKind is SpecialFunctionKind.Literal)
+        {
+            symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
+            symbol.ReturnType = TypeRef.Inferred;
+        }
+        else if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
+
+        foreach (var handle in symbol.Parameters)
+        {
+            if (context.GetParameterSymbol(handle) is { } parameter)
+                ResolveParameter(parameter);
+        }
+
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -397,11 +524,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
+        if (symbol.SpecialKind is SpecialFunctionKind.Literal)
+        {
+            symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
+            symbol.ReturnType = symbol.Parent is { } parentHandle ? TypeRef.Resolved(parentHandle) : TypeRef.Inferred;
+        }
+        else if (symbol.SpecialKind is not SpecialFunctionKind.Constructor)
             symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
+
+        foreach (var handle in symbol.Parameters)
+        {
+            if (context.GetParameterSymbol(handle) is { } parameter)
+                ResolveParameter(parameter);
+        }
+
         ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -412,7 +551,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        symbol.Type = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope);
+        bool isUntagged = symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged);
+
+        var paramType = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope, isUntaggedContext: isUntagged);
+        symbol.Type = isUntagged ? TypeRef.Untagged(paramType) : paramType;
 
         ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol ?? default);
     }
@@ -438,6 +580,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
         setAttributes(attributeHandles);
 
+        bool isUntagged = syntax.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged) ||
+                          (symbol is FieldSymbol fs && fs.Flags.HasFlag(VariableFlags.Untagged)) ||
+                          (symbol is LocalVariableSymbol ls && ls.Flags.HasFlag(VariableFlags.Untagged)) ||
+                          (symbol is GlobalVariableSymbol gs && gs.Flags.HasFlag(VariableFlags.Untagged));
+
         TypeRef? resolvedType = null;
         bool isTupleDestructuring = syntax.Declarators.Any(d => d.Identifier is TupleName);
         if (isTupleDestructuring && syntax.Type is TupleType tupleType)
@@ -445,10 +592,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             var matchedElement = tupleType.Elements.FirstOrDefault(e => e.Name != null && context.GetScopedSymbolName(new SimpleName(e.Name)).Last == symbol.Name);
 
             if (matchedElement != null)
-                resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false);
+                resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false, isUntaggedContext: isUntagged);
         }
 
-        setType(resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference));
+        var actualType = resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference, isUntaggedContext: isUntagged);
+        if (isUntagged)
+            actualType = TypeRef.Untagged(actualType);
+        setType(actualType);
+
+        bool isInferred = actualType.IsInferred;
 
         foreach (var declarator in syntax.Declarators)
         {
@@ -456,11 +608,17 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
                     if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                    {
+                        CheckInferredInitializer(initExpr, isInferred);
                         ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+                    }
             }
             else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
                 if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+                {
+                    CheckInferredInitializer(initExpr, isInferred);
                     ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+                }
         }
     }
 
@@ -519,7 +677,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
     private void ResolveDeclarationSyntax(VariableDeclaration syntax, Scope scope, SymbolHandle containingFunction)
     {
-        ResolveType(syntax.Type, scope, allowInference: true);
+        var resolvedType = ResolveType(syntax.Type, scope, allowInference: true);
+        bool isInferred = resolvedType.IsInferred;
 
         if (!resolvedVariableAttributes.TryGetValue((syntax, scope), out _))
         {
@@ -531,7 +690,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var declarator in syntax.Declarators)
         {
             if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+            {
+                CheckInferredInitializer(initExpr, isInferred);
                 ResolveExpression(initExpr, scope, containingFunction);
+            }
         }
     }
 
@@ -627,12 +789,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return result;
     }
 
-    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false)
+    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false)
     {
         if (resolvedTypes.TryGetValue((syntax, scope, allowInference), out var cached))
             return cached;
 
-        var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference);
+        var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference, isUntaggedContext);
 
         if (reportDiagnostics || result.IsResolved)
             resolvedTypes[(syntax, scope, allowInference)] = result;
@@ -640,14 +802,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return result;
     }
 
-    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false)
+    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false)
     {
         if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
         {
             if (allowInference)
                 return TypeRef.Inferred;
 
-            return ResolveTypeName(syntax, scope, reportDiagnostics);
+            var varRes = ResolveTypeName(syntax, scope, reportDiagnostics);
+            CheckUntaggedUsage(varRes, syntax, isUntaggedContext, reportDiagnostics);
+            return varRes;
+        }
+
+        if (syntax is UnionType union)
+        {
+            var elements = new List<TypeRef>(union.Variants.Count);
+            foreach (var elem in union.Variants)
+                elements.Add(ResolveType(elem, scope, reportDiagnostics));
+            return TypeRef.Union(elements, isUntagged: false);
         }
 
         if (syntax is TupleType tuple)
@@ -678,10 +850,28 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             return modified.Modifier switch
             {
-                PointerTypeModifier => TypeRef.Pointer(innerType),
-                ReferenceTypeModifier => TypeRef.Reference(innerType),
+                PointerTypeModifier => ResolvePointerModifier(modified, innerType, reportDiagnostics),
+                ReferenceTypeModifier => ResolveReferenceModifier(modified, innerType, reportDiagnostics),
                 OptionalTypeModifier => TypeRef.Optional(innerType),
-                ArrayTypeModifier array => ResolveArrayOrSpanModifier(array, innerType, scope),
+                ArrayTypeModifier => ResolveArrayModifier(modified, innerType, reportDiagnostics),
+                FixedArrayTypeModifier fixedArray => ResolveFixedArrayModifier(modified, fixedArray, innerType, scope, reportDiagnostics),
+                _ => TypeRef.Error
+            };
+        }
+
+        if (syntax is PrefixModifiedType prefixModified)
+        {
+            if (prefixModified.Modifier is UntaggedTypeModifier)
+            {
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext: true);
+                return TypeRef.Untagged(inner);
+            }
+
+            var innerType = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+
+            return prefixModified.Modifier switch
+            {
+                SpanTypeModifier => ResolveSpanModifier(prefixModified, innerType, reportDiagnostics),
                 _ => TypeRef.Error
             };
         }
@@ -690,6 +880,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         {
             TypeRef genericTarget = ResolveTypeName(generic, scope, reportDiagnostics);
             ResolveGenericArguments(generic, genericTarget.Handle, scope);
+            CheckUntaggedUsage(genericTarget, syntax, isUntaggedContext, reportDiagnostics);
 
             return genericTarget;
         }
@@ -704,6 +895,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     context.ResolvedTree.AddReference(qualifiedGeneric, handle);
 
                 ResolveGenericArguments(qualifiedGeneric, target.Handle, scope);
+                CheckUntaggedUsage(target, syntax, isUntaggedContext, reportDiagnostics);
                 return target;
             }
 
@@ -712,18 +904,32 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             if (result.Handle is { } rightHandle)
                 context.ResolvedTree.AddReference(qualified.Right, rightHandle);
 
+            CheckUntaggedUsage(result, syntax, isUntaggedContext, reportDiagnostics);
             return result;
         }
 
         ResolveTypeChildren(syntax, scope);
 
-        return ResolveTypeName(syntax, scope, reportDiagnostics);
+        var finalRes = ResolveTypeName(syntax, scope, reportDiagnostics);
+        CheckUntaggedUsage(finalRes, syntax, isUntaggedContext, reportDiagnostics);
+        return finalRes;
+    }
+
+    private void CheckUntaggedUsage(TypeRef typeRef, TypeSyntax syntax, bool isUntaggedContext, bool reportDiagnostics)
+    {
+        if (reportDiagnostics && !isUntaggedContext && typeRef.Handle is { } h)
+        {
+            if (context.GetTypeSymbol(h) is { } typeSym && typeSym.Flags.HasFlag(TypeFlags.Untagged))
+            {
+                context.Diagnostics.ReportUntaggedDefinitionTaggedUsage(syntax.GetSpan() ?? default, typeSym.Name.ToString(), syntax.GetSource());
+            }
+        }
     }
 
     private TypeRef ResolveTypeName(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true)
     {
         var name = ResolutionContext.GetSymbolName(syntax);
-        var symbols = scope[name];
+        var symbols = scope.ResolveType(name);
         if (symbols.Count > 1 && !AreSamePartialType(symbols))
         {
             if (reportDiagnostics)
@@ -736,7 +942,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return TypeRef.Error;
         }
 
-        if (ResolveSingle(scope, name) is not { } symbol)
+        if (symbols.Count == 0)
         {
             if (reportDiagnostics)
             {
@@ -748,6 +954,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
             return TypeRef.Error;
         }
+
+        var symbol = symbols[0];
 
         if (symbol is AliasSymbol aliasSymbol && aliasSymbol.IsGlobalAlias && !aliasSymbol.Target.IsResolved)
         {
@@ -843,15 +1051,102 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return handle;
     }
 
-    private TypeRef ResolveArrayOrSpanModifier(ArrayTypeModifier array, TypeRef innerType, Scope scope)
+    private TypeRef ResolvePointerModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
     {
-        if (array.Size is { } size)
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer))
         {
-            ResolveExpression(size, scope, default);
-            return TypeRef.Array(innerType, size);
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "pointer type syntax", KnownIntrinsics.Pointer, modified.GetSource());
+        }
+
+        return TypeRef.Pointer(innerType);
+    }
+
+    private TypeRef ResolveReferenceModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference))
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "reference type syntax", KnownIntrinsics.Reference, modified.GetSource());
+        }
+
+        return TypeRef.Reference(innerType);
+    }
+
+    private TypeRef ResolveSpanModifier(PrefixModifiedType prefixModified, TypeRef innerType, bool reportDiagnostics)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span))
+        {
+            var span = prefixModified.Modifier.GetSpan() ?? prefixModified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "span type syntax", KnownIntrinsics.Span, prefixModified.GetSource());
         }
 
         return TypeRef.Span(innerType);
+    }
+
+    private TypeRef ResolveArrayModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics = true)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "array type syntax", KnownIntrinsics.Array, modified.GetSource());
+        }
+
+        return TypeRef.Array(innerType);
+    }
+
+    private TypeRef ResolveFixedArrayModifier(ModifiedType modified, FixedArrayTypeModifier fixedArray, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
+    {
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+        {
+            var span = fixedArray.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "fixed-size array type syntax", KnownIntrinsics.FixedArray, modified.GetSource());
+        }
+
+        ResolveExpression(fixedArray.Size, scope, default);
+        return TypeRef.FixedArray(innerType, fixedArray.Size);
+    }
+
+    private void CheckInferredInitializer(Expression expr, bool isInferred)
+    {
+        if (expr is CollectionExpression collection && isInferred)
+        {
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
+            {
+                var span = collection.GetSpan() ?? default;
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "inferred collection expression", KnownIntrinsics.Array, collection.GetSource());
+            }
+        }
+        else if (expr is LiteralExpression literal && !literal.HasSuffix && isInferred)
+        {
+            CheckUnsuffixedLiteral(literal);
+        }
+    }
+
+    private void CheckUnsuffixedLiteral(LiteralExpression literal)
+    {
+        string? required = literal.Literal.Kind switch
+        {
+            TokenKind.Integer => KnownIntrinsics.Int32,
+            TokenKind.Float => KnownIntrinsics.Float64,
+            TokenKind.String => KnownIntrinsics.Str,
+            TokenKind.Char => KnownIntrinsics.Char,
+            _ => null
+        };
+
+        if (required is not null && !context.DiscoveredIntrinsics.Contains(required))
+        {
+            string desc = literal.Literal.Kind switch
+            {
+                TokenKind.Integer => "unsuffixed integer literal",
+                TokenKind.Float => "unsuffixed float literal",
+                TokenKind.String => "unsuffixed string literal",
+                TokenKind.Char => "unsuffixed char literal",
+                _ => "literal"
+            };
+
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(literal.Literal.Span, desc, required, literal.Literal.Source);
+        }
     }
 
     private void ResolveTypeChildren(TypeSyntax syntax, Scope scope)
@@ -863,6 +1158,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             case QualifiedType qualified:
                 ResolveType(qualified.Left, scope);
                 ResolveType(qualified.Right, scope);
+                break;
+            case ModifiedType modified:
+                ResolveTypeChildren(modified.Type, scope);
+                break;
+            case PrefixModifiedType prefixModified:
+                ResolveTypeChildren(prefixModified.Type, scope);
                 break;
         }
     }
@@ -895,6 +1196,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveType(asExpr.Type, scope);
                 ResolveExpression(asExpr.Expression, scope, containingSymbol);
                 break;
+            case TypeAsExpression typeAs:
+                ResolveType(typeAs.TargetType, scope);
+                ResolveType(typeAs.InterfaceType, scope);
+                break;
             case TupleExpression tuple:
                 foreach (var argument in tuple.Arguments)
                     ResolveExpression(argument, scope, containingSymbol);
@@ -908,7 +1213,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveExpression(index.Index, scope, containingSymbol);
                 break;
             case MemberAccessExpression access:
-                ResolveExpression(access.Expression, scope, containingSymbol);
+                ResolveMemberAccess(access, scope, containingSymbol);
                 break;
             case NameofExpression nameofExpr:
                 ResolveExpression(nameofExpr.Argument, scope, containingSymbol);
@@ -968,6 +1273,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 ResolveExpression(array.Size, scope, containingSymbol);
                 ResolveInitializer(array.Initializer, scope, containingSymbol);
                 ResolveInitializer(array.WithClause?.Initializer, scope, containingSymbol);
+                break;
+            case VariantCreationExpression variantCreation:
+                ResolveExpression(variantCreation.Target, scope, containingSymbol);
+                ResolveInitializer(variantCreation.Initializer, scope, containingSymbol);
+                break;
+            case MatchExpression match:
+                ResolveMatchExpression(match, scope, containingSymbol);
                 break;
         }
     }
@@ -1073,6 +1385,169 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     nestedTypes.Add(handle);
                     break;
             }
+        }
+    }
+
+    private static void PopulateSumTypeMembers(ISumTypeSymbol sumType, Scope scope)
+    {
+        sumType.Methods.Clear();
+        sumType.NestedTypes.Clear();
+
+        foreach (var symbol in scope.Symbols.Values)
+        {
+            var handle = ResolutionContext.GetHandle(symbol);
+
+            switch (symbol.Kind)
+            {
+                case SymbolKind.Method:
+                    sumType.Methods.Add(handle);
+                    break;
+                case SymbolKind.NestedType:
+                    sumType.NestedTypes.Add(handle);
+                    break;
+            }
+        }
+    }
+
+    private void ResolveMemberAccess(MemberAccessExpression access, Scope scope, SymbolHandle containingSymbol)
+    {
+        ResolveExpression(access.Expression, scope, containingSymbol);
+
+        if (access.Expression is TypeAsExpression typeAs)
+        {
+            TypeSymbol? asTargetType = null;
+            TypeSymbol? asInterfaceType = null;
+
+            var targetRef = ResolveType(typeAs.TargetType, scope, reportDiagnostics: false);
+            if (targetRef is { Handle: { } targetHandle } && context.GetTypeSymbol(targetHandle) is TypeSymbol ts)
+                asTargetType = ts;
+
+            var ifaceRef = ResolveType(typeAs.InterfaceType, scope, reportDiagnostics: false);
+            if (ifaceRef is { Handle: { } ifaceHandle } && context.GetTypeSymbol(ifaceHandle) is TypeSymbol isym)
+                asInterfaceType = isym;
+
+            if (asTargetType is not null && asInterfaceType is not null)
+            {
+                var targetScope = GetOwnedScope(asTargetType);
+                if (targetScope is not null)
+                {
+                    var memberName = new SymbolPart(access.Identifier);
+                    var candidates = targetScope[new SymbolName(memberName)];
+
+                    MethodSymbol? chosen = null;
+
+                    // Priority 1: interface-scoped method matching interface name
+                    foreach (var cand in candidates)
+                    {
+                        if (cand is MethodSymbol m && m.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                        {
+                            if (m.ExplicitInterfaceName is { } ein && ein.Last.Equals(asInterfaceType.Name))
+                            {
+                                chosen = m;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Priority 2: ordinary method
+                    if (chosen is null)
+                    {
+                        foreach (var cand in candidates)
+                        {
+                            if (cand is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                            {
+                                chosen = m;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (chosen is not null)
+                    {
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(chosen));
+                        return;
+                    }
+                }
+            }
+        }
+
+        if (access.Expression is NamedExpression named)
+        {
+            var sym = ResolveSingle(scope, new SymbolName(new SymbolPart(named.Identifier.Value)));
+            if (sym is TypeSymbol typeSym)
+            {
+                var typeScope = GetOwnedScope(typeSym);
+                if (typeScope is not null)
+                {
+                    var memberName = new SymbolPart(access.Identifier);
+                    var variantSyms = typeScope[new SymbolName(memberName)];
+                    var accessible = variantSyms.Where(cand => cand is not MethodSymbol m || !m.Flags.HasFlag(FunctionFlags.InterfaceScoped)).ToList();
+                    if (accessible.Count > 0)
+                    {
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private void ResolveMatchExpression(MatchExpression match, Scope scope, SymbolHandle containingSymbol)
+    {
+        ResolveExpression(match.Expression, scope, containingSymbol);
+
+        foreach (var arm in match.Arms)
+        {
+            var armScope = context.CreateScope(scope);
+            context.RegisterSyntaxScope(arm, armScope);
+
+            DeclarePatternVariables(arm.Pattern, armScope);
+            ResolveExpression(arm.Expression, armScope, containingSymbol);
+        }
+    }
+
+    private void DeclarePatternVariables(PatternSyntax pattern, Scope armScope)
+    {
+        switch (pattern)
+        {
+            case VariablePattern varPat:
+                context.CreateLocalVariableSymbol(
+                    armScope,
+                    context.GetScopedSymbolName(varPat.Name).Last,
+                    default,
+                    null);
+                break;
+
+            case LiteralPattern lit:
+                ResolveExpression(lit.Literal, armScope, default);
+                break;
+
+            case EnumVariantPattern variantPat:
+                if (variantPat.SubPatterns is { } subPatterns)
+                {
+                    foreach (var sub in subPatterns)
+                        DeclarePatternVariables(sub, armScope);
+                }
+
+                if (variantPat.FieldPatterns is { } fieldPatterns)
+                {
+                    foreach (var fp in fieldPatterns)
+                        DeclarePatternVariables(fp.Pattern, armScope);
+                }
+                break;
+
+            case TypePattern typePat:
+                if (typePat.Variable is not null)
+                {
+                    var resolvedType = ResolveType(typePat.Type, armScope, reportDiagnostics: false);
+                    var varSym = context.CreateLocalVariableSymbol(
+                        armScope,
+                        context.GetScopedSymbolName(typePat.Variable).Last,
+                        default,
+                        null);
+                    varSym.Type = resolvedType;
+                }
+                break;
         }
     }
 
@@ -1367,14 +1842,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             ValidateFunctionSignatureGroup(group);
 
         // 2. Member & Local methods
-        var methodGroups = new Dictionary<(Scope, SymbolPart), List<FunctionSignatureInfo>>();
+        var methodGroups = new Dictionary<(Scope, SymbolPart, SymbolName?), List<FunctionSignatureInfo>>();
 
         foreach (var m in context.MethodSymbols)
         {
             if (m.Name.Text == "_")
                 continue;
 
-            var key = (m.EnclosingScope, m.Name);
+            var key = (m.EnclosingScope, m.Name, m.ExplicitInterfaceName);
 
             if (!methodGroups.TryGetValue(key, out var list))
             {
@@ -1558,8 +2033,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 (SpanSemanticType sA, SpanSemanticType sB) =>
                     ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
                 (ArraySemanticType aA, ArraySemanticType aB) =>
-                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null) &&
-                    (aA.Size == aB.Size || Nullable.Equals(aA.Size.GetSpan(), aB.Size.GetSpan())),
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null),
+                (FixedArraySemanticType fA, FixedArraySemanticType fB) =>
+                    ParameterTypesMatch(fA.ElementType, genericParamsA, fB.ElementType, genericParamsB, null, null) &&
+                    (fA.Size == fB.Size || Nullable.Equals(fA.Size.GetSpan(), fB.Size.GetSpan())),
                 (OptionalSemanticType oA, OptionalSemanticType oB) =>
                     ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
                 (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>

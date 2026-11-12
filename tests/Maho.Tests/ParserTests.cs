@@ -1061,6 +1061,101 @@ public sealed class ParserTests
     }
 
     [Fact]
+    public void Parse_ConstructorCall_WithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new<Arena>(pool) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("Arena", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("pool", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_WithAllocationTypeArgumentsOnly_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new<Arena> Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("Arena", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.Null(constructor.AllocationArguments);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_WithAllocationArgumentsOnly_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = new(pool) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
+        Assert.Null(constructor.AllocationTypeArguments);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("pool", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_ConstructorCall_PutWithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
+    {
+        LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
+            var p = put<StackFrame>(offset) Point(10, 20);
+            """, typeof(LocalVariableDeclarationStatement)));
+
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.Equal(ObjectCreationKind.Put, constructor.Kind);
+        Assert.NotNull(constructor.AllocationTypeArguments);
+        Assert.Single(constructor.AllocationTypeArguments.Value);
+        NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
+        Assert.Equal("StackFrame", Assert.IsType<IdentifierNameExpression>(genericArg.Expression).Identifier.Value);
+        Assert.NotNull(constructor.AllocationArguments);
+        Assert.Single(constructor.AllocationArguments.Value);
+        Assert.Equal("offset", Assert.IsType<IdentifierNameExpression>(constructor.AllocationArguments.Value[0]).Identifier.Value);
+        Assert.Equal("Point", Assert.IsType<SimpleType>(constructor.Type).Name.Value);
+        Assert.Equal(2, constructor.Arguments.Count);
+    }
+
+    [Fact]
+    public void Parse_LiteralFunctionDeclaration_IntrinsicAndUserDefined_ParsesCorrectly()
+    {
+        var u64Lit = Assert.IsType<MemberFunctionDeclaration>(ParseSingleMember("""
+            [intrinsic]
+            public literal u64(int V);
+            """, typeof(MemberFunctionDeclaration)));
+        Assert.Equal(SpecialFunctionKind.Literal, u64Lit.Function.SpecialKind);
+        Assert.Equal("u64", Assert.IsType<SimpleName>(u64Lit.Function.Signature.Identifier).Name.Value);
+        Assert.Single(u64Lit.Function.Signature.Parameters);
+        Assert.IsType<FunctionEmptyBody>(u64Lit.Function.Body);
+
+        var distLit = Assert.IsType<MemberFunctionDeclaration>(ParseSingleMember("""
+            public literal km(int V) => Distance.FromKm(V);
+            """, typeof(MemberFunctionDeclaration)));
+        Assert.Equal(SpecialFunctionKind.Literal, distLit.Function.SpecialKind);
+        Assert.Equal("km", Assert.IsType<SimpleName>(distLit.Function.Signature.Identifier).Name.Value);
+        Assert.IsType<FunctionLambdaBody>(distLit.Function.Body);
+    }
+
+    [Fact]
     public void Parse_ObjectCreationWithClause_AttachesToArrayCreation()
     {
         LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
@@ -1459,7 +1554,7 @@ public sealed class ParserTests
                 public T Value;
                 public class Nested;
 
-                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, Extra.Nested nested, TInput input) where TInput: Extra.Nested
+                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, untagged int untaggedParam, Extra.Nested nested, TInput input) where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
@@ -1471,6 +1566,7 @@ public sealed class ParserTests
 
                     int local = 1;
                     int[] numbers = new int[3] { 1, 2, 3 };
+                    int[3] fixedNumbers;
                     (int, int) pair = (1, 2);
                     PointerLocal * localPointer;
                     ReferenceLocal & localReference;
@@ -1483,6 +1579,20 @@ public sealed class ParserTests
                     local = put Box<int>(local).Value;
                     local = if (local) local else 0;
                     local = identity<int>(value: local);
+                    (int | string) anonUnion;
+                    untagged (int | string) untaggedUnion;
+                    Box<untagged int> boxOfUntagged;
+                    untagged int untaggedLocal = 0;
+                    local = match (local)
+                    {
+                        MyEnum.UnitVar => 1,
+                        MyEnum.TupleVar(val) => val,
+                        MyEnum.StructVar { x } => x,
+                        1 => 2,
+                        int t => t,
+                        _ => 0
+                    };
+                    var created = MyEnum.StructVar { x = local };
 
                     if (int testCond = local; testCond) local = 1; else local = 2;
                     ;
@@ -1495,6 +1605,19 @@ public sealed class ParserTests
                 {
                     void UnsafeFunc() { }
                 }
+            }
+
+            public enum MyEnum with int
+            {
+                UnitVar = 1,
+                TupleVar(int x) = 2,
+                StructVar { int x; } = 3;
+                public void Method() { }
+            }
+
+            public union MyUnion (int | string)
+            {
+                public void Method() { }
             }
 
             public static int identity<T>(T value) where T: Extra.Nested
@@ -1569,14 +1692,17 @@ public sealed class ParserTests
             typeof(GenericType),
             typeof(QualifiedType),
             typeof(ModifiedType),
+            typeof(PrefixModifiedType),
             typeof(TupleType),
             typeof(TypeBaseClause),
             typeof(TypeConstraintClause),
             typeof(TypeTypeConstraint),
             typeof(ArrayTypeModifier),
+            typeof(FixedArrayTypeModifier),
             typeof(PointerTypeModifier),
             typeof(OptionalTypeModifier),
             typeof(ReferenceTypeModifier),
+            typeof(SpanTypeModifier),
             typeof(LiteralExpression),
             typeof(IdentifierNameExpression),
             typeof(GenericNameExpression),
@@ -1599,7 +1725,22 @@ public sealed class ParserTests
             typeof(ArrayCreationExpression),
             typeof(ObjectWithClause),
             typeof(TypeInitializer),
-            typeof(NamedArgumentExpression));
+            typeof(NamedArgumentExpression),
+            typeof(EnumUnitVariant),
+            typeof(EnumTupleVariant),
+            typeof(EnumStructVariant),
+            typeof(TypeEnumBody),
+            typeof(UnionType),
+            typeof(MatchExpression),
+            typeof(MatchArm),
+            typeof(VariantCreationExpression),
+            typeof(WildcardPattern),
+            typeof(LiteralPattern),
+            typeof(FieldPatternSyntax),
+            typeof(EnumVariantPattern),
+            typeof(TypePattern),
+            typeof(VariablePattern),
+            typeof(UntaggedTypeModifier));
     }
 
     [Fact]
@@ -2229,5 +2370,56 @@ public sealed class ParserTests
         Assert.Equal(TokenKind.SuffixedInteger, arg1.Literal.Kind);
         Assert.Equal("u8", arg1.Suffix);
         Assert.Equal("0b1010", arg1.ValueWithoutSuffix);
+    }
+
+    [Fact]
+    public void Parse_SpanDeclarationInDeclarationContext_ParsesAsVariableDeclaration()
+    {
+        Local local = ParseSingleLocal("&int32 x;", typeof(LocalVariableDeclarationStatement));
+        var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        var prefix = Assert.IsType<PrefixModifiedType>(variable.Declaration.Type);
+        Assert.IsType<SpanTypeModifier>(prefix.Modifier);
+        var simple = Assert.IsType<SimpleType>(prefix.Type);
+        Assert.Equal("int32", simple.Name.Value);
+        Assert.Equal("x", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
+    }
+
+    [Fact]
+    public void Parse_PrefixAmpersandInDeclarationContext_WhenNotFollowedByIdentifier_ParsesAsExpressionStatement()
+    {
+        Local local = ParseSingleLocal("&T + 1;", typeof(LocalExpressionStatement));
+        var stmt = Assert.IsType<LocalExpressionStatement>(local);
+        var unary = Assert.IsType<UnaryExpression>(stmt.Expression);
+        Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
+        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_PrefixAmpersandInExpressionContext_AlwaysParsesAsUnaryExpression()
+    {
+        Local local = ParseSingleLocal("var x = &T + 1;", typeof(LocalVariableDeclarationStatement));
+        var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
+        var init = variable.Declaration.Declarators[0].Initializer!.Initializer;
+        var unary = Assert.IsType<UnaryExpression>(init);
+        Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
+        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+    }
+
+    [Fact]
+    public void Parse_ArrayTypeModifier_Vs_FixedArrayTypeModifier()
+    {
+        Local dynamicArr = ParseSingleLocal("int32[] x;", typeof(LocalVariableDeclarationStatement));
+        var dynamicVar = Assert.IsType<LocalVariableDeclarationStatement>(dynamicArr);
+        var dynamicMod = Assert.IsType<ModifiedType>(dynamicVar.Declaration.Type);
+        Assert.IsType<ArrayTypeModifier>(dynamicMod.Modifier);
+
+        Local fixedArr = ParseSingleLocal("int32[10] y;", typeof(LocalVariableDeclarationStatement));
+        var fixedVar = Assert.IsType<LocalVariableDeclarationStatement>(fixedArr);
+        var fixedMod = Assert.IsType<ModifiedType>(fixedVar.Declaration.Type);
+        var fixedArrMod = Assert.IsType<FixedArrayTypeModifier>(fixedMod.Modifier);
+        var sizeLit = Assert.IsType<LiteralExpression>(fixedArrMod.Size);
+        Assert.Equal("10", sizeLit.Literal.Value);
     }
 }

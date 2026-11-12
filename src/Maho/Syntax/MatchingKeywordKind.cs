@@ -53,4 +53,13 @@ internal enum MatchingKeywordKind : byte
     Operator,
     Prefix,
     Postfix,
+    Untagged,
+    Match,
+    Literal,
+    Str,
+    Char,
+    True,
+    False,
+    Null,
+    This
 }

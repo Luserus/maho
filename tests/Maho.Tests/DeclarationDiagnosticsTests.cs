@@ -102,7 +102,7 @@ public sealed class DeclarationDiagnosticsTests
         Assert.Empty(compilation.Diagnostics);
 
         // Verify that referencing Entity resolves correctly
-        var user = Assert.Single(compilation.Context!.TypeSymbols, t => t.Name.ToString() == "User");
+        var user = Assert.Single(compilation.Context.TypeSymbols, t => t.Name.ToString() == "User");
         var field = Assert.Single(compilation.Context.FieldSymbols, f => f.Name.ToString() == "entity");
         Assert.True(field.Type.IsResolved);
     }

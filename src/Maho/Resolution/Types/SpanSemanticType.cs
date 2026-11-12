@@ -2,7 +2,7 @@ using System;
 
 namespace Maho.Resolution;
 
-/// <summary>Represents an unsized span type (<c>T[]</c>).</summary>
+/// <summary>Represents a non-owning span type (<c>&amp;T</c>).</summary>
 internal sealed class SpanSemanticType : SemanticType
 {
     public override SemanticTypeKind Kind => SemanticTypeKind.Span;
@@ -18,5 +18,7 @@ internal sealed class SpanSemanticType : SemanticType
 
     public override int GetHashCode() => HashCode.Combine(Kind, ElementType);
 
-    public override string ToString() => $"{ElementType}[]";
+    public override string ToString() => $"&{ElementType}";
+
+    public override string ToDisplayString(ResolutionContext? context = null) => $"&{ElementType.ToDisplayString(context)}";
 }

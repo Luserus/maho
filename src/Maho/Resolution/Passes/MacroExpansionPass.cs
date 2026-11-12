@@ -17,6 +17,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
     public override void Resolve(ResolutionContext context)
     {
         var macroTable = new Dictionary<SymbolPart, MacroDeclaration>();
+        var literalMacroTable = new Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration>();
 
         // 1. Collect all declared macros from symbol store
         foreach (var macroSymbol in context.MacroSymbols)
@@ -25,7 +26,11 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         // Also collect directly from syntax tree roots if not yet discovered
         foreach (var tree in context.SyntaxTrees)
-            CollectMacros(tree.Root.Members, macroTable);
+            CollectMacros(tree.Root.Members, macroTable, literalMacroTable);
+
+        foreach (var project in context.ReferencedProjects)
+            foreach (var tree in project.SyntaxTrees)
+                CollectMacros(tree.Root.Members, macroTable, literalMacroTable);
 
         ulong recursionLimit = context.Options?.MacroRecursionLimit ?? 128;
         var expander = new MacroExpander(context.Diagnostics, recursionLimit, macroTable, context);
@@ -45,7 +50,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
                 var root = tree.Root;
                 var sourceText = root.GetSource() ?? (root.Members.Count > 0 ? root.Members[0].GetSource() : null) ?? new SourceText(string.Empty);
 
-                if (ExpandCompilationUnit(root, expander, currentDepth, sourceText))
+                if (ExpandCompilationUnit(root, expander, literalMacroTable, currentDepth, sourceText))
                     anyExpanded = true;
             }
 
@@ -55,52 +60,58 @@ internal sealed class MacroExpansionPass : ResolutionPass
         } while (anyExpanded);
     }
 
-    private static void CollectMacros(IEnumerable<TopLevel> members, Dictionary<SymbolPart, MacroDeclaration> macroTable)
+    private static void CollectMacros(IEnumerable<TopLevel> members, Dictionary<SymbolPart, MacroDeclaration> macroTable, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable)
     {
         foreach (var member in members)
         {
-            if (member is TopLevelMacroDeclaration macroDecl)
+            if (member is TopLevelLiteralMacroDeclaration litDecl)
+                literalMacroTable[(litDecl.LiteralMacro.LiteralKind, litDecl.LiteralMacro.Suffix.Value)] = litDecl.LiteralMacro;
+            else if (member is TopLevelMacroDeclaration macroDecl)
                 macroTable[new SymbolPart(macroDecl.Macro.Name)] = macroDecl.Macro;
             else if (member is NamespaceDeclaration ns && ns.Body is NamespaceBlockBody nsBody)
-                CollectMacros(nsBody.Members, macroTable);
+                CollectMacros(nsBody.Members, macroTable, literalMacroTable);
             else if (member is TopLevelTypeDeclaration typeDecl && typeDecl.Type.Body is TypeBlockBody body)
-                CollectMemberMacros(body.Members, macroTable);
+                CollectMemberMacros(body.Members, macroTable, literalMacroTable);
             else if (member is TopLevelFunctionDeclaration funcDecl && funcDecl.Function.Body is FunctionBlockBody funcBody)
-                CollectLocalMacros(funcBody.Locals, macroTable);
+                CollectLocalMacros(funcBody.Locals, macroTable, literalMacroTable);
         }
     }
 
-    private static void CollectMemberMacros(IEnumerable<Member> members, Dictionary<SymbolPart, MacroDeclaration> macroTable)
+    private static void CollectMemberMacros(IEnumerable<Member> members, Dictionary<SymbolPart, MacroDeclaration> macroTable, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable)
     {
         foreach (var member in members)
         {
-            if (member is MemberMacroDeclaration innerMacro)
+            if (member is MemberLiteralMacroDeclaration litDecl)
+                literalMacroTable[(litDecl.LiteralMacro.LiteralKind, litDecl.LiteralMacro.Suffix.Value)] = litDecl.LiteralMacro;
+            else if (member is MemberMacroDeclaration innerMacro)
                 macroTable[new SymbolPart(innerMacro.Macro.Name)] = innerMacro.Macro;
             else if (member is MemberTypeDeclaration nestedType && nestedType.Type.Body is TypeBlockBody nestedBody)
-                CollectMemberMacros(nestedBody.Members, macroTable);
+                CollectMemberMacros(nestedBody.Members, macroTable, literalMacroTable);
             else if (member is MemberFunctionDeclaration method && method.Function.Body is FunctionBlockBody methodBody)
-                CollectLocalMacros(methodBody.Locals, macroTable);
+                CollectLocalMacros(methodBody.Locals, macroTable, literalMacroTable);
         }
     }
 
-    private static void CollectLocalMacros(IEnumerable<Local> locals, Dictionary<SymbolPart, MacroDeclaration> macroTable)
+    private static void CollectLocalMacros(IEnumerable<Local> locals, Dictionary<SymbolPart, MacroDeclaration> macroTable, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable)
     {
         foreach (var local in locals)
         {
-            if (local is LocalMacroDeclaration localMacro)
+            if (local is LocalLiteralMacroDeclaration litDecl)
+                literalMacroTable[(litDecl.LiteralMacro.LiteralKind, litDecl.LiteralMacro.Suffix.Value)] = litDecl.LiteralMacro;
+            else if (local is LocalMacroDeclaration localMacro)
                 macroTable[new SymbolPart(localMacro.Macro.Name)] = localMacro.Macro;
             else if (local is LocalExpressionStatement exprStmt && exprStmt.Expression is BlockExpression block)
-                CollectLocalMacros(block.Locals, macroTable);
+                CollectLocalMacros(block.Locals, macroTable, literalMacroTable);
             else if (local is LocalFunctionDeclaration localFunc && localFunc.Function.Body is FunctionBlockBody funcBody)
-                CollectLocalMacros(funcBody.Locals, macroTable);
+                CollectLocalMacros(funcBody.Locals, macroTable, literalMacroTable);
             else if (local is LocalTypeDeclaration localType && localType.Type.Body is TypeBlockBody typeBody)
-                CollectMemberMacros(typeBody.Members, macroTable);
+                CollectMemberMacros(typeBody.Members, macroTable, literalMacroTable);
         }
     }
 
-    private static bool ExpandCompilationUnit(CompilationUnit unit, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandCompilationUnit(CompilationUnit unit, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
-        if (ExpandTopLevels(unit.Members, expander, currentDepth, sourceText, out var newMembers))
+        if (ExpandTopLevels(unit.Members, expander, literalMacroTable, currentDepth, sourceText, out var newMembers))
         {
             unit.Members = newMembers;
             return true;
@@ -109,7 +120,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return false;
     }
 
-    private static bool ExpandTopLevels(IReadOnlyList<TopLevel> members, MacroExpander expander, ulong currentDepth, SourceText sourceText, out List<TopLevel> newMembers)
+    private static bool ExpandTopLevels(IReadOnlyList<TopLevel> members, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText, out List<TopLevel> newMembers)
     {
         bool changed = false;
         newMembers = [];
@@ -141,7 +152,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
             else if (member is NamespaceDeclaration ns && ns.Body is NamespaceBlockBody nsBody)
             {
-                if (ExpandTopLevels(nsBody.Members, expander, currentDepth, sourceText, out var expandedNsMembers))
+                if (ExpandTopLevels(nsBody.Members, expander, literalMacroTable, currentDepth, sourceText, out var expandedNsMembers))
                 {
                     nsBody.Members = expandedNsMembers;
                     changed = true;
@@ -151,28 +162,28 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
             else if (member is TopLevelTypeDeclaration typeDecl)
             {
-                if (ExpandTypeDeclaration(typeDecl.Type, expander, currentDepth, sourceText))
+                if (ExpandTypeDeclaration(typeDecl.Type, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
             }
             else if (member is TopLevelFunctionDeclaration funcDecl)
             {
-                if (ExpandFunctionBody(funcDecl.Function.Body, expander, currentDepth, sourceText))
+                if (ExpandFunctionBody(funcDecl.Function.Body, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
             }
             else if (member is TopLevelBlockDeclaration block)
             {
-                if (ExpandTopLevelBlock(block, expander, currentDepth, sourceText))
+                if (ExpandTopLevelBlock(block, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
             }
             else if (member is TopLevelStatement stmt)
             {
-                if (ExpandTopLevelStatement(stmt, expander, currentDepth, sourceText))
+                if (ExpandTopLevelStatement(stmt, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
@@ -184,7 +195,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static bool ExpandTypeDeclaration(TypeDeclaration type, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandTypeDeclaration(TypeDeclaration type, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
         if (type.Body is not TypeBlockBody body)
             return false;
@@ -219,14 +230,14 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
             else if (member is MemberTypeDeclaration nestedType)
             {
-                if (ExpandTypeDeclaration(nestedType.Type, expander, currentDepth, sourceText))
+                if (ExpandTypeDeclaration(nestedType.Type, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
             }
             else if (member is MemberFunctionDeclaration method)
             {
-                if (ExpandFunctionBody(method.Function.Body, expander, currentDepth, sourceText))
+                if (ExpandFunctionBody(method.Function.Body, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newMembers.Add(member);
@@ -241,7 +252,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static bool ExpandFunctionBody(FunctionBody body, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandFunctionBody(FunctionBody body, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
         if (body is not FunctionBlockBody blockBody)
             return false;
@@ -277,7 +288,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
             else
             {
-                if (ExpandLocal(local, expander, currentDepth, sourceText))
+                if (ExpandLocal(local, expander, literalMacroTable, currentDepth, sourceText))
                     changed = true;
 
                 newLocals.Add(local);
@@ -290,7 +301,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static bool ExpandTopLevelBlock(TopLevelBlockDeclaration block, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandTopLevelBlock(TopLevelBlockDeclaration block, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
         bool changed = false;
         var newMembers = new List<TopLevel>();
@@ -319,7 +330,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static bool ExpandLocal(Local local, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandLocal(Local local, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
         bool changed = false;
 
@@ -329,7 +340,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             {
                 if (declarator.Initializer is { } init)
                 {
-                    var newExpr = ExpandExpression(init.Initializer, expander, currentDepth, sourceText, ref changed);
+                    var newExpr = ExpandExpression(init.Initializer, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
                     if (!ReferenceEquals(newExpr, init.Initializer))
                         init.Initializer = newExpr;
@@ -338,14 +349,14 @@ internal sealed class MacroExpansionPass : ResolutionPass
         }
         else if (local is LocalReturnStatement retStmt && retStmt.Statement.Expression is not null)
         {
-            var newExpr = ExpandExpression(retStmt.Statement.Expression, expander, currentDepth, sourceText, ref changed);
+            var newExpr = ExpandExpression(retStmt.Statement.Expression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(newExpr, retStmt.Statement.Expression))
                 retStmt.Statement.Expression = newExpr;
         }
         else if (local is LocalExpressionStatement exprStmt && exprStmt.Expression is not MacroInvocationExpression)
         {
-            var newExpr = ExpandExpression(exprStmt.Expression, expander, currentDepth, sourceText, ref changed);
+            var newExpr = ExpandExpression(exprStmt.Expression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(newExpr, exprStmt.Expression))
                 exprStmt.Expression = newExpr;
@@ -354,13 +365,13 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static bool ExpandTopLevelStatement(TopLevelStatement stmt, MacroExpander expander, ulong currentDepth, SourceText sourceText)
+    private static bool ExpandTopLevelStatement(TopLevelStatement stmt, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText)
     {
         bool changed = false;
 
         if (stmt is TopLevelExpressionStatement exprStmt)
         {
-            var newExpr = ExpandExpression(exprStmt.Expression, expander, currentDepth, sourceText, ref changed);
+            var newExpr = ExpandExpression(exprStmt.Expression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(newExpr, exprStmt.Expression))
                 exprStmt.Expression = newExpr;
@@ -369,8 +380,44 @@ internal sealed class MacroExpansionPass : ResolutionPass
         return changed;
     }
 
-    private static Expression ExpandExpression(Expression expr, MacroExpander expander, ulong currentDepth, SourceText sourceText, ref bool changed)
+    private static Expression ExpandExpression(Expression expr, MacroExpander expander, Dictionary<(LiteralMacroKind Kind, string Suffix), LiteralMacroDeclaration> literalMacroTable, ulong currentDepth, SourceText sourceText, ref bool changed)
     {
+        if (expr is LiteralExpression lit && lit.Literal.HasSuffix && lit.Literal.Suffix is { } suffix)
+        {
+            LiteralMacroKind? kind = lit.Literal.Kind switch
+            {
+                TokenKind.SuffixedInteger => LiteralMacroKind.Int,
+                TokenKind.SuffixedFloat => LiteralMacroKind.Float,
+                TokenKind.SuffixedString => LiteralMacroKind.Str,
+                TokenKind.SuffixedChar => LiteralMacroKind.Char,
+                _ => null
+            };
+
+            if (kind is not null && literalMacroTable.TryGetValue((kind.Value, suffix), out var literalMacro))
+            {
+                TokenKind unsuffixedKind = kind.Value switch
+                {
+                    LiteralMacroKind.Int => TokenKind.Integer,
+                    LiteralMacroKind.Float => TokenKind.Float,
+                    LiteralMacroKind.Str => TokenKind.String,
+                    LiteralMacroKind.Char => TokenKind.Char,
+                    _ => throw new InvalidOperationException()
+                };
+
+                var unsuffixedToken = new Token(
+                    lit.Literal.Source,
+                    new TextSpan(lit.Literal.Span.Start, lit.Literal.ValueWithoutSuffix.Length),
+                    unsuffixedKind,
+                    lit.Literal.LeadingTrivia,
+                    lit.Literal.TrailingTrivia);
+
+                var replacementLiteral = new LiteralExpression(unsuffixedToken);
+                var expanded = SubstituteParameter(literalMacro.Body, literalMacro.ParameterIdentifier.Value, replacementLiteral);
+                changed = true;
+                return expanded;
+            }
+        }
+
         if (expr is MacroInvocationExpression inv)
         {
             var expanded = expander.ExpandExpression(inv, currentDepth, inv.ExpansionOrigin, sourceText);
@@ -386,12 +433,12 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is BinaryExpression bin)
         {
-            var left = ExpandExpression(bin.LeftExpression, expander, currentDepth, sourceText, ref changed);
+            var left = ExpandExpression(bin.LeftExpression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(left, bin.LeftExpression))
                 bin.LeftExpression = left;
 
-            var right = ExpandExpression(bin.RightExpression, expander, currentDepth, sourceText, ref changed);
+            var right = ExpandExpression(bin.RightExpression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(right, bin.RightExpression))
                 bin.RightExpression = right;
@@ -401,7 +448,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is AssignmentExpression assign)
         {
-            var rhs = ExpandExpression(assign.RhsExpression, expander, currentDepth, sourceText, ref changed);
+            var rhs = ExpandExpression(assign.RhsExpression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(rhs, assign.RhsExpression))
                 assign.RhsExpression = rhs;
@@ -411,7 +458,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is UnaryExpression unary)
         {
-            var operand = ExpandExpression(unary.Operand, expander, currentDepth, sourceText, ref changed);
+            var operand = ExpandExpression(unary.Operand, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(operand, unary.Operand))
                 unary.Operand = operand;
@@ -421,7 +468,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is ParenthesizedExpression paren)
         {
-            var inner = ExpandExpression(paren.Expression, expander, currentDepth, sourceText, ref changed);
+            var inner = ExpandExpression(paren.Expression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(inner, paren.Expression))
                 paren.Expression = inner;
@@ -431,7 +478,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is NameofExpression nameofExpr)
         {
-            var inner = ExpandExpression(nameofExpr.Argument, expander, currentDepth, sourceText, ref changed);
+            var inner = ExpandExpression(nameofExpr.Argument, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(inner, nameofExpr.Argument))
                 nameofExpr.Argument = inner;
@@ -441,7 +488,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (expr is CallExpression call)
         {
-            var callee = ExpandExpression(call.Callee, expander, currentDepth, sourceText, ref changed);
+            var callee = ExpandExpression(call.Callee, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (!ReferenceEquals(callee, call.Callee))
                 call.Callee = callee;
@@ -452,7 +499,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             for (int i = 0; i < call.Arguments.Count; i++)
             {
                 var arg = call.Arguments[i];
-                var expandedArg = ExpandExpression(arg, expander, currentDepth, sourceText, ref changed);
+                var expandedArg = ExpandExpression(arg, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
                 if (!ReferenceEquals(expandedArg, arg))
                     argsChanged = true;
@@ -503,7 +550,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
                 }
                 else
                 {
-                    if (ExpandLocal(local, expander, currentDepth, sourceText))
+                    if (ExpandLocal(local, expander, literalMacroTable, currentDepth, sourceText))
                         localsChanged = true;
 
                     newLocals.Add(local);
@@ -513,7 +560,7 @@ internal sealed class MacroExpansionPass : ResolutionPass
             Expression? newFinal = block.FinalExpression;
 
             if (block.FinalExpression is not null)
-                newFinal = ExpandExpression(block.FinalExpression, expander, currentDepth, sourceText, ref changed);
+                newFinal = ExpandExpression(block.FinalExpression, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
             if (localsChanged || !ReferenceEquals(newFinal, block.FinalExpression))
             {
@@ -526,6 +573,59 @@ internal sealed class MacroExpansionPass : ResolutionPass
             }
 
             return block;
+        }
+
+        return expr;
+    }
+
+    private static Expression SubstituteParameter(Expression expr, string paramName, Expression replacement)
+    {
+        if (expr is IdentifierNameExpression ident && ident.Identifier.Value == paramName)
+            return replacement;
+
+        if (expr is BinaryExpression bin)
+        {
+            var left = SubstituteParameter(bin.LeftExpression, paramName, replacement);
+            var right = SubstituteParameter(bin.RightExpression, paramName, replacement);
+            return new BinaryExpression(left, bin.OperatorToken, right);
+        }
+
+        if (expr is UnaryExpression unary)
+        {
+            var operand = SubstituteParameter(unary.Operand, paramName, replacement);
+            return new UnaryExpression(unary.OperatorToken, operand, unary.Position);
+        }
+
+        if (expr is ParenthesizedExpression paren)
+        {
+            var inner = SubstituteParameter(paren.Expression, paramName, replacement);
+            return new ParenthesizedExpression(paren.LeftParen, inner, paren.RightParen);
+        }
+
+        if (expr is MemberAccessExpression member)
+        {
+            var target = SubstituteParameter(member.Expression, paramName, replacement);
+            return new MemberAccessExpression(target, member.Dot, member.Identifier);
+        }
+
+        if (expr is CallExpression call)
+        {
+            var callee = SubstituteParameter(call.Callee, paramName, replacement);
+            var newArgs = new List<SyntaxNode>();
+            for (int i = 0; i < call.Arguments.Count; i++)
+            {
+                newArgs.Add(SubstituteParameter(call.Arguments[i], paramName, replacement));
+                var sep = call.Arguments.GetSeparator(i);
+                if (sep is not null)
+                    newArgs.Add(sep);
+            }
+            return new CallExpression(callee, call.OpenParen, new SeparatedSyntaxList<Expression>(newArgs), call.CloseParen);
+        }
+
+        if (expr is BlockExpression block)
+        {
+            var newFinal = block.FinalExpression is not null ? SubstituteParameter(block.FinalExpression, paramName, replacement) : null;
+            return new BlockExpression(block.Attributes, block.Modifiers, block.OpenBrace, block.Locals, newFinal, block.CloseBrace);
         }
 
         return expr;

@@ -14,6 +14,9 @@ internal sealed class ResolutionContext
 
     public NamespaceTrieNode GlobalNamespace { get; }
 
+    public DiscoveredIntrinsics DiscoveredIntrinsics { get; }
+    public DiscoveredOperators DiscoveredOperators { get; }
+
     public List<AttributeSymbol> AttributeSymbols { get; }
     public List<NestedAttributeSymbol> NestedAttributeSymbols { get; }
     public List<TypeSymbol> TypeSymbols { get; }
@@ -30,6 +33,7 @@ internal sealed class ResolutionContext
     public List<LabelSymbol> LabelSymbols { get; }
     public List<AliasSymbol> AliasSymbols { get; }
     public List<MacroSymbol> MacroSymbols { get; }
+    public List<EnumVariantSymbol> EnumVariantSymbols { get; }
 
     public SymbolStore SinkSymbols { get; } = SymbolStore.CreateEmpty();
     private readonly List<LocalVariableSymbol> sinkLocalVariables = [];
@@ -40,11 +44,30 @@ internal sealed class ResolutionContext
             .Concat(sinkLocalVariables);
     private readonly Dictionary<SymbolHandle, Symbol> sinkSymbolsByHandle = [];
     private int sinkID = -1;
+    private int enumVariantID;
 
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
     private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
+    private readonly Dictionary<Expression, TypeRef> expressionTypes = [];
+    private readonly Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> controlFlowGraphs = [];
+
+    public void SetExpressionType(Expression expr, TypeRef type) => expressionTypes[expr] = type;
+
+    public TypeRef? GetExpressionType(Expression expr) =>
+        expressionTypes.TryGetValue(expr, out var type) ? type : null;
+
+    public TypeRef GetRequiredExpressionType(Expression expr) =>
+        expressionTypes.TryGetValue(expr, out var type) ? type : TypeRef.Error;
+
+    public void SetControlFlowGraph(SymbolHandle handle, ControlFlow.ControlFlowGraph cfg) =>
+        controlFlowGraphs[handle] = cfg;
+
+    public bool TryGetControlFlowGraph(SymbolHandle handle, out ControlFlow.ControlFlowGraph? cfg) =>
+        controlFlowGraphs.TryGetValue(handle, out cfg);
+
+    public IReadOnlyDictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs => controlFlowGraphs;
 
     public void RegisterHygiene(SyntaxNode node, HygieneId hygiene) => nodeHygiene[node] = hygiene;
 
@@ -98,12 +121,16 @@ internal sealed class ResolutionContext
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
         IReadOnlyList<SymbolStore>? importedSymbols = null,
         DiagnosticsManager? diagnostics = null,
-        CompilationOptions? options = null)
+        CompilationOptions? options = null,
+        DiscoveredIntrinsics? discoveredIntrinsics = null,
+        DiscoveredOperators? discoveredOperators = null)
     {
         SyntaxTrees = syntaxTrees;
         ResolvedTree = resolvedTree;
         Diagnostics = diagnostics ?? new DiagnosticsManager();
         Options = options ?? new CompilationOptions();
+        DiscoveredIntrinsics = discoveredIntrinsics ?? new DiscoveredIntrinsics();
+        DiscoveredOperators = discoveredOperators ?? new DiscoveredOperators();
 
         GlobalNamespace = globalNamespace;
         Scopes = scopes;
@@ -123,6 +150,7 @@ internal sealed class ResolutionContext
         LabelSymbols = symbols.LabelSymbols;
         AliasSymbols = symbols.AliasSymbols;
         MacroSymbols = symbols.MacroSymbols;
+        EnumVariantSymbols = symbols.EnumVariantSymbols;
 
         ReferencedProjects = referencedProjects ?? [];
         ImportedProjectSymbols = importedSymbols ?? [];
@@ -141,6 +169,7 @@ internal sealed class ResolutionContext
         labelID = LabelSymbols.Count;
         aliasID = AliasSymbols.Count;
         macroID = MacroSymbols.Count;
+        enumVariantID = EnumVariantSymbols.Count;
 
         if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
             InitializeProjectReferences();
@@ -635,6 +664,29 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
+    public EnumVariantSymbol CreateEnumVariantSymbol(
+        Scope enclosingScope,
+        SymbolPart name,
+        EnumVariantKind variantKind,
+        SymbolHandle containingType,
+        EnumVariant? syntax,
+        Expression? explicitValue = null)
+    {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : enumVariantID++;
+        var symbol = new EnumVariantSymbol(id, enclosingScope, name, variantKind, containingType, syntax, explicitValue);
+
+        if (isSink)
+        {
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+            EnumVariantSymbols.Add(symbol);
+
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
     public FunctionSymbol? GetFunctionSymbol(SymbolHandle handle)
     {
         if (handle.Kind != SymbolKind.Function)
@@ -743,17 +795,58 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    public FieldSymbol? GetFieldSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Field)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < FieldSymbols.Count)
+            return FieldSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FieldSymbol f)
+            return f;
+
+        return null;
+    }
+
+    public PropertySymbol? GetPropertySymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Property)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < PropertySymbols.Count)
+            return PropertySymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is PropertySymbol p)
+            return p;
+
+        return null;
+    }
+
+    public EnumVariantSymbol? GetEnumVariantSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.EnumVariant)
+            return null;
+        if (handle.ID.Value >= 0 && handle.ID.Value < EnumVariantSymbols.Count)
+            return EnumVariantSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is EnumVariantSymbol v)
+            return v;
+
+        return null;
+    }
+
     public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
     {
         SymbolKind.Type => GetTypeSymbol(handle),
         SymbolKind.NestedType => GetNestedTypeSymbol(handle),
         SymbolKind.Function => GetFunctionSymbol(handle),
         SymbolKind.Method => GetMethodSymbol(handle),
+        SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
+        SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
+        SymbolKind.Field => GetFieldSymbol(handle),
+        SymbolKind.Property => GetPropertySymbol(handle),
         SymbolKind.Alias => GetAliasSymbol(handle),
         SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
         SymbolKind.Parameter => GetParameterSymbol(handle),
         SymbolKind.Attribute => GetAttributeSymbol(handle),
         SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
+        SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
         _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
     };
 
@@ -771,6 +864,9 @@ internal sealed class ResolutionContext
     /// </summary>
     public SymbolHandle? GetType(TypeRef typeRef)
     {
+        if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
+            return GetType(untagged.InnerType);
+
         if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
             return null;
 
@@ -810,6 +906,9 @@ internal sealed class ResolutionContext
     /// </summary>
     public TypeRef UnwrapAlias(TypeRef typeRef)
     {
+        if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
+            return TypeRef.Untagged(UnwrapAlias(untagged.InnerType));
+
         var current = typeRef;
         var visited = new HashSet<SymbolHandle>();
 
@@ -927,6 +1026,10 @@ internal sealed class ResolutionContext
 
             case ModifiedType modified:
                 AddTypeNameParts(modified.Type, parts);
+                break;
+
+            case PrefixModifiedType prefixModified:
+                AddTypeNameParts(prefixModified.Type, parts);
                 break;
 
             case TupleType:
