@@ -7,6 +7,22 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Pass 5 of semantic resolution: Expression Type Binding, Operator Resolution, and Eager/Retroactive Literal Collapsing.
+/// <para>
+/// Responsibilities:
+/// <list type="bullet">
+///   <item><description>Binds every expression in function/method/accessor bodies and variable/field initializers to its semantic <see cref="TypeRef"/>.</description></item>
+///   <item><description>Dispatches operators (<c>+</c>, <c>-</c>, <c>*</c>, <c>==</c>, indexers, callables, etc.) strictly through discovered operator interfaces (<c>[OperatorFunction]</c>).</description></item>
+///   <item><description>Performs zero constant-folding: expressions resolve to AST operator invocation nodes rather than pre-calculated constants.</description></item>
+///   <item><description>Implements eager, retroactive literal collapsing: unsuffixed literals start as unconstrained scalar types (<see cref="CompileTimeLiteralType"/>) and collapse into the first concrete lvalue type encountered, retroactively resolving all operations chained on them.</description></item>
+///   <item><description>Enforces sequential eager collapsing: subsequent uses retain the collapsed type, emitting argument mismatch diagnostics if incompatible.</description></item>
+///   <item><description>Resolves canonical booleans (<c>true</c>/<c>false</c>) directly to canonical <c>bool</c> without literal polymorphism.</description></item>
+///   <item><description>Resolves <c>this</c> to the enclosing type handle within non-static methods, constructors, and property accessors.</description></item>
+///   <item><description>Resolves two-phase object allocation and construction (<c>New</c>/<c>Put</c> allocation followed by <c>Ctor</c> construction).</description></item>
+/// </list>
+/// </para>
+/// </summary>
 internal sealed class ExpressionResolutionPass : ResolutionPass
 {
     private ResolutionContext context = null!;
@@ -20,10 +36,23 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private TypeRef voidType = TypeRef.Unresolved;
     private TypeRef boolType = TypeRef.Unresolved;
 
+    /// <summary>Tracks visited function bodies to avoid redundant evaluation across multiple traversal passes.</summary>
     private readonly HashSet<FunctionBody> visitedBodies = [];
+
+    /// <summary>Tracks visited variable declarations to avoid redundant evaluation across multiple traversal passes.</summary>
     private readonly HashSet<VariableDeclaration> visitedDeclarations = [];
+
+    /// <summary>
+    /// Tracks local variables declared with unconstrained literals (<c>var x = 10;</c>) mapped to their initializer AST node,
+    /// enabling retroactive type propagation when an assignment or operator subsequently collapses the variable.
+    /// </summary>
     private readonly Dictionary<LocalVariableSymbol, SyntaxNode> uncollapsedLocals = new();
 
+    /// <summary>
+    /// Executes Pass 5: binds expression types, dispatches operators against library interfaces,
+    /// and resolves retroactive literal collapsing across all statements.
+    /// </summary>
+    /// <param name="context">The active resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
@@ -84,6 +113,10 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Caches handles to discovered intrinsic primitives in local fields for fast zero-allocation checks.
+    /// Includes name-based fallbacks for unit test environments that do not register full intrinsic metadata.
+    /// </summary>
     private void CacheIntrinsicHandles()
     {
         var intrinsics = context.DiscoveredIntrinsics;
@@ -157,6 +190,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Looks up a type symbol handle by name in top-level or nested types as a fallback for testing.
+    /// </summary>
     private SymbolHandle? FindFallbackTypeHandle(string name)
     {
         foreach (var sym in context.TypeSymbols)
@@ -172,21 +208,28 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return null;
     }
 
+    /// <summary>Checks whether a type reference corresponds to a signed integer primitive.</summary>
     private bool IsSignedInteger(TypeRef t) =>
         t.Handle is { } h && (h == hInt8 || h == hInt16 || h == hInt32 || h == hInt64 || h == hInt128 || h == hNInt);
 
+    /// <summary>Checks whether a type reference corresponds to an unsigned integer primitive.</summary>
     private bool IsUnsignedInteger(TypeRef t) =>
         t.Handle is { } h && (h == hUInt8 || h == hUInt16 || h == hUInt32 || h == hUInt64 || h == hUInt128 || h == hNUInt);
 
+    /// <summary>Checks whether a type reference corresponds to any integer primitive.</summary>
     private bool IsInteger(TypeRef t) => IsSignedInteger(t) || IsUnsignedInteger(t);
 
+    /// <summary>Checks whether a type reference corresponds to a floating-point primitive.</summary>
     private bool IsFloatingPoint(TypeRef t) =>
         t.Handle is { } h && (h == hFloat16 || h == hFloat32 || h == hFloat64 || h == hFloat128);
 
+    /// <summary>Checks whether a type reference is numeric (integer or floating-point).</summary>
     private bool IsNumeric(TypeRef t) => IsInteger(t) || IsFloatingPoint(t);
 
+    /// <summary>Checks whether a type reference corresponds to canonical boolean.</summary>
     private bool IsBool(TypeRef t) => t.Handle is { } h && h == hBool;
 
+    /// <summary>Checks whether a type reference corresponds to <c>void</c>.</summary>
     private bool IsVoidType(TypeRef t)
     {
         if (t.Handle is { } h)
@@ -199,9 +242,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>Retrieves the lexical child scope owned by a symbol, or returns its enclosing scope.</summary>
     private static Scope GetOwnedScope(Symbol symbol) =>
         symbol.EnclosingScope.GetChildScope(ResolutionContext.GetHandle(symbol)) ?? symbol.EnclosingScope;
 
+    /// <summary>
+    /// Resolves top-level statements across compilation units that opted into top-level execution.
+    /// Traverses statements under the synthetic main function and collapses remaining unconstrained locals.
+    /// </summary>
     private void ResolveTopLevelStatements()
     {
         foreach (var tree in context.SyntaxTrees)
@@ -226,6 +274,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Recursively resolves top-level statements and member declarations (blocks, namespaces, expressions).
+    /// </summary>
     private void ResolveTopLevelMembers(IReadOnlyList<TopLevel> members, Scope scope, SymbolHandle main)
     {
         foreach (var member in members)
@@ -252,6 +303,15 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Resolves all statements within a function, method, or accessor body.
+    /// Traverses statements in lexical sequence, binding types, resolving operators, and performing eager literal collapsing.
+    /// At the end of the body, triggers <see cref="CollapseRemainingLocals"/> to collapse any locals that remained unconstrained.
+    /// </summary>
+    /// <param name="body">The AST function body.</param>
+    /// <param name="scope">The lexical scope for the body.</param>
+    /// <param name="containingFunction">Symbol handle of the containing callable.</param>
+    /// <param name="expectedReturnType">The expected return type of the callable.</param>
     private void ResolveFunctionBody(FunctionBody body, Scope scope, SymbolHandle containingFunction, TypeRef expectedReturnType)
     {
         if (body is FunctionBlockBody block)
@@ -267,12 +327,19 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         CollapseRemainingLocals(scope, containingFunction);
     }
 
+    /// <summary>
+    /// Dispatches and resolves an individual local statement (expression statement, return, local variable declaration, goto).
+    /// </summary>
     private void ResolveLocal(Local local, Scope scope, SymbolHandle containingFunction, TypeRef expectedReturnType)
     {
         switch (local)
         {
             case LocalExpressionStatement exprStmt:
                 var t = ResolveExpression(exprStmt.Expression, scope, containingFunction);
+
+                // If expression statement evaluates to an uncollapsed literal:
+                // - If it is the final expression of a typed function, collapse to expectedReturnType.
+                // - Otherwise, because its result is discarded with no target lvalue, collapse to default intrinsic.
                 if (t.IsLiteral)
                 {
                     var targetType = exprStmt.IsFinalExpression && !expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError
@@ -280,6 +347,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         : CollapseLiteralToDefault(t);
                     t = CollapseExpression(exprStmt.Expression, targetType, scope, containingFunction);
                 }
+
+                // Final expression acts as implicit return: verify type compatibility against expected return type
                 if (exprStmt.IsFinalExpression && !expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError && !t.IsUnresolved && !t.IsError)
                 {
                     if (!expectedReturnType.IsAssignableFrom(t, context))
@@ -306,6 +375,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Resolves and type-checks a <see cref="LocalReturnStatement"/> against the containing function's return type.
+    /// <para>
+    /// If the returned expression is an uncollapsed literal, it is collapsed retroactively against <paramref name="expectedReturnType"/>.
+    /// If concrete, assignability is checked, falling back to implicit conversion operators (<c>[OperatorFunction("ImplicitCast")]</c>).
+    /// Emits diagnostic <c>MH2006</c> if a return type mismatch occurs.
+    /// </para>
+    /// </summary>
     private void ResolveReturnStatement(LocalReturnStatement returnStmt, Scope scope, SymbolHandle containingFunction, TypeRef expectedReturnType)
     {
         TextSpan span;
@@ -319,6 +396,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             {
                 if (returnedType.IsLiteral)
                 {
+                    // Retroactively collapse the returned literal into the expected return type
                     var collapsed = CollapseExpression(expr, expectedReturnType, scope, containingFunction);
                     if (collapsed.IsError)
                     {
@@ -343,7 +421,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
         else
         {
-            // Bare return;
+            // Bare return statement (return;) must only appear in void-returning functions
             span = returnStmt.Statement.Keyword.Span;
 
             if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
@@ -360,6 +438,16 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Collapses an uncollapsed compile-time scalar literal type (<see cref="CompileTimeLiteralType"/>)
+    /// into its default canonical intrinsic type:
+    /// <list type="bullet">
+    ///   <item><description><see cref="CompileTimeLiteralKind.Int"/> -> <c>int32</c></description></item>
+    ///   <item><description><see cref="CompileTimeLiteralKind.Float"/> -> <c>float64</c></description></item>
+    ///   <item><description><see cref="CompileTimeLiteralKind.Str"/> -> <c>Str</c></description></item>
+    ///   <item><description><see cref="CompileTimeLiteralKind.Char"/> -> <c>char</c></description></item>
+    /// </list>
+    /// </summary>
     private TypeRef CollapseLiteralToDefault(TypeRef type)
     {
         if (type.IsLiteral && type.SpecialType is CompileTimeLiteralType lit)
@@ -376,6 +464,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return type;
     }
 
+    /// <summary>
+    /// Resolves variable declarations (both tuple destructuring and single variable declarators).
+    /// <para>
+    /// Program Flow:
+    /// <list type="number">
+    ///   <item><description>Tuple Destructuring (<c>var (a, b) = expr;</c>): Resolves RHS, validates arity against <see cref="TupleSemanticType"/>, and assigns element types to targets.</description></item>
+    ///   <item><description>Inferred Declarator (<c>var x = expr;</c>): If RHS is an unconstrained literal, records in <see cref="uncollapsedLocals"/> for retroactive propagation; otherwise assigns concrete type.</description></item>
+    ///   <item><description>Explicitly Typed Declarator (<c>Concrete x = expr;</c>): If RHS is an unconstrained literal, immediately collapses it to the target type via <see cref="CollapseExpression"/>; otherwise verifies assignability or implicit conversion operators (<c>MH2003</c>).</description></item>
+    ///   <item><description>Uninitialized Inferred Variable (<c>var x;</c>): Reports <c>MH2008</c>.</description></item>
+    /// </list>
+    /// </para>
+    /// </summary>
     private void ResolveVariableDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingFunction)
     {
         foreach (var declarator in declaration.Declarators)
@@ -428,6 +528,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     var initType = ResolveExpression(initExpr, scope, containingFunction);
                     if (sym is not null && symType?.IsInferred == true)
                     {
+                        // Inferred local variable:
+                        // If initialized from unconstrained literal, track in uncollapsedLocals for retroactive propagation
                         if (initType.IsLiteral)
                         {
                             SetVariableSymbolType(sym, initType);
@@ -443,6 +545,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                              !initType.IsInferred && !initType.IsUnresolved && !initType.IsError &&
                              initExpr is not CollectionExpression)
                     {
+                        // Explicitly typed variable:
+                        // If initialized from unconstrained literal, immediately collapse literal to target type
                         if (initType.IsLiteral)
                         {
                             var collapsed = CollapseExpression(initExpr, st, scope, containingFunction);
@@ -457,7 +561,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         }
                         else
                         {
-                            // Type check explicit variable initialization
+                            // Type check explicit variable initialization: check assignability or implicit conversion
                             if (!st.IsAssignableFrom(initType, context) &&
                                 !TryResolveImplicitCast(initType, st, out _))
                             {
@@ -472,7 +576,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
                 else if (sym is not null && symType?.IsInferred == true)
                 {
-                    // Inferred variable without initializer
+                    // Inferred variable without initializer cannot determine type
                     context.Diagnostics.ReportCannotInferType(
                         declarator.Identifier.GetSpan() ?? default,
                         name.Text,
@@ -482,12 +586,23 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Looks up a variable symbol (local, field, or global) in the given lexical scope matching the specified name.
+    /// </summary>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="name">The symbol name part including hygiene identifier.</param>
+    /// <returns>The matching variable symbol, or <see langword="null"/> if none is declared.</returns>
     private Symbol? ResolveLocalOrFieldSymbol(Scope scope, SymbolPart name)
     {
         var syms = scope[new SymbolName(name)];
         return syms.FirstOrDefault(s => s is LocalVariableSymbol or FieldSymbol or GlobalVariableSymbol);
     }
 
+    /// <summary>
+    /// Sets the resolved type on a variable symbol (local, field, or global).
+    /// </summary>
+    /// <param name="sym">The variable symbol to update.</param>
+    /// <param name="type">The resolved semantic type.</param>
     private static void SetVariableSymbolType(Symbol sym, TypeRef type)
     {
         switch (sym)
@@ -498,6 +613,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Retrieves the current semantic type assigned to a variable symbol (local, field, or global).
+    /// </summary>
+    /// <param name="sym">The variable symbol to inspect.</param>
+    /// <returns>The assigned <see cref="TypeRef"/>, or <see langword="null"/> if the symbol is not a variable.</returns>
     private static TypeRef? GetVariableSymbolType(Symbol sym) => sym switch
     {
         LocalVariableSymbol local => local.Type,
@@ -506,6 +626,15 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => null
     };
 
+    /// <summary>
+    /// Recursively resolves the semantic type of an AST expression node within a lexical scope.
+    /// Dispatches each expression syntax node to its specialized resolver, caches the resolved type
+    /// in the resolution context, and returns the computed <see cref="TypeRef"/>.
+    /// </summary>
+    /// <param name="expr">The AST expression node to resolve.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved semantic type of the expression.</returns>
     private TypeRef ResolveExpression(Expression? expr, Scope scope, SymbolHandle containingFunction)
     {
         if (expr is null)
@@ -616,16 +745,30 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return result;
     }
 
+    /// <summary>
+    /// Resolves the semantic type of a literal expression.
+    /// <para>
+    /// Maho applies strict literal typing rules:
+    /// 1. Canonical booleans (<c>true</c>, <c>false</c>) immediately resolve to canonical <c>bool</c>.
+    /// 2. Suffixed literals (e.g. <c>10km</c>, <c>42px</c>) match user-defined literal conversion functions marked with <see cref="FunctionFlags.Literal"/>.
+    /// 3. Unsuffixed literals return unconstrained compile-time literal types (<see cref="CompileTimeLiteralType"/>)
+    ///    preserving their source token kind until an lvalue context or explicit annotation collapses them.
+    /// </para>
+    /// </summary>
+    /// <param name="lit">The literal expression node.</param>
+    /// <returns>The resolved or uncollapsed literal <see cref="TypeRef"/>.</returns>
     private TypeRef ResolveLiteral(LiteralExpression lit)
     {
+        // 1. Canonical booleans cannot be overloaded or uncollapsed
         if (lit.Literal.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
             return boolType;
 
+        // 2. Suffixed literals dispatch to custom literal conversion methods or functions
         if (lit.HasSuffix)
         {
             var suffix = lit.Literal.GetSuffixSpan().ToString();
 
-            // 1. Check for literal functions declared on types or at file level
+            // Check for literal methods declared on types
             foreach (var m in context.MethodSymbols)
             {
                 if (m.Flags.HasFlag(FunctionFlags.Literal) && m.Name.Text == suffix)
@@ -635,6 +778,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
             }
 
+            // Check for file-level literal functions
             foreach (var fn in context.FunctionSymbols)
             {
                 if (fn.Flags.HasFlag(FunctionFlags.Literal) && fn.Name.Text == suffix)
@@ -647,6 +791,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return TypeRef.Unresolved;
         }
 
+        // 3. Unsuffixed literals yield uncollapsed compile-time literal types
         return lit.Literal.Kind switch
         {
             TokenKind.Integer => TypeRef.Literal(CompileTimeLiteralKind.Int, lit.Literal.Value),
@@ -657,6 +802,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         };
     }
 
+    /// <summary>
+    /// Finds all methods decorated with <see cref="FunctionFlags.Literal"/> on the specified target type
+    /// that are capable of converting a compile-time literal into that type.
+    /// </summary>
+    /// <param name="targetType">The destination type to search.</param>
+    /// <param name="kind">The kind of compile-time literal being converted.</param>
+    /// <returns>A list of matching literal conversion method symbols.</returns>
     private List<MethodSymbol> GetMatchingLiteralMethods(TypeRef targetType, CompileTimeLiteralKind kind)
     {
         var result = new List<MethodSymbol>();
@@ -674,11 +826,22 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return result;
     }
 
+    /// <summary>
+    /// Resolves an identifier or named expression within the current lexical scope.
+    /// Handles canonical booleans (<c>true</c>, <c>false</c>), <c>this</c> self-references in instance methods,
+    /// hygienic symbol lookup, and binding references into the resolution tree.
+    /// </summary>
+    /// <param name="named">The named expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved type of the named symbol, or <see cref="TypeRef.Unresolved"/> if not found.</returns>
     private TypeRef ResolveNamed(NamedExpression named, Scope scope, SymbolHandle containingFunction = default)
     {
+        // 1. Reserved boolean literal keywords
         if (named.Identifier.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
             return boolType;
 
+        // 2. 'this' receiver expression inside non-static member functions
         if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
         {
             if (context.GetSymbol(containingFunction) is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.Static) && m.Parent is { } parentHandle)
@@ -689,6 +852,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return TypeRef.Unresolved;
         }
 
+        // 3. Lexical scope lookup with hygiene tracking
         var hygiene = context.GetHygiene(named);
         var part = named is GenericNameExpression generic
             ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count, hygiene)
@@ -702,12 +866,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return GetTypeFromSymbol(sym);
         }
 
+        // 4. Fallback check for previously recorded resolution tree references
         if (context.ResolvedTree.TryGetReference(named, out var handle))
             return GetTypeFromHandle(handle);
 
         return TypeRef.Unresolved;
     }
 
+    /// <summary>
+    /// Extracts the semantic <see cref="TypeRef"/> associated with a declared symbol.
+    /// </summary>
+    /// <param name="sym">The symbol to inspect.</param>
+    /// <returns>The resolved semantic type of the symbol.</returns>
     private TypeRef GetTypeFromSymbol(Symbol sym) => sym switch
     {
         LocalVariableSymbol local => local.Type,
@@ -721,12 +891,36 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => TypeRef.Unresolved
     };
 
+    /// <summary>
+    /// Resolves the semantic type of a symbol reference handle.
+    /// </summary>
+    /// <param name="handle">The symbol handle to inspect.</param>
+    /// <returns>The resolved semantic type, or a resolved reference type to the handle.</returns>
     private TypeRef GetTypeFromHandle(SymbolHandle handle)
     {
         var sym = context.GetSymbol(handle);
         return sym is not null ? GetTypeFromSymbol(sym) : TypeRef.Resolved(handle);
     }
 
+    /// <summary>
+    /// Resolves the semantic type of a binary operator expression.
+    /// <para>
+    /// Resolution proceeds through five sequential tiers:
+    /// 1. Uncollapsed literals on both sides (e.g. <c>10 + 20</c>): comparisons yield <c>bool</c>;
+    ///    arithmetic preserves the uncollapsed literal kind.
+    /// 2. Canonical boolean operations (<c>&amp;&amp;</c>, <c>||</c>) yielding <c>bool</c>.
+    /// 3. Mixed binary expressions with one literal and one concrete operand (e.g. <c>10 + myInt64</c>):
+    ///    dispatches to <see cref="TryResolveOneLiteralBinary"/> to find an operator overload on the concrete type
+    ///    and collapse the literal to the operator parameter's expected type.
+    /// 4. Concrete operand operator overload lookup via <see cref="DiscoveredOperators"/>
+    ///    by inspecting explicit interface implementations (<c>&lt;T as Add&gt;::Add</c>) on either operand type.
+    /// 5. Diagnostic reporting: emits <c>MH2001</c> if no compatible operator overload exists.
+    /// </para>
+    /// </summary>
+    /// <param name="binary">The binary expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved semantic type of the binary operation, or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef ResolveBinary(BinaryExpression binary, Scope scope, SymbolHandle containingFunction)
     {
         var lhs = ResolveExpression(binary.LeftExpression, scope, containingFunction);
@@ -736,7 +930,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (opKind == OperatorKind.None)
             return TypeRef.Error;
 
-        // 1. Uncollapsed literals on both sides
+        // 1. Uncollapsed literals on both sides:
+        // Comparison operators evaluate to canonical bool; arithmetic preserves uncollapsed literal type
         if (lhs.IsLiteral && rhs.IsLiteral)
         {
             var lLit = lhs.AsLiteral!;
@@ -754,11 +949,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             }
         }
 
-        // 2. Canonical bool operations
+        // 2. Canonical bool operations (&&, ||)
         if ((opKind == OperatorKind.LogicalAnd || opKind == OperatorKind.LogicalOr) && IsBool(lhs) && IsBool(rhs))
             return boolType;
 
-        // 3. One literal operand and one concrete operand (e.g. 10 + myInt64)
+        // 3. One literal operand and one concrete operand (e.g. 10 + myInt64 or myInt64 + 10)
+        // Collapses the literal operand directly to the operator parameter type without falling back to Int32
         if (lhs.IsLiteral && !rhs.IsLiteral && !rhs.IsUnresolved && !rhs.IsError)
         {
             if (TryResolveOneLiteralBinary(opKind, binary, binary.LeftExpression, lhs, rhs, isLhsLiteral: true, scope, containingFunction, out var res))
@@ -774,7 +970,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (TryResolveOperatorOverload(opKind, lhs, rhs, binary, out var overloadResult))
             return overloadResult;
 
-        // 5. Neither overload found: report MH2001
+        // 5. No compatible operator overload found: report MH2001
         if (!lhs.IsUnresolved && !lhs.IsError && !lhs.IsInferred && !rhs.IsUnresolved && !rhs.IsError && !rhs.IsInferred)
         {
             context.Diagnostics.ReportTypeMismatch(
@@ -790,6 +986,25 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Error;
     }
 
+    /// <summary>
+    /// Attempts to resolve a binary operator where one operand is an unconstrained compile-time literal
+    /// and the other is a concrete type.
+    /// <para>
+    /// Searches candidate operator interface implementations registered on the concrete operand type.
+    /// If an operator method is found where the concrete parameter matches and the literal is compatible
+    /// with the literal parameter, the literal operand is eagerly collapsed to the parameter type and bound.
+    /// </para>
+    /// </summary>
+    /// <param name="kind">The binary operator kind.</param>
+    /// <param name="binary">The binary expression syntax node.</param>
+    /// <param name="literalExpr">The literal expression AST node.</param>
+    /// <param name="literalType">The uncollapsed literal type of the literal operand.</param>
+    /// <param name="concreteType">The concrete semantic type of the other operand.</param>
+    /// <param name="isLhsLiteral"><see langword="true"/> if LHS is the literal; <see langword="false"/> if RHS is.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <param name="result">The resulting return type of the operator overload if found.</param>
+    /// <returns><see langword="true"/> if an operator overload was found and bound; otherwise <see langword="false"/>.</returns>
     private bool TryResolveOneLiteralBinary(
         OperatorKind kind,
         BinaryExpression binary,
@@ -844,6 +1059,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Maps a Maho binary operator token kind to its corresponding semantic <see cref="OperatorKind"/>.
+    /// </summary>
+    /// <param name="tokenKind">The token kind from the lexer.</param>
+    /// <returns>The mapped <see cref="OperatorKind"/>, or <see cref="OperatorKind.None"/> if not an operator.</returns>
     private static OperatorKind GetBinaryOperatorKind(TokenKind tokenKind) => tokenKind switch
     {
         TokenKind.Plus => OperatorKind.Addition,
@@ -868,6 +1088,20 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => OperatorKind.None
     };
 
+    /// <summary>
+    /// Attempts to find a user-defined binary operator overload implemented on either operand type.
+    /// <para>
+    /// In Maho, operators are declared as explicit interface implementations (<c>&lt;T as Add&gt;::Add</c>).
+    /// This method searches candidate operator methods registered in <see cref="DiscoveredOperators"/>
+    /// that are implemented in the owned scope of either the LHS or RHS operand type.
+    /// </para>
+    /// </summary>
+    /// <param name="kind">The operator kind to look up.</param>
+    /// <param name="lhs">The semantic type of the left operand.</param>
+    /// <param name="rhs">The semantic type of the right operand.</param>
+    /// <param name="syntax">The syntax node to bind in the resolution tree if matched.</param>
+    /// <param name="result">The return type of the matching operator method.</param>
+    /// <returns><see langword="true"/> if a matching operator overload was found and bound; otherwise <see langword="false"/>.</returns>
     private bool TryResolveOperatorOverload(
         OperatorKind kind,
         TypeRef lhs,
@@ -928,6 +1162,19 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Resolves the semantic type of a unary operator expression.
+    /// <para>
+    /// Supports built-in pointer and reference operators (<c>&amp;</c> address-of, <c>*</c> dereference),
+    /// canonical boolean negation (<c>!bool</c>), uncollapsed compile-time literals (preserving uncollapsed type),
+    /// and user-defined unary operator overloads via <see cref="DiscoveredOperators"/>.
+    /// Emits <c>MH2002</c> if no compatible unary operator exists.
+    /// </para>
+    /// </summary>
+    /// <param name="unary">The unary expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved semantic type of the unary operation, or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef ResolveUnary(UnaryExpression unary, Scope scope, SymbolHandle containingFunction)
     {
         var operand = ResolveExpression(unary.Operand, scope, containingFunction);
@@ -949,18 +1196,19 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return TypeRef.Error;
         }
 
-        // 2. Canonical bool
+        // 2. Canonical bool negation
         if (opKind == OperatorKind.LogicalNot && IsBool(operand))
             return boolType;
 
-        // 3. Uncollapsed literal unary
+        // 3. Uncollapsed literal unary (e.g. -10 maintains uncollapsed Int literal)
         if (operand.IsLiteral)
             return operand;
 
-        // 4. Overload lookup through DiscoveredOperators
+        // 4. Overload lookup through DiscoveredOperators for user-defined types
         if (TryResolveUnaryOverload(opKind, operand, unary, out var overloadResult))
             return overloadResult;
 
+        // 5. No unary overload found: report MH2002
         if (!operand.IsUnresolved && !operand.IsError && !operand.IsInferred)
         {
             context.Diagnostics.ReportUnaryTypeMismatch(
@@ -974,6 +1222,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Error;
     }
 
+    /// <summary>
+    /// Maps a unary token kind and position (prefix vs. postfix) to its corresponding <see cref="OperatorKind"/>.
+    /// </summary>
+    /// <param name="tokenKind">The operator token kind.</param>
+    /// <param name="position">Whether the unary operator appears as a prefix or postfix.</param>
+    /// <returns>The mapped <see cref="OperatorKind"/>, or <see cref="OperatorKind.None"/> if unmapped.</returns>
     private static OperatorKind GetUnaryOperatorKind(TokenKind tokenKind, UnaryPosition position) => tokenKind switch
     {
         TokenKind.Minus => OperatorKind.UnaryNegation,
@@ -987,6 +1241,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => OperatorKind.None
     };
 
+    /// <summary>
+    /// Attempts to find a user-defined unary operator overload implemented on the operand type.
+    /// </summary>
+    /// <param name="kind">The unary operator kind.</param>
+    /// <param name="operand">The semantic type of the operand.</param>
+    /// <param name="syntax">The syntax node to bind in the resolution tree if matched.</param>
+    /// <param name="result">The return type of the matching unary operator method.</param>
+    /// <returns><see langword="true"/> if a matching unary operator was found; otherwise <see langword="false"/>.</returns>
     private bool TryResolveUnaryOverload(OperatorKind kind, TypeRef operand, SyntaxNode syntax, out TypeRef result)
     {
         result = TypeRef.Unresolved;
@@ -1029,12 +1291,26 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Resolves an assignment expression (<c>=</c>, <c>+=</c>, <c>-=</c>, etc.).
+    /// <para>
+    /// Verifies that the LHS denotes a valid assignable L-value (<c>MH2003</c>).
+    /// For simple assignment (<c>=</c>), if the RHS is an uncollapsed literal, immediately collapses
+    /// the RHS (and its retroactive subtree) to the LHS type.
+    /// Checks type assignability and implicit conversion operators (<see cref="TryResolveImplicitCast"/>),
+    /// reporting <c>MH2004</c> on mismatch.
+    /// </para>
+    /// </summary>
+    /// <param name="assignment">The assignment expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved type of the assignment (the LHS type), or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef ResolveAssignment(AssignmentExpression assignment, Scope scope, SymbolHandle containingFunction)
     {
         var lhs = ResolveExpression(assignment.LhsExpression, scope, containingFunction);
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
-        // Verify LValue
+        // 1. Verify that the LHS expression denotes a valid writable L-value
         if (!IsLValue(assignment.LhsExpression))
         {
             context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
@@ -1044,12 +1320,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var opToken = assignment.EqualsOperator.Kind;
         if (opToken == TokenKind.Equals)
         {
+            // 2. If RHS is an unconstrained literal, eagerly collapse it to the target LHS type
             if (rhs.IsLiteral && !lhs.IsLiteral && !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred)
             {
                 var collapsed = CollapseExpression(assignment.RhsExpression, lhs, scope, containingFunction);
                 return collapsed.IsError ? TypeRef.Error : lhs;
             }
 
+            // 3. Verify type compatibility: assignability or registered implicit conversion operator
             if (!lhs.IsAssignableFrom(rhs, context) &&
                 !TryResolveImplicitCast(rhs, lhs, out _) &&
                 !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred &&
@@ -1066,10 +1344,16 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return lhs;
         }
 
-        // Compound assignments (+=, -=, etc.)
+        // Compound assignments (+=, -=, etc.) return LHS type
         return lhs;
     }
 
+    /// <summary>
+    /// Determines whether the given expression denotes a valid L-value (assignable storage location).
+    /// In Maho, valid L-values are named expressions, index expressions, member accesses, and pointer dereferences.
+    /// </summary>
+    /// <param name="expr">The AST expression node to inspect.</param>
+    /// <returns><see langword="true"/> if the expression is an L-value; otherwise <see langword="false"/>.</returns>
     private static bool IsLValue(Expression expr) => expr switch
     {
         NamedExpression => true,
@@ -1079,8 +1363,22 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         _ => false
     };
 
+    /// <summary>
+    /// Resolves the semantic type of a function, method, or callable operator invocation.
+    /// <para>
+    /// Handles member access receivers, functions/methods bound in the resolution tree,
+    /// and user-defined types implementing the <see cref="OperatorKind.Callable"/> operator interface.
+    /// Emits <c>MH2009</c> if the callee expression is not callable.
+    /// </para>
+    /// </summary>
+    /// <param name="call">The call expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved return type of the invocation, or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef ResolveCall(CallExpression call, Scope scope, SymbolHandle containingFunction)
     {
+        // 1. If callee is member access on an uncollapsed literal receiver (e.g. 10.Abs()),
+        // return uncollapsed receiver type so retroactive propagation can resolve the method once typed
         if (call.Callee is MemberAccessExpression access)
         {
             var recvType = ResolveExpression(access.Expression, scope, containingFunction);
@@ -1095,6 +1393,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         foreach (var arg in call.Arguments)
             argTypes.Add(ResolveExpression(arg, scope, containingFunction));
 
+        // 2. Direct function or method invocation
         if (context.ResolvedTree.TryGetReference(call.Callee, out var calleeHandle))
         {
             var sym = context.GetSymbol(calleeHandle);
@@ -1104,10 +1403,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 return TypeCheckCall(call, m.Parameters, m.ReturnType, argTypes, scope, containingFunction);
         }
 
-        // Check if callee is an instance invoking Callable operator:
+        // 3. Instance invoking user-defined Callable operator: T(...)
         if (TryResolveCallableOperator(call, calleeType, argTypes, out var callableReturn))
             return callableReturn;
 
+        // 4. Non-callable type error reporting: MH2009
         if (!calleeType.IsError && !calleeType.IsUnresolved && !calleeType.IsInferred)
         {
             context.Diagnostics.ReportTypeNotCallable(call.Callee.GetSpan() ?? default, calleeType.ToDisplayString(context), call.GetSource());
@@ -1117,6 +1417,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return calleeType;
     }
 
+    /// <summary>
+    /// Attempts to resolve an invocation on an instance whose type implements the <see cref="OperatorKind.Callable"/> operator.
+    /// </summary>
+    /// <param name="call">The call expression syntax node.</param>
+    /// <param name="calleeType">The semantic type of the receiver/callee object.</param>
+    /// <param name="argTypes">The evaluated argument types.</param>
+    /// <param name="result">The return type of the matching Callable method if found.</param>
+    /// <returns><see langword="true"/> if a matching Callable operator was resolved; otherwise <see langword="false"/>.</returns>
     private bool TryResolveCallableOperator(CallExpression call, TypeRef calleeType, List<TypeRef> argTypes, out TypeRef result)
     {
         result = TypeRef.Unresolved;
@@ -1165,12 +1473,33 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Determines whether a parameter is declared with a variadic modifier (<c>...</c>).
+    /// </summary>
+    /// <param name="p">The parameter symbol to inspect.</param>
+    /// <returns><see langword="true"/> if variadic; otherwise <see langword="false"/>.</returns>
     private static bool IsVariadicParameter(ParameterSymbol p) =>
         p.Syntax?.Declarator.Type is ModifiedType m && m.Modifier is VariadicTypeModifier;
 
+    /// <summary>
+    /// Determines whether a parameter has a default initial value expression.
+    /// </summary>
+    /// <param name="p">The parameter symbol to inspect.</param>
+    /// <returns><see langword="true"/> if optional with a default value; otherwise <see langword="false"/>.</returns>
     private static bool HasDefaultValue(ParameterSymbol p) =>
         p.Syntax?.Initializer is not null;
 
+    /// <summary>
+    /// Type-checks call arguments against expected parameters, eagerly collapses unconstrained literal arguments,
+    /// verifies argument counts, and checks assignability or implicit conversions.
+    /// </summary>
+    /// <param name="call">The call expression syntax node.</param>
+    /// <param name="paramHandles">List of parameter symbol handles for the target function or method.</param>
+    /// <param name="returnType">The declared return type of the callee.</param>
+    /// <param name="argTypes">The evaluated argument types.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The return type of the validated call.</returns>
     private TypeRef TypeCheckCall(CallExpression call, IReadOnlyList<SymbolHandle> paramHandles, TypeRef returnType, List<TypeRef> argTypes, Scope scope, SymbolHandle containingFunction)
     {
         var expectedParams = new List<ParameterSymbol>();
@@ -1187,6 +1516,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         int requiredCount = expectedParams.Count(p => !IsVariadicParameter(p) && !HasDefaultValue(p));
         int maxCount = isVariadic ? int.MaxValue : expectedParams.Count;
 
+        // Verify argument count within [requiredCount, maxCount]
         if (argTypes.Count < requiredCount || argTypes.Count > maxCount)
         {
             context.Diagnostics.ReportArgumentCountMismatch(
@@ -1196,6 +1526,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 call.GetSource());
         }
 
+        // Verify argument types and eagerly collapse literal arguments
         for (int i = 0; i < argTypes.Count && i < expectedParams.Count; i++)
         {
             var param = expectedParams[i];
@@ -1221,6 +1552,19 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return returnType;
     }
 
+    /// <summary>
+    /// Resolves a member access expression (<c>receiver.member</c>).
+    /// <para>
+    /// Handles static vs instance member access, sum type safety rules (preventing ordinary instance method
+    /// invocations on untagged sum types <c>MH0608</c> and variant-level method calls on sum types <c>MH0609</c>),
+    /// and hides interface-scoped operator methods from standard instance access.
+    /// Emits <c>MH2008</c> if the member is not found.
+    /// </para>
+    /// </summary>
+    /// <param name="access">The member access expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The resolved type of the member, or <see cref="TypeRef.Error"/>/<see cref="TypeRef.Unresolved"/> on failure.</returns>
     private TypeRef ResolveMemberAccess(MemberAccessExpression access, Scope scope, SymbolHandle containingFunction)
     {
         if (context.ResolvedTree.TryGetReference(access, out var existingRef))
@@ -1233,6 +1577,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var receiverType = ResolveExpression(access.Expression, scope, containingFunction);
         var memberName = access.Identifier.Value;
 
+        // If receiver is an uncollapsed literal, defer resolution until collapsed
         if (receiverType.IsLiteral)
         {
             return receiverType;
@@ -1248,7 +1593,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 isStaticAccessOnType = true;
         }
 
-        // Untagged union and sum type member checks (instance members only!):
+        // Untagged union and sum type member safety checks (instance members only!)
         if (!isStaticAccessOnType)
         {
             var unwrapped = receiverType;
@@ -1279,7 +1624,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
                 if (declaredMethod is not null)
                 {
-                    // MH0608: Calling ordinary instance method on untagged sum type
+                    // MH0608: Calling ordinary instance method on untagged sum type without @untagged flag
                     if (isUntagged && !declaredMethod.Flags.HasFlag(FunctionFlags.Untagged))
                     {
                         context.Diagnostics.ReportUntaggedMethodMismatch(
@@ -1395,6 +1740,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Unresolved;
     }
 
+    /// <summary>
+    /// Resolves the semantic type of an indexer expression (<c>target[index]</c>).
+    /// Supports built-in indexing for arrays, spans, and pointers, as well as user-defined indexer operators.
+    /// </summary>
+    /// <param name="index">The index expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The element type of the indexed target, or <see cref="TypeRef.Unresolved"/> on failure.</returns>
     private TypeRef ResolveIndex(IndexExpression index, Scope scope, SymbolHandle containingFunction)
     {
         var targetType = ResolveExpression(index.Expression, scope, containingFunction);
@@ -1414,6 +1767,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Unresolved;
     }
 
+    /// <summary>
+    /// Attempts to resolve a user-defined indexer getter operator on the target type.
+    /// </summary>
+    /// <param name="targetType">The type being indexed.</param>
+    /// <param name="index">The index expression syntax node.</param>
+    /// <param name="result">The return type of the indexer method.</param>
+    /// <returns><see langword="true"/> if a matching indexer was found; otherwise <see langword="false"/>.</returns>
     private bool TryResolveIndexer(TypeRef targetType, IndexExpression index, out TypeRef result)
     {
         result = TypeRef.Unresolved;
@@ -1446,6 +1806,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Resolves an <c>if</c> conditional expression.
+    /// <para>
+    /// Validates condition expression (<c>MH2006</c> if not boolean).
+    /// Maho enforces strict exact branch matching without implicit widening: both branches must evaluate
+    /// to the exact same concrete type or compatible literal type, emitting <c>MH2011</c> if they diverge.
+    /// </para>
+    /// </summary>
+    /// <param name="conditional">The if-expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The common branch type, <see cref="TypeRef.Void"/> (if no else branch), or <see cref="TypeRef.Error"/>.</returns>
     private TypeRef ResolveIf(IfExpression conditional, Scope scope, SymbolHandle containingFunction)
     {
         Scope ifScope = conditional.Declaration is not null ? context.GetSyntaxScope(conditional, scope) : scope;
@@ -1500,6 +1872,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Error;
     }
 
+    /// <summary>
+    /// Resolves a <c>while</c> loop expression and validates that its condition evaluates to a boolean (<c>MH2006</c>).
+    /// </summary>
+    /// <param name="loop">The while expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns><see cref="TypeRef.Void"/>.</returns>
     private TypeRef ResolveWhile(WhileExpression loop, Scope scope, SymbolHandle containingFunction)
     {
         Scope whileScope = loop.Declaration is not null ? context.GetSyntaxScope(loop, scope) : scope;
@@ -1519,6 +1898,15 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return voidType;
     }
 
+    /// <summary>
+    /// Resolves a block expression: enters a block scope, resolves local statements sequentially,
+    /// evaluates the final tail expression (if any), and triggers <see cref="CollapseRemainingLocals"/>
+    /// for any local literals left unconstrained at the end of the block.
+    /// </summary>
+    /// <param name="block">The block expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The semantic type of the final expression, or <see cref="TypeRef.Void"/> if none.</returns>
     private TypeRef ResolveBlock(BlockExpression block, Scope scope, SymbolHandle containingFunction)
     {
         var blockScope = context.GetSyntaxScope(block, scope);
@@ -1535,6 +1923,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return result;
     }
 
+    /// <summary>
+    /// Retrieves the declared return type of the enclosing function, method, or property.
+    /// </summary>
+    /// <param name="containingFunction">Symbol handle to the enclosing symbol.</param>
+    /// <returns>The declared return type, or <see cref="TypeRef.Void"/> if undefined.</returns>
     private TypeRef GetFunctionReturnType(SymbolHandle containingFunction)
     {
         var sym = context.GetSymbol(containingFunction);
@@ -1547,11 +1940,24 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         };
     }
 
+    /// <summary>
+    /// Resolves a <c>match</c> pattern matching expression.
+    /// <para>
+    /// Evaluates the governing expression, enforces sum type pattern matching safety (prohibiting match on
+    /// untagged sum types without an explicit discriminant, <c>MH0606</c>), validates pattern arms against
+    /// enum variants or union constituents (<c>MH0607</c>), checks exhaustiveness (<c>MH0605</c>),
+    /// and determines the common arm result type.
+    /// </para>
+    /// </summary>
+    /// <param name="match">The match expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The common return type of the match arms, or <see cref="TypeRef.Error"/>.</returns>
     private TypeRef ResolveMatch(MatchExpression match, Scope scope, SymbolHandle containingFunction)
     {
         var governingType = ResolveExpression(match.Expression, scope, containingFunction);
 
-        // MH0606: Untagged sum type match without discriminant
+        // 1. Untagged sum types cannot be matched without an external discriminant: MH0606
         bool isUntaggedSumType = false;
         if (governingType.IsUntagged)
             isUntaggedSumType = true;
@@ -1583,6 +1989,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var matchedTypes = new HashSet<TypeRef>();
         TypeRef armResultType = voidType;
 
+        // 2. Validate patterns in each match arm and resolve arm body expressions
         foreach (var arm in match.Arms)
         {
             var armScope = context.GetSyntaxScope(arm, scope);
@@ -1592,7 +1999,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 armResultType = armType;
         }
 
-        // Exhaustiveness checking
+        // 3. Exhaustiveness checking: verify that all variants or constituents are covered
         if (!hasWildcard && !isUntaggedSumType)
         {
             if (sumTypeSym is not null && typeSym?.TypeKind == TypeKind.Enum)
@@ -1642,6 +2049,19 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return armResultType;
     }
 
+    /// <summary>
+    /// Validates an individual match arm pattern against the governing sum type or union type.
+    /// Emits <c>MH0607</c> if a pattern specifies an invalid or unrecognized variant for the type.
+    /// </summary>
+    /// <param name="pattern">The pattern syntax node.</param>
+    /// <param name="armScope">The lexical scope of the match arm.</param>
+    /// <param name="governingType">The type of the matched expression.</param>
+    /// <param name="sumTypeSym">The sum type symbol if the governing type is a sum type.</param>
+    /// <param name="unionType">The union semantic type if the governing type is an anonymous union.</param>
+    /// <param name="hasWildcard">Updated to <see langword="true"/> if a wildcard or catch-all variable pattern is encountered.</param>
+    /// <param name="matchedVariants">Set of matched enum variant names.</param>
+    /// <param name="matchedTypes">Set of matched constituent types.</param>
+    /// <param name="source">The source file context.</param>
     private void ValidatePattern(
         PatternSyntax pattern,
         Scope armScope,
@@ -1729,6 +2149,21 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Resolves an object creation expression implementing Maho's two-phase allocation and construction model.
+    /// <para>
+    /// In Maho, allocation and construction are strictly separated:
+    /// 1. Phase 1 (Allocation): resolves the <see cref="OperatorKind.Put"/> operator for placement allocation
+    ///    (<c>put&lt;arena&gt; Type(...)</c>) or the <see cref="OperatorKind.New"/> operator for heap allocation
+    ///    (<c>new&lt;allocator&gt; Type(...)</c>), eagerly collapsing any literal allocation arguments.
+    /// 2. Phase 2 (Construction): resolves constructor methods (<c>Construct</c> or <c>.ctor</c>) on the target type,
+    ///    matching argument counts and types and collapsing literal arguments.
+    /// </para>
+    /// </summary>
+    /// <param name="constructorCall">The constructor call syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The constructed <see cref="TypeRef"/>, or <see cref="TypeRef.Void"/> for placement <c>put</c>.</returns>
     private TypeRef ResolveConstructorCall(ConstructorCallExpression constructorCall, Scope scope, SymbolHandle containingFunction)
     {
         var isPut = constructorCall.Kind == ObjectCreationKind.Put;
@@ -1745,7 +2180,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 allocArgTypes.Add(ResolveExpression(a, scope, containingFunction));
         }
 
-        // Two-phase allocation resolution:
+        // Phase 1: Allocation operator resolution (Put vs New)
         if (isPut)
         {
             if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Put, out var putCandidates))
@@ -1791,7 +2226,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             }
         }
 
-        // Resolve Constructor on targetType:
+        // Phase 2: Constructor method resolution on targetType
         if (targetType.Handle is { } targetHandle && context.GetTypeSymbol(targetHandle) is { } targetSym)
         {
             var targetScope = GetOwnedScope(targetSym);
@@ -1823,6 +2258,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         }
                         if (matches)
                         {
+                            // Collapse literal arguments to the matched parameter types
                             for (int i = 0; i < ctorArgTypes.Count; i++)
                             {
                                 if (ctorArgTypes[i].IsLiteral && context.GetParameterSymbol(m.Parameters[i]) is { } param)
@@ -1842,12 +2278,31 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return isPut ? voidType : targetType;
     }
 
+    /// <summary>
+    /// Resolves an explicit type-cast expression (<c>&lt;expr as TargetType&gt;</c>).
+    /// </summary>
+    /// <param name="typeAs">The type-as expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <returns>The resolved target type.</returns>
     private TypeRef ResolveTypeAs(TypeAsExpression typeAs, Scope scope) =>
         ResolveTypeSyntax(typeAs.TargetType, scope);
 
+    /// <summary>
+    /// Resolves a cast expression (<c>expr as TargetType</c>).
+    /// </summary>
+    /// <param name="asExpr">The as-expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <returns>The resolved target type.</returns>
     private TypeRef ResolveAs(AsExpression asExpr, Scope scope) =>
         ResolveTypeSyntax(asExpr.Type, scope);
 
+    /// <summary>
+    /// Resolves a collection literal expression (<c>[a, b, c]</c>) and types it as an array.
+    /// </summary>
+    /// <param name="collection">The collection expression syntax node.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>An array <see cref="TypeRef"/> wrapping the inferred element type.</returns>
     private TypeRef ResolveCollection(CollectionExpression collection, Scope scope, SymbolHandle containingFunction)
     {
         TypeRef elemType = TypeRef.Unresolved;
@@ -1861,6 +2316,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Array(elemType);
     }
 
+    /// <summary>
+    /// Resolves a type syntax node to a semantic <see cref="TypeRef"/> by querying the lexical scope.
+    /// </summary>
+    /// <param name="syntax">The type syntax node to resolve.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <returns>The resolved <see cref="TypeRef"/>, or <see cref="TypeRef.Unresolved"/> if not found.</returns>
     private TypeRef ResolveTypeSyntax(TypeSyntax syntax, Scope scope)
     {
         var name = ResolutionContext.GetSymbolName(syntax);
@@ -1871,6 +2332,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return TypeRef.Unresolved;
     }
 
+    /// <summary>
+    /// Fallback resolution invoked at the end of a block or function scope:
+    /// collapses any local variables still holding unconstrained compile-time literal types
+    /// to their canonical intrinsic types (<c>Int32</c>, <c>Float64</c>, <c>String</c>, <c>Char</c>)
+    /// and retroactively propagates that type into their initializer expression trees.
+    /// </summary>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
     private void CollapseRemainingLocals(Scope scope, SymbolHandle containingFunction)
     {
         if (uncollapsedLocals.Count == 0)
@@ -1889,6 +2358,27 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Core sequential eager collapsing and retroactive literal resolution engine.
+    /// <para>
+    /// When an uncollapsed literal expression tree encounters a concrete target type
+    /// (such as through assignment, parameter passing, or explicit variable type annotation),
+    /// this method propagates the target type downward through the expression tree:
+    /// <list type="bullet">
+    /// <item><description>Updates local variable symbols and collapses their initializer trees.</description></item>
+    /// <item><description>Validates literal conversions and reports ambiguity (<c>MH2014</c>).</description></item>
+    /// <item><description>Re-resolves binary operator overloads on the target type and re-binds method references.</description></item>
+    /// <item><description>Re-resolves unary operator overloads on the target type.</description></item>
+    /// <item><description>Re-resolves member access and call invocations (e.g. <c>10.Abs()</c>) against the target type,
+    /// reporting member not found (<c>MH2008</c>) if missing.</description></item>
+    /// </list>
+    /// </para>
+    /// </summary>
+    /// <param name="node">The root syntax node of the expression subtree being collapsed.</param>
+    /// <param name="targetType">The concrete target semantic type to collapse into.</param>
+    /// <param name="scope">The current lexical scope.</param>
+    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
+    /// <returns>The collapsed semantic <see cref="TypeRef"/>, or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef CollapseExpression(
         SyntaxNode node,
         TypeRef targetType,
@@ -1901,6 +2391,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         switch (node)
         {
             case NamedExpression named:
+                // Named expression: collapse referencing local variable symbol and its initializer tree
                 LocalVariableSymbol? local = null;
                 var namedPart = new SymbolPart(named.Identifier, 0, context.GetHygiene(named));
                 var namedSyms = scope[new SymbolName(namedPart)];
@@ -1927,6 +2418,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 return targetType;
 
             case LiteralExpression lit:
+                // Boolean literals always remain canonical bool
                 if (lit.Literal.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
                     return boolType;
 
@@ -1936,6 +2428,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 var literalOverloads = GetMatchingLiteralMethods(targetType, literalKind);
                 if (literalOverloads.Count > 1)
                 {
+                    // Ambiguous literal conversion: multiple literal methods match
                     var overloadNames = string.Join(", ", literalOverloads.Select(m => m.Name.Text));
                     context.Diagnostics.ReportAmbiguousLiteralConversion(
                         lit.GetSpan() ?? default,
@@ -1960,6 +2453,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 return targetType;
 
             case BinaryExpression binary:
+                // Re-resolve binary operator overload against the concrete target type
                 var opKind = GetBinaryOperatorKind(binary.OperatorToken.Kind);
                 if (TryFindOperatorForTarget(opKind, targetType, out var opMethod, out var lhsType, out var rhsType) && opMethod != null)
                 {
@@ -1984,6 +2478,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
 
             case UnaryExpression unary:
+                // Re-resolve unary operator overload against the concrete target type
                 var uOpKind = GetUnaryOperatorKind(unary.OperatorToken.Kind, unary.Position);
                 if (TryFindUnaryOperatorForTarget(uOpKind, targetType, out var uOpMethod, out var opParamType) && uOpMethod != null)
                 {
@@ -2005,6 +2500,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
 
             case CallExpression call:
+                // Re-resolve member call (e.g. 10.Abs()) against the collapsed target type
                 if (call.Callee is MemberAccessExpression access)
                 {
                     CollapseExpression(access.Expression, targetType, scope, containingFunction);
@@ -2039,6 +2535,15 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Searches for a binary operator implementation on the target type matching the specified operator kind.
+    /// </summary>
+    /// <param name="kind">The binary operator kind.</param>
+    /// <param name="targetType">The concrete target type implementing the operator.</param>
+    /// <param name="opMethod">The matching operator method symbol if found.</param>
+    /// <param name="lhsType">The required left-hand parameter type.</param>
+    /// <param name="rhsType">The required right-hand parameter type.</param>
+    /// <returns><see langword="true"/> if a matching operator was found; otherwise <see langword="false"/>.</returns>
     private bool TryFindOperatorForTarget(
         OperatorKind kind,
         TypeRef targetType,
@@ -2090,6 +2595,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Searches for a unary operator implementation on the target type matching the specified operator kind.
+    /// </summary>
+    /// <param name="kind">The unary operator kind.</param>
+    /// <param name="targetType">The concrete target type implementing the operator.</param>
+    /// <param name="opMethod">The matching unary operator method symbol if found.</param>
+    /// <param name="operandType">The required operand parameter type.</param>
+    /// <returns><see langword="true"/> if a matching operator was found; otherwise <see langword="false"/>.</returns>
     private bool TryFindUnaryOperatorForTarget(
         OperatorKind kind,
         TypeRef targetType,
@@ -2137,6 +2650,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Attempts to find an implicit conversion operator (<see cref="OperatorKind.ImplicitCast"/>)
+    /// converting from <paramref name="from"/> type to <paramref name="to"/> type.
+    /// </summary>
+    /// <param name="from">The source semantic type.</param>
+    /// <param name="to">The destination semantic type.</param>
+    /// <param name="castMethod">The matching implicit cast method if found.</param>
+    /// <returns><see langword="true"/> if a matching implicit conversion was found; otherwise <see langword="false"/>.</returns>
     private bool TryResolveImplicitCast(TypeRef from, TypeRef to, out MethodSymbol? castMethod)
     {
         castMethod = null;
@@ -2184,6 +2705,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Searches for a publicly accessible member on the specified type by name,
+    /// filtering out interface-scoped operator methods.
+    /// </summary>
+    /// <param name="targetType">The type to query.</param>
+    /// <param name="memberName">The name of the member to find.</param>
+    /// <returns>The matching symbol if found; otherwise <see langword="null"/>.</returns>
     private Symbol? LookupMemberOnType(TypeRef targetType, string memberName)
     {
         if (targetType.Handle is not { } handle)
@@ -2202,6 +2730,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return null;
     }
 
+    /// <summary>
+    /// Checks whether a literal expression syntax node is type-compatible with a destination target type.
+    /// </summary>
+    /// <param name="lit">The literal expression syntax node.</param>
+    /// <param name="targetType">The destination type.</param>
+    /// <returns><see langword="true"/> if compatible; otherwise <see langword="false"/>.</returns>
     private bool IsLiteralCompatibleWith(LiteralExpression lit, TypeRef targetType)
     {
         if (targetType.IsLiteral)
@@ -2241,6 +2775,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Checks whether an uncollapsed compile-time literal semantic type is compatible with a destination target type.
+    /// </summary>
+    /// <param name="litType">The uncollapsed literal <see cref="TypeRef"/>.</param>
+    /// <param name="targetType">The destination type.</param>
+    /// <returns><see langword="true"/> if compatible; otherwise <see langword="false"/>.</returns>
     private bool IsLiteralCompatibleWith(TypeRef litType, TypeRef targetType)
     {
         if (targetType.IsLiteral)

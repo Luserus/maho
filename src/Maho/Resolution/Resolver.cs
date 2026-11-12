@@ -5,6 +5,20 @@ using Maho.Syntax;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Orchestrates the semantic analysis and resolution pipeline of the Maho compiler.
+/// <para>
+/// Executes the 6 resolution passes in strict dependency order:
+/// <list type="number">
+/// <item><description><see cref="MacroExpansionPass"/>: Expands syntactic macros with hygiene tracking.</description></item>
+/// <item><description><see cref="SymbolDiscoveryPass"/>: Discovers declarations and builds the lexical scope tree.</description></item>
+/// <item><description><see cref="IntrinsicDiscoveryPass"/>: Validates compiler intrinsic attributes, types, and operator interfaces.</description></item>
+/// <item><description><see cref="DeclarationResolutionPass"/>: Resolves member signatures, field/param types, and base types.</description></item>
+/// <item><description><see cref="ExpressionResolutionPass"/>: Performs expression typing, operator overload resolution, and eager retroactive literal collapsing.</description></item>
+/// <item><description><see cref="ControlFlowAndReturnInferencePass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and infers function return types.</description></item>
+/// </list>
+/// </para>
+/// </summary>
 internal sealed class Resolver
 {
     private readonly ResolutionPass[] passes =
@@ -19,6 +33,15 @@ internal sealed class Resolver
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();
 
+    /// <summary>
+    /// Executes the full resolution pipeline across a list of syntax trees.
+    /// </summary>
+    /// <param name="syntaxTrees">The parsed syntax trees representing source compilation units.</param>
+    /// <param name="referencedProjects">Referenced compiled project contexts providing external symbols and intrinsics.</param>
+    /// <param name="baseContext">Optional base context from an earlier compilation stage.</param>
+    /// <param name="diagnostics">Optional diagnostics manager for error and warning aggregation.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <returns>A fully resolved <see cref="ResolutionContext"/> containing the semantic model, symbol tables, and CFGs.</returns>
     public ResolutionContext Resolve(
         IReadOnlyList<SyntaxTree> syntaxTrees,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,

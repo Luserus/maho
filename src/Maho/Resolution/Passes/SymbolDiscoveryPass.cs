@@ -6,10 +6,22 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Resolution Pass 1: Symbol Discovery.
+/// <para>
+/// Walks all compilation units in the project syntax trees to discover and declare top-level and nested symbols
+/// (namespaces, classes, structs, interfaces, enums, sum types, methods, fields, properties, functions, and macros).
+/// Constructs the lexical <see cref="Scope"/> hierarchy, populates symbol tables, and binds syntax nodes to their scopes.
+/// </para>
+/// </summary>
 internal sealed class SymbolDiscoveryPass : ResolutionPass
 {
     private ResolutionContext context = null!;
 
+    /// <summary>
+    /// Executes symbol discovery across all syntax trees in the compilation.
+    /// </summary>
+    /// <param name="context">The shared compilation resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;

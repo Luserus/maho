@@ -48,7 +48,7 @@ The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel pa
 
 ### `CompileFiles(...)` and `CompileSource(...)`
 
-These are the compiler entry points used for full compilation runs. They execute front-end lexing, parsing, and semantic resolution passes (`SymbolDiscoveryPass` and `DeclarationResolutionPass`). If front-end analysis succeeds with zero errors, execution reaches the lowering/codegen boundary (currently throwing `CompilerPipelineNotImplementedException` with error code `MH9000`).
+These are the compiler entry points used for full compilation runs. They execute front-end lexing, parsing, and the complete 6-pass semantic resolution pipeline via `Resolver` (`MacroExpansionPass`, `SymbolDiscoveryPass`, `IntrinsicDiscoveryPass`, `DeclarationResolutionPass`, `ExpressionResolutionPass`, and `ControlFlowAndReturnInferencePass`). If front-end analysis succeeds with zero errors, execution reaches the lowering/codegen boundary (currently throwing `CompilerPipelineNotImplementedException` with error code `MH9000`).
 
 Both methods record phase durations in `CompilationPhaseTimers` and expose `Elapsed` representing total core compilation time.
 

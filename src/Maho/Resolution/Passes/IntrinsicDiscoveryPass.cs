@@ -7,10 +7,26 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
+/// <summary>
+/// Resolution Pass 2: Intrinsic and Operator Discovery.
+/// <para>
+/// Responsible for:
+/// 1. Inspecting imported libraries/projects and merging declared intrinsics and operators.
+/// 2. Discovering and validating compiler-recognized attribute declarations (<c>IntrinsicType</c>, <c>OperatorFunction</c>, <c>IntrinsicFunction</c>).
+/// 3. Discovering types decorated with <c>[IntrinsicType("...")]</c> and enforcing strict topological ABI layout contracts
+///    (e.g., zero instance fields on primitive scalars; pointer/reference requiring <c>nuint</c> field; <c>Str</c> requiring <c>Int8&amp;</c> and <c>Int64</c> length).
+/// 4. Discovering and cataloging operator interfaces and their methods in <see cref="DiscoveredOperators"/>.
+/// 5. Discovering compiler intrinsic functions.
+/// </para>
+/// </summary>
 internal sealed class IntrinsicDiscoveryPass : ResolutionPass
 {
     private ResolutionContext context = null!;
 
+    /// <summary>
+    /// Executes the intrinsic and operator discovery pass over the compilation context.
+    /// </summary>
+    /// <param name="context">The shared compilation resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
@@ -31,6 +47,9 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         DiscoverAndValidateIntrinsicFunctions();
     }
 
+    /// <summary>
+    /// Imports intrinsic attributes, types, and operator registrations from referenced external projects.
+    /// </summary>
     private void ImportReferencedIntrinsics()
     {
         foreach (var project in context.ReferencedProjects)

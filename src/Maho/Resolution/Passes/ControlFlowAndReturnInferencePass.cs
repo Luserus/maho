@@ -7,10 +7,23 @@ using Maho.Text;
 
 namespace Maho.Resolution.Passes;
 
+/// <summary>
+/// Pass 6 of semantic resolution: Control Flow Graph (CFG) Construction and Return Type Inference.
+/// <para>
+/// Responsibilities:
+/// <list type="bullet">
+///   <item><description>Constructs a directed control-flow graph of basic blocks for every function, member method, and property accessor.</description></item>
+///   <item><description>Performs reachability analysis from the entry block to identify dead code and divergent control paths (for static analysis/diagnostics only; no constant folding optimizations).</description></item>
+///   <item><description>Infers inferred (<c>var</c>) return types by collecting and unifying return expressions across all reachable execution paths, reporting <c>MH2012</c> if branches conflict.</description></item>
+///   <item><description>Collapses remaining unconstrained scalar literals in global variables and fields to their canonical intrinsic defaults.</description></item>
+/// </list>
+/// </para>
+/// </summary>
 internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
 {
     private ResolutionContext context = null!;
 
+    // Cached handles to discovered primitive intrinsics for zero-allocation type resolution
     private SymbolHandle? hInt8, hInt16, hInt32, hInt64, hInt128, hNInt;
     private SymbolHandle? hUInt8, hUInt16, hUInt32, hUInt64, hUInt128, hNUInt;
     private SymbolHandle? hFloat16, hFloat32, hFloat64, hFloat128;
@@ -18,6 +31,10 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
     private TypeRef voidType = TypeRef.Unresolved;
     private TypeRef boolType = TypeRef.Unresolved;
 
+    /// <summary>
+    /// Executes Pass 6: builds CFGs, runs reachability analysis, infers return types, and collapses unconstrained globals/fields.
+    /// </summary>
+    /// <param name="context">The active resolution context containing discovered symbols and ASTs.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
@@ -65,7 +82,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             }
         }
 
-        // Collapse unconstrained global and field variables
+        // 2. Collapse unconstrained global and field literal variables to their default intrinsic types
         foreach (var global in context.GlobalVariableSymbols)
         {
             if (global.Type.IsLiteral)
@@ -79,6 +96,9 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Caches symbol handles for discovered core intrinsic types so downstream queries avoid dictionary lookups.
+    /// </summary>
     private void CacheIntrinsicHandles()
     {
         var intrinsics = context.DiscoveredIntrinsics;
@@ -117,11 +137,18 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Constructs a <see cref="ControlFlowGraph"/> from the AST statements of a function body.
+    /// </summary>
+    /// <param name="body">The AST body of the function or method.</param>
+    /// <param name="containingSymbol">The symbol handle of the callable owner.</param>
+    /// <returns>A fully structured directed control-flow graph.</returns>
     private ControlFlowGraph BuildCFG(FunctionBody body, SymbolHandle containingSymbol)
     {
         int nextId = 0;
         BasicBlock CreateBlock() => new(nextId++);
 
+        // Create the dedicated entry and exit blocks
         var entry = CreateBlock();
         var exit = CreateBlock();
         var allBlocks = new List<BasicBlock> { entry, exit };
@@ -135,6 +162,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
 
         var currentBlock = entry;
 
+        // Traverse the AST statements and construct basic blocks at branch points
         if (body is FunctionBlockBody blockBody)
         {
             currentBlock = ProcessLocals(blockBody.Locals, currentBlock, exit, NewBlock);
@@ -145,6 +173,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             currentBlock = ProcessLocals([lambdaBody.Statement], currentBlock, exit, NewBlock);
         }
 
+        // If the final block did not terminate in an explicit branch/return, wire fallthrough to exit
         if (currentBlock.Terminator.Kind == BlockTerminatorKind.Unreachable && currentBlock.Successors.Count == 0)
         {
             currentBlock.Terminator = BlockTerminator.Fallthrough(exit);
@@ -156,6 +185,15 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return cfg;
     }
 
+    /// <summary>
+    /// Processes a linear sequence of local statements and attaches them to basic blocks.
+    /// When a control-flow statement (if, while, return, goto) is encountered, blocks are split and wired.
+    /// </summary>
+    /// <param name="locals">The local statements to process.</param>
+    /// <param name="current">The currently active basic block.</param>
+    /// <param name="exit">The CFG exit basic block.</param>
+    /// <param name="newBlock">Factory delegate to allocate new basic blocks.</param>
+    /// <returns>The basic block that is active after processing all statements.</returns>
     private BasicBlock ProcessLocals(
         IReadOnlyList<Local> locals,
         BasicBlock current,
@@ -169,6 +207,8 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             {
                 case LocalExpressionStatement exprStmt:
                     block.Instructions.Add(exprStmt.Expression);
+
+                    // Branching expressions (if, while) construct their own sub-graphs
                     if (exprStmt.Expression is IfExpression ifExpr)
                     {
                         block = ProcessIf(ifExpr, block, exit, newBlock);
@@ -179,6 +219,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                     }
                     else if (exprStmt.IsFinalExpression)
                     {
+                        // In expression-bodied functions or final block expressions, this is an implicit return
                         block.Terminator = BlockTerminator.Return(exprStmt.Expression);
                         block.AddSuccessor(exit);
                         block = newBlock();
@@ -189,6 +230,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                     block.Instructions.Add(retStmt.Statement);
                     block.Terminator = BlockTerminator.Return(retStmt.Statement.Expression);
                     block.AddSuccessor(exit);
+                    // Code following a return begins in a new block (potentially unreachable)
                     block = newBlock();
                     break;
 
@@ -207,6 +249,10 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return block;
     }
 
+    /// <summary>
+    /// Lowers an <see cref="IfExpression"/> into conditional basic block branches:
+    /// wires the condition to then/else targets and converges both paths into a merge block.
+    /// </summary>
     private BasicBlock ProcessIf(
         IfExpression ifExpr,
         BasicBlock current,
@@ -217,11 +263,12 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         var elseBlock = newBlock();
         var mergeBlock = newBlock();
 
+        // 1. Current block terminates with a two-way conditional branch
         current.Terminator = BlockTerminator.Conditional(ifExpr.Condition, thenBlock, elseBlock);
         current.AddSuccessor(thenBlock);
         current.AddSuccessor(elseBlock);
 
-        // Process then branch
+        // 2. Process 'then' branch statements
         thenBlock.Instructions.Add(ifExpr.ThenExpression);
         if (ifExpr.ThenExpression is BlockExpression thenBlockExpr)
         {
@@ -238,7 +285,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             thenBlock.AddSuccessor(mergeBlock);
         }
 
-        // Process else branch
+        // 3. Process 'else' branch statements (or direct fallthrough if no else)
         if (ifExpr.ElseExpression is { Expression: var elseSubExpr })
         {
             elseBlock.Instructions.Add(elseSubExpr);
@@ -266,6 +313,9 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return mergeBlock;
     }
 
+    /// <summary>
+    /// Lowers a <see cref="WhileExpression"/> loop into header, body, and exit basic blocks with a backedge.
+    /// </summary>
     private static BasicBlock ProcessWhile(
         WhileExpression whileExpr,
         BasicBlock current,
@@ -276,14 +326,17 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         var bodyBlock = newBlock();
         var exitBlock = newBlock();
 
+        // Jump into loop header
         current.Terminator = BlockTerminator.Branch(headerBlock);
         current.AddSuccessor(headerBlock);
 
+        // Header tests condition: true branches to body, false breaks out to exit
         headerBlock.Instructions.Add(whileExpr.Condition);
         headerBlock.Terminator = BlockTerminator.Conditional(whileExpr.Condition, bodyBlock, exitBlock);
         headerBlock.AddSuccessor(bodyBlock);
         headerBlock.AddSuccessor(exitBlock);
 
+        // Body executes statements then unconditionally loops back to header
         bodyBlock.Instructions.Add(whileExpr.Body);
         bodyBlock.Terminator = BlockTerminator.Branch(headerBlock);
         bodyBlock.AddSuccessor(headerBlock);
@@ -291,6 +344,12 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return exitBlock;
     }
 
+    /// <summary>
+    /// Performs reachability analysis via breadth-first search from the entry basic block.
+    /// Evaluates static boolean constants (<c>true</c>/<c>false</c>) on branch conditions to mark unreachable blocks.
+    /// Note: this analysis is purely for dead-code and return diagnostics; no optimizations or AST mutation occur.
+    /// </summary>
+    /// <param name="cfg">The control-flow graph to analyze.</param>
     private static void AnalyzeReachability(ControlFlowGraph cfg)
     {
         var reachable = new HashSet<int>();
@@ -303,7 +362,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         {
             var block = queue.Dequeue();
 
-            // Evaluate constant conditions
+            // Check if branch condition is statically known to evaluate to true or false
             if (block.Terminator.Kind == BlockTerminatorKind.ConditionalBranch &&
                 block.Terminator.Condition is { } cond)
             {
@@ -322,6 +381,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                 }
             }
 
+            // Normal control flow: enqueue all successor blocks
             foreach (var succ in block.Successors)
             {
                 if (reachable.Add(succ.Id))
@@ -329,12 +389,17 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             }
         }
 
+        // Tag each block's reachability flag
         foreach (var b in cfg.Blocks)
         {
             b.IsReachable = reachable.Contains(b.Id);
         }
     }
 
+    /// <summary>
+    /// Evaluates whether an expression is a static literal boolean <c>true</c> or <c>false</c>.
+    /// Uses <see cref="MatchingKeywordKind"/> enum checks with zero string comparisons.
+    /// </summary>
     private static bool? TryEvaluateConstantBool(Expression cond)
     {
         if (cond is NamedExpression named)
@@ -352,6 +417,10 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return null;
     }
 
+    /// <summary>
+    /// Collapses an unconstrained scalar literal type into its canonical default intrinsic type
+    /// (Int -> int32, Float -> float64, Str -> Str, Char -> char).
+    /// </summary>
     private TypeRef CollapseToDefault(TypeRef type)
     {
         if (type.IsLiteral && type.SpecialType is CompileTimeLiteralType lit)
@@ -374,6 +443,18 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         return type;
     }
 
+    /// <summary>
+    /// Infers the return type of a function or method whose return type was declared as <c>var</c> (inferred).
+    /// Inspects all reachable return statements in the CFG:
+    /// <list type="bullet">
+    ///   <item><description>If zero returns and fallthrough reaches exit, infers <c>void</c>.</description></item>
+    ///   <item><description>If returns exist, unifies their types; all branches must evaluate to the exact same concrete type.</description></item>
+    ///   <item><description>If conflicting return types are detected, reports <c>MH2012</c> without widening.</description></item>
+    ///   <item><description>If non-void function falls through to exit without return, reports <c>MH2012</c>.</description></item>
+    /// </list>
+    /// </summary>
+    /// <param name="cfg">The control-flow graph for the callable.</param>
+    /// <param name="function">The function or method symbol.</param>
     private void InferReturnType(ControlFlowGraph cfg, Symbol function)
     {
         var returnType = function switch
@@ -389,6 +470,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         var reachableReturns = new List<(TypeRef Type, TextSpan Span, SourceText? Source)>();
         bool fallthroughReachesExit = false;
 
+        // Collect return types from all reachable blocks
         foreach (var block in cfg.Blocks.Where(b => b.IsReachable))
         {
             if (block.Terminator.Kind == BlockTerminatorKind.Return)
@@ -412,12 +494,14 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
             }
         }
 
+        // Case 1: No returns and fallthrough reaches exit -> void function
         if (reachableReturns.Count == 0 && fallthroughReachesExit)
         {
             SetSymbolReturnType(function, voidType);
             return;
         }
 
+        // Case 2: One or more returns exist -> verify exact match across all branches
         if (reachableReturns.Count > 0)
         {
             var first = reachableReturns[0];
@@ -441,6 +525,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                 }
             }
 
+            // If code can fall through to exit without a return in a non-void function, report mismatch
             if (fallthroughReachesExit && !first.Type.Equals(voidType))
             {
                 hasMismatch = true;
@@ -459,6 +544,9 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Assigns the finalized return type to a function or method symbol.
+    /// </summary>
     private static void SetSymbolReturnType(Symbol function, TypeRef type)
     {
         switch (function)
@@ -468,3 +556,4 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         }
     }
 }
+

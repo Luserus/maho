@@ -63,7 +63,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0161` | `MultipleTopLevelSources` | Multiple files in a project attempting to declare top-level statements. |
 | `MH0162` | `InvalidPragmaDirective` | Malformed `#pragma` directive or unrecognized pragma argument. |
 
-### 2.4 Macro Syntax & Grammar (`MH0200` - `MH0249`)
+### 2.4 Macro Syntax & Grammar (`MH0200` - `MH0239`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0200` | `InvalidMacroDeclaration` | Malformed `macro $Name` header or missing arm list. |
@@ -71,6 +71,14 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0202` | `InvalidMacroRepetition` | Malformed variadic pack pattern or repetition syntax `$( ... )...`. |
 | `MH0203` | `InvalidMacroEscape` | Malformed or mispositioned macro parameter reference `@name`. |
 | `MH0230` | `InvalidTokenConcatenation` | Invalid token pasting with `##` operator in macro template. |
+
+### 2.5 Semantic Syntax & ABI Requirements (`MH0240` - `MH0249`)
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH0240` | `MissingIntrinsicForSyntax` | Syntax requires an intrinsic type that was not declared or failed verification. |
+| `MH0242` | `InvalidOperatorFunctionSignature` | Invalid signature for operator function declaration. |
+| `MH0243` | `DestructorNandCopy` | Type cannot implement both `Destructor` and `Copy`; types with destructors must use move semantics. |
+| `MH0244` | `CopyNandMove` | Type cannot implement both `Copy` and `Move`; a type must be exclusively Copy or exclusively Move. |
 
 ---
 
@@ -87,7 +95,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0520` | `ConstructorOutsideType` | Constructor must be declared inside a type body. |
 | `MH0525` | `ConstructorNameMismatch` | Constructor name does not match enclosing type name. |
 
-### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0569`)
+### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0539`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0530` | `DuplicateTypeDeclaration` | Multiple non-partial type declarations sharing name and arity in the same scope. |
@@ -100,7 +108,16 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0537` | `DuplicateAliasDeclaration` | Type alias conflicts with an existing type or alias in scope. |
 | `MH0538` | `CyclicTypeHierarchy` | Base type inheritance or alias expansion forms a cyclic loop. |
 
-### 3.3 Macro Expansion & Metaprogramming (`MH0600` - `MH0649`)
+### 3.3 Compiler Intrinsics & ABI Layout (`MH0540` - `MH0549`)
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH0540` | `UnknownIntrinsicAttribute` | Unrecognized intrinsic attribute name declared with the `intrinsic` modifier. |
+| `MH0541` | `InvalidIntrinsicAttributeSignature` | Invalid parameter or return signature for an intrinsic attribute declaration. |
+| `MH0542` | `UnknownIntrinsicType` | Unknown intrinsic type literal specified in `[IntrinsicType("...")]`. |
+| `MH0543` | `DuplicateIntrinsicType` | Intrinsic type declared more than once across compilation and referenced libraries. |
+| `MH0544` | `IntrinsicAbiMismatch` | Type fails to satisfy the required memory layout or field ABI contract for its intrinsic type. |
+
+### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0600` | `MacroRecursionLimitExceeded` | Macro expansion depth exceeded the configured `MacroRecursionLimit`. |
@@ -108,13 +125,45 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0602` | `UnresolvedMacro` | Macro symbol `$name` not found in lexical or imported scopes. |
 | `MH0603` | `InvalidMacroContext` | Macro invoked in incompatible context (e.g. statement macro in expression context). |
 | `MH0604` | `MacroDependencyCycle` | Mutually recursive macros or static reflection queries deadlocked without progress. |
-| `MH0605` | `InvalidVariadicPackExpansion` | Variadic pack `@item...` used outside repetition or array context. |
+
+### 3.5 Sum Types, Patterns & Invocations (`MH0605` - `MH0619`)
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH0605` | `NonExhaustiveMatch` | Match expression is not exhaustive and fails to cover all variants or constituents. |
+| `MH0606` | `UntaggedMatchDisallowed` | Match expression attempted on an untagged sum type without an explicit discriminant. |
+| `MH0607` | `InvalidPatternForSumType` | Pattern arm does not match any valid variant or constituent of the sum type. |
+| `MH0608` | `UntaggedMethodMismatch` | Invocations of ordinary instance methods on an untagged sum type without the `untagged` modifier. |
+| `MH0609` | `DirectVariantMethodInvocation` | Direct invocation of a variant-level method on a sum type instance without pattern unwrapping. |
+| `MH0610` | `UntaggedDefinitionTaggedUsage` | Untagged-defined type used in a tagged context without the `untagged` modifier. |
+| `MH0611` | `TypeNotCallable` | Expression type is not callable and does not implement the `Callable` operator interface. |
 
 ---
 
-## 4. Sequential Extensions (`MH1000`+)
+## 4. Expression Typing & Control Flow Analysis (`MH2000` - `MH2099`)
 
-Reserved for future type checking, control flow analysis, and lifetime/borrow rules as the compiler expands.
+These diagnostics are emitted by Pass 5 (`ExpressionResolutionPass`) and Pass 6 (`ControlFlowAndReturnInferencePass`):
+
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH2001` | `BinaryOperatorTypeMismatch` | Binary operator cannot be applied to left and right operand types (no matching operator interface). |
+| `MH2002` | `UnaryOperatorTypeMismatch` | Unary operator cannot be applied to operand type. |
+| `MH2003` | `CannotAssignToNonLValue` | Left-hand side of assignment does not evaluate to a writable L-value. |
+| `MH2004` | `AssignmentTypeMismatch` | Right-hand side type cannot be assigned to target type (no implicit conversion). |
+| `MH2005` | `ReturnTypeMismatch` | Value returned by return statement does not match declared function return type. |
+| `MH2006` | `ConditionTypeMismatch` | Condition expression in `if` or `while` does not evaluate to canonical boolean. |
+| `MH2007` | `CannotInferType` | Type of inferred variable (`var x`) cannot be determined without an initializer. |
+| `MH2008` | `MemberNotFound` | Member name not found on receiver type. |
+| `MH2010` | `ArgumentCountMismatch` | Invocation provides fewer or more arguments than expected by parameter signature. |
+| `MH2011` | `AmbiguousConditionalBranches` | Conditional `if-else` branches evaluate to conflicting types (exact matching required; no implicit widening). |
+| `MH2012` | `ConflictingReturnType / DeadCode` | Conflicting inferred return types across branches or unreachable dead code detected in control flow graph. |
+| `MH2013` | `AmbiguousLiteralConversion` | Multiple custom literal conversion methods match the literal; explicit suffix is required. |
+| `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse. |
+
+---
+
+## 5. Sequential Extensions (`MH1000` - `MH1999`)
+
+Reserved for future borrow checking, lifetime analysis, and advanced semantic verification passes.
 
 ---
 

@@ -6,7 +6,19 @@ using Maho.Text;
 
 namespace Maho.Resolution;
 
-/// <summary>Resolves declaration-owned references after every declaration is known.</summary>
+/// <summary>
+/// Resolution Pass 3: Declaration Resolution.
+/// <para>
+/// Resolves declaration-owned references and signatures after all declarations have been discovered:
+/// <list type="bullet">
+/// <item><description>Resolves base types, interface implementations, and sum type constituents.</description></item>
+/// <item><description>Resolves field and global variable declared types.</description></item>
+/// <item><description>Resolves parameter types, return types, and generic parameter constraints on functions and methods.</description></item>
+/// <item><description>Resolves attributes applied to types, functions, parameters, and variables.</description></item>
+/// <item><description>Validates mutual exclusivity of operator semantics (such as Destructor vs. Copy and Copy vs. Move).</description></item>
+/// </list>
+/// </para>
+/// </summary>
 internal sealed class DeclarationResolutionPass : ResolutionPass
 {
     private record struct FunctionSignatureInfo(Symbol Symbol, FunctionFlags Flags, FunctionDeclaration? Syntax, IReadOnlyList<SymbolHandle> GenericParameters, List<SymbolHandle> Parameters, TypeRef ReturnType);
@@ -18,6 +30,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
+    /// <summary>
+    /// Executes declaration resolution across all discovered symbols.
+    /// </summary>
+    /// <param name="context">The shared compilation resolution context.</param>
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
