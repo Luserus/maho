@@ -116,10 +116,10 @@ public sealed class SymbolDiscoveryTests
                     public int field;
                     public int Property { get; set; }
 
-                    public static int Method<U>(int parameter)
+                    public static func Method<U>(int parameter) -> int
                     {
                         public class LocalType<W>;
-                        public static int Nested<V>() { return 0; }
+                        public static func Nested<V>() -> int { return 0; }
                         int local = 0;
                         return local;
                     }
@@ -132,7 +132,7 @@ public sealed class SymbolDiscoveryTests
 
             {
                 public int global;
-                public static int Function<Y>() { return 0; }
+                public static func Function<Y>() -> int { return 0; }
                 public class TopLevelType<Z>;
             }
 
@@ -159,26 +159,6 @@ public sealed class SymbolDiscoveryTests
     }
 
     [Fact]
-    public void Resolve_SpecialFunctions_SetSpecialKind()
-    {
-        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public class Box
-            {
-                public Box() {}
-            }
-            """);
-        Assert.Empty(diagnostics.Diagnostics);
-
-        ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
-
-        var methods = context.MethodSymbols;
-        Assert.Single(methods);
-
-        var ctor = methods.Single(m => m.Name.Text == ".ctor");
-        Assert.Equal(SpecialFunctionKind.Constructor, ctor.SpecialKind);
-    }
-
-    [Fact]
     public void Resolve_DiscoversAliasSymbolsAcrossAllBlockScopesAndGenericParameters()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
@@ -195,12 +175,11 @@ public sealed class SymbolDiscoveryTests
                     using MemberAlias = Target;
                     using GenericMemberAlias<M> = Target;
 
-                    unsafe
                     {
                         using MemberBlockAlias = Target;
                     }
 
-                    public static void Method<U>()
+                    public static func Method<U>() -> void
                     {
                         using LocalAlias = Target;
                         using GenericLocalAlias<L> = Target;

@@ -1,25 +1,22 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Maho.Resolution.ControlFlow;
 using Maho.Syntax;
-using Maho.Text;
 
 namespace Maho.Resolution.Passes;
 
 /// <summary>
-/// Pass 6 of semantic resolution: Control Flow Graph (CFG) Construction and Return Type Inference.
+/// Pass 6 of semantic resolution: Control Flow Graph (CFG) Construction and Analysis.
 /// <para>
 /// Responsibilities:
 /// <list type="bullet">
 ///   <item><description>Constructs a directed control-flow graph of basic blocks for every function, member method, and property accessor.</description></item>
-///   <item><description>Performs reachability analysis from the entry block to identify dead code and divergent control paths (for static analysis/diagnostics only; no constant folding optimizations).</description></item>
-///   <item><description>Infers inferred (<c>var</c>) return types by collecting and unifying return expressions across all reachable execution paths, reporting <c>MH2012</c> if branches conflict.</description></item>
+///   <item><description>Performs reachability analysis from the entry block to identify dead code and divergent control paths.</description></item>
 ///   <item><description>Collapses remaining unconstrained scalar literals in global variables and fields to their canonical intrinsic defaults.</description></item>
 /// </list>
 /// </para>
 /// </summary>
-internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
+internal sealed class ControlFlowAnalysisPass : ResolutionPass
 {
     private ResolutionContext context = null!;
 
@@ -32,7 +29,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
     private TypeRef boolType = TypeRef.Unresolved;
 
     /// <summary>
-    /// Executes Pass 6: builds CFGs, runs reachability analysis, infers return types, and collapses unconstrained globals/fields.
+    /// Executes Pass 6: builds CFGs, runs reachability analysis, and collapses unconstrained globals/fields.
     /// </summary>
     /// <param name="context">The active resolution context containing discovered symbols and ASTs.</param>
     public override void Resolve(ResolutionContext context)
@@ -49,7 +46,6 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
                 AnalyzeReachability(cfg);
-                InferReturnType(cfg, function);
             }
         }
 
@@ -61,7 +57,6 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
                 AnalyzeReachability(cfg);
-                InferReturnType(cfg, method);
             }
         }
 
@@ -130,7 +125,7 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         if (intrinsics.TryGet(KnownIntrinsics.Char, out var c)) hChar = c;
         if (intrinsics.TryGet(KnownIntrinsics.Str, out var s)) hStr = s;
 
-        if (intrinsics.TryGet(KnownIntrinsics.Void, out var v))
+        if (intrinsics.TryGet(KnownIntrinsics.Unit, out var v))
         {
             hVoid = v;
             voidType = TypeRef.Resolved(v);
@@ -441,119 +436,6 @@ internal sealed class ControlFlowAndReturnInferencePass : ResolutionPass
         }
 
         return type;
-    }
-
-    /// <summary>
-    /// Infers the return type of a function or method whose return type was declared as <c>var</c> (inferred).
-    /// Inspects all reachable return statements in the CFG:
-    /// <list type="bullet">
-    ///   <item><description>If zero returns and fallthrough reaches exit, infers <c>void</c>.</description></item>
-    ///   <item><description>If returns exist, unifies their types; all branches must evaluate to the exact same concrete type.</description></item>
-    ///   <item><description>If conflicting return types are detected, reports <c>MH2012</c> without widening.</description></item>
-    ///   <item><description>If non-void function falls through to exit without return, reports <c>MH2012</c>.</description></item>
-    /// </list>
-    /// </summary>
-    /// <param name="cfg">The control-flow graph for the callable.</param>
-    /// <param name="function">The function or method symbol.</param>
-    private void InferReturnType(ControlFlowGraph cfg, Symbol function)
-    {
-        var returnType = function switch
-        {
-            FunctionSymbol fn => fn.ReturnType,
-            MethodSymbol m => m.ReturnType,
-            _ => TypeRef.Unresolved
-        };
-
-        if (!returnType.IsInferred)
-            return;
-
-        var reachableReturns = new List<(TypeRef Type, TextSpan Span, SourceText? Source)>();
-        bool fallthroughReachesExit = false;
-
-        // Collect return types from all reachable blocks
-        foreach (var block in cfg.Blocks.Where(b => b.IsReachable))
-        {
-            if (block.Terminator.Kind == BlockTerminatorKind.Return)
-            {
-                if (block.Terminator.ReturnExpression is { } retExpr)
-                {
-                    var exprType = context.GetRequiredExpressionType(retExpr);
-                    if (exprType.IsLiteral)
-                        exprType = CollapseToDefault(exprType);
-
-                    reachableReturns.Add((exprType, retExpr.GetSpan() ?? default, retExpr.GetSource()));
-                }
-                else
-                {
-                    reachableReturns.Add((voidType, default, null));
-                }
-            }
-            else if (block.Successors.Contains(cfg.Exit) && block.Terminator.Kind == BlockTerminatorKind.Fallthrough)
-            {
-                fallthroughReachesExit = true;
-            }
-        }
-
-        // Case 1: No returns and fallthrough reaches exit -> void function
-        if (reachableReturns.Count == 0 && fallthroughReachesExit)
-        {
-            SetSymbolReturnType(function, voidType);
-            return;
-        }
-
-        // Case 2: One or more returns exist -> verify exact match across all branches
-        if (reachableReturns.Count > 0)
-        {
-            var first = reachableReturns[0];
-            bool hasMismatch = false;
-
-            // If return is uncollapsed literal and no standard intrinsics exist, cannot finalize
-            if (first.Type.IsLiteral && hInt32 is null)
-                return;
-
-            for (int i = 1; i < reachableReturns.Count; i++)
-            {
-                var current = reachableReturns[i];
-                if (!first.Type.Equals(current.Type))
-                {
-                    hasMismatch = true;
-                    context.Diagnostics.ReportConflictingReturnType(
-                        current.Span,
-                        current.Type.ToDisplayString(context),
-                        first.Type.ToDisplayString(context),
-                        current.Source);
-                }
-            }
-
-            // If code can fall through to exit without a return in a non-void function, report mismatch
-            if (fallthroughReachesExit && !first.Type.Equals(voidType))
-            {
-                hasMismatch = true;
-                context.Diagnostics.ReportConflictingReturnType(
-                    first.Span,
-                    "void",
-                    first.Type.ToDisplayString(context),
-                    first.Source);
-            }
-
-            SetSymbolReturnType(function, hasMismatch ? TypeRef.Error : first.Type);
-        }
-        else
-        {
-            SetSymbolReturnType(function, voidType);
-        }
-    }
-
-    /// <summary>
-    /// Assigns the finalized return type to a function or method symbol.
-    /// </summary>
-    private static void SetSymbolReturnType(Symbol function, TypeRef type)
-    {
-        switch (function)
-        {
-            case FunctionSymbol fn: fn.ReturnType = type; break;
-            case MethodSymbol m: m.ReturnType = type; break;
-        }
     }
 }
 

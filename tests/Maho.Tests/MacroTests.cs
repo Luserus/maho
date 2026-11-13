@@ -5,13 +5,13 @@ namespace Maho.Tests;
 public sealed class MacroTests
 {
     private const string MacroPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [IntrinsicType("Void")]
+        intrinsic attribute OperatorFunction(Str name);
+
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("NUInt")]
@@ -23,8 +23,10 @@ public sealed class MacroTests
         [IntrinsicType("Int32")]
         public struct int32 : Add<int32>, Mul<int32>
         {
-            public static int32 Add.Add(int32 left, int32 right) { return left; }
-            public static int32 Mul.Mul(int32 left, int32 right) { return left; }
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")]
+            public static func Add.Add(int32 left, int32 right) -> int32;
+            [IntrinsicFunction("Int32.Mul(Int32, Int32)")]
+            public static func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
         [IntrinsicType("Reference")]
@@ -40,19 +42,54 @@ public sealed class MacroTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
+        }
+
+        [IntrinsicType("Pointer")]
+        public struct Pointer<T>
+        {
+            nuint addr;
+        }
+
+        [IntrinsicType("ValueType")]
+        public struct ValType;
+
+        [IntrinsicType("Struct")]
+        public struct Struct : ValType;
+
+        public interface Callable<TReturn, TParams...>
+        {
+            [OperatorFunction("Callable")]
+            public func Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Function")]
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            public func Callable.Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Delegate")]
+        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            Pointer<ValType> env;
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
+            public func Callable.Invoke(TParams args) -> TReturn;
         }
 
         public interface Add<T>
         {
             [OperatorFunction("Addition")]
-            public static int32 Add(int32 left, int32 right);
+            public static func Add(int32 left, int32 right) -> int32;
         }
 
         public interface Mul<T>
         {
             [OperatorFunction("Multiplication")]
-            public static int32 Mul(int32 left, int32 right);
+            public static func Mul(int32 left, int32 right) -> int32;
         }
         """;
 
@@ -68,7 +105,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $add(1, 2);
                 }
@@ -99,7 +136,7 @@ public sealed class MacroTests
             {
                 public struct int32;
 
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $nest(1);
                 }
@@ -133,7 +170,7 @@ public sealed class MacroTests
                 public struct void;
                 public struct int32;
 
-                public void Test()
+                public func Test() -> void
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -153,7 +190,7 @@ public sealed class MacroTests
 
         // Third statement is 'var temp = x;' with uncollidable HygieneId (no name mangling)
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[2]);
-        var declarator = Assert.Single(varDecl.Declaration.Declarators);
+        var declarator = varDecl.Declaration.Declarator;
         Assert.Equal("temp", declarator.Identifier.ToString());
         Assert.True(compilation.Context.GetHygiene(declarator.Identifier).IsMacroGenerated);
 
@@ -179,7 +216,7 @@ public sealed class MacroTests
                 public struct void;
                 public struct int32;
 
-                public void Test()
+                public func Test() -> void
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -218,7 +255,7 @@ public sealed class MacroTests
                 public struct void;
                 public struct int32;
 
-                public void Test()
+                public func Test() -> void
                 {
                     int32 temp = 1;
                     int32 other = 2;
@@ -255,7 +292,7 @@ public sealed class MacroTests
                 public struct void;
                 public struct int32;
 
-                public void Test()
+                public func Test() -> void
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -299,7 +336,7 @@ public sealed class MacroTests
         var fields = body.Members.OfType<MemberFieldDeclaration>().ToList();
         Assert.Equal(2, fields.Count);
 
-        var names = fields.SelectMany(f => f.Declaration.Declarators).Select(d => d.Identifier.ToString()).ToList();
+        var names = fields.Select(f => f.Declaration.Declarator.Identifier.ToString()).ToList();
         Assert.Contains("x", names);
         Assert.Contains("y", names);
 
@@ -323,7 +360,7 @@ public sealed class MacroTests
                 public struct void;
                 public struct List;
 
-                public void Test()
+                public func Test() -> void
                 {
                     List arr = $wrap(10, 20, 30);
                 }
@@ -337,7 +374,7 @@ public sealed class MacroTests
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
 
         var varStmt = Assert.Single(funcBody.Locals.OfType<LocalVariableDeclarationStatement>());
-        var collExpr = Assert.IsType<CollectionExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        var collExpr = Assert.IsType<CollectionExpression>(varStmt.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(3, collExpr.Expressions.Count);
     }
 
@@ -355,7 +392,7 @@ public sealed class MacroTests
             {
                 public struct void;
 
-                public void Test()
+                public func Test() -> void
                 {
                     $call_all(print, 1, 2, 3);
                 }
@@ -389,7 +426,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $loop();
                 }
@@ -411,7 +448,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $exact(99);
                 }
@@ -429,7 +466,7 @@ public sealed class MacroTests
         var compilation = Compilation.FromSource("""
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $unknown_macro(123);
                 }
@@ -453,7 +490,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     int32 a = $valid();
                     $Invalid;
@@ -481,7 +518,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $block_macro();
                 }
@@ -503,7 +540,7 @@ public sealed class MacroTests
             {
                 public struct int32;
 
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $here;
                 }
@@ -530,7 +567,7 @@ public sealed class MacroTests
             {
                 public struct int32;
 
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $`macro`;
                 }
@@ -561,7 +598,7 @@ public sealed class MacroTests
 
                 public class Calculator
                 {
-                    public int32 Calc()
+                    public func Calc() -> int32
                     {
                         return $sq(7);
                     }
@@ -598,7 +635,7 @@ public sealed class MacroTests
             {
                 public struct int32;
 
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $step(5);
                 }
@@ -630,7 +667,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     macro $local_add {
                         (@a: expr, @b: expr) => @a + @b;
@@ -667,7 +704,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $compute(10, 20);
                 }
@@ -702,7 +739,7 @@ public sealed class MacroTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     $declare_variables();
                     return a + b;
@@ -842,7 +879,7 @@ public sealed class MacroTests
         var compilation = Compilation.FromSource("""
             public macro $MakeMethod {
                 (@prefix: ident, @suffix: ident) => {
-                    public void @prefix##@suffix() {}
+                    public func @prefix##@suffix() -> void {}
                 }
             }
 
@@ -932,7 +969,7 @@ public sealed class MacroTests
             public class Host
             {
                 public struct void;
-                public void Test()
+                public func Test() -> void
                 {
                     $MakeSuffixed(123, i32);
                 }
@@ -976,7 +1013,7 @@ public sealed class MacroTests
                 public struct int32;
                 public struct void;
 
-                public void Test()
+                public func Test() -> void
                 {
                     int32 x = 42;
                     var name = nameof(x);
@@ -990,7 +1027,7 @@ public sealed class MacroTests
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
         var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
-        var init = varStmt.Declaration.Declarators[0].Initializer!.Initializer;
+        var init = varStmt.Declaration.Declarator.Initializer!.Initializer;
         var nameofExpr = Assert.IsType<NameofExpression>(init);
         var arg = Assert.IsType<IdentifierNameExpression>(nameofExpr.Argument);
         Assert.Equal("x", arg.Identifier.Value);
@@ -1079,7 +1116,7 @@ public sealed class MacroTests
             {
                 public struct int32;
 
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return $OldMacro();
                 }

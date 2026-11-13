@@ -14,13 +14,13 @@ public sealed class DeclarationResolutionTests
             {
                 public Value field;
                 public Value Property { get; }
-                public Value Method(Value parameter)
+                public func Method(Value parameter) -> Value
                 {
                     Value local = parameter;
                     return local;
                 }
             }
-            public Value Function(Value parameter) { return parameter; }
+            public func Function(Value parameter) -> Value { return parameter; }
             public Value global;
             """);
 
@@ -141,8 +141,8 @@ public sealed class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value;
-            public static Value Identity(Value value) { return value; }
-            public static Value Loop(Value parameter)
+            public static func Identity(Value value) -> Value { return value; }
+            public static func Loop(Value parameter) -> Value
             {
             again:
                 Value local = Identity(parameter);
@@ -165,7 +165,7 @@ public sealed class DeclarationResolutionTests
         LocalGotoStatement branch = Assert.IsType<LocalGotoStatement>(body.Locals[2]);
         LocalReturnStatement result = Assert.IsType<LocalReturnStatement>(body.Locals[3]);
 
-        CallExpression call = Assert.IsType<CallExpression>(localDeclaration.Declaration.Declarators[0].Initializer?.Initializer);
+        CallExpression call = Assert.IsType<CallExpression>(localDeclaration.Declaration.Declarator.Initializer?.Initializer);
         AssertReference(context, Assert.IsType<IdentifierNameExpression>(call.Callee), ResolutionContext.GetHandle(identity));
         AssertReference(context, Assert.IsType<IdentifierNameExpression>(Assert.Single(call.Arguments)), ResolutionContext.GetHandle(parameter));
         AssertReference(context, branch, ResolutionContext.GetHandle(label));
@@ -255,14 +255,17 @@ public sealed class DeclarationResolutionTests
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value
             {
-                public Value firstField, secondField;
-                public Value Method()
+                public Value firstField;
+                public Value secondField;
+                public func Method() -> Value
                 {
-                    Value firstLocal, secondLocal;
+                    Value firstLocal;
+                    Value secondLocal;
                     return firstLocal;
                 }
             }
-            public Value firstGlobal, secondGlobal;
+            public Value firstGlobal;
+            public Value secondGlobal;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -289,7 +292,7 @@ public sealed class DeclarationResolutionTests
             public var global = 10;
             public struct Container
             {
-                public void Method()
+                public func Method() -> void
                 {
                     var local = 20;
                 }
@@ -318,7 +321,7 @@ public sealed class DeclarationResolutionTests
             {
                 public UnknownType field;
                 public UnknownType Property { get; }
-                public UnknownType Method(UnknownType param)
+                public func Method(UnknownType param) -> UnknownType
                 {
                     UnknownType local = param;
                     return local;
@@ -500,10 +503,10 @@ public sealed class DeclarationResolutionTests
 
             public struct Container
             {
-                public void Method<T>() where T : ConstraintAlias { }
+                public func Method<T>() -> void where T : ConstraintAlias { }
             }
 
-            public void Function<T>() where T : ConstraintAlias { }
+            public func Function<T>() -> void where T : ConstraintAlias { }
 
             using Projected<T> where T : ConstraintAlias = GenericType<T>;
             """);
@@ -767,7 +770,7 @@ public sealed class DeclarationResolutionTests
             public struct TypeB;
             public struct TypeC;
 
-            public void Test()
+            public func Test() -> void
             {
                 (TypeA a, TypeB b, TypeC c) = (1, 2, 3);
             }
@@ -793,13 +796,13 @@ public sealed class DeclarationResolutionTests
     public void Resolve_MultipleFunctionsHaveIndependentLocalVariableIdsAndIndexers()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void First()
+            public func First() -> void
             {
                 int a = 1;
                 int b = 2;
             }
 
-            public void Second()
+            public func Second() -> void
             {
                 int x = 10;
                 int y = 20;
@@ -849,7 +852,7 @@ public sealed class DeclarationResolutionTests
             public attribute Marker;
             public attribute Config(int value);
 
-            public void Foo([Marker] int a, [Config(42)] string b, int c)
+            public func Foo([Marker] int a, [Config(42)] string b, int c) -> void
             {
             }
             """);
@@ -990,11 +993,11 @@ public sealed class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Int32;
-            public void Process(Int32 value) { }
-            public void Process(Int32* value) { }
-            public void Process(&Int32 value) { }
-            public void Process(Int32[] value) { }
-            public void Process(Int32[10] value) { }
+            public func Process(Int32 value) -> void { }
+            public func Process(Int32* value) -> void { }
+            public func Process(&Int32 value) -> void { }
+            public func Process(Int32[] value) -> void { }
+            public func Process(Int32[10] value) -> void { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -1040,7 +1043,7 @@ public sealed class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct var;
-            public void Test()
+            public func Test() -> void
             {
                 var x = 1;
             }
@@ -1063,7 +1066,7 @@ public sealed class DeclarationResolutionTests
             {
                 public struct var;
             }
-            public void Test()
+            public func Test() -> void
             {
                 Holder.var x;
             }
@@ -1088,7 +1091,7 @@ public sealed class DeclarationResolutionTests
         // When struct var is in scope, parameter type "var" resolves to struct var
         var (_, diag1, _, root1) = CompilerTestBed.Parse("""
             public struct var;
-            public void Test(var p) { }
+            public func Test(var p) -> void { }
             """);
 
         Assert.Empty(diag1.Diagnostics);
@@ -1100,7 +1103,7 @@ public sealed class DeclarationResolutionTests
 
         // When struct var is NOT in scope, parameter type "var" reports error
         var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public void Test(var p) { }
+            public func Test(var p) -> void { }
             """);
 
         Assert.Empty(diag2.Diagnostics);
@@ -1109,52 +1112,23 @@ public sealed class DeclarationResolutionTests
         Assert.Contains(ctx2.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
     }
 
-    [Fact]
-    public void Resolve_VarInReturnType_AlwaysInfers_UnlessQualified()
-    {
-        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
-            public struct var;
-            public var InferFn() { return 1; }
-            """);
-
-        Assert.Empty(diag1.Diagnostics);
-        ResolutionContext ctx1 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root1));
-        var fn1 = Assert.Single(ctx1.FunctionSymbols, f => f.Name.ToString() == "InferFn");
-        Assert.True(fn1.ReturnType.IsInferred);
-
-        var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public struct Holder
-            {
-                public struct var;
-            }
-            public Holder.var ReturnTypeFn() { return default; }
-            """);
-
-        Assert.Empty(diag2.Diagnostics);
-        ResolutionContext ctx2 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root2));
-        var fn2 = Assert.Single(ctx2.FunctionSymbols, f => f.Name.ToString() == "ReturnTypeFn");
-        Assert.False(fn2.ReturnType.IsInferred);
-        Assert.True(fn2.ReturnType.IsResolved);
-        var nestedVar = Assert.Single(ctx2.NestedTypeSymbols, t => t.Name.ToString() == "var");
-        Assert.Equal(ResolutionContext.GetHandle(nestedVar), fn2.ReturnType.Handle);
-    }
 
     [Fact]
     public void Resolve_ThrowawaySymbols_PutInSink_MultipleCanCoexist_NotLoweredOrInGlobalTables()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void _() { }
-            public void _(int a) { }
+            public func _() -> void { }
+            public func _(int a) -> void { }
             public struct _
             {
                 public int x;
-                public void Method() { }
+                public func Method() -> void { }
             }
             public struct _
             {
                 public int y;
             }
-            public void Test()
+            public func Test() -> void
             {
                 var _ = 1;
                 var _ = 2;
@@ -1193,7 +1167,7 @@ public sealed class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value;
-            public void _()
+            public func _() -> void
             {
                 Value a;
                 Value b = a;
@@ -1201,7 +1175,7 @@ public sealed class DeclarationResolutionTests
             public struct _
             {
                 public Value field;
-                public Value GetField()
+                public func GetField() -> Value
                 {
                     return this.field;
                 }
@@ -1230,9 +1204,9 @@ public sealed class DeclarationResolutionTests
     public void Resolve_ThrowawaySymbols_CannotBeReferenced()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void _() { }
+            public func _() -> void { }
             public struct _ { }
-            public void Test()
+            public func Test() -> void
             {
                 var _ = 1;
                 var a = _;
@@ -1285,7 +1259,7 @@ public sealed class DeclarationResolutionTests
     public void Resolve_ThrowawayParameters_CanCoexist_AndRoutedToSink()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Handler(int _, int _) { }
+            public func Handler(int _, int _) -> void { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -1304,9 +1278,9 @@ public sealed class DeclarationResolutionTests
         // it cannot be called from active code, but its body resolution still validates types
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct User;
-            public void ActiveFn(User u) { }
+            public func ActiveFn(User u) -> void { }
             // Temporarily inactivated function for testing
-            public void _(User u)
+            public func _(User u) -> void
             {
                 ActiveFn(u);
             }

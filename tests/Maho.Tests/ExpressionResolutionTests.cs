@@ -6,13 +6,11 @@ namespace Maho.Tests;
 public sealed class ExpressionResolutionTests
 {
     private const string Prelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("Bool")]
@@ -30,42 +28,43 @@ public sealed class ExpressionResolutionTests
                               LeftShift<int32>, RightShift<int32>,
                               Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
         {
-            public static int32 Add.Add(int32 l, int32 r) { return l; }
-            public static int32 Sub.Sub(int32 l, int32 r) { return l; }
-            public static int32 Mul.Mul(int32 l, int32 r) { return l; }
-            public static int32 Div.Div(int32 l, int32 r) { return l; }
-            public static int32 Rem.Rem(int32 l, int32 r) { return l; }
-            public static int32 BitwiseAnd.BitwiseAnd(int32 l, int32 r) { return l; }
-            public static int32 BitwiseOr.BitwiseOr(int32 l, int32 r) { return l; }
-            public static int32 BitwiseXor.BitwiseXor(int32 l, int32 r) { return l; }
-            public static int32 BitwiseNot.BitwiseNot(int32 o) { return o; }
-            public static int32 LeftShift.LeftShift(int32 l, int32 r) { return l; }
-            public static int32 RightShift.RightShift(int32 l, int32 r) { return l; }
-            public static bool Eq.Eq(int32 l, int32 r) { return true; }
-            public static bool Neq.Neq(int32 l, int32 r) { return false; }
-            public static bool Lt.Lt(int32 l, int32 r) { return true; }
-            public static bool Le.Le(int32 l, int32 r) { return true; }
-            public static bool Gt.Gt(int32 l, int32 r) { return false; }
-            public static bool Ge.Ge(int32 l, int32 r) { return false; }
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")] public static func Add.Add(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Sub(Int32, Int32)")] public static func Sub.Sub(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Mul(Int32, Int32)")] public static func Mul.Mul(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Div(Int32, Int32)")] public static func Div.Div(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Rem(Int32, Int32)")] public static func Rem.Rem(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseAnd(Int32, Int32)")] public static func BitwiseAnd.BitwiseAnd(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseOr(Int32, Int32)")] public static func BitwiseOr.BitwiseOr(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseXor(Int32, Int32)")] public static func BitwiseXor.BitwiseXor(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseNot(Int32)")] public static func BitwiseNot.BitwiseNot(int32 o) -> int32;
+            [IntrinsicFunction("Int32.LeftShift(Int32, Int32)")] public static func LeftShift.LeftShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.RightShift(Int32, Int32)")] public static func RightShift.RightShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Eq(Int32, Int32)")] public static func Eq.Eq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Neq(Int32, Int32)")] public static func Neq.Neq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Lt(Int32, Int32)")] public static func Lt.Lt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Le(Int32, Int32)")] public static func Le.Le(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Gt(Int32, Int32)")] public static func Gt.Gt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Ge(Int32, Int32)")] public static func Ge.Ge(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.<i32>")] public literal i32(int32 v);
         }
 
-        public interface Add<T> { [OperatorFunction("Addition")] public static int32 Add(int32 l, int32 r); }
-        public interface Sub<T> { [OperatorFunction("Subtraction")] public static int32 Sub(int32 l, int32 r); }
-        public interface Mul<T> { [OperatorFunction("Multiplication")] public static int32 Mul(int32 l, int32 r); }
-        public interface Div<T> { [OperatorFunction("Division")] public static int32 Div(int32 l, int32 r); }
-        public interface Rem<T> { [OperatorFunction("Remainder")] public static int32 Rem(int32 l, int32 r); }
-        public interface BitwiseAnd<T> { [OperatorFunction("BitwiseAnd")] public static int32 BitwiseAnd(int32 l, int32 r); }
-        public interface BitwiseOr<T> { [OperatorFunction("BitwiseOr")] public static int32 BitwiseOr(int32 l, int32 r); }
-        public interface BitwiseXor<T> { [OperatorFunction("BitwiseXor")] public static int32 BitwiseXor(int32 l, int32 r); }
-        public interface BitwiseNot<T> { [OperatorFunction("BitwiseNot")] public static int32 BitwiseNot(int32 o); }
-        public interface LeftShift<T> { [OperatorFunction("LeftShift")] public static int32 LeftShift(int32 l, int32 r); }
-        public interface RightShift<T> { [OperatorFunction("RightShift")] public static int32 RightShift(int32 l, int32 r); }
-        public interface Eq<T> { [OperatorFunction("Equality")] public static bool Eq(int32 l, int32 r); }
-        public interface Neq<T> { [OperatorFunction("Inequality")] public static bool Neq(int32 l, int32 r); }
-        public interface Lt<T> { [OperatorFunction("LessThan")] public static bool Lt(int32 l, int32 r); }
-        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public static bool Le(int32 l, int32 r); }
-        public interface Gt<T> { [OperatorFunction("GreaterThan")] public static bool Gt(int32 l, int32 r); }
-        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public static bool Ge(int32 l, int32 r); }
+        public interface Add<T> { [OperatorFunction("Addition")] public static func Add(int32 l, int32 r) -> int32; }
+        public interface Sub<T> { [OperatorFunction("Subtraction")] public static func Sub(int32 l, int32 r) -> int32; }
+        public interface Mul<T> { [OperatorFunction("Multiplication")] public static func Mul(int32 l, int32 r) -> int32; }
+        public interface Div<T> { [OperatorFunction("Division")] public static func Div(int32 l, int32 r) -> int32; }
+        public interface Rem<T> { [OperatorFunction("Remainder")] public static func Rem(int32 l, int32 r) -> int32; }
+        public interface BitwiseAnd<T> { [OperatorFunction("BitwiseAnd")] public static func BitwiseAnd(int32 l, int32 r) -> int32; }
+        public interface BitwiseOr<T> { [OperatorFunction("BitwiseOr")] public static func BitwiseOr(int32 l, int32 r) -> int32; }
+        public interface BitwiseXor<T> { [OperatorFunction("BitwiseXor")] public static func BitwiseXor(int32 l, int32 r) -> int32; }
+        public interface BitwiseNot<T> { [OperatorFunction("BitwiseNot")] public static func BitwiseNot(int32 o) -> int32; }
+        public interface LeftShift<T> { [OperatorFunction("LeftShift")] public static func LeftShift(int32 l, int32 r) -> int32; }
+        public interface RightShift<T> { [OperatorFunction("RightShift")] public static func RightShift(int32 l, int32 r) -> int32; }
+        public interface Eq<T> { [OperatorFunction("Equality")] public static func Eq(int32 l, int32 r) -> bool; }
+        public interface Neq<T> { [OperatorFunction("Inequality")] public static func Neq(int32 l, int32 r) -> bool; }
+        public interface Lt<T> { [OperatorFunction("LessThan")] public static func Lt(int32 l, int32 r) -> bool; }
+        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public static func Le(int32 l, int32 r) -> bool; }
+        public interface Gt<T> { [OperatorFunction("GreaterThan")] public static func Gt(int32 l, int32 r) -> bool; }
+        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public static func Ge(int32 l, int32 r) -> bool; }
 
         [IntrinsicType("Int64")]
         public struct int64;
@@ -95,7 +94,46 @@ public sealed class ExpressionResolutionTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
+        }
+        intrinsic attribute IntrinsicFunction(Str signature);
+
+        [IntrinsicType("Pointer")]
+        public struct Pointer<T>
+        {
+            nuint addr;
+        }
+
+        [IntrinsicType("ValueType")]
+        public struct ValType;
+
+        [IntrinsicType("Struct")]
+        public struct Struct : ValType;
+
+        [IntrinsicType("Tuple")]
+        public struct Tuple<T...> : ValType;
+
+        public interface Callable<TReturn, TParams...>
+        {
+            [OperatorFunction("Callable")]
+            public func Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Function")]
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            public func Callable.Invoke(TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Delegate")]
+        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            Pointer<ValType> env;
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
+            public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
 
@@ -107,7 +145,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var a = 42;
                     var b = true;
@@ -116,7 +154,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Bool, out var hBool));
@@ -143,14 +181,14 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var (x, y) = (10, true);
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Bool, out var hBool));
@@ -177,12 +215,12 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Helper()
+                public func Helper() -> void
                 {
                     return;
                 }
 
-                public void Test()
+                public func Test() -> void
                 {
                     void v = Helper();
                     var inferredVoid = v;
@@ -191,7 +229,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -202,7 +240,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var add = 10 + 20;
                     var sub = 30 - 5;
@@ -231,7 +269,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -243,7 +281,7 @@ public sealed class ExpressionResolutionTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static Vector Add(Vector left, Vector right);
+                public static func Add(Vector left, Vector right) -> Vector;
             }
 
             public struct Vector : Add
@@ -251,7 +289,7 @@ public sealed class ExpressionResolutionTests
                 public int32 X;
                 public int32 Y;
 
-                public static Vector Add.Add(Vector left, Vector right)
+                public static func Add.Add(Vector left, Vector right) -> Vector
                 {
                     Vector result;
                     return result;
@@ -260,14 +298,14 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public Vector Test(Vector a, Vector b)
+                public func Test(Vector a, Vector b) -> Vector
                 {
                     return a + b;
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -291,7 +329,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10 + true;
                 }
@@ -310,7 +348,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x = -true;
                 }
@@ -329,7 +367,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     int32 x = true;
                 }
@@ -348,9 +386,9 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Foo(int32 x) { }
+                public func Foo(int32 x) -> void { }
 
-                public void Test()
+                public func Test() -> void
                 {
                     Foo(true);
                 }
@@ -369,9 +407,9 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Foo(int32 x, int32 y) { }
+                public func Foo(int32 x, int32 y) -> void { }
 
-                public void Test()
+                public func Test() -> void
                 {
                     Foo(1);
                 }
@@ -390,7 +428,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public int32 Test()
+                public func Test() -> int32
                 {
                     return true;
                 }
@@ -409,7 +447,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     if (42)
                     {
@@ -430,7 +468,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x;
                 }
@@ -449,7 +487,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     10 = 20;
                 }
@@ -468,7 +506,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var (a, b) = 42;
                 }
@@ -493,7 +531,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test(UntaggedData d)
+                public func Test(UntaggedData d) -> void
                 {
                     match (d)
                     {
@@ -518,12 +556,12 @@ public sealed class ExpressionResolutionTests
             {
                 A,
                 B;
-                public void NormalMethod() { }
+                public func NormalMethod() -> void { }
             }
 
             public class Host
             {
-                public void Test(untagged E e)
+                public func Test(untagged E e) -> void
                 {
                     e.NormalMethod();
                 }
@@ -542,12 +580,12 @@ public sealed class ExpressionResolutionTests
 
             public enum Shape
             {
-                Circle { public void Draw() {} }
+                Circle { public func Draw() -> void {} }
             }
 
             public class Host
             {
-                public void Test(Shape s)
+                public func Test(Shape s) -> void
                 {
                     s.Circle.Draw();
                 }
@@ -577,14 +615,14 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public Meters Test()
+                public func Test() -> Meters
                 {
                     return 50m;
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -610,19 +648,19 @@ public sealed class ExpressionResolutionTests
             public interface ConcreteAdd
             {
                 [OperatorFunction("Addition")]
-                public static Concrete Add(Concrete l, Concrete r);
+                public static func Add(Concrete l, Concrete r) -> Concrete;
             }
 
             public struct Concrete : ConcreteAdd
             {
-                public literal int();
-                public static Concrete ConcreteAdd.Add(Concrete l, Concrete r) { return l; }
-                public Concrete Abs() { return this; }
+                public literal int() { Concrete res; return res; }
+                public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                public func Abs() -> Concrete { return this; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10;
                     var y = x + 10.Abs();
@@ -631,7 +669,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -643,18 +681,18 @@ public sealed class ExpressionResolutionTests
             public interface ConcreteAdd
             {
                 [OperatorFunction("Addition")]
-                public static Concrete Add(Concrete l, Concrete r);
+                public static func Add(Concrete l, Concrete r) -> Concrete;
             }
 
             public struct Concrete : ConcreteAdd
             {
-                public literal int();
-                public static Concrete ConcreteAdd.Add(Concrete l, Concrete r) { return l; }
+                public literal int() { Concrete res; return res; }
+                public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10;
                     var y = x + 10.Abs();
@@ -675,10 +713,10 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void FromInt32(int32 x) {}
-                public void FromInt64(int64 x) {}
+                public func FromInt32(int32 x) -> void {}
+                public func FromInt64(int64 x) -> void {}
 
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10;
                     FromInt32(x);
@@ -699,7 +737,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10;
                     x.NonExistentMethod();
@@ -719,7 +757,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var t = true;
                     var f = false;
@@ -727,15 +765,15 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
         var varT = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
         var varF = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
-        Assert.IsType<LiteralExpression>(varT.Declaration.Declarators[0].Initializer!.Initializer);
-        Assert.IsType<LiteralExpression>(varF.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.IsType<LiteralExpression>(varT.Declaration.Declarator.Initializer!.Initializer);
+        Assert.IsType<LiteralExpression>(varF.Declaration.Declarator.Initializer!.Initializer);
     }
 
     [Fact]
@@ -746,20 +784,20 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     var res = 10 + 20;
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
         var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
-        var bin = Assert.IsType<BinaryExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        var bin = Assert.IsType<BinaryExpression>(varStmt.Declaration.Declarator.Initializer!.Initializer);
         Assert.True(compilation.Context.ResolvedTree.TryGetReference(bin, out var opHandle));
         var opSym = compilation.Context.GetSymbol(opHandle);
         var method = Assert.IsAssignableFrom<MethodSymbol>(opSym);
@@ -778,7 +816,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test(bool cond, Dog d, Cat c)
+                public func Test(bool cond, Dog d, Cat c) -> void
                 {
                     var res = if (cond) d else c;
                 }
@@ -797,14 +835,14 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public int32 Test(bool cond, int32 a, int32 b)
+                public func Test(bool cond, int32 a, int32 b) -> int32
                 {
                     return if (cond) a else b;
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -818,13 +856,13 @@ public sealed class ExpressionResolutionTests
             public interface New
             {
                 [OperatorFunction("New")]
-                public static Point New(Arena pool);
+                public static func New(Arena pool) -> Point;
             }
 
             public interface Put
             {
                 [OperatorFunction("Put")]
-                public static void Put(int32 offset);
+                public static func Put(int32 offset) -> void;
             }
 
             public struct Point : New, Put
@@ -832,7 +870,7 @@ public sealed class ExpressionResolutionTests
                 public int32 X;
                 public int32 Y;
 
-                public static Point Construct(int32 x, int32 y)
+                public static func Construct(int32 x, int32 y) -> Point
                 {
                     Point p;
                     p.X = x;
@@ -840,20 +878,20 @@ public sealed class ExpressionResolutionTests
                     return p;
                 }
 
-                public static Point New.New(Arena pool)
+                public static func New.New(Arena pool) -> Point
                 {
                     Point p;
                     return p;
                 }
 
-                public static void Put.Put(int32 offset)
+                public static func Put.Put(int32 offset) -> void
                 {
                 }
             }
 
             public class Host
             {
-                public void Test(Arena pool)
+                public func Test(Arena pool) -> void
                 {
                     var p1 = new(pool) Point(10, 20);
                     put(4) Point(30, 40);
@@ -861,7 +899,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -873,14 +911,14 @@ public sealed class ExpressionResolutionTests
             public interface Callable
             {
                 [OperatorFunction("Callable")]
-                public int32 Call(int32 x, int32 y);
+                public func Call(int32 x, int32 y) -> int32;
             }
 
             public struct Multiplier : Callable
             {
                 public int32 Factor;
 
-                public int32 Callable.Call(int32 x, int32 y)
+                public func Callable.Call(int32 x, int32 y) -> int32
                 {
                     return x;
                 }
@@ -888,14 +926,14 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public int32 Test(Multiplier m)
+                public func Test(Multiplier m) -> int32
                 {
                     return m(10, 20);
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -908,7 +946,7 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void Test(NonCallable n)
+                public func Test(NonCallable n) -> void
                 {
                     n(1, 2);
                 }
@@ -927,13 +965,13 @@ public sealed class ExpressionResolutionTests
 
             public struct Overloaded
             {
-                public literal lit1(int32 v);
-                public literal lit2(int32 v);
+                public literal lit1(int32 v) { Overloaded res; return res; }
+                public literal lit2(int32 v) { Overloaded res; return res; }
             }
 
             public class Host
             {
-                public void Test()
+                public func Test() -> void
                 {
                     Overloaded o = 42;
                 }
@@ -952,9 +990,9 @@ public sealed class ExpressionResolutionTests
 
             public class Host
             {
-                public void ExpectInt64(int64 val) { }
+                public func ExpectInt64(int64 val) -> void { }
 
-                public void Test()
+                public func Test() -> void
                 {
                     var x = 10;
                     ExpectInt64(x);
@@ -962,7 +1000,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var hInt64));
 
@@ -978,62 +1016,57 @@ public sealed class ExpressionResolutionTests
     }
 
     [Fact]
-    public void CFG_ReturnInference_ConflictingReturns_ReportsMH2012()
+    public void IntrinsicFunction_OperatorAndLiteralOverloads_ResolveCorrectly()
     {
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
+            public interface AddMixed<TLhs, TRhs, TReturn>
+            {
+                [OperatorFunction("Addition")]
+                public static func Add(TLhs l, TRhs r) -> TReturn;
+            }
+
+            [IntrinsicType("UInt64")]
+            public struct uint64 : AddMixed<uint64, int32, uint64>
+            {
+                [IntrinsicFunction("UInt64.Add(UInt64, Int32)")]
+                public static func AddMixed.Add(uint64 l, int32 r) -> uint64;
+
+                [IntrinsicFunction("UInt64.<u64>")]
+                public literal u64(int32 v);
+            }
+
             public class Host
             {
-                public var Test(bool cond)
+                public func Test() -> uint64
                 {
-                    if (cond)
-                    {
-                        return 10;
-                    }
-                    else
-                    {
-                        return true;
-                    }
+                    var lit = 100u64;
+                    uint64 a = 10u64;
+                    int32 b = 5i32;
+                    return a + b;
                 }
             }
             """);
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2012");
-    }
-
-    [Fact]
-    public void CFG_ReturnInference_UnifiedReturns_InfersExactType()
-    {
-        var compilation = Compilation.FromSource($$"""
-            {{Prelude}}
-
-            public class Host
-            {
-                public var Test(bool cond, int32 a, int32 b)
-                {
-                    if (cond)
-                    {
-                        return a;
-                    }
-                    else
-                    {
-                        return b;
-                    }
-                }
-            }
-            """);
-
-        Assert.False(compilation.HasErrors);
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
-        Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
-
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Test");
-        var methodSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(ResolutionContext.GetHandle(context.MethodSymbols.First(m => m.Name.Text == "Test"))));
-        Assert.Equal(hInt32, methodSym.ReturnType.Handle);
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+
+        var varLit = funcBody.Locals.OfType<LocalVariableDeclarationStatement>().First();
+        var litExpr = Assert.IsType<LiteralExpression>(varLit.Declaration.Declarator.Initializer!.Initializer);
+        Assert.True(context.ResolvedTree.TryGetReference(litExpr, out var litHandle));
+        var litSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(litHandle));
+        Assert.Equal("UInt64.<u64>", litSym.IntrinsicSignature);
+
+        var ret = funcBody.Locals.OfType<LocalReturnStatement>().First();
+        var binExpr = Assert.IsType<BinaryExpression>(ret.Statement.Expression);
+        Assert.True(context.ResolvedTree.TryGetReference(binExpr, out var opHandle));
+        var opSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(opHandle));
+        Assert.Equal("UInt64.Add(UInt64, Int32)", opSym.IntrinsicSignature);
     }
 }

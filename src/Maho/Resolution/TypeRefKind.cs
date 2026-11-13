@@ -29,6 +29,10 @@ internal enum TypeRefKind : byte
     Union,
     /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
     Untagged,
+    /// <summary>Function pointer type (<c>func(params) -&gt; ReturnType</c>).</summary>
+    Function,
+    /// <summary>Delegate type (<c>delegate(params) -&gt; ReturnType</c>).</summary>
+    Delegate,
     /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
     Literal
 }

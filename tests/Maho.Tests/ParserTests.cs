@@ -14,8 +14,8 @@ public sealed class ParserTests
     [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public attribute Marker;", typeof(TopLevelAttributeDeclaration), null)]
     [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
-    [InlineData("public static int Main();", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
-    [InlineData("public static int Main() { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("public static func Main() -> int;", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
+    [InlineData("public static func Main() -> int { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
     [InlineData("public int value;", typeof(TopLevelVariableDeclaration), null)]
     public void Parse_TopLevelDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
@@ -38,12 +38,10 @@ public sealed class ParserTests
     [Theory]
     [InlineData("public struct Nested;", typeof(MemberTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public struct Nested { public int Value; }", typeof(MemberTypeDeclaration), typeof(TypeBlockBody))]
-    [InlineData("public static int Compute();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
-    [InlineData("public static int Compute() { return 0; }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("public static func Compute() -> int;", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
+    [InlineData("public static func Compute() -> int { return 0; }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
     [InlineData("public int Value { get; set; }", typeof(MemberPropertyDeclaration), null)]
     [InlineData("public int Value;", typeof(MemberFieldDeclaration), null)]
-    [InlineData("public Foo();", typeof(MemberFunctionDeclaration), typeof(FunctionEmptyBody))]
-    [InlineData("public Foo() { }", typeof(MemberFunctionDeclaration), typeof(FunctionBlockBody))]
     public void Parse_MemberDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
         Member member = ParseSingleMember(source, expectedType);
@@ -62,18 +60,10 @@ public sealed class ParserTests
     }
 
     [Theory]
-    [InlineData("public Foo();", SpecialFunctionKind.Constructor)]
-    public void Parse_SpecialFunctions(string source, SpecialFunctionKind expectedSpecialKind)
-    {
-        var member = (MemberFunctionDeclaration)ParseSingleMember(source, typeof(MemberFunctionDeclaration));
-        Assert.Equal(expectedSpecialKind, member.Function.SpecialKind);
-    }
-
-    [Theory]
     [InlineData("public class LocalBox;", typeof(LocalTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public class LocalBox { public int Value; }", typeof(LocalTypeDeclaration), typeof(TypeBlockBody))]
-    [InlineData("public static int Local();", typeof(LocalFunctionDeclaration), typeof(FunctionEmptyBody))]
-    [InlineData("public static int Local() { return 0; }", typeof(LocalFunctionDeclaration), typeof(FunctionBlockBody))]
+    [InlineData("public static func Local() -> int;", typeof(LocalFunctionDeclaration), typeof(FunctionEmptyBody))]
+    [InlineData("public static func Local() -> int { return 0; }", typeof(LocalFunctionDeclaration), typeof(FunctionBlockBody))]
     public void Parse_LocalDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
     {
         Local local = ParseSingleLocal(source, expectedType);
@@ -308,7 +298,7 @@ public sealed class ParserTests
     public void Parse_LocalBlock_SupportsUsingDirective_And_AliasDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 {
                     using Std.Collections;
@@ -338,7 +328,7 @@ public sealed class ParserTests
     public void Parse_LocalBlock_RequiresSemicolonOnNonFinalExpressions()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 {
                     int x = 1;
@@ -355,7 +345,7 @@ public sealed class ParserTests
     public void Parse_LocalBlock_AllowsTrailingExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 var val = {
                     int x = 1;
@@ -371,7 +361,7 @@ public sealed class ParserTests
     public void Parse_TrailingBlockExpressionInBlockContext()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 var val = {
                     int x = 1;
@@ -387,7 +377,7 @@ public sealed class ParserTests
     public void Parse_StandaloneScopeBlockWithoutSemicolon()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 {
                     int x = 1;
@@ -403,7 +393,7 @@ public sealed class ParserTests
     public void Parse_IfStatementWithoutSemicolonWhenEndingWithBlock()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 if (1)
                 {
@@ -424,7 +414,7 @@ public sealed class ParserTests
     public void Parse_IfStatementWithEmbeddedExpressionAndSemicolon()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 if (1) call();
                 int y = 3;
@@ -438,7 +428,7 @@ public sealed class ParserTests
     public void Parse_FunctionBodyDisallowsTrailingExpressionAndReportsExpectedReturn()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 int x = 1;
                 x + 2
@@ -454,7 +444,7 @@ public sealed class ParserTests
     public void Parse_FunctionBlockBody_RequiresSemicolonOnExpressions()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 int x = 1;
                 x + 2
@@ -468,7 +458,7 @@ public sealed class ParserTests
     public void Parse_BlockExpression_SupportsMultipleStatementsAndFinalExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 var val = {
                     int x = 1;
@@ -482,7 +472,7 @@ public sealed class ParserTests
         var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
         var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
-        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarators[0].Initializer!.Initializer);
+        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarator.Initializer!.Initializer);
 
         Assert.Equal(2, blockExpr.Locals.Count);
         Assert.IsType<LocalVariableDeclarationStatement>(blockExpr.Locals[0]);
@@ -496,7 +486,7 @@ public sealed class ParserTests
     public void Parse_WhileExpression_WithoutSemicolon_WhenBodyEndsWithBlock()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 while (true)
                 {
@@ -520,7 +510,7 @@ public sealed class ParserTests
     public void Parse_WhileExpression_AsFinalExpressionInBlockExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static void Test()
+            public static func Test() -> void
             {
                 var val = {
                     int x = 0;
@@ -536,7 +526,7 @@ public sealed class ParserTests
         var funcDecl = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
         var body = Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
-        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarators[0].Initializer!.Initializer);
+        var blockExpr = Assert.IsType<BlockExpression>(varDecl.Declaration.Declarator.Initializer!.Initializer);
 
         Assert.Single(blockExpr.Locals);
         Assert.NotNull(blockExpr.FinalExpression);
@@ -655,18 +645,8 @@ public sealed class ParserTests
     {
         TopLevel topLevel = ParseSingleTopLevel(source, typeof(TopLevelVariableDeclaration));
         TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
-        Assert.Single(variable.Declaration.Declarators);
+        Assert.NotNull(variable.Declaration.Declarator);
         Assert.IsType<ModifiedType>(variable.Declaration.Type);
-    }
-
-    [Fact]
-    public void Parse_TopLevelMultipleDeclarators()
-    {
-        TopLevel topLevel = ParseSingleTopLevel("PointerType * a, b;", typeof(TopLevelVariableDeclaration));
-        TopLevelVariableDeclaration variable = Assert.IsType<TopLevelVariableDeclaration>(topLevel);
-        Assert.Equal(2, variable.Declaration.Declarators.Count);
-        Assert.Equal("a", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
-        Assert.Equal("b", Assert.IsType<SimpleName>(variable.Declaration.Declarators[1].Identifier).Name.Value);
     }
 
     [Theory]
@@ -676,18 +656,8 @@ public sealed class ParserTests
     {
         Local local = ParseSingleLocal(source, typeof(LocalVariableDeclarationStatement));
         LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
-        Assert.Single(variable.Declaration.Declarators);
+        Assert.NotNull(variable.Declaration.Declarator);
         Assert.IsType<ModifiedType>(variable.Declaration.Type);
-    }
-
-    [Fact]
-    public void Parse_LocalMultipleDeclarators()
-    {
-        Local local = ParseSingleLocal("PointerType * a, b;", typeof(LocalVariableDeclarationStatement));
-        LocalVariableDeclarationStatement variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
-        Assert.Equal(2, variable.Declaration.Declarators.Count);
-        Assert.Equal("a", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
-        Assert.Equal("b", Assert.IsType<SimpleName>(variable.Declaration.Declarators[1].Identifier).Name.Value);
     }
 
     [Fact]
@@ -773,7 +743,7 @@ public sealed class ParserTests
 
         // No diagnostics for [x]; inside a function
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            void Foo()
+            func Foo() -> void
             {
                 [x];
             }
@@ -831,7 +801,7 @@ public sealed class ParserTests
     public void Parse_StatementBracketDisambiguation_UnclosedBracketReportsError()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            void Foo()
+            func Foo() -> void
             {
                 [x][;
             }
@@ -866,17 +836,11 @@ public sealed class ParserTests
         Assert.Empty(topVar2.Declaration.Attributes[0].Attributes);
         Assert.Empty(topVar2.Declaration.Attributes[1].Attributes);
 
-        // Top-level [Marker] { int x = 1; } parses as top-level block
-        TopLevel topLevelBlock = ParseSingleTopLevel("[Marker] { int x = 1; }", typeof(TopLevelBlockDeclaration));
-        TopLevelBlockDeclaration blockDecl = Assert.IsType<TopLevelBlockDeclaration>(topLevelBlock);
-        Assert.Single(blockDecl.Attributes);
-        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(blockDecl.Attributes[0].Attributes).Name).Name.Value);
-
-        // Top-level [] { int x = 1; } parses as top-level block with empty attribute list
-        TopLevel topLevelEmptyBlock = ParseSingleTopLevel("[] { int x = 1; }", typeof(TopLevelBlockDeclaration));
-        TopLevelBlockDeclaration emptyBlockDecl = Assert.IsType<TopLevelBlockDeclaration>(topLevelEmptyBlock);
-        Assert.Single(emptyBlockDecl.Attributes);
-        Assert.Empty(emptyBlockDecl.Attributes[0].Attributes);
+        // Top-level [Marker] int x = 1; parses as variable declaration with attribute
+        TopLevel topLevelAttributed = ParseSingleTopLevel("[Marker] int x = 1;", typeof(TopLevelVariableDeclaration));
+        TopLevelVariableDeclaration attributedVar = Assert.IsType<TopLevelVariableDeclaration>(topLevelAttributed);
+        Assert.Single(attributedVar.Declaration.Attributes);
+        Assert.Equal("Marker", Assert.IsType<SimpleName>(Assert.Single(attributedVar.Declaration.Attributes[0].Attributes).Name).Name.Value);
     }
 
     [Fact]
@@ -895,8 +859,8 @@ public sealed class ParserTests
         LocalVariableDeclarationStatement varStmt = Assert.IsType<LocalVariableDeclarationStatement>(local);
         TupleType tupleType = Assert.IsType<TupleType>(varStmt.Declaration.Type);
         Assert.Equal(2, tupleType.Elements.Count);
-        Assert.Single(varStmt.Declaration.Declarators);
-        Assert.IsType<TupleExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.NotNull(varStmt.Declaration.Declarator);
+        Assert.IsType<TupleExpression>(varStmt.Declaration.Declarator.Initializer!.Initializer);
     }
 
     [Fact]
@@ -940,31 +904,30 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_AttributedModifiedTopLevelBlock_PreservesMetadataAndMembers()
+    public void Parse_GlobalAndConstBlocks_PreserveAttachedKeywordAndMembers()
     {
         TopLevelBlockDeclaration block = Assert.IsType<TopLevelBlockDeclaration>(ParseSingleTopLevel("""
-            [Attribute]
-            unsafe
+            global
             {
                 public struct Example
                 {
-                    unsafe
+                    const
                     {
-                        void Func() { }
+                        func Func() -> void { }
                     }
                 }
             }
             """, typeof(TopLevelBlockDeclaration)));
 
-        Assert.Single(block.Attributes);
-        Assert.Contains(block.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        Assert.NotNull(block.AttachedKeyword);
+        Assert.Equal("global", block.AttachedKeyword.Value);
 
         TopLevelTypeDeclaration topLevelType = Assert.IsType<TopLevelTypeDeclaration>(Assert.Single(block.Members));
         TypeBlockBody typeBody = Assert.IsType<TypeBlockBody>(topLevelType.Type.Body);
         MemberBlockDeclaration memberBlock = Assert.IsType<MemberBlockDeclaration>(Assert.Single(typeBody.Members));
 
-        Assert.Empty(memberBlock.Attributes);
-        Assert.Contains(memberBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        Assert.NotNull(memberBlock.AttachedKeyword);
+        Assert.Equal("const", memberBlock.AttachedKeyword.Value);
         Assert.IsType<MemberFunctionDeclaration>(Assert.Single(memberBlock.Members));
     }
 
@@ -982,13 +945,12 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_AttributedModifiedBlocks_WorkInNamespaceAndLocalScopes()
+    public void Parse_Blocks_WorkInNamespaceAndLocalScopes()
     {
         NamespaceDeclaration @namespace = Assert.IsType<NamespaceDeclaration>(ParseSingleTopLevel("""
             namespace Demo
             {
-                [Attribute]
-                unsafe
+                global
                 {
                     int value;
                 }
@@ -998,8 +960,8 @@ public sealed class ParserTests
         NamespaceBlockBody namespaceBody = Assert.IsType<NamespaceBlockBody>(@namespace.Body);
         TopLevelBlockDeclaration topLevelBlock = Assert.IsType<TopLevelBlockDeclaration>(Assert.Single(namespaceBody.Members));
 
-        Assert.Single(topLevelBlock.Attributes);
-        Assert.Contains(topLevelBlock.Modifiers, token => token.MatchingKind == MatchingKeywordKind.Unsafe);
+        Assert.NotNull(topLevelBlock.AttachedKeyword);
+        Assert.Equal("global", topLevelBlock.AttachedKeyword.Value);
 
         LocalExpressionStatement localBlock = Assert.IsType<LocalExpressionStatement>(ParseSingleLocal("""
             [Attribute]
@@ -1015,45 +977,14 @@ public sealed class ParserTests
     }
 
     [Fact]
-    public void Parse_VariableDeclaration_PreservesMultipleDeclaratorsAndInitializers()
-    {
-        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public int first = 1, second = first;
-            """);
-
-        Assert.Empty(diagnostics.Diagnostics);
-
-        TopLevelVariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members));
-        Assert.Equal(2, declaration.Declaration.Declarators.Count);
-        Assert.Equal("first", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[0].Identifier).Name.Value);
-        Assert.IsType<LiteralExpression>(declaration.Declaration.Declarators[0].Initializer?.Initializer);
-        Assert.Equal("second", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[1].Identifier).Name.Value);
-        Assert.IsType<IdentifierNameExpression>(declaration.Declaration.Declarators[1].Initializer?.Initializer);
-    }
-
-    [Fact]
-    public void Parse_LocalVariableDeclaration_PreservesMultipleDeclarators()
-    {
-        LocalVariableDeclarationStatement declaration = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
-            Value first = new Value(), second = first;
-            """, typeof(LocalVariableDeclarationStatement)));
-
-        Assert.Equal(2, declaration.Declaration.Declarators.Count);
-        Assert.Equal("first", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[0].Identifier).Name.Value);
-        Assert.Equal("second", Assert.IsType<SimpleName>(declaration.Declaration.Declarators[1].Identifier).Name.Value);
-        Assert.IsType<ConstructorCallExpression>(declaration.Declaration.Declarators[0].Initializer?.Initializer);
-        Assert.IsType<IdentifierNameExpression>(declaration.Declaration.Declarators[1].Initializer?.Initializer);
-    }
-
-    [Fact]
     public void Parse_ObjectCreationWithClause_AttachesToConstructorCall()
     {
         LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
             SomeType value = new SomeType(ctorValue) with { prop = "val" };
             """, typeof(LocalVariableDeclarationStatement)));
 
-        Assert.Single(local.Declaration.Declarators);
-        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.NotNull(local.Declaration.Declarator);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(constructor.WithClause);
         AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
 
@@ -1067,7 +998,7 @@ public sealed class ParserTests
             var p = new<Arena>(pool) Point(10, 20);
             """, typeof(LocalVariableDeclarationStatement)));
 
-        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         Assert.Equal(ObjectCreationKind.New, constructor.Kind);
         Assert.NotNull(constructor.AllocationTypeArguments);
         Assert.Single(constructor.AllocationTypeArguments.Value);
@@ -1087,7 +1018,7 @@ public sealed class ParserTests
             var p = new<Arena> Point(10, 20);
             """, typeof(LocalVariableDeclarationStatement)));
 
-        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         Assert.Equal(ObjectCreationKind.New, constructor.Kind);
         Assert.NotNull(constructor.AllocationTypeArguments);
         Assert.Single(constructor.AllocationTypeArguments.Value);
@@ -1105,7 +1036,7 @@ public sealed class ParserTests
             var p = new(pool) Point(10, 20);
             """, typeof(LocalVariableDeclarationStatement)));
 
-        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         Assert.Equal(ObjectCreationKind.New, constructor.Kind);
         Assert.Null(constructor.AllocationTypeArguments);
         Assert.NotNull(constructor.AllocationArguments);
@@ -1122,7 +1053,7 @@ public sealed class ParserTests
             var p = put<StackFrame>(offset) Point(10, 20);
             """, typeof(LocalVariableDeclarationStatement)));
 
-        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         Assert.Equal(ObjectCreationKind.Put, constructor.Kind);
         Assert.NotNull(constructor.AllocationTypeArguments);
         Assert.Single(constructor.AllocationTypeArguments.Value);
@@ -1139,7 +1070,7 @@ public sealed class ParserTests
     public void Parse_LiteralFunctionDeclaration_IntrinsicAndUserDefined_ParsesCorrectly()
     {
         var u64Lit = Assert.IsType<MemberFunctionDeclaration>(ParseSingleMember("""
-            [intrinsic]
+            [IntrinsicFunction("UInt64.<u64>")]
             public literal u64(int V);
             """, typeof(MemberFunctionDeclaration)));
         Assert.Equal(SpecialFunctionKind.Literal, u64Lit.Function.SpecialKind);
@@ -1162,8 +1093,8 @@ public sealed class ParserTests
             int[] arr = put int[10] with { SomeProp = someVal };
             """, typeof(LocalVariableDeclarationStatement)));
 
-        Assert.Single(local.Declaration.Declarators);
-        ArrayCreationExpression array = Assert.IsType<ArrayCreationExpression>(local.Declaration.Declarators[0].Initializer?.Initializer);
+        Assert.NotNull(local.Declaration.Declarator);
+        ArrayCreationExpression array = Assert.IsType<ArrayCreationExpression>(local.Declaration.Declarator.Initializer?.Initializer);
         ObjectWithClause withClause = Assert.IsType<ObjectWithClause>(array.WithClause);
         AssignmentExpression assignment = Assert.IsType<AssignmentExpression>(Assert.Single(withClause.Initializer.Expressions));
 
@@ -1307,7 +1238,7 @@ public sealed class ParserTests
     public void Parse_FunctionDeclaration_WithTypeConstraints()
     {
         FunctionDeclaration function = ParseSingleTopLevelFunction("""
-            public static TResult Build<TInput, TResult>(TInput input)
+            public static func Build<TInput, TResult>(TInput input) -> TResult
                 where TInput: Source
                 where TResult: Output<TInput>;
             """);
@@ -1341,7 +1272,7 @@ public sealed class ParserTests
             public class Box<T, N: int,> : Base<T,>, Other,
                 where T : Constraint, OtherConstraint,
             {
-                public void Function(Int32 a, Int32 b,)
+                public func Function(Int32 a, Int32 b,) -> void
                 {
                     Call(a, b,);
                     new Int32[] { a, b, };
@@ -1372,17 +1303,6 @@ public sealed class ParserTests
         AssertTrailingComma(variableType.GenericArguments);
     }
 
-    [Fact]
-    public void Parse_VariableDeclarators_RejectTrailingComma()
-    {
-        var (_, diagnostics, _, root) = CompilerTestBed.Parse("Int32 first, second,;");
-
-        Assert.Contains(diagnostics.Diagnostics, diagnostic => diagnostic.DiagnosticCode == "MH0122");
-
-        VariableDeclaration declaration = Assert.IsType<TopLevelVariableDeclaration>(Assert.Single(root.Members)).Declaration;
-        Assert.Equal(2, declaration.Declarators.Count);
-        AssertTrailingComma(declaration.Declarators);
-    }
 
     [Fact]
     public void Parse_GenericDeclaration_SupportsCompileTimeAndVariadicParameters()
@@ -1436,7 +1356,7 @@ public sealed class ParserTests
     public void Parse_FunctionParameter_WithAttributes()
     {
         FunctionDeclaration function = ParseSingleTopLevelFunction("""
-            void Foo([NotNull] int x, [First][Second(1)] string y = "default");
+            func Foo([NotNull] int x, [First][Second(1)] string y = "default") -> void;
             """);
 
         Assert.Equal(2, function.Signature.Parameters.Count);
@@ -1554,12 +1474,12 @@ public sealed class ParserTests
                 public T Value;
                 public class Nested;
 
-                public static int Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, untagged int untaggedParam, Extra.Nested nested, TInput input) where TInput: Extra.Nested
+                public static func Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, &int spanParam, untagged int untaggedParam, Extra.Nested nested, TInput input) -> int where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
                     public class LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
-                    public static int LocalFunc<TLocal>(TLocal input) where TLocal: Extra.Nested
+                    public static func LocalFunc<TLocal>(TLocal input) -> int where TLocal: Extra.Nested
                     {
                         return 0;
                     }
@@ -1601,9 +1521,9 @@ public sealed class ParserTests
                     return local;
                 }
 
-                unsafe
+                const
                 {
-                    void UnsafeFunc() { }
+                    func UnsafeFunc() -> void { }
                 }
             }
 
@@ -1612,25 +1532,25 @@ public sealed class ParserTests
                 UnitVar = 1,
                 TupleVar(int x) = 2,
                 StructVar { int x; } = 3;
-                public void Method() { }
+                public func Method() -> void { }
             }
 
             public union MyUnion (int | string)
             {
-                public void Method() { }
+                public func Method() -> void { }
             }
 
-            public static int identity<T>(T value) where T: Extra.Nested
+            public static func identity<T>(T value) -> int where T: Extra.Nested
             {
                 return value;
             }
 
-            public static int Main()
+            public static func Main() -> int
             {
                 return 0;
             }
 
-            public static void Forward();
+            public static func Forward() -> void;
 
             global { using Extra; int globalBlockValue = 0; }
             call();
@@ -1747,13 +1667,13 @@ public sealed class ParserTests
     public void Parse_RecoversAndStillParsesLaterDeclarations()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static int Broken(int argc, char*[] argv
+            public static func Broken(int argc, char*[] argv
             {
                 call(1, 2, ;
                 return 0
             }
 
-            public static int Next()
+            public static func Next() -> int
             {
                 return 1;
             }
@@ -1797,7 +1717,7 @@ public sealed class ParserTests
     private static Local ParseSingleLocal(string source, Type expectedType)
     {
         TopLevelFunctionDeclaration wrapper = Assert.IsType<TopLevelFunctionDeclaration>(ParseSingleTopLevel($$"""
-            public static int Main()
+            public static func Main() -> int
             {
                 {{source}}
             }
@@ -1891,7 +1811,7 @@ public sealed class ParserTests
         // 1. "some err" should be parsed as TopLevelVariableDeclaration missing a semicolon
         var someErrMember = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
         Assert.Equal("some", Assert.IsType<SimpleType>(someErrMember.Declaration.Type).Name.Value);
-        Assert.Equal("err", Assert.IsType<SimpleName>(someErrMember.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("err", Assert.IsType<SimpleName>(someErrMember.Declaration.Declarator.Identifier).Name.Value);
 
         // Diagnostic for missing ';' after "some err" points to unexpected token on line 5 (1-based line 5:1) with line 4 as Context
         var missingSemiDiag = Assert.Single(diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0120" && d.Message.Contains("variable declaration"));
@@ -2131,7 +2051,7 @@ public sealed class ParserTests
     public void Parse_GenericDeclarationInStatementContext_ParsesAsDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 A<B> C;
             }
@@ -2143,7 +2063,7 @@ public sealed class ParserTests
         var decl = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
         var genType = Assert.IsType<GenericType>(decl.Declaration.Type);
         Assert.Equal("A", genType.Name.Value);
-        Assert.Equal("C", Assert.IsType<SimpleName>(decl.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("C", Assert.IsType<SimpleName>(decl.Declaration.Declarator.Identifier).Name.Value);
     }
 
     [Theory]
@@ -2170,14 +2090,14 @@ public sealed class ParserTests
     {
         var stmt = ParseSingleLocal($"var x = {source};", typeof(LocalVariableDeclarationStatement));
         var decl = (LocalVariableDeclarationStatement)stmt;
-        Assert.IsType(expectedType, decl.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.IsType(expectedType, decl.Declaration.Declarator.Initializer!.Initializer);
     }
 
     [Fact]
     public void Parse_ExpressionGenericsComparison_ParsesAsBinaryExpressions()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 var r1 = A<B>(x);
                 var r2 = A<B>(x, y);
@@ -2189,13 +2109,13 @@ public sealed class ParserTests
         var body = Assert.IsType<FunctionBlockBody>(func.Body);
 
         var stmt1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
-        var bin1 = Assert.IsType<BinaryExpression>(stmt1.Declaration.Declarators[0].Initializer!.Initializer);
+        var bin1 = Assert.IsType<BinaryExpression>(stmt1.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(TokenKind.GreaterThanSign, bin1.OperatorToken.Kind);
         var leftBin1 = Assert.IsType<BinaryExpression>(bin1.LeftExpression);
         Assert.Equal(TokenKind.LessThanSign, leftBin1.OperatorToken.Kind);
 
         var stmt2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
-        var bin2 = Assert.IsType<BinaryExpression>(stmt2.Declaration.Declarators[0].Initializer!.Initializer);
+        var bin2 = Assert.IsType<BinaryExpression>(stmt2.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(TokenKind.GreaterThanSign, bin2.OperatorToken.Kind);
         Assert.IsType<TupleExpression>(bin2.RightExpression);
     }
@@ -2204,7 +2124,7 @@ public sealed class ParserTests
     public void Parse_ExpressionGenericsCall_ParsesAsCallExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 var r1 = A<B, C>(x);
                 var r2 = A<B>(p: x);
@@ -2217,17 +2137,17 @@ public sealed class ParserTests
         var body = Assert.IsType<FunctionBlockBody>(func.Body);
 
         var stmt1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
-        var call1 = Assert.IsType<CallExpression>(stmt1.Declaration.Declarators[0].Initializer!.Initializer);
+        var call1 = Assert.IsType<CallExpression>(stmt1.Declaration.Declarator.Initializer!.Initializer);
         var gen1 = Assert.IsType<GenericNameExpression>(call1.Callee);
         Assert.Null(gen1.ColonColonToken);
 
         var stmt2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
-        var call2 = Assert.IsType<CallExpression>(stmt2.Declaration.Declarators[0].Initializer!.Initializer);
+        var call2 = Assert.IsType<CallExpression>(stmt2.Declaration.Declarator.Initializer!.Initializer);
         var gen2 = Assert.IsType<GenericNameExpression>(call2.Callee);
         Assert.Null(gen2.ColonColonToken);
 
         var stmt3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
-        var call3 = Assert.IsType<CallExpression>(stmt3.Declaration.Declarators[0].Initializer!.Initializer);
+        var call3 = Assert.IsType<CallExpression>(stmt3.Declaration.Declarator.Initializer!.Initializer);
         var gen3 = Assert.IsType<GenericNameExpression>(call3.Callee);
         Assert.NotNull(gen3.ColonColonToken);
     }
@@ -2236,7 +2156,7 @@ public sealed class ParserTests
     public void Parse_TurbofishOnVariableInstance_ParsesAsGenericNameExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 var v = A::<B>;
             }
@@ -2246,7 +2166,7 @@ public sealed class ParserTests
         var func = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members)).Function;
         var body = Assert.IsType<FunctionBlockBody>(func.Body);
         var stmt = Assert.IsType<LocalVariableDeclarationStatement>(Assert.Single(body.Locals));
-        var gen = Assert.IsType<GenericNameExpression>(stmt.Declaration.Declarators[0].Initializer!.Initializer);
+        var gen = Assert.IsType<GenericNameExpression>(stmt.Declaration.Declarator.Initializer!.Initializer);
         Assert.NotNull(gen.ColonColonToken);
         Assert.Equal("A", gen.Identifier.Value);
     }
@@ -2255,7 +2175,7 @@ public sealed class ParserTests
     public void Parse_TupleSyntax_SupportsNamedElementsAndUniformTuple()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 (Type a, Type2 b, Type3 c) var1;
                 Type (a, b, c) var2;
@@ -2280,25 +2200,25 @@ public sealed class ParserTests
         Assert.Equal(3, uniformTupleType.Elements.Count);
 
         var s3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
-        var tupleName = Assert.IsType<TupleName>(s3.Declaration.Declarators[0].Identifier);
+        var tupleName = Assert.IsType<TupleName>(s3.Declaration.Declarator.Identifier);
         Assert.Equal(3, tupleName.Elements.Count);
 
         var s4 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
         var s4Type = Assert.IsType<TupleType>(s4.Declaration.Type);
         Assert.Equal(3, s4Type.Elements.Count);
-        var s4TupleName = Assert.IsType<TupleName>(s4.Declaration.Declarators[0].Identifier);
+        var s4TupleName = Assert.IsType<TupleName>(s4.Declaration.Declarator.Identifier);
         Assert.Equal(3, s4TupleName.Elements.Count);
         Assert.Equal("a", Assert.IsType<SimpleName>(s4TupleName.Elements[0]).Name.Value);
         Assert.Equal("b", Assert.IsType<SimpleName>(s4TupleName.Elements[1]).Name.Value);
         Assert.Equal("c", Assert.IsType<SimpleName>(s4TupleName.Elements[2]).Name.Value);
-        Assert.NotNull(s4.Declaration.Declarators[0].Initializer);
+        Assert.NotNull(s4.Declaration.Declarator.Initializer);
     }
 
     [Fact]
     public void Parse_SuffixedLiteralsInExpressions_ParsesAsLiteralExpressionsWithSuffixProperties()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public void Test()
+            public func Test() -> void
             {
                 var a = 123f32 + 456i32;
                 var b = 1.5e-3f32 * 2_000e1_0f64;
@@ -2314,7 +2234,7 @@ public sealed class ParserTests
 
         // a = 123f32 + 456i32
         var s1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
-        var bin = Assert.IsType<BinaryExpression>(s1.Declaration.Declarators[0].Initializer!.Initializer);
+        var bin = Assert.IsType<BinaryExpression>(s1.Declaration.Declarator.Initializer!.Initializer);
         var left = Assert.IsType<LiteralExpression>(bin.LeftExpression);
         Assert.Equal(TokenKind.SuffixedInteger, left.Literal.Kind);
         Assert.True(left.HasSuffix);
@@ -2329,7 +2249,7 @@ public sealed class ParserTests
 
         // b = 1.5e-3f32 * 2_000e1_0f64
         var s2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
-        var mul = Assert.IsType<BinaryExpression>(s2.Declaration.Declarators[0].Initializer!.Initializer);
+        var mul = Assert.IsType<BinaryExpression>(s2.Declaration.Declarator.Initializer!.Initializer);
         var mulLeft = Assert.IsType<LiteralExpression>(mul.LeftExpression);
         Assert.Equal(TokenKind.SuffixedFloat, mulLeft.Literal.Kind);
         Assert.True(mulLeft.HasSuffix);
@@ -2344,7 +2264,7 @@ public sealed class ParserTests
 
         // c = 'a'u8
         var s3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
-        var charLit = Assert.IsType<LiteralExpression>(s3.Declaration.Declarators[0].Initializer!.Initializer);
+        var charLit = Assert.IsType<LiteralExpression>(s3.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(TokenKind.SuffixedChar, charLit.Literal.Kind);
         Assert.True(charLit.HasSuffix);
         Assert.Equal("u8", charLit.Suffix);
@@ -2352,7 +2272,7 @@ public sealed class ParserTests
 
         // d = "hello"s
         var s4 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
-        var strLit = Assert.IsType<LiteralExpression>(s4.Declaration.Declarators[0].Initializer!.Initializer);
+        var strLit = Assert.IsType<LiteralExpression>(s4.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(TokenKind.SuffixedString, strLit.Literal.Kind);
         Assert.True(strLit.HasSuffix);
         Assert.Equal("s", strLit.Suffix);
@@ -2381,7 +2301,7 @@ public sealed class ParserTests
         Assert.IsType<SpanTypeModifier>(prefix.Modifier);
         var simple = Assert.IsType<SimpleType>(prefix.Type);
         Assert.Equal("int32", simple.Name.Value);
-        Assert.Equal("x", Assert.IsType<SimpleName>(variable.Declaration.Declarators[0].Identifier).Name.Value);
+        Assert.Equal("x", Assert.IsType<SimpleName>(variable.Declaration.Declarator.Identifier).Name.Value);
     }
 
     [Fact]
@@ -2400,7 +2320,7 @@ public sealed class ParserTests
     {
         Local local = ParseSingleLocal("var x = &T + 1;", typeof(LocalVariableDeclarationStatement));
         var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
-        var init = variable.Declaration.Declarators[0].Initializer!.Initializer;
+        var init = variable.Declaration.Declarator.Initializer!.Initializer;
         var unary = Assert.IsType<UnaryExpression>(init);
         Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
         var bin = Assert.IsType<BinaryExpression>(unary.Operand);

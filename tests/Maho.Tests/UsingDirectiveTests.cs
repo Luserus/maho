@@ -251,7 +251,7 @@ public sealed class UsingDirectiveTests
 
             public struct Service
             {
-                public void Process()
+                public func Process() -> void
                 {
                     using Helper;
                     using LocalData = HelperData;
@@ -260,7 +260,7 @@ public sealed class UsingDirectiveTests
                     HelperData y;
                 }
 
-                public void Other()
+                public func Other() -> void
                 {
                     HelperData z;
                 }
@@ -294,7 +294,7 @@ public sealed class UsingDirectiveTests
 
             public struct Runner
             {
-                public void Run()
+                public func Run() -> void
                 {
                     {
                         using Helper;
@@ -337,7 +337,7 @@ public sealed class UsingDirectiveTests
             {
                 public Item outerItem;
 
-                public void Test()
+                public func Test() -> void
                 {
                     {
                         using NsB;

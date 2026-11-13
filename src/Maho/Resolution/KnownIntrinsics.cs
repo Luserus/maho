@@ -35,7 +35,15 @@ internal static class KnownIntrinsics
     public const string Bool = "Bool";
     public const string Char = "Char";
     public const string Str = "Str";
-    public const string Void = "Void";
+    public const string Unit = "Unit";
+
+    // Value types and Callables
+    public const string ValueType = "ValueType";
+    public const string Struct = "Struct";
+    public const string Enum = "Enum";
+    public const string Function = "Function";
+    public const string Delegate = "Delegate";
+    public const string Tuple = "Tuple";
 
     // Pointer and Reference
     public const string Pointer = "Pointer";
@@ -112,7 +120,8 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Str, Void,
+        Bool, Char, Str, Unit,
+        ValueType, Struct, Enum, Function, Delegate, Tuple,
         Pointer, Reference,
         FixedArray, Array, Span
     ];
@@ -122,7 +131,8 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Void,
+        Bool, Char, Unit,
+        ValueType, Struct, Enum, Tuple,
         FixedArray
     ];
 

@@ -80,7 +80,7 @@ All words lex as `identifier` tokens. The lexer additionally classifies the foll
 
 ```text
 control        if else while return goto
-declarations   using namespace attribute struct class enum union interface
+declarations   using namespace attribute struct class enum union interface func delegate
 accessors      get set
 construction   new put with
 modifiers      public private internal protected sealed virtual extern
@@ -158,9 +158,9 @@ alias-declaration       ::= "using" declaration-name { type-constraint-clause }
 
 top-level-declaration   ::= attribute-lists modifiers
                           ( type-declaration | function-declaration | variable-declaration ";" )
-                          | attribute-lists modifiers top-level-block
+                          | top-level-block
 
-top-level-block         ::= "{" { top-level } "}"
+top-level-block         ::= [ "global" | "const" ] "{" { top-level } "}"
 ```
 
 ### 3.3 Generic declarations
@@ -195,8 +195,14 @@ The generic parameter forms mean:
 
 ```text
 type                    ::= primary-type { type-modifier } [ "." type ]
+                          | function-type
+                          | delegate-type
 primary-type            ::= identifier [ generic-argument-clause ] [ uniform-tuple-suffix ]
                           | tuple-type
+function-type           ::= "func" "(" parameter-type-list ")" "->" type
+delegate-type           ::= "delegate" "(" parameter-type-list ")" "->" type
+parameter-type-list     ::= [ parameter-type { "," parameter-type } [","] ]
+parameter-type          ::= type [ identifier ]
 tuple-type              ::= "(" tuple-type-element { "," tuple-type-element } [","] ")"
 tuple-type-element      ::= type [ identifier ]
 uniform-tuple-suffix    ::= "(" identifier { "," identifier } [","] ")"
@@ -227,27 +233,30 @@ type-keyword            ::= "attribute" | "class" | "struct" | "interface"
 type-base-clause        ::= ":" type { "," type } [","]
 type-body               ::= ";" | "{" { member } "}"
 
-function-declaration    ::= type declaration-name "(" parameter-list ")"
+function-declaration    ::= modifiers "func" declaration-name [ generic-parameter-clause ]
+                          "(" parameter-list ")" modifiers [ "->" type ] modifiers
                           { type-constraint-clause } function-body
 parameter-list          ::= [ parameter { "," parameter } [","] ]
 parameter               ::= { attribute-list } modifiers type declaration-name [ "=" expression ]
-function-body           ::= ";" | "{" { local } "}"
+function-body           ::= ";" | "{" { local } "}" | "=>" expression ";"
 
 variable-declaration    ::= type variable-declarator
                           { "," variable-declarator }
 variable-declarator     ::= declaration-name [ "=" expression ]
 ```
 
-The final comma is intentionally **not** legal in `variable-declaration`; `Int32 a,;` is diagnosed. It is legal in the other separated lists above, for example `void F(Int32 a, Int32 b,)`.
+The final comma is intentionally **not** legal in `variable-declaration`; `Int32 a,;` is diagnosed. It is legal in the other separated lists above, for example `func F(Int32 a, Int32 b,) -> void`.
 
-Within a type body, the parser distinguishes fields, functions, nested types, modifier-bearing member blocks, and properties:
+Function declarations in Maho strictly use the `func` keyword with a trailing return type `-> type`. If the trailing return type is omitted, it defaults to `void`. Legacy C-style function declarations are not supported and parse as syntax errors. Both pre-modifiers (before `func`) and post-modifiers (after the parameter list and return type) are parsed, with semantic analysis validating their applicability.
+
+Within a type body, the parser distinguishes fields, functions, nested types, member blocks, and properties:
 
 ```text
 member                  ::= attribute-lists modifiers
                           ( type-declaration | function-declaration
                           | variable-declaration ";" | property-declaration
                           | member-block )
-member-block            ::= "{" { member } "}"
+member-block            ::= [ "const" ] "{" { member } "}"
 property-declaration    ::= type declaration-name property-accessor-list
 property-accessor-list  ::= "{" { property-accessor } "}"
 property-accessor       ::= attribute-lists modifiers ( "get" | "set" ) function-body
@@ -283,6 +292,7 @@ primary-expression      ::= literal
                           | named-expression
                           | "(" expression ")"
                           | tuple-expression
+                          | lambda-expression
                           | if-expression
                           | block-expression
                           | collection-expression
@@ -290,6 +300,11 @@ primary-expression      ::= literal
 
 tuple-expression        ::= "(" expression "," expression { "," expression } [","] ")"
 named-expression        ::= identifier [ ( "::" | ε ) generic-argument-clause ]
+lambda-expression       ::= lambda-parameters [ "->" type ] "=>" ( expression | lambda-block-body )
+lambda-parameters       ::= identifier
+                          | "(" [ lambda-parameter { "," lambda-parameter } [","] ] ")"
+lambda-parameter        ::= [ type ] identifier
+lambda-block-body       ::= "{" { local } "}"
 if-expression           ::= "if" "(" expression ")" expression
                           [ "else" expression ]
 block-expression        ::= "{" { local } [ expression ] "}"
@@ -348,59 +363,65 @@ Resolution runs only after all compilation units form one unified `SyntaxTree`. 
 The discovery pass creates scopes and symbols before resolving declaration-owned references:
 
 - Discovers namespaces and constructs a hierarchical `NamespaceTrieNode` for qualified paths;
-- Discovers top-level types, nested types, local types, aliases, functions, methods, properties, fields, globals, parameters, locals, and labels;
+- Discovers top-level types, nested types, local types, aliases, functions (`func`), methods, properties, fields, globals, parameters, locals, and labels;
 - Resolves modifier flags onto symbols, including `TypeFlags.Partial` and `FunctionFlags.Partial`;
 - Constructs child scopes for every generic owner, type, function, method, accessor body, and local block;
 - Allocates `GenericParameterSymbol` instances for every declared generic parameter;
 - Registers every variable declarator separately, including multiple declarators in one declaration statement;
+- Traverses lambda expressions (`LambdaExpression`), allocating lexical scopes and parameter symbols for lambda parameters (`LambdaParameterSyntax`) and nested local declarations inside lambda block bodies;
 - Registers labels before expression resolution, so forward `goto` references can bind.
 
-If a compilation unit opts into top-level statements, discovery creates a synthetic `Main` function and scope. Ordinary top-level variables in that unit become locals of `Main`. A top-level block with the `global` modifier is handled specially: its variable declarations bypass that synthetic scope and become global variables.
+If a compilation unit opts into top-level statements, discovery creates a synthetic `Main` function and scope. Ordinary top-level variables in that unit become locals of `Main`. A top-level block with the `global` modifier (`global { ... }`) is handled specially: its variable declarations bypass that synthetic scope and become global variables.
 
-Namespaces and type declarations retain their containing namespace. Functions and methods retain child scopes for parameters and bodies. Local blocks receive nested scopes.
+Namespaces and type declarations retain their containing namespace. Functions, methods, and lambdas retain child scopes for parameters and bodies. Local blocks receive nested scopes.
 
-### 6.2 Declaration-resolution pass (`DeclarationResolutionPass`)
+### 6.2 Intrinsic discovery pass & type hierarchy (`IntrinsicDiscoveryPass`)
+
+Maho establishes an intrinsic type hierarchy with topological memory layout verification and implicit struct deriving:
+
+- **Root Value Type (`Std.ValType`)**: Marked with `[IntrinsicType("ValueType")]`. The base type of all value representations.
+- **Implicit Struct Deriving (`Std.Struct`)**: Marked with `[IntrinsicType("Struct")]`, deriving from `Std.ValType`. All user-declared structs implicitly inherit from `Std.Struct` (and transitively from `Std.ValType`).
+- **Unit (`Unit`)**: Marked with `[IntrinsicType("Unit")]`, deriving from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
+- **Function Pointers & Delegates (`Std.Function`, `Std.Delegate`)**: Marked with `[IntrinsicType("Function")]` and `[IntrinsicType("Delegate")]`, deriving from `Std.ValType`.
+  - `Std.Function<TReturn, TParams...>` ABI: exactly 1 instance field: `nuint` (function code address).
+  - `Std.Delegate<TReturn, TParams...>` ABI: exactly 2 instance fields: `nuint` (code address) and `Pointer<ValType>` (environment pointer).
+- **Lazy Intrinsic Requirement (`MH0240`)**: Compiler intrinsics are lazily required. Minimal compilations that do not use functions, delegates, or structs do not fail intrinsic verification; `MH0240` is reported only when source code uses a syntactic construct whose backing intrinsic type was not declared.
+
+### 6.3 Declaration-resolution pass (`DeclarationResolutionPass`)
 
 The declaration pass records successful, unambiguous references in `ResolvedTree` and enforces semantic declaration invariants:
 
-- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types. Modified and compound syntax types are represented as first-class structural semantic types: pointers (`T*`), references (`T&`), unsized spans (`T[]`), fixed-size arrays (`T[n]`), optionals (`T?`), and tuples (`(T1, T2)` / `T (a, b)`), preserving type structure and modifier distinctness without requiring an intrinsic library discovery pass;
-- **Non-Partial Duplicate Type Declarations (`MH1002`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH1002` with primary label on the redeclaration, secondary label on the previous declaration, and remediation guidance;
-- **Partial Type Canonical Merging**: Multiple partial declarations of the same type in the same scope are merged into a canonical first symbol. Verifies that all partial declarations share the same `TypeKind` (e.g. all `class` or all `struct`);
-- **Partial Function Declarations (`MH1003`)**:
-  - Unlimited bodyless partial declarations are permitted without warnings or errors (macro implementations in later passes can supply bodies);
-  - At most one declaration may contain an implementation body (`Body is not FunctionEmptyBody`). If more than one body is found, reports `MH1003` with primary label on the duplicate body and secondary label on the first body;
-  - Enforces return type consistency across all partial function declarations;
-- **Duplicate Function Declarations (`MH1003`)**: Groups functions by scope and checks parameter type equality and generic arity via `SignaturesMatch(...)`. Reports duplicate function errors when non-partial functions collide;
-- **Duplicate Variables & Fields (`MH1005`)**: Detects duplicate global variables in the same namespace and duplicate fields within product types;
-- **Duplicate Properties (`MH1006`)**: Detects duplicate properties in the same enclosing type;
-- **Cyclic Type Hierarchies (`MH1004`)**: Traverses inheritance graphs via depth-first search, reporting cycles before type layout;
-- **Ambiguous Type References (`MH1001`)**: Emits `MH1001` when an unqualified type reference matches multiple candidate types from different namespaces;
-- **Aliases**: Resolves alias targets and unwraps alias chains;
+- **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types. Modified and compound syntax types are represented as first-class structural semantic types: pointers (`T*`), references (`T&`), unsized spans (`T[]`), fixed-size arrays (`T[n]`), optionals (`T?`), and tuples (`(T1, T2)` / `T (a, b)`).
+- **Function Types & Aliases**: Binds `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>` and `DelegateTypeSyntax` (`delegate(...) -> R`) to `Std.Delegate<TReturn, TParams...>`.
+- **Unified Function Typing**: Assigns first-class types to all function declarations: static and global functions receive `Std.Function`, while instance methods receive `Std.Delegate`. Functions implement `Callable` and can access members directly from their type (`Func.Member`).
+- **Non-Partial Duplicate Type Declarations (`MH0530`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH0530` with primary and secondary labels.
+- **Partial Type Canonical Merging**: Merges multiple partial declarations in the same scope into a canonical symbol, verifying kind consistency (`MH0531`).
+- **Partial Function Declarations (`MH0532`, `MH0533`, `MH0534`)**: Permits bodyless partial declarations, enforces that at most one declaration contains an implementation body (`MH0533`), matches signatures, and verifies return type consistency (`MH0534`).
+- **Duplicate Variables & Fields (`MH0535`)**: Detects duplicate global variables in the same namespace and duplicate fields within types.
+- **Duplicate Properties (`MH0536`)**: Detects duplicate properties in the same enclosing type.
+- **Cyclic Type Hierarchies (`MH0538`)**: Detects inheritance cycles via depth-first search.
+- **Ambiguous Type References (`MH0501`)**: Emits `MH0501` when an unqualified type reference matches multiple candidate types from different namespaces.
+- **Copy / Move / Destructor Exclusivity (`MH0243`, `MH0244`)**: Types implementing `Destructor` must use move semantics; types cannot implement both `Copy` and `Move`.
+- **Aliases**: Resolves alias targets and unwraps alias chains.
 - **Labels & Gotos**: Binds `goto` statements to labels within the same containing function.
 
-### 6.3 Generic arguments and constraints
+### 6.4 Expression-resolution pass (`ExpressionResolutionPass`)
 
-For a generic type application, the resolver first resolves the target generic symbol. It then uses the target's generic parameter list positionally:
+The expression pass resolves types, operators, and control-flow invariants:
 
-- A type-valued parameter resolves a bare named argument as a type symbol.
-- A non-type parameter resolves a bare named argument as an expression name.
-- A literal generic argument is retained as syntax for a later compile-time-expression/metaprogramming pass.
-- No type-kind compatibility diagnostic is emitted for non-type arguments in this pass.
-- Primitive compile-time kinds such as `int` and `float` are syntax classifications, not compiler-recognized library types yet.
-
-An alias target is retained only if its type-valued generic arguments satisfy the target's currently known constraints. Constraint satisfaction follows direct equality, recursively declared generic-parameter constraints, base types, and already-resolved aliases. Non-type generic arguments are deliberately excluded from this compatibility check until compile-time expression evaluation exists.
-
-### 6.4 Rules deferred to subsequent passes
-
-The declaration resolution pass deliberately focuses on type-level and member-level signatures. The following are deferred to upcoming passes:
-
-- Statement-level and expression-level type checking inside method bodies;
-- Definite assignment and local variable flow analysis;
-- Binary and unary operator overload resolution;
-- Implicit and explicit type conversions and assignability validation;
-- Evaluation, substitution, and constness checking of non-type generic arguments;
-- Accessibility enforcement (e.g. `private`, `protected`, `internal`);
-- Lowering and IL/native code generation.
+- **Sequential Eager Collapsing with Retroactive Literal Resolution**:
+  - Literals do not possess a fixed compile-time type upfront. Unadorned literals evaluate to unconstrained literal types (`Int`, `Float`, `Str`, `Char`).
+  - Canonical booleans (`true`, `false`) resolve directly to canonical `bool`.
+  - When an uncollapsed literal encounters a concrete target type (via assignment, variable typing, function argument, or mixed binary operator), the target type eagerly collapses the literal and retroactively propagates down its expression tree, re-resolving operators and member accesses against the target type.
+  - Unconstrained literals at scope end collapse to default intrinsic types (`Int32`, `Float64`, `String`, `Char`).
+- **Zero Frontend Constant Folding**: The frontend preserves operator calls without constant folding, allowing the backend to fold expressions with full semantic layout knowledge.
+- **Lambda Expressions & Closures**:
+  - Non-capturing lambdas evaluate to `Std.Function<TReturn, TParams...>`.
+  - Capturing lambdas evaluate to `Std.Delegate<TReturn, TParams...>`.
+  - Block bodies strictly require an explicit `return` statement; trailing expressions are rejected with `MH2016`.
+  - Bidirectional contextual typing infers parameter types when assigned to typed variables or passed as function arguments; un-inferrable parameters emit `MH2015`.
+- **Operator Overload Resolution**: Operators resolve to explicit interface implementations on operand types (`MH2001`, `MH2002`).
+- **Branch Type Consistency (`MH2011`)**: Conditional `if-else` branches require exact type equality without implicit widening.
 
 ## 7. Worked accepted examples
 
@@ -422,7 +443,7 @@ global
 public struct Example<T, N: int, Rest...,> : Base<T,>
     where T : Constraint,
 {
-    public void Function(Std.Int32 first, Std.Int32 second,)
+    public func Function(Std.Int32 first, Std.Int32 second,) -> void
     {
     again:
         Call(first, second,);
@@ -430,6 +451,10 @@ public struct Example<T, N: int, Rest...,> : Base<T,>
         goto again;
     }
 }
+
+func Add(Std.Int32 a, Std.Int32 b) -> Std.Int32 => a + b;
+
+func(Std.Int32, Std.Int32) -> Std.Int32 addPtr = Add;
 
 Example<Std.Int32, 100,> value;
 ```

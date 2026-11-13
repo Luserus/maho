@@ -20,6 +20,12 @@ internal sealed class FunctionSymbol : Symbol
     public List<SymbolHandle> LocalTypes { get; internal set; }
 
     public TypeRef ReturnType { get; internal set; } = TypeRef.Unresolved;
+    public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
+    /// <summary>
+    /// Gets or sets the intrinsic member signature descriptor specified in the <c>[IntrinsicFunction("...")]</c> attribute,
+    /// such as <c>"Int32.Add(Int32, Int32)"</c> or <c>"Int32.&lt;i32&gt;"</c>.
+    /// </summary>
+    public string? IntrinsicSignature { get; internal set; }
 
     public FunctionDeclaration? Syntax { get; }
 
