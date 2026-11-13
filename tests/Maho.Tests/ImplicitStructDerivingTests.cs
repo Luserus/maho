@@ -25,15 +25,14 @@ public sealed class ImplicitStructDerivingTests
     public void UserStruct_ImplicitlyDerivesFromStruct_WhenIntrinsicExists()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Void")] public struct void;
+            [IntrinsicType("Unit")] public struct void;
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -64,13 +63,12 @@ public sealed class ImplicitStructDerivingTests
     public void Hierarchy_Void_DerivesFromValueType()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
 
             [IntrinsicType("ValueType")]
@@ -79,7 +77,7 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
 
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
             """);
 
@@ -95,13 +93,12 @@ public sealed class ImplicitStructDerivingTests
     public void Hierarchy_Enum_DerivesFromValType_AndUserEnumDerivesFromEnum()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
 
             [IntrinsicType("ValueType")]

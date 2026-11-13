@@ -77,8 +77,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Optional(TypeRef element) =>
         new TypeRef(TypeRefKind.Optional, null, new OptionalSemanticType(element));
 
-    public static TypeRef Tuple(IReadOnlyList<TupleElement> elements) =>
-        new TypeRef(TypeRefKind.Tuple, null, new TupleSemanticType(elements));
+    /// <summary>
+    /// Creates a tuple <see cref="TypeRef"/> holding the element types and optional intrinsic <c>Tuple</c> symbol handle.
+    /// </summary>
+    public static TypeRef Tuple(IReadOnlyList<TupleElement> elements, SymbolHandle? tupleHandle = null) =>
+        new TypeRef(TypeRefKind.Tuple, tupleHandle, new TupleSemanticType(elements));
 
     public static TypeRef Union(IReadOnlyList<TypeRef> constituents, bool isUntagged = false)
     {

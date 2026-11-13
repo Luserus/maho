@@ -6,14 +6,11 @@ namespace Maho.Tests;
 public sealed class FunctionPointerAndDelegateTests
 {
     private const string StdPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -24,7 +21,7 @@ public sealed class FunctionPointerAndDelegateTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("Int32")]
@@ -40,7 +37,7 @@ public sealed class FunctionPointerAndDelegateTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
 
         [IntrinsicType("Pointer")]
@@ -65,7 +62,7 @@ public sealed class FunctionPointerAndDelegateTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -74,7 +71,7 @@ public sealed class FunctionPointerAndDelegateTests
         {
             nuint codeAddress;
             ValType* env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
@@ -138,14 +135,13 @@ public sealed class FunctionPointerAndDelegateTests
     public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0240()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Void")] public struct void;
+            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
 
             public func(int32) -> int32 fn;
@@ -159,14 +155,13 @@ public sealed class FunctionPointerAndDelegateTests
     public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0240()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Void")] public struct void;
+            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
 
             public delegate(int32) -> int32 del;
@@ -234,13 +229,12 @@ public sealed class FunctionPointerAndDelegateTests
     public void Function_WithoutCallableImplementation_ReportsMH0544()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("ValueType")] public struct ValType;
 
@@ -259,13 +253,12 @@ public sealed class FunctionPointerAndDelegateTests
     public void StructMethod_WithSemicolonWithoutIntrinsicFunction_ReportsMH0124()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
@@ -284,15 +277,14 @@ public sealed class FunctionPointerAndDelegateTests
     public void Call_WithoutCallableInPrelude_ReportsMH0240()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; int64 length; }
+            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Void")] public struct void;
+            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;

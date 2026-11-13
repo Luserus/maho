@@ -255,6 +255,14 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Implements implicit deriving rules for structs:
+    /// <list type="bullet">
+    ///   <item><description><c>ValType</c> has no base type.</description></item>
+    ///   <item><description><c>Struct</c>, <c>Array</c>, <c>Enum</c>, <c>Function</c>, <c>Delegate</c>, <c>Unit</c>, and <c>Tuple</c> derive directly from <c>ValType</c>.</description></item>
+    ///   <item><description>All other structs (user structs and numeric intrinsics) implicitly derive from <c>Struct</c> (and transitively from <c>ValType</c>).</description></item>
+    /// </list>
+    /// </summary>
     private void ApplyImplicitStructBasesCore(SymbolHandle handle, string typeName, IReadOnlyList<TypeRef> existingBases, TypeDeclaration? syntax, Action<List<TypeRef>> setBaseTypes)
     {
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
@@ -263,12 +271,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
         bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
-        bool isVoid = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Void, out var voidh) && handle == voidh;
+        bool isUnit = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitH) && handle == unitH;
+        bool isTuple = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleH) && handle == tupleH;
 
         if (isValueType)
             return;
 
-        if (isStruct || isArray || isEnum || isFunction || isDelegate || isVoid)
+        if (isStruct || isArray || isEnum || isFunction || isDelegate || isUnit || isTuple)
         {
             if (valTypeH != default)
             {
@@ -304,6 +313,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Implements implicit deriving rules for enums: all user-defined enum declarations implicitly derive from <c>Enum</c>.
+    /// </summary>
     private void ApplyImplicitEnumBasesCore(SymbolHandle handle, string typeName, IReadOnlyList<TypeRef> existingBases, TypeDeclaration? syntax, Action<List<TypeRef>> setBaseTypes)
     {
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
@@ -328,6 +340,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
     }
 
+    /// <summary>
+    /// Validates lifecycle operator exclusivity rules: Destructor NAND Copy (MH0243) and Copy NAND Move (MH0244).
+    /// </summary>
     private void ValidateLifecycleOperatorCombinations(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
     {
         bool hasDestructor = false;
@@ -361,6 +376,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             context.Diagnostics.ReportCopyNandMove(span, typeName, source);
     }
 
+    /// <summary>
+    /// Validates that <c>Function</c> and <c>Delegate</c> types implement the <c>Callable</c> operator interface.
+    /// </summary>
     private void ValidateCallableImplementation(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
     {
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && typeHandle == fnH;
@@ -597,6 +615,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         return false;
     }
 
+    /// <summary>
+    /// Resolves the signature, explicit return type, parameter types, generic constraints, and body of a top-level function.
+    /// Emits MH0240 if intrinsic <c>Function</c> or <c>Callable</c> is missing, and reports MH0124 if a non-partial/non-intrinsic function lacks a body.
+    /// </summary>
     private void ResolveFunction(FunctionSymbol symbol)
     {
         if (symbol.Syntax is null)
@@ -605,13 +627,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
-        if (symbol.SpecialKind is SpecialFunctionKind.Literal)
-        {
-            symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
-            symbol.ReturnType = TypeRef.Inferred;
-        }
-        else
-            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
+        symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -643,9 +659,24 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "function declaration", KnownIntrinsics.OpCallable, symbol.Syntax.GetSource());
         }
 
-        ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
+        if (symbol.Syntax?.Body is FunctionEmptyBody)
+        {
+            if (!symbol.Flags.HasFlag(FunctionFlags.Partial) &&
+                !symbol.Flags.HasFlag(FunctionFlags.Intrinsic))
+            {
+                var span = symbol.Syntax.Body.GetSpan() ?? symbol.Syntax.GetSpan() ?? default;
+                context.Diagnostics.ReportExpectedBody(span, "a function body", DiagnosticText.Literal(";"), "for non-partial function", symbol.Syntax.GetSource());
+            }
+        }
+
+        if (symbol.Syntax?.Body is not null)
+            ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
+    /// <summary>
+    /// Resolves the signature, explicit return type, parameter types, generic constraints, and body of a type member method.
+    /// Handles <see cref="SpecialFunctionKind.Literal"/> by setting return type to the parent struct and requiring a body unless marked with [IntrinsicFunction].
+    /// </summary>
     private void ResolveMethod(MethodSymbol symbol)
     {
         if (symbol.Syntax is null)
@@ -657,10 +688,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.SpecialKind is SpecialFunctionKind.Literal)
         {
             symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
-            symbol.ReturnType = symbol.Parent is { } parentHandle ? TypeRef.Resolved(parentHandle) : TypeRef.Inferred;
+            symbol.ReturnType = symbol.Parent is { } parentHandle ? TypeRef.Resolved(parentHandle) : TypeRef.Error;
         }
         else
-            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: true);
+            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
         ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
@@ -725,8 +756,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (symbol.Syntax?.Body is FunctionEmptyBody && !isParentInterface)
         {
             if (!symbol.Flags.HasFlag(FunctionFlags.Partial) &&
-                !symbol.Flags.HasFlag(FunctionFlags.Intrinsic) &&
-                !symbol.Flags.HasFlag(FunctionFlags.Literal))
+                !symbol.Flags.HasFlag(FunctionFlags.Intrinsic))
             {
                 var span = symbol.Syntax.Body.GetSpan() ?? symbol.Syntax.GetSpan() ?? default;
                 context.Diagnostics.ReportExpectedBody(span, "a function body", DiagnosticText.Literal(";"), "for non-partial method", symbol.Syntax.GetSource());
@@ -734,6 +764,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         }
 
         if (symbol.Syntax?.Body is not null)
+            if (symbol.Syntax?.Body is not null)
             ResolveBodyOnce(symbol.Syntax.Body, scope, ResolutionContext.GetHandle(symbol));
     }
 
@@ -779,7 +810,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                           (symbol is GlobalVariableSymbol gs && gs.Flags.HasFlag(VariableFlags.Untagged));
 
         TypeRef? resolvedType = null;
-        bool isTupleDestructuring = syntax.Declarators.Any(d => d.Identifier is TupleName);
+        bool isTupleDestructuring = syntax.Declarator.Identifier is TupleName;
         if (isTupleDestructuring && syntax.Type is TupleType tupleType)
         {
             var matchedElement = tupleType.Elements.FirstOrDefault(e => e.Name != null && context.GetScopedSymbolName(new SimpleName(e.Name)).Last == symbol.Name);
@@ -795,24 +826,22 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         bool isInferred = actualType.IsInferred;
 
-        foreach (var declarator in syntax.Declarators)
+        var declarator = syntax.Declarator;
+        if (declarator.Identifier is TupleName dTupleName)
         {
-            if (declarator.Identifier is TupleName tupleName)
-            {
-                if (tupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
-                    if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
-                    {
-                        CheckInferredInitializer(initExpr, isInferred);
-                        ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
-                    }
-            }
-            else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
+            if (dTupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
                 if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
                 {
                     CheckInferredInitializer(initExpr, isInferred);
                     ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
                 }
         }
+        else if (context.GetScopedSymbolName(declarator.Identifier).Last == symbol.Name)
+            if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
+            {
+                CheckInferredInitializer(initExpr, isInferred);
+                ResolveExpression(initExpr, symbol.EnclosingScope, GetContainingFunction(symbol));
+            }
     }
 
     private void ResolveProperty(PropertySymbol symbol)
@@ -880,13 +909,11 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                     ResolveNamed(application.Name, scope, application);
         }
 
-        foreach (var declarator in syntax.Declarators)
+        var declarator = syntax.Declarator;
+        if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
         {
-            if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
-            {
-                CheckInferredInitializer(initExpr, isInferred);
-                ResolveExpression(initExpr, scope, containingFunction);
-            }
+            CheckInferredInitializer(initExpr, isInferred);
+            ResolveExpression(initExpr, scope, containingFunction);
         }
     }
 
@@ -1055,7 +1082,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 var elemType = ResolveType(elem.Type, scope, reportDiagnostics);
                 elements.Add(new TupleElement(elemType, elem.Name?.Value));
             }
-            return TypeRef.Tuple(elements);
+            if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Tuple))
+            {
+                if (reportDiagnostics)
+                    context.Diagnostics.ReportMissingIntrinsicForSyntax(tuple.GetSpan() ?? default, "tuple type syntax", KnownIntrinsics.Tuple, tuple.GetSource());
+            }
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleHandle);
+            return TypeRef.Tuple(elements, tupleHandle != default ? tupleHandle : null);
         }
 
         if (syntax is UniformTupleType uniform)
@@ -1066,7 +1099,13 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             foreach (var elem in uniform.Elements)
                 elements.Add(new TupleElement(elemType, elem.Name.Value));
 
-            return TypeRef.Tuple(elements);
+            if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Tuple))
+            {
+                if (reportDiagnostics)
+                    context.Diagnostics.ReportMissingIntrinsicForSyntax(uniform.GetSpan() ?? default, "tuple type syntax", KnownIntrinsics.Tuple, uniform.GetSource());
+            }
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleHandle);
+            return TypeRef.Tuple(elements, tupleHandle != default ? tupleHandle : null);
         }
 
         if (syntax is ModifiedType modified)
@@ -2378,17 +2417,15 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
     {
         if (syntax != null)
         {
-            foreach (var declarator in syntax.Declarators)
+            var declarator = syntax.Declarator;
+            if (declarator.Identifier is TupleName tupleName)
             {
-                if (declarator.Identifier is TupleName tupleName)
-                {
-                    foreach (var elem in tupleName.Elements)
-                        if (context.GetScopedSymbolName(elem).Last == name)
-                            return elem.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
-                }
-                else if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
-                    return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
+                foreach (var elem in tupleName.Elements)
+                    if (context.GetScopedSymbolName(elem).Last == name)
+                        return elem.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
             }
+            else if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
+                return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
 
             return syntax.GetSpan() ?? default;
         }

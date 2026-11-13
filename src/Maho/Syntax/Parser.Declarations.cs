@@ -312,7 +312,7 @@ internal sealed partial class Parser
                     var fieldType = ParseTypeSyntax();
                     var fieldName = ParseNamedSyntax();
                     var semicolon = ExpectToken(TokenKind.Semicolon, ";", "after struct variant field");
-                    fields.Add(new MemberFieldDeclaration(new VariableDeclaration(fieldAttrs, fieldModifiers, fieldType, new SeparatedSyntaxList<VariableDeclarator>([new VariableDeclarator(fieldName, null)])), semicolon));
+                    fields.Add(new MemberFieldDeclaration(new VariableDeclaration(fieldAttrs, fieldModifiers, fieldType, new VariableDeclarator(fieldName, null)), semicolon));
                 }
                 var closeVariantBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close struct variant body");
                 Token? equalsToken = null;
@@ -610,71 +610,49 @@ internal sealed partial class Parser
         return new AttributeParameters(leftParen, parameters, rightParen);
     }
 
+    /// <summary>
+    /// Parses a single variable declaration consisting of optional attributes, modifiers, a type, and exactly one declarator.
+    /// In accordance with Maho's single-declarator grammar rule, multiple comma-chained declarators are rejected.
+    /// </summary>
     private VariableDeclaration ParseVariableDeclaration(IReadOnlyList<AttributeListSyntax>? attributes = null, IReadOnlyList<Token>? modifiers = null, TypeSyntax? type = null, NamedSyntax? firstIdentifier = null)
     {
         attributes ??= ParseAttributeLists();
         modifiers ??= ParseModifiers();
         type ??= ParseTypeSyntax();
 
-        var nodesAndSeparators = new List<SyntaxNode>();
-        bool wasCommaLast = false;
-        bool parsingFirstDeclarator = firstIdentifier is not null;
-
-        while (parsingFirstDeclarator || (CurrentToken.Kind is not TokenKind.EndToken and not TokenKind.Semicolon))
+        NamedSyntax identifier;
+        if (firstIdentifier is not null)
         {
-            NamedSyntax identifier;
-
-            if (parsingFirstDeclarator)
-            {
-                identifier = firstIdentifier!;
-                parsingFirstDeclarator = false;
-            }
-            else
-            {
-                if (firstIdentifier is null && nodesAndSeparators.Count == 0 && IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
-                    identifier = CreateTupleNameFromTupleType((TupleType)type);
-                else if (CurrentToken.Kind is TokenKind.LeftParen)
-                    identifier = ParseTupleName();
-                else if (CurrentToken.Kind is TokenKind.Identifier)
-                    identifier = ParseNamedSyntax();
-                else
-                {
-                    diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
-                    break;
-                }
-            }
-
-            wasCommaLast = false;
-
-            AssignmentClause? initializer = null;
-
-            if (CurrentToken.Kind is TokenKind.Equals)
-            {
-                var assignmentOp = Consume();
-                var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
-
-                initializer = new AssignmentClause(assignmentOp, initExpr);
-            }
-
-            var declarator = new VariableDeclarator(identifier, initializer);
-
-            nodesAndSeparators.Add(declarator);
-
-            if (CurrentToken.Kind is TokenKind.Comma)
-            {
-                nodesAndSeparators.Add(Consume());
-                wasCommaLast = true;
-            }
-            else
-                break;
+            identifier = firstIdentifier;
+        }
+        else if (IsDestructuringTupleType(type) && CurrentToken.Kind is TokenKind.Equals)
+        {
+            identifier = CreateTupleNameFromTupleType((TupleType)type);
+        }
+        else if (CurrentToken.Kind is TokenKind.LeftParen)
+        {
+            identifier = ParseTupleName();
+        }
+        else if (CurrentToken.Kind is TokenKind.Identifier)
+        {
+            identifier = ParseNamedSyntax();
+        }
+        else
+        {
+            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the variable name");
+            identifier = new SimpleName(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []));
         }
 
-        if (wasCommaLast)
-            diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "after ',' in the variable declaration");
+        AssignmentClause? initializer = null;
+        if (CurrentToken.Kind is TokenKind.Equals)
+        {
+            var assignmentOp = Consume();
+            var initExpr = ParseExpectedExpression("after '=' in the variable initializer", MissingTokenAnchor.AfterPrevious);
+            initializer = new AssignmentClause(assignmentOp, initExpr);
+        }
 
-        var declarators = new SeparatedSyntaxList<VariableDeclarator>(nodesAndSeparators);
-
-        return new VariableDeclaration(attributes, modifiers, type, declarators);
+        var declarator = new VariableDeclarator(identifier, initializer);
+        return new VariableDeclaration(attributes, modifiers, type, declarator);
     }
 
 

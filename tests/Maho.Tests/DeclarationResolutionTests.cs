@@ -165,7 +165,7 @@ public sealed class DeclarationResolutionTests
         LocalGotoStatement branch = Assert.IsType<LocalGotoStatement>(body.Locals[2]);
         LocalReturnStatement result = Assert.IsType<LocalReturnStatement>(body.Locals[3]);
 
-        CallExpression call = Assert.IsType<CallExpression>(localDeclaration.Declaration.Declarators[0].Initializer?.Initializer);
+        CallExpression call = Assert.IsType<CallExpression>(localDeclaration.Declaration.Declarator.Initializer?.Initializer);
         AssertReference(context, Assert.IsType<IdentifierNameExpression>(call.Callee), ResolutionContext.GetHandle(identity));
         AssertReference(context, Assert.IsType<IdentifierNameExpression>(Assert.Single(call.Arguments)), ResolutionContext.GetHandle(parameter));
         AssertReference(context, branch, ResolutionContext.GetHandle(label));
@@ -255,14 +255,17 @@ public sealed class DeclarationResolutionTests
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value
             {
-                public Value firstField, secondField;
+                public Value firstField;
+                public Value secondField;
                 public func Method() -> Value
                 {
-                    Value firstLocal, secondLocal;
+                    Value firstLocal;
+                    Value secondLocal;
                     return firstLocal;
                 }
             }
-            public Value firstGlobal, secondGlobal;
+            public Value firstGlobal;
+            public Value secondGlobal;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -1109,35 +1112,6 @@ public sealed class DeclarationResolutionTests
         Assert.Contains(ctx2.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0500");
     }
 
-    [Fact]
-    public void Resolve_VarInReturnType_AlwaysInfers_UnlessQualified()
-    {
-        var (_, diag1, _, root1) = CompilerTestBed.Parse("""
-            public struct var;
-            public func InferFn() -> var { return 1; }
-            """);
-
-        Assert.Empty(diag1.Diagnostics);
-        ResolutionContext ctx1 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root1));
-        var fn1 = Assert.Single(ctx1.FunctionSymbols, f => f.Name.ToString() == "InferFn");
-        Assert.True(fn1.ReturnType.IsInferred);
-
-        var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public struct Holder
-            {
-                public struct var;
-            }
-            public func ReturnTypeFn() -> Holder.var { return default; }
-            """);
-
-        Assert.Empty(diag2.Diagnostics);
-        ResolutionContext ctx2 = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root2));
-        var fn2 = Assert.Single(ctx2.FunctionSymbols, f => f.Name.ToString() == "ReturnTypeFn");
-        Assert.False(fn2.ReturnType.IsInferred);
-        Assert.True(fn2.ReturnType.IsResolved);
-        var nestedVar = Assert.Single(ctx2.NestedTypeSymbols, t => t.Name.ToString() == "var");
-        Assert.Equal(ResolutionContext.GetHandle(nestedVar), fn2.ReturnType.Handle);
-    }
 
     [Fact]
     public void Resolve_ThrowawaySymbols_PutInSink_MultipleCanCoexist_NotLoweredOrInGlobalTables()

@@ -15,7 +15,7 @@ namespace Maho.Resolution;
 /// <item><description><see cref="IntrinsicDiscoveryPass"/>: Validates compiler intrinsic attributes, types, and operator interfaces.</description></item>
 /// <item><description><see cref="DeclarationResolutionPass"/>: Resolves member signatures, field/param types, and base types.</description></item>
 /// <item><description><see cref="ExpressionResolutionPass"/>: Performs expression typing, operator overload resolution, and eager retroactive literal collapsing.</description></item>
-/// <item><description><see cref="ControlFlowAndReturnInferencePass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and infers function return types.</description></item>
+/// <item><description><see cref="ControlFlowAnalysisPass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and collapses unconstrained scalar literals in globals/fields.</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -28,7 +28,7 @@ internal sealed class Resolver
         new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass(),
         new ExpressionResolutionPass(),
-        new ControlFlowAndReturnInferencePass()
+        new ControlFlowAnalysisPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();

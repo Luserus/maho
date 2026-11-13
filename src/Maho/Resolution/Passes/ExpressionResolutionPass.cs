@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Maho.Diagnostics;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -160,7 +159,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (intrinsics.TryGet(KnownIntrinsics.Char, out var c)) hChar = c;
         if (intrinsics.TryGet(KnownIntrinsics.Str, out var s)) hStr = s;
 
-        if (intrinsics.TryGet(KnownIntrinsics.Void, out var v))
+        if (intrinsics.TryGet(KnownIntrinsics.Unit, out var v))
         {
             hVoid = v;
             voidType = TypeRef.Resolved(v);
@@ -496,113 +495,111 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     /// </summary>
     private void ResolveVariableDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingFunction)
     {
-        foreach (var declarator in declaration.Declarators)
+        var declarator = declaration.Declarator;
+        if (declarator.Identifier is TupleName tupleName)
         {
-            if (declarator.Identifier is TupleName tupleName)
+            // Tuple destructuring declaration: var (a, b) = expr;
+            if (declarator.Initializer?.Initializer is { } initExpr)
             {
-                // Tuple destructuring declaration: var (a, b) = expr;
-                if (declarator.Initializer?.Initializer is { } initExpr)
+                var initType = ResolveExpression(initExpr, scope, containingFunction);
+                if (initType.SpecialType is TupleSemanticType tupleSemantic)
                 {
-                    var initType = ResolveExpression(initExpr, scope, containingFunction);
-                    if (initType.SpecialType is TupleSemanticType tupleSemantic)
-                    {
-                        if (tupleName.Elements.Count != tupleSemantic.Elements.Count)
-                        {
-                            context.Diagnostics.ReportTupleDestructureMismatch(
-                                tupleName.GetSpan() ?? default,
-                                $"expected {tupleName.Elements.Count} elements, but initializer provides {tupleSemantic.Elements.Count}",
-                                declaration.GetSource());
-                        }
-
-                        for (int i = 0; i < tupleName.Elements.Count && i < tupleSemantic.Elements.Count; i++)
-                        {
-                            var elemName = context.GetScopedSymbolName(tupleName.Elements[i]).Last;
-                            var elemSym = ResolveLocalOrFieldSymbol(scope, elemName);
-                            if (elemSym is not null && GetVariableSymbolType(elemSym)?.IsInferred == true)
-                            {
-                                var elemType = CollapseLiteralToDefault(tupleSemantic.Elements[i].Type);
-                                if (elemType.IsResolved || elemType.IsSpecial)
-                                    SetVariableSymbolType(elemSym, elemType);
-                            }
-                        }
-                    }
-                    else if (!initType.IsError && !initType.IsInferred && !initType.IsUnresolved)
+                    if (tupleName.Elements.Count != tupleSemantic.Elements.Count)
                     {
                         context.Diagnostics.ReportTupleDestructureMismatch(
-                            declarator.Initializer.GetSpan() ?? default,
-                            $"cannot destructure non-tuple expression of type '{initType.ToDisplayString(context)}'",
+                            tupleName.GetSpan() ?? default,
+                            $"expected {tupleName.Elements.Count} elements, but initializer provides {tupleSemantic.Elements.Count}",
                             declaration.GetSource());
+                    }
+
+                    for (int i = 0; i < tupleName.Elements.Count && i < tupleSemantic.Elements.Count; i++)
+                    {
+                        var elemName = context.GetScopedSymbolName(tupleName.Elements[i]).Last;
+                        var elemSym = ResolveLocalOrFieldSymbol(scope, elemName);
+                        if (elemSym is not null && GetVariableSymbolType(elemSym)?.IsInferred == true)
+                        {
+                            var elemType = CollapseLiteralToDefault(tupleSemantic.Elements[i].Type);
+                            if (elemType.IsResolved || elemType.IsSpecial)
+                                SetVariableSymbolType(elemSym, elemType);
+                        }
+                    }
+                }
+                else if (!initType.IsError && !initType.IsInferred && !initType.IsUnresolved)
+                {
+                    context.Diagnostics.ReportTupleDestructureMismatch(
+                        declarator.Initializer.GetSpan() ?? default,
+                        $"cannot destructure non-tuple expression of type '{initType.ToDisplayString(context)}'",
+                        declaration.GetSource());
+                }
+            }
+        }
+        else
+        {
+            var name = context.GetScopedSymbolName(declarator.Identifier).Last;
+            var sym = ResolveLocalOrFieldSymbol(scope, name);
+            var symType = sym is not null ? GetVariableSymbolType(sym) : null;
+
+            if (declarator.Initializer?.Initializer is { } initExpr)
+            {
+                if (symType is { IsInferred: false } targetType)
+                    expectedExpressionTypes[initExpr] = targetType;
+
+                var initType = ResolveExpression(initExpr, scope, containingFunction);
+                if (sym is not null && symType?.IsInferred == true)
+                {
+                    // Inferred local variable:
+                    // If initialized from unconstrained literal, track in uncollapsedLocals for retroactive propagation
+                    if (initType.IsLiteral)
+                    {
+                        SetVariableSymbolType(sym, initType);
+                        if (sym is LocalVariableSymbol localSym)
+                            uncollapsedLocals[localSym] = initExpr;
+                    }
+                    else if (initType.IsResolved || initType.IsSpecial)
+                    {
+                        SetVariableSymbolType(sym, initType);
+                    }
+                }
+                else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError &&
+                         !initType.IsInferred && !initType.IsUnresolved && !initType.IsError &&
+                         initExpr is not CollectionExpression)
+                {
+                    // Explicitly typed variable:
+                    // If initialized from unconstrained literal, immediately collapse literal to target type
+                    if (initType.IsLiteral)
+                    {
+                        var collapsed = CollapseExpression(initExpr, st, scope, containingFunction);
+                        if (collapsed.IsError)
+                        {
+                            context.Diagnostics.ReportAssignmentTypeMismatch(
+                                initExpr.GetSpan() ?? default,
+                                initType.ToDisplayString(context),
+                                st.ToDisplayString(context),
+                                declaration.GetSource());
+                        }
+                    }
+                    else
+                    {
+                        // Type check explicit variable initialization: check assignability or implicit conversion
+                        if (!st.IsAssignableFrom(initType, context) &&
+                            !TryResolveImplicitCast(initType, st, out _))
+                        {
+                            context.Diagnostics.ReportAssignmentTypeMismatch(
+                                initExpr.GetSpan() ?? default,
+                                initType.ToDisplayString(context),
+                                st.ToDisplayString(context),
+                                declaration.GetSource());
+                        }
                     }
                 }
             }
-            else
+            else if (sym is not null && symType?.IsInferred == true)
             {
-                var name = context.GetScopedSymbolName(declarator.Identifier).Last;
-                var sym = ResolveLocalOrFieldSymbol(scope, name);
-                var symType = sym is not null ? GetVariableSymbolType(sym) : null;
-
-                if (declarator.Initializer?.Initializer is { } initExpr)
-                {
-                    if (symType is { IsInferred: false } targetType)
-                        expectedExpressionTypes[initExpr] = targetType;
-
-                    var initType = ResolveExpression(initExpr, scope, containingFunction);
-                    if (sym is not null && symType?.IsInferred == true)
-                    {
-                        // Inferred local variable:
-                        // If initialized from unconstrained literal, track in uncollapsedLocals for retroactive propagation
-                        if (initType.IsLiteral)
-                        {
-                            SetVariableSymbolType(sym, initType);
-                            if (sym is LocalVariableSymbol localSym)
-                                uncollapsedLocals[localSym] = initExpr;
-                        }
-                        else if (initType.IsResolved || initType.IsSpecial)
-                        {
-                            SetVariableSymbolType(sym, initType);
-                        }
-                    }
-                    else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError &&
-                             !initType.IsInferred && !initType.IsUnresolved && !initType.IsError &&
-                             initExpr is not CollectionExpression)
-                    {
-                        // Explicitly typed variable:
-                        // If initialized from unconstrained literal, immediately collapse literal to target type
-                        if (initType.IsLiteral)
-                        {
-                            var collapsed = CollapseExpression(initExpr, st, scope, containingFunction);
-                            if (collapsed.IsError)
-                            {
-                                context.Diagnostics.ReportAssignmentTypeMismatch(
-                                    initExpr.GetSpan() ?? default,
-                                    initType.ToDisplayString(context),
-                                    st.ToDisplayString(context),
-                                    declaration.GetSource());
-                            }
-                        }
-                        else
-                        {
-                            // Type check explicit variable initialization: check assignability or implicit conversion
-                            if (!st.IsAssignableFrom(initType, context) &&
-                                !TryResolveImplicitCast(initType, st, out _))
-                            {
-                                context.Diagnostics.ReportAssignmentTypeMismatch(
-                                    initExpr.GetSpan() ?? default,
-                                    initType.ToDisplayString(context),
-                                    st.ToDisplayString(context),
-                                    declaration.GetSource());
-                            }
-                        }
-                    }
-                }
-                else if (sym is not null && symType?.IsInferred == true)
-                {
-                    // Inferred variable without initializer cannot determine type
-                    context.Diagnostics.ReportCannotInferType(
-                        declarator.Identifier.GetSpan() ?? default,
-                        name.Text,
-                        declaration.GetSource());
-                }
+                // Inferred variable without initializer cannot determine type
+                context.Diagnostics.ReportCannotInferType(
+                    declarator.Identifier.GetSpan() ?? default,
+                    name.Text,
+                    declaration.GetSource());
             }
         }
     }
@@ -684,7 +681,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     var argType = ResolveExpression(tuple.Arguments[i], scope, containingFunction);
                     elements.Add(new TupleElement(argType, null));
                 }
-                result = TypeRef.Tuple(elements);
+                if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Tuple))
+                {
+                    context.Diagnostics.ReportMissingIntrinsicForSyntax(tuple.GetSpan() ?? default, "tuple expression", KnownIntrinsics.Tuple, tuple.GetSource());
+                }
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleHandle);
+                result = TypeRef.Tuple(elements, tupleHandle != default ? tupleHandle : null);
                 break;
 
             case BinaryExpression binary:
@@ -796,20 +798,44 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             // Check for literal methods declared on types
             foreach (var m in context.MethodSymbols)
             {
-                if (m.Flags.HasFlag(FunctionFlags.Literal) && m.Name.Text == suffix)
+                if (m.Flags.HasFlag(FunctionFlags.Literal))
                 {
-                    context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(m));
-                    return m.ReturnType;
+                    bool matches = m.Name.Text == suffix;
+                    if (!matches && m.IntrinsicSignature is { } sig)
+                    {
+                        var startAngle = sig.IndexOf('<');
+                        var endAngle = sig.IndexOf('>');
+                        if (startAngle >= 0 && endAngle > startAngle && sig.Substring(startAngle + 1, endAngle - startAngle - 1) == suffix)
+                            matches = true;
+                    }
+
+                    if (matches)
+                    {
+                        context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(m));
+                        return m.ReturnType;
+                    }
                 }
             }
 
             // Check for file-level literal functions
             foreach (var fn in context.FunctionSymbols)
             {
-                if (fn.Flags.HasFlag(FunctionFlags.Literal) && fn.Name.Text == suffix)
+                if (fn.Flags.HasFlag(FunctionFlags.Literal))
                 {
-                    context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(fn));
-                    return fn.ReturnType;
+                    bool matches = fn.Name.Text == suffix;
+                    if (!matches && fn.IntrinsicSignature is { } sig)
+                    {
+                        var startAngle = sig.IndexOf('<');
+                        var endAngle = sig.IndexOf('>');
+                        if (startAngle >= 0 && endAngle > startAngle && sig.Substring(startAngle + 1, endAngle - startAngle - 1) == suffix)
+                            matches = true;
+                    }
+
+                    if (matches)
+                    {
+                        context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(fn));
+                        return fn.ReturnType;
+                    }
                 }
             }
 

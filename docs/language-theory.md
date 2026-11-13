@@ -381,7 +381,7 @@ Maho establishes an intrinsic type hierarchy with topological memory layout veri
 
 - **Root Value Type (`Std.ValType`)**: Marked with `[IntrinsicType("ValueType")]`. The base type of all value representations.
 - **Implicit Struct Deriving (`Std.Struct`)**: Marked with `[IntrinsicType("Struct")]`, deriving from `Std.ValType`. All user-declared structs implicitly inherit from `Std.Struct` (and transitively from `Std.ValType`).
-- **Void (`Void`)**: Marked with `[IntrinsicType("Void")]`, deriving from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
+- **Unit (`Unit`)**: Marked with `[IntrinsicType("Unit")]`, deriving from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
 - **Function Pointers & Delegates (`Std.Function`, `Std.Delegate`)**: Marked with `[IntrinsicType("Function")]` and `[IntrinsicType("Delegate")]`, deriving from `Std.ValType`.
   - `Std.Function<TReturn, TParams...>` ABI: exactly 1 instance field: `nuint` (function code address).
   - `Std.Delegate<TReturn, TParams...>` ABI: exactly 2 instance fields: `nuint` (code address) and `Pointer<ValType>` (environment pointer).

@@ -7,14 +7,11 @@ namespace Maho.Tests;
 internal static class CompilerTestBed
 {
     public const string FullPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -31,7 +28,7 @@ internal static class CompilerTestBed
         [IntrinsicType("NUInt")]
         public struct nuint;
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("Bool")]
@@ -47,7 +44,7 @@ internal static class CompilerTestBed
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
 
         [IntrinsicType("Pointer")]
@@ -65,6 +62,9 @@ internal static class CompilerTestBed
         [IntrinsicType("Enum")]
         public struct Enum : ValType;
 
+        [IntrinsicType("Tuple")]
+        public struct Tuple<T...> : ValType;
+
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
@@ -75,7 +75,7 @@ internal static class CompilerTestBed
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -84,7 +84,7 @@ internal static class CompilerTestBed
         {
             nuint codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;

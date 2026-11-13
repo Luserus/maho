@@ -6,13 +6,11 @@ namespace Maho.Tests;
 public sealed class ExpressionResolutionTests
 {
     private const string Prelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("Bool")]
@@ -30,23 +28,24 @@ public sealed class ExpressionResolutionTests
                               LeftShift<int32>, RightShift<int32>,
                               Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
         {
-            public static func Add.Add(int32 l, int32 r) -> int32 { return l; }
-            public static func Sub.Sub(int32 l, int32 r) -> int32 { return l; }
-            public static func Mul.Mul(int32 l, int32 r) -> int32 { return l; }
-            public static func Div.Div(int32 l, int32 r) -> int32 { return l; }
-            public static func Rem.Rem(int32 l, int32 r) -> int32 { return l; }
-            public static func BitwiseAnd.BitwiseAnd(int32 l, int32 r) -> int32 { return l; }
-            public static func BitwiseOr.BitwiseOr(int32 l, int32 r) -> int32 { return l; }
-            public static func BitwiseXor.BitwiseXor(int32 l, int32 r) -> int32 { return l; }
-            public static func BitwiseNot.BitwiseNot(int32 o) -> int32 { return o; }
-            public static func LeftShift.LeftShift(int32 l, int32 r) -> int32 { return l; }
-            public static func RightShift.RightShift(int32 l, int32 r) -> int32 { return l; }
-            public static func Eq.Eq(int32 l, int32 r) -> bool { return true; }
-            public static func Neq.Neq(int32 l, int32 r) -> bool { return false; }
-            public static func Lt.Lt(int32 l, int32 r) -> bool { return true; }
-            public static func Le.Le(int32 l, int32 r) -> bool { return true; }
-            public static func Gt.Gt(int32 l, int32 r) -> bool { return false; }
-            public static func Ge.Ge(int32 l, int32 r) -> bool { return false; }
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")] public static func Add.Add(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Sub(Int32, Int32)")] public static func Sub.Sub(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Mul(Int32, Int32)")] public static func Mul.Mul(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Div(Int32, Int32)")] public static func Div.Div(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Rem(Int32, Int32)")] public static func Rem.Rem(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseAnd(Int32, Int32)")] public static func BitwiseAnd.BitwiseAnd(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseOr(Int32, Int32)")] public static func BitwiseOr.BitwiseOr(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseXor(Int32, Int32)")] public static func BitwiseXor.BitwiseXor(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseNot(Int32)")] public static func BitwiseNot.BitwiseNot(int32 o) -> int32;
+            [IntrinsicFunction("Int32.LeftShift(Int32, Int32)")] public static func LeftShift.LeftShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.RightShift(Int32, Int32)")] public static func RightShift.RightShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Eq(Int32, Int32)")] public static func Eq.Eq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Neq(Int32, Int32)")] public static func Neq.Neq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Lt(Int32, Int32)")] public static func Lt.Lt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Le(Int32, Int32)")] public static func Le.Le(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Gt(Int32, Int32)")] public static func Gt.Gt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Ge(Int32, Int32)")] public static func Ge.Ge(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.<i32>")] public literal i32(int32 v);
         }
 
         public interface Add<T> { [OperatorFunction("Addition")] public static func Add(int32 l, int32 r) -> int32; }
@@ -95,10 +94,9 @@ public sealed class ExpressionResolutionTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
         [IntrinsicType("Pointer")]
         public struct Pointer<T>
@@ -112,6 +110,9 @@ public sealed class ExpressionResolutionTests
         [IntrinsicType("Struct")]
         public struct Struct : ValType;
 
+        [IntrinsicType("Tuple")]
+        public struct Tuple<T...> : ValType;
+
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
@@ -122,7 +123,7 @@ public sealed class ExpressionResolutionTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -131,7 +132,7 @@ public sealed class ExpressionResolutionTests
         {
             nuint codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
@@ -652,7 +653,7 @@ public sealed class ExpressionResolutionTests
 
             public struct Concrete : ConcreteAdd
             {
-                public literal int();
+                public literal int() { Concrete res; return res; }
                 public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
                 public func Abs() -> Concrete { return this; }
             }
@@ -685,7 +686,7 @@ public sealed class ExpressionResolutionTests
 
             public struct Concrete : ConcreteAdd
             {
-                public literal int();
+                public literal int() { Concrete res; return res; }
                 public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
             }
 
@@ -771,8 +772,8 @@ public sealed class ExpressionResolutionTests
         var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
         var varT = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
         var varF = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
-        Assert.IsType<LiteralExpression>(varT.Declaration.Declarators[0].Initializer!.Initializer);
-        Assert.IsType<LiteralExpression>(varF.Declaration.Declarators[0].Initializer!.Initializer);
+        Assert.IsType<LiteralExpression>(varT.Declaration.Declarator.Initializer!.Initializer);
+        Assert.IsType<LiteralExpression>(varF.Declaration.Declarator.Initializer!.Initializer);
     }
 
     [Fact]
@@ -796,7 +797,7 @@ public sealed class ExpressionResolutionTests
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(test.Function.Body);
         var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[0]);
-        var bin = Assert.IsType<BinaryExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        var bin = Assert.IsType<BinaryExpression>(varStmt.Declaration.Declarator.Initializer!.Initializer);
         Assert.True(compilation.Context.ResolvedTree.TryGetReference(bin, out var opHandle));
         var opSym = compilation.Context.GetSymbol(opHandle);
         var method = Assert.IsAssignableFrom<MethodSymbol>(opSym);
@@ -964,8 +965,8 @@ public sealed class ExpressionResolutionTests
 
             public struct Overloaded
             {
-                public literal lit1(int32 v);
-                public literal lit2(int32 v);
+                public literal lit1(int32 v) { Overloaded res; return res; }
+                public literal lit2(int32 v) { Overloaded res; return res; }
             }
 
             public class Host
@@ -1015,62 +1016,57 @@ public sealed class ExpressionResolutionTests
     }
 
     [Fact]
-    public void CFG_ReturnInference_ConflictingReturns_ReportsMH2012()
+    public void IntrinsicFunction_OperatorAndLiteralOverloads_ResolveCorrectly()
     {
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public interface AddMixed<TLhs, TRhs, TReturn>
             {
-                public func Test(bool cond) -> var
-                {
-                    if (cond)
-                    {
-                        return 10;
-                    }
-                    else
-                    {
-                        return true;
-                    }
-                }
+                [OperatorFunction("Addition")]
+                public static func Add(TLhs l, TRhs r) -> TReturn;
             }
-            """);
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2012");
-    }
+            [IntrinsicType("UInt64")]
+            public struct uint64 : AddMixed<uint64, int32, uint64>
+            {
+                [IntrinsicFunction("UInt64.Add(UInt64, Int32)")]
+                public static func AddMixed.Add(uint64 l, int32 r) -> uint64;
 
-    [Fact]
-    public void CFG_ReturnInference_UnifiedReturns_InfersExactType()
-    {
-        var compilation = Compilation.FromSource($$"""
-            {{Prelude}}
+                [IntrinsicFunction("UInt64.<u64>")]
+                public literal u64(int32 v);
+            }
 
             public class Host
             {
-                public func Test(bool cond, int32 a, int32 b) -> var
+                public func Test() -> uint64
                 {
-                    if (cond)
-                    {
-                        return a;
-                    }
-                    else
-                    {
-                        return b;
-                    }
+                    var lit = 100u64;
+                    uint64 a = 10u64;
+                    int32 b = 5i32;
+                    return a + b;
                 }
             }
             """);
 
         Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
-        Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
-
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Test");
-        var methodSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(ResolutionContext.GetHandle(context.MethodSymbols.First(m => m.Name.Text == "Test"))));
-        Assert.Equal(hInt32, methodSym.ReturnType.Handle);
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+
+        var varLit = funcBody.Locals.OfType<LocalVariableDeclarationStatement>().First();
+        var litExpr = Assert.IsType<LiteralExpression>(varLit.Declaration.Declarator.Initializer!.Initializer);
+        Assert.True(context.ResolvedTree.TryGetReference(litExpr, out var litHandle));
+        var litSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(litHandle));
+        Assert.Equal("UInt64.<u64>", litSym.IntrinsicSignature);
+
+        var ret = funcBody.Locals.OfType<LocalReturnStatement>().First();
+        var binExpr = Assert.IsType<BinaryExpression>(ret.Statement.Expression);
+        Assert.True(context.ResolvedTree.TryGetReference(binExpr, out var opHandle));
+        var opSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(opHandle));
+        Assert.Equal("UInt64.Add(UInt64, Int32)", opSym.IntrinsicSignature);
     }
 }

@@ -73,7 +73,7 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
 - **Intrinsic Hierarchy & Implicit Deriving**:
   - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations.
   - *Struct* (`Std.Struct`, `[IntrinsicType("Struct")]`): derives from `Std.ValType`. All user structs implicitly derive from `Std.Struct` (and transitively `Std.ValType`).
-  - *Void* (`Void`, `[IntrinsicType("Void")]`): derives from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
+  - *Unit* (`Unit`, `[IntrinsicType("Unit")]`): derives from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
   - *Function & Delegate* (`Std.Function`, `Std.Delegate`): derive from `Std.ValType`.
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
   - *Primitive Scalars* (`Int8`-`Int64`, `UInt8`-`UInt64`, `Float32`, `Float64`, `Bool`, `Char`, `Void`): must have zero instance fields and zero generic parameters (`MH0544`).

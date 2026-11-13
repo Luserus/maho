@@ -38,18 +38,16 @@ public sealed class IntrinsicDiscoveryTests
         public struct Str
         {
             Int8& data;
-            Int64 length;
+            NUInt length;
         }
         """;
 
     private const string UseSitePrelude = IntrinsicBootstrapPrelude + """
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         public interface Callable<TReturn, TParams...>
@@ -62,7 +60,7 @@ public sealed class IntrinsicDiscoveryTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             NUInt codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -71,7 +69,7 @@ public sealed class IntrinsicDiscoveryTests
         {
             NUInt codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
@@ -464,7 +462,7 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
-        Assert.Contains("second field must be of type 'Int64'", diag.Message);
+        Assert.Contains("second field must be of type 'NUInt'", diag.Message);
     }
 
     [Fact]
@@ -486,7 +484,7 @@ public sealed class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void Array_ValidABI_WithPointerAndInt64_Succeeds()
+    public void Array_ValidABI_WithPointerAndNUInt_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -494,7 +492,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Array<T>
             {
                 T* data;
-                Int64 length;
+                NUInt length;
             }
             """);
 
@@ -511,7 +509,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Array<T>
             {
                 Pointer<T> data;
-                Int64 length;
+                NUInt length;
             }
             """);
 
@@ -529,7 +527,7 @@ public sealed class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void Span_ValidABI_WithReferenceAndInt64_Succeeds()
+    public void Span_ValidABI_WithReferenceAndNUInt_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -537,7 +535,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Span<T>
             {
                 T& data;
-                Int64 length;
+                NUInt length;
             }
             """);
 
@@ -554,7 +552,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Span<T>
             {
                 Reference<T> data;
-                Int64 length;
+                NUInt length;
             }
             """);
 
@@ -571,7 +569,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Span<T>
             {
                 T* wrongPtr;
-                Int64 length;
+                NUInt length;
             }
             """);
 
@@ -685,7 +683,7 @@ public sealed class IntrinsicDiscoveryTests
             public struct Span<T>
             {
                 T& data;
-                Int64 length;
+                NUInt length;
             }
 
             public struct Container
@@ -873,7 +871,7 @@ public sealed class IntrinsicDiscoveryTests
                 public struct MyStr
                 {
                     Int8& data;
-                    Int64 len;
+                    usize len;
                 }
             }
             """);
@@ -889,8 +887,8 @@ public sealed class IntrinsicDiscoveryTests
     {
         var libCompilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Int32")] public struct Int32;
-            [IntrinsicType("Array")] public struct Array<T> { T* data; Int64 len; }
-            [IntrinsicType("Span")] public struct Span<T> { T& data; Int64 len; }
+            [IntrinsicType("Array")] public struct Array<T> { T* data; NUInt len; }
+            [IntrinsicType("Span")] public struct Span<T> { T& data; NUInt len; }
             [IntrinsicType("FixedArray")] public struct FixedArray<T, N>;
             """, "Lib.mh");
 
@@ -922,23 +920,23 @@ public sealed class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void VoidIntrinsic_ZeroField_RegistersSuccessfully()
+    public void UnitIntrinsic_ZeroField_RegistersSuccessfully()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
-            public struct Void;
+            [IntrinsicType("Unit")]
+            public struct Unit;
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.TryGet("Void", out var voidHandle));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.TryGet("Unit", out var unitHandle));
     }
 
     [Fact]
-    public void VoidIntrinsic_WithInstanceFields_ReportsAbiMismatch()
+    public void UnitIntrinsic_WithInstanceFields_ReportsAbiMismatch()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
-            public struct Void
+            [IntrinsicType("Unit")]
+            public struct Unit
             {
                 Int8 x;
             }
@@ -1113,12 +1111,12 @@ public sealed class IntrinsicDiscoveryTests
     public void IntrinsicFunction_InIntrinsicType_TagsFunctionFlagsIntrinsic()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute IntrinsicFunction(Str target = "");
+            intrinsic attribute IntrinsicFunction(Str target);
 
             [IntrinsicType("Int32")]
             public struct Int32
             {
-                [IntrinsicFunction("i32.add")]
+                [IntrinsicFunction("Int32.Add(Int32, Int32)")]
                 public static func Add(Int32 a, Int32 b) -> Int32;
             }
             """);
@@ -1129,13 +1127,14 @@ public sealed class IntrinsicDiscoveryTests
         var addMethod = compilation.Context.GetMethodSymbol(addMethodHandle);
         Assert.NotNull(addMethod);
         Assert.True(addMethod.Flags.HasFlag(FunctionFlags.Intrinsic));
+        Assert.Equal("Int32.Add(Int32, Int32)", addMethod.IntrinsicSignature);
     }
 
     [Fact]
     public void IntrinsicFunction_InNonIntrinsicType_ReportsMH0541()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute IntrinsicFunction(Str target = "");
+            intrinsic attribute IntrinsicFunction(Str target);
 
             public struct UserType
             {
@@ -1146,6 +1145,65 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("must be declared in an intrinsic type"));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_WrongParameterCount_ReportsMH0541()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            intrinsic attribute IntrinsicFunction;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("must accept exactly one parameter"));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_ParameterTypeMismatch_ReportsMH0541()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Int32")] public struct Int32;
+            intrinsic attribute IntrinsicFunction(Int32 target);
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("Str"));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_ApplicationWithoutArgument_ReportsMH0541()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            intrinsic attribute IntrinsicFunction(Str target);
+
+            [IntrinsicType("Int32")]
+            public struct Int32
+            {
+                [IntrinsicFunction]
+                public static func Add(Int32 a, Int32 b) -> Int32;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("requires exactly one argument"));
+    }
+
+    [Fact]
+    public void IntrinsicFunction_ApplicationNonStringLiteral_ReportsMH0541()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            intrinsic attribute IntrinsicFunction(Str target);
+
+            [IntrinsicType("Int32")]
+            public struct Int32
+            {
+                [IntrinsicFunction(42)]
+                public static func Add(Int32 a, Int32 b) -> Int32;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0541" && d.Message.Contains("must be a string literal"));
     }
 
     [Fact]
@@ -1193,7 +1251,7 @@ public sealed class IntrinsicDiscoveryTests
     public void OperatorFunction_Put_ValidAndInvalidSignatures()
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);
@@ -1209,7 +1267,7 @@ public sealed class IntrinsicDiscoveryTests
         Assert.Single(putOps);
 
         var nonVoid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);
@@ -1228,7 +1286,7 @@ public sealed class IntrinsicDiscoveryTests
     public void OperatorFunction_Copy_And_Move_ValidAndInvalidSignatures()
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);
@@ -1252,7 +1310,7 @@ public sealed class IntrinsicDiscoveryTests
         Assert.Single(moveOps);
 
         var badParamCount = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);
@@ -1288,7 +1346,7 @@ public sealed class IntrinsicDiscoveryTests
     public void Lifecycle_DestructorNandCopy_ReportsMH0243()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);
@@ -1320,7 +1378,7 @@ public sealed class IntrinsicDiscoveryTests
     public void Lifecycle_CopyNandMove_ReportsMH0244()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             public attribute OperatorFunction(Str name);

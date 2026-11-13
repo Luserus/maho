@@ -5,16 +5,13 @@ namespace Maho.Tests;
 public sealed class MacroTests
 {
     private const string MacroPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("NUInt")]
@@ -26,8 +23,10 @@ public sealed class MacroTests
         [IntrinsicType("Int32")]
         public struct int32 : Add<int32>, Mul<int32>
         {
-            public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
-            public static func Mul.Mul(int32 left, int32 right) -> int32 { return left; }
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")]
+            public static func Add.Add(int32 left, int32 right) -> int32;
+            [IntrinsicFunction("Int32.Mul(Int32, Int32)")]
+            public static func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
         [IntrinsicType("Reference")]
@@ -43,7 +42,7 @@ public sealed class MacroTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
 
         [IntrinsicType("Pointer")]
@@ -68,7 +67,7 @@ public sealed class MacroTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -77,7 +76,7 @@ public sealed class MacroTests
         {
             nuint codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -191,7 +190,7 @@ public sealed class MacroTests
 
         // Third statement is 'var temp = x;' with uncollidable HygieneId (no name mangling)
         var varDecl = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[2]);
-        var declarator = Assert.Single(varDecl.Declaration.Declarators);
+        var declarator = varDecl.Declaration.Declarator;
         Assert.Equal("temp", declarator.Identifier.ToString());
         Assert.True(compilation.Context.GetHygiene(declarator.Identifier).IsMacroGenerated);
 
@@ -337,7 +336,7 @@ public sealed class MacroTests
         var fields = body.Members.OfType<MemberFieldDeclaration>().ToList();
         Assert.Equal(2, fields.Count);
 
-        var names = fields.SelectMany(f => f.Declaration.Declarators).Select(d => d.Identifier.ToString()).ToList();
+        var names = fields.Select(f => f.Declaration.Declarator.Identifier.ToString()).ToList();
         Assert.Contains("x", names);
         Assert.Contains("y", names);
 
@@ -375,7 +374,7 @@ public sealed class MacroTests
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
 
         var varStmt = Assert.Single(funcBody.Locals.OfType<LocalVariableDeclarationStatement>());
-        var collExpr = Assert.IsType<CollectionExpression>(varStmt.Declaration.Declarators[0].Initializer!.Initializer);
+        var collExpr = Assert.IsType<CollectionExpression>(varStmt.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(3, collExpr.Expressions.Count);
     }
 
@@ -1028,7 +1027,7 @@ public sealed class MacroTests
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
         var varStmt = Assert.IsType<LocalVariableDeclarationStatement>(funcBody.Locals[1]);
-        var init = varStmt.Declaration.Declarators[0].Initializer!.Initializer;
+        var init = varStmt.Declaration.Declarator.Initializer!.Initializer;
         var nameofExpr = Assert.IsType<NameofExpression>(init);
         var arg = Assert.IsType<IdentifierNameExpression>(nameofExpr.Argument);
         Assert.Equal("x", arg.Identifier.Value);

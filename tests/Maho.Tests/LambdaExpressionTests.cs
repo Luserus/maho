@@ -8,19 +8,16 @@ namespace Maho.Tests;
 public sealed class LambdaExpressionTests
 {
     private const string StdPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
         [IntrinsicType("Int8")] public struct int8;
         [IntrinsicType("Int64")] public struct int64;
         [IntrinsicType("NUInt")] public struct nuint;
-        [IntrinsicType("Void")] public struct void;
+        [IntrinsicType("Unit")] public struct void;
         [IntrinsicType("Int32")] public struct int32;
 
         [IntrinsicType("Reference")]
@@ -33,7 +30,7 @@ public sealed class LambdaExpressionTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
 
         [IntrinsicType("Pointer")]
@@ -58,7 +55,7 @@ public sealed class LambdaExpressionTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -67,7 +64,7 @@ public sealed class LambdaExpressionTests
         {
             nuint codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
@@ -91,19 +88,19 @@ public sealed class LambdaExpressionTests
         Assert.Equal(4, body.Locals.Count);
 
         var s1 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
-        var lambda1 = Assert.IsType<LambdaExpression>(s1.Declaration.Declarators[0].Initializer!.Initializer);
+        var lambda1 = Assert.IsType<LambdaExpression>(s1.Declaration.Declarator.Initializer!.Initializer);
         Assert.Single(lambda1.Parameters);
 
         var s2 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
-        var lambda2 = Assert.IsType<LambdaExpression>(s2.Declaration.Declarators[0].Initializer!.Initializer);
+        var lambda2 = Assert.IsType<LambdaExpression>(s2.Declaration.Declarator.Initializer!.Initializer);
         Assert.Equal(2, lambda2.Parameters.Count);
 
         var s3 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
-        var lambda3 = Assert.IsType<LambdaExpression>(s3.Declaration.Declarators[0].Initializer!.Initializer);
+        var lambda3 = Assert.IsType<LambdaExpression>(s3.Declaration.Declarator.Initializer!.Initializer);
         Assert.NotNull(lambda3.ReturnType);
 
         var s4 = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
-        var lambda4 = Assert.IsType<LambdaExpression>(s4.Declaration.Declarators[0].Initializer!.Initializer);
+        var lambda4 = Assert.IsType<LambdaExpression>(s4.Declaration.Declarator.Initializer!.Initializer);
         Assert.IsType<BlockExpression>(lambda4.Body);
     }
 

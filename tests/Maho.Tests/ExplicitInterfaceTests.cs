@@ -9,13 +9,11 @@ namespace Maho.Tests;
 public class ExplicitInterfaceTests
 {
     private const string StandardPrelude = """
-        [intrinsic]
-        public attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(Str name);
 
-        [intrinsic]
-        public attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Void")]
+        [IntrinsicType("Unit")]
         public struct void;
 
         [IntrinsicType("NUInt")]
@@ -40,10 +38,9 @@ public class ExplicitInterfaceTests
         public struct Str
         {
             int8& buffer;
-            int64 length;
+            nuint length;
         }
-        [intrinsic]
-        public attribute IntrinsicFunction;
+        intrinsic attribute IntrinsicFunction(Str signature);
 
         [IntrinsicType("Pointer")]
         public struct Pointer<T>
@@ -67,7 +64,7 @@ public class ExplicitInterfaceTests
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
             nuint codeAddress;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
 
@@ -76,7 +73,7 @@ public class ExplicitInterfaceTests
         {
             nuint codeAddress;
             Pointer<ValType> env;
-            [IntrinsicFunction]
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(TParams args) -> TReturn;
         }
         """;
@@ -85,11 +82,9 @@ public class ExplicitInterfaceTests
     public void CustomVoidType_RecognizedAsVoidReturn_ForOperatorFunctions()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
-            [intrinsic]
-            public attribute OperatorFunction(Str name);
+            intrinsic attribute OperatorFunction(Str name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -116,11 +111,11 @@ public class ExplicitInterfaceTests
             public struct Str
             {
                 int8& buffer;
-                int64 length;
+                nuint length;
             }
 
             // Custom void type name: Unit
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct Unit;
 
             public interface Ctor<T>
@@ -148,11 +143,9 @@ public class ExplicitInterfaceTests
     public void CustomReferenceType_RecognizedAsReferenceReturn_ForDereference()
     {
         var compilation = Compilation.FromSource("""
-            [intrinsic]
-            public attribute IntrinsicType(Str name);
+            intrinsic attribute IntrinsicType(Str name);
 
-            [intrinsic]
-            public attribute OperatorFunction(Str name);
+            intrinsic attribute OperatorFunction(Str name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -160,7 +153,7 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
 
-            [IntrinsicType("Void")]
+            [IntrinsicType("Unit")]
             public struct void;
 
             [IntrinsicType("NUInt")]
@@ -183,7 +176,7 @@ public class ExplicitInterfaceTests
             public struct Str
             {
                 MyRef<int8> buffer;
-                int64 length;
+                nuint length;
             }
 
             public interface Deref<TTarget>
