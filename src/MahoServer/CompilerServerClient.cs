@@ -29,7 +29,7 @@ public static class CompilerServerClient
         string normVersion = CompilerServerEndpoint.NormalizeVersion(version);
         string pipeName = CompilerServerEndpoint.CreatePipeName(normVersion);
 
-        if (!TrySend(pipeName, request, 150, out var response))
+        if (!TrySend(pipeName, request, 500, out var response))
             response = StartOrFindServer(pipeName, normVersion, request, mahoHome);
 
         return response!;
@@ -79,7 +79,7 @@ public static class CompilerServerClient
 
         try
         {
-            if (!createdNew && TrySend(pipeName, request, 500, out var existing))
+            if (TrySend(pipeName, request, 500, out var existing))
                 return existing!;
 
             StartServer(pipeName, version, mahoHome);

@@ -78,17 +78,4 @@ internal sealed class FunctionSignature : SyntaxNode
             Modifiers = all;
         }
     }
-
-    /// <summary> Creates one function signature node (legacy or constructor compatibility overload). </summary>
-    public FunctionSignature(
-        IReadOnlyList<Token> modifiers,
-        TypeSyntax returnType,
-        NamedSyntax identifier,
-        Token openParen,
-        SeparatedSyntaxList<Parameter> parameters,
-        Token closeParen,
-        IReadOnlyList<TypeConstraintClause> constraints)
-        : this(modifiers, null, identifier, openParen, parameters, closeParen, Array.Empty<Token>(), null, returnType, constraints)
-    {
-    }
 }

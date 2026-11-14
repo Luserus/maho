@@ -45,80 +45,157 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         resolvedVariableAttributes.Clear();
 
         foreach (var attribute in context.AttributeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(attribute));
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+        }
 
         foreach (var attribute in context.NestedAttributeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(attribute));
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+        }
 
         foreach (var type in context.TypeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(type));
             ResolveType(type, type.Syntax);
+        }
 
         foreach (var type in context.NestedTypeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(type));
             ResolveType(type, type.Syntax);
+        }
 
         foreach (var alias in context.AliasSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(alias));
             ResolveAlias(alias);
+        }
 
         foreach (var function in context.FunctionSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
             ResolveFunction(function);
+        }
 
         foreach (var method in context.MethodSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(method));
             ResolveMethod(method);
+        }
 
         foreach (var parameter in context.ParameterSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(parameter));
             ResolveParameter(parameter);
+        }
 
         foreach (var global in context.GlobalVariableSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(global));
             ResolveVariable(global, global.Syntax);
+        }
 
         foreach (var field in context.FieldSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
             ResolveVariable(field, field.Syntax);
+        }
 
         foreach (var local in context.LocalVariableSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(local));
             ResolveVariable(local, local.Syntax);
+        }
 
         foreach (var property in context.PropertySymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(property));
             ResolveProperty(property);
+        }
 
         // Resolve throwaway sink declarations so their signatures and bodies resolve error-free
         foreach (var attribute in context.SinkSymbols.AttributeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(attribute));
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+        }
 
         foreach (var attribute in context.SinkSymbols.NestedAttributeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(attribute));
             ResolveAttributeDeclaration(attribute, attribute.Syntax);
+        }
 
         foreach (var type in context.SinkSymbols.TypeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(type));
             ResolveType(type, type.Syntax);
+        }
 
         foreach (var type in context.SinkSymbols.NestedTypeSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(type));
             ResolveType(type, type.Syntax);
+        }
 
         foreach (var alias in context.SinkSymbols.AliasSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(alias));
             ResolveAlias(alias);
+        }
 
         foreach (var function in context.SinkSymbols.FunctionSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
             ResolveFunction(function);
+        }
 
         foreach (var method in context.SinkSymbols.MethodSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(method));
             ResolveMethod(method);
+        }
 
         foreach (var parameter in context.SinkSymbols.ParameterSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(parameter));
             ResolveParameter(parameter);
+        }
 
         foreach (var global in context.SinkSymbols.GlobalVariableSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(global));
             ResolveVariable(global, global.Syntax);
+        }
 
         foreach (var field in context.SinkSymbols.FieldSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
             ResolveVariable(field, field.Syntax);
+        }
 
         foreach (var local in context.SinkLocalVariableSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(local));
             ResolveVariable(local, local.Syntax);
+        }
 
         foreach (var property in context.SinkSymbols.PropertySymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(property));
             ResolveProperty(property);
+        }
 
         foreach (var tree in context.SyntaxTrees)
+        {
+            context.CurrentTreeFilePath = tree.FilePath;
             ResolveTopLevelStatements(tree.Root);
+        }
+
+        context.CurrentTreeFilePath = null;
 
         CheckDuplicateTypeDeclarations();
         CheckCyclicTypeHierarchies();

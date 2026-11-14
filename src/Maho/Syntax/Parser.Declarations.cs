@@ -1310,11 +1310,14 @@ internal sealed partial class Parser
 
         var signature = new FunctionSignature(
             modifiers,
-            missingReturnType,
+            null,
             identifier,
             openParen,
             parameters,
             closeParen,
+            Array.Empty<Token>(),
+            null,
+            missingReturnType,
             constraints);
 
         var body = ParseFunctionBody();

@@ -77,7 +77,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, size));
 
     public static TypeRef FixedArray(TypeRef element, int count, SymbolHandle? fixedArrayHandle = null) =>
-        new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, new LiteralExpression(new Token(new Maho.Text.SourceText(count.ToString()), default, TokenKind.Integer, [], [], MatchingKeywordKind.None, count.ToString()))));
+        new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, new LiteralExpression(new Token(new Text.SourceText(count.ToString()), default, TokenKind.Integer, [], [], MatchingKeywordKind.None, count.ToString()))));
 
     public static TypeRef Span(TypeRef element) =>
         new TypeRef(TypeRefKind.Span, null, new SpanSemanticType(element));

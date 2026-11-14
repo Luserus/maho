@@ -48,7 +48,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Role flags used to describe how one token kind behaves in expression parsing. </summary>
-    [System.Flags]
+    [Flags]
     private enum OperatorRole : byte
     {
         None = 0,

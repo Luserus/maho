@@ -24,9 +24,3 @@ public sealed class CompiledArtifact
     /// <summary>Produces the stable text form suitable for an IL file.</summary>
     public override string ToString() => string.Join(Environment.NewLine, Instructions);
 }
-
-/// <summary>Placeholder for future semantic-model queries.</summary>
-public sealed class SemanticModel
-{
-    internal SemanticModel() { }
-}

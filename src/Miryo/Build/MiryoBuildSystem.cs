@@ -191,16 +191,3 @@ public static class MiryoBuildSystem
             config.GlobalAliases);
     }
 }
-
-/// <summary> Backward-compatible alias for <see cref="MiryoBuildSystem"/>. </summary>
-public static class MahoBuildSystem
-{
-    public static string[] ResolveSourceFiles(string path, MahoProjectConfiguration? config = null) =>
-        MiryoBuildSystem.ResolveSourceFiles(path, config);
-
-    public static string? FindProjectFile(string directoryPath) =>
-        MiryoBuildSystem.FindProjectFile(directoryPath);
-
-    public static MahoProject LoadProject(string projectFilePath) =>
-        MiryoBuildSystem.LoadProject(projectFilePath);
-}

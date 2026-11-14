@@ -29,10 +29,4 @@ internal sealed class MemberBlockDeclaration : Member
         Members = members;
         CloseBrace = closeBrace;
     }
-
-    /// <summary> Compatibility constructor. </summary>
-    public MemberBlockDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<Member> members, Token closeBrace)
-        : this(modifiers.Count > 0 ? modifiers[0] : null, openBrace, members, closeBrace)
-    {
-    }
 }

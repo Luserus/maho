@@ -33,6 +33,22 @@ internal sealed class SourceText : IDisposable
     /// <summary> Optional file path this source was loaded from. </summary>
     public string? FilePath { get; }
 
+    /// <summary> File write time recorded when loaded from disk, or null for in-memory text. </summary>
+    public DateTime? LastWriteTimeUtc { get; set; }
+
+    /// <summary> File size in bytes recorded when loaded from disk, or null for in-memory text. </summary>
+    public long? FileLength { get; set; }
+
+    private string? lazyHash;
+    /// <summary> SHA256 content hash of the source text. </summary>
+    public string ContentHash => lazyHash ??= ComputeHash();
+
+    private string ComputeHash()
+    {
+        var bytes = Encoding.UTF8.GetBytes(EnsureText());
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+    }
+
     // --- Constructors ---
 
     /// <summary> Loads source text from a file. </summary>
@@ -47,6 +63,8 @@ internal sealed class SourceText : IDisposable
 
         var fi = new FileInfo(sourceFile.FilePath);
         fileLength = fi.Length;
+        FileLength = fi.Length;
+        LastWriteTimeUtc = fi.LastWriteTimeUtc;
 
         if (fileLength == 0)
         {
@@ -77,6 +95,16 @@ internal sealed class SourceText : IDisposable
     public SourceText(string text, string? filePath = null)
     {
         FilePath = filePath;
+        if (filePath != null && File.Exists(filePath))
+        {
+            try
+            {
+                var fi = new FileInfo(filePath);
+                LastWriteTimeUtc = fi.LastWriteTimeUtc;
+                FileLength = fi.Length;
+            }
+            catch { }
+        }
         cachedText = text ?? string.Empty;
         loadMode = SourceTextLoadMode.Eager;
         lazyLines = ParseLines();

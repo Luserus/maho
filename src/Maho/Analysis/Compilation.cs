@@ -8,6 +8,7 @@ using Maho.Diagnostics;
 using Maho.Resolution;
 using Maho.Syntax;
 using Maho.Text;
+using Maho.Tooling;
 
 namespace Maho;
 
@@ -17,19 +18,43 @@ namespace Maho;
 /// </summary>
 public sealed class Compilation
 {
+    /// <summary> Gets the project name or assembly identity for this compilation. </summary>
     public string ProjectName { get; }
+
+    /// <summary> Gets the ordered parsed syntax trees for all source files in this compilation. </summary>
     public IReadOnlyList<SyntaxTree> SyntaxTrees { get; }
+
+    /// <summary> Gets the ordered parsed syntax trees for all source files in this compilation. </summary>
     public IReadOnlyList<SyntaxTree> Files => SyntaxTrees;
+
+    /// <summary> Gets the configuration options used during compilation. </summary>
     public CompilationOptions Options { get; }
-    public string? EntryFile => Options.EntryFile;
+
+    /// <summary> Gets the entry point source file path, if specified or inferred. </summary>
+    public string? EntryFile { get; }
+
+    /// <summary> Gets the referenced external project compilations. </summary>
     public IReadOnlyList<Compilation> ReferencedCompilations { get; }
+
+    /// <summary> Gets the project-wide semantic resolution context. </summary>
     internal ResolutionContext Context { get; }
+
+    /// <summary> Gets aggregated diagnostics reported across all phases of compilation. </summary>
     public IReadOnlyList<DiagnosticInfo> Diagnostics { get; }
+
+    /// <summary> Gets the compiled artifact containing generated MHIL instructions. </summary>
     public CompiledArtifact Artifact { get; }
+
+    /// <summary> Gets execution timers for each compiler pipeline phase. </summary>
     public CompilationPhaseTimers PhaseTimers { get; }
+
+    /// <summary> Gets total elapsed compilation time across all phases. </summary>
     public TimeSpan Elapsed => PhaseTimers.Total;
+
+    /// <summary> Gets file I/O or access errors keyed by file path. </summary>
     public IReadOnlyDictionary<string, (string ErrorMessage, bool IsInternal)> FileErrors { get; }
 
+    /// <summary> Indicates whether any fatal error or escalated warning diagnostics were emitted. </summary>
     public bool HasErrors => Diagnostics.Any(d =>
         d.Severity == DiagnosticSeverity.Error ||
         (Options.WarningsAsErrors && d.Severity == DiagnosticSeverity.Warning));
@@ -37,7 +62,7 @@ public sealed class Compilation
     /// <summary>
     /// Gets the primary source path if this compilation represents a single file, or the entry file.
     /// </summary>
-    public string? SourcePath => SyntaxTrees.Count == 1 ? SyntaxTrees[0].FilePath : Options.EntryFile;
+    public string? SourcePath => SyntaxTrees.Count == 1 ? SyntaxTrees[0].FilePath : EntryFile;
 
 
     /// <summary>
@@ -57,6 +82,135 @@ public sealed class Compilation
     public SyntaxTree? GetSyntaxTree(string filePath) =>
         SyntaxTrees.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
 
+    private readonly Dictionary<SyntaxTree, SemanticModel> semanticModels = [];
+    private readonly Dictionary<string, SemanticModel> semanticModelsByPath = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets the semantic model for a syntax tree in this compilation.
+    /// </summary>
+    /// <param name="syntaxTree">The syntax tree whose semantic model to retrieve.</param>
+    /// <returns>The <see cref="SemanticModel"/>, or <see langword="null"/> if not present.</returns>
+    public SemanticModel? GetSemanticModel(SyntaxTree syntaxTree) =>
+        semanticModels.TryGetValue(syntaxTree, out var model) ? model : null;
+
+    /// <summary>
+    /// Gets the semantic model for a source file path in this compilation.
+    /// </summary>
+    /// <param name="filePath">The source file path whose semantic model to retrieve.</param>
+    /// <returns>The <see cref="SemanticModel"/>, or <see langword="null"/> if not present.</returns>
+    public SemanticModel? GetSemanticModel(string filePath) =>
+        semanticModelsByPath.TryGetValue(filePath, out var model) ? model : null;
+
+    /// <summary>
+    /// LSP Go-to-Definition: resolves definition location for a symbol at the given file and position.
+    /// </summary>
+    /// <param name="filePath">The source file path containing the symbol reference.</param>
+    /// <param name="line">The 1-based line number.</param>
+    /// <param name="column">The 1-based column number.</param>
+    /// <returns>A <see cref="DefinitionLocation"/> if resolved; otherwise <see langword="null"/>.</returns>
+    public DefinitionLocation? FindDefinition(string filePath, int line, int column) =>
+        GetSemanticModel(filePath)?.FindDefinition(line, column);
+
+    /// <summary>
+    /// LSP Find-All-References: finds all references across the compilation for a symbol at the given position.
+    /// </summary>
+    /// <param name="filePath">The source file path containing the symbol reference.</param>
+    /// <param name="line">The 1-based line number.</param>
+    /// <param name="column">The 1-based column number.</param>
+    /// <param name="includeDeclaration">Whether to include the symbol's declaration in the results.</param>
+    /// <returns>A list of reference locations matching the target symbol.</returns>
+    public IReadOnlyList<ReferenceLocation> FindReferences(string filePath, int line, int column, bool includeDeclaration = true) =>
+        GetSemanticModel(filePath)?.FindReferences(line, column, includeDeclaration) ?? [];
+
+    /// <summary>
+    /// LSP Hover: gets hover tooltip information for a symbol or expression at the given position.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <param name="line">The 1-based line number.</param>
+    /// <param name="column">The 1-based column number.</param>
+    /// <returns>Hover tooltip details, or <see langword="null"/> if no symbol or expression is at the position.</returns>
+    public HoverInfo? GetHover(string filePath, int line, int column) =>
+        GetSemanticModel(filePath)?.GetHover(line, column);
+
+    /// <summary>
+    /// LSP Document Symbols: retrieves hierarchical outline symbols for the given file.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <returns>A list of document outline symbols.</returns>
+    public IReadOnlyList<DocumentSymbolInfo> GetDocumentSymbols(string filePath) =>
+        GetSemanticModel(filePath)?.GetDocumentSymbols() ?? [];
+
+    /// <summary>
+    /// LSP Completions: provides completion items at the given file and position.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <param name="line">The 1-based line number.</param>
+    /// <param name="column">The 1-based column number.</param>
+    /// <returns>A list of completion suggestions.</returns>
+    public IReadOnlyList<CompletionItemInfo> GetCompletions(string filePath, int line, int column) =>
+        GetSemanticModel(filePath)?.GetCompletions(line, column) ?? [];
+
+    /// <summary>
+    /// LSP Signature Help: provides signature help and active parameter info at the given position.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <param name="line">The 1-based line number.</param>
+    /// <param name="column">The 1-based column number.</param>
+    /// <returns>Signature help information for the invocation, or <see langword="null"/> if not within a call.</returns>
+    public SignatureHelpInfo? GetSignatureHelp(string filePath, int line, int column) =>
+        GetSemanticModel(filePath)?.GetSignatureHelp(line, column);
+
+    /// <summary>
+    /// LSP Semantic Tokens: generates semantic classification tokens for the given file.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <returns>A list of classified semantic tokens for editor syntax highlighting.</returns>
+    public IReadOnlyList<SemanticTokenInfo> GetSemanticTokens(string filePath) =>
+        GetSemanticModel(filePath)?.GetSemanticTokens() ?? [];
+
+    /// <summary>
+    /// Creates a new compilation snapshot with modified options, preserving existing semantic models.
+    /// </summary>
+    /// <param name="newOptions">The new compilation options to apply.</param>
+    /// <returns>A new <see cref="Compilation"/> snapshot with updated options.</returns>
+    public Compilation WithOptions(CompilationOptions newOptions)
+    {
+        if (Options == newOptions) return this;
+        return new Compilation(
+            ProjectName,
+            SyntaxTrees,
+            newOptions,
+            ReferencedCompilations,
+            Context,
+            Diagnostics,
+            Artifact,
+            CompilationPhaseTimers.Zero,
+            FileErrors,
+            semanticModels,
+            EntryFile);
+    }
+
+    /// <summary>
+    /// Creates a new compilation snapshot with modified phase timers, preserving all analysis results.
+    /// </summary>
+    /// <param name="newTimers">The new phase execution timings.</param>
+    /// <returns>A new <see cref="Compilation"/> snapshot with updated phase timers.</returns>
+    public Compilation WithPhaseTimers(CompilationPhaseTimers newTimers)
+    {
+        return new Compilation(
+            ProjectName,
+            SyntaxTrees,
+            Options,
+            ReferencedCompilations,
+            Context,
+            Diagnostics,
+            Artifact,
+            newTimers,
+            FileErrors,
+            semanticModels,
+            EntryFile);
+    }
+
     internal Compilation(
         string projectName,
         IReadOnlyList<SyntaxTree> syntaxTrees,
@@ -66,28 +220,72 @@ public sealed class Compilation
         IReadOnlyList<DiagnosticInfo> diagnostics,
         CompiledArtifact? artifact = null,
         CompilationPhaseTimers? phaseTimers = null,
-        IReadOnlyDictionary<string, (string ErrorMessage, bool IsInternal)>? fileErrors = null)
+        IReadOnlyDictionary<string, (string ErrorMessage, bool IsInternal)>? fileErrors = null,
+        IReadOnlyDictionary<SyntaxTree, SemanticModel>? models = null,
+        string? entryFile = null)
     {
         ProjectName = projectName;
         SyntaxTrees = syntaxTrees;
         Options = options;
+        EntryFile = entryFile ?? options.EntryFile;
         ReferencedCompilations = referencedCompilations;
         Context = context;
         Diagnostics = diagnostics;
         Artifact = artifact ?? CompiledArtifact.Empty;
         PhaseTimers = phaseTimers ?? CompilationPhaseTimers.Zero;
         FileErrors = fileErrors ?? new Dictionary<string, (string, bool)>();
+
+        foreach (var tree in syntaxTrees)
+        {
+            SemanticModel? model = null;
+            if (models != null && models.TryGetValue(tree, out var existing))
+            {
+                model = existing;
+            }
+            else
+            {
+                var bindings = context.ExtractTreeBindings(tree);
+                model = new SemanticModel(this, tree, bindings.NodeSymbols, bindings.ExpressionTypes, bindings.ControlFlowGraphs);
+            }
+
+            semanticModels[tree] = model;
+            semanticModelsByPath[tree.FilePath] = model;
+        }
     }
 
     /// <summary>
-    /// Creates a compilation from a single in-memory source string.
+    /// Creates a compilation from a single in-memory source string, with optional cached compilation reuse.
     /// </summary>
+    /// <param name="source">The in-memory source text string.</param>
+    /// <param name="filePath">The logical or file path to associate with this source.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="referencedCompilations">Optional external referenced project compilations.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse AST and semantics.</param>
+    /// <returns>A fully resolved <see cref="Compilation"/> instance.</returns>
     public static Compilation FromSource(
         string source,
         string filePath = "source.mh",
         CompilationOptions? options = null,
-        IReadOnlyList<Compilation>? referencedCompilations = null)
+        IReadOnlyList<Compilation>? referencedCompilations = null,
+        Compilation? cachedCompilation = null)
     {
+        options ??= CompilationOptions.Default;
+
+        if (cachedCompilation != null &&
+            !cachedCompilation.Options.RequiresReanalysis(options) &&
+            cachedCompilation.SyntaxTrees.Count == 1 &&
+            string.Equals(cachedCompilation.SyntaxTrees[0].FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(cachedCompilation.SyntaxTrees[0].SourceText.ToString(), source, StringComparison.Ordinal))
+        {
+            if (cachedCompilation.Options.WarningsAsErrors != options.WarningsAsErrors ||
+                cachedCompilation.Options.ColorMode != options.ColorMode ||
+                cachedCompilation.Options.PathStyle != options.PathStyle ||
+                cachedCompilation.Options.OutputFormat != options.OutputFormat)
+            {
+                return cachedCompilation.WithOptions(options);
+            }
+            return cachedCompilation;
+        }
         options ??= CompilationOptions.Default;
         var sourceText = new SourceText(source);
         var diagnosticsManager = new DiagnosticsManager(sourceText);
@@ -122,17 +320,40 @@ public sealed class Compilation
     }
 
     /// <summary>
-    /// Creates a compilation from a collection of source files.
+    /// Creates a compilation from a collection of source files, with optional incremental caching.
     /// </summary>
+    /// <param name="filePaths">The collection of source file paths on disk.</param>
+    /// <param name="projectName">Optional explicit project or assembly name.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="referencedCompilations">Optional external referenced project compilations.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse unchanged AST trees and semantics.</param>
+    /// <returns>A fully resolved <see cref="Compilation"/> instance.</returns>
     public static Compilation FromFiles(
         IEnumerable<string> filePaths,
         string? projectName = null,
         CompilationOptions? options = null,
-        IReadOnlyList<Compilation>? referencedCompilations = null)
+        IReadOnlyList<Compilation>? referencedCompilations = null,
+        Compilation? cachedCompilation = null)
     {
         options ??= CompilationOptions.Default;
         referencedCompilations ??= [];
         var pathsList = filePaths.Select(Path.GetFullPath).ToList();
+
+        // 1. Full Reuse Short-Circuit:
+        if (cachedCompilation != null &&
+            !cachedCompilation.Options.RequiresReanalysis(options) &&
+            pathsList.Count == cachedCompilation.SyntaxTrees.Count &&
+            pathsList.All(p => cachedCompilation.GetSyntaxTree(p) is { } tree && tree.IsEquivalent(p)))
+        {
+            if (cachedCompilation.Options.WarningsAsErrors != options.WarningsAsErrors ||
+                cachedCompilation.Options.ColorMode != options.ColorMode ||
+                cachedCompilation.Options.PathStyle != options.PathStyle ||
+                cachedCompilation.Options.OutputFormat != options.OutputFormat)
+            {
+                return cachedCompilation.WithOptions(options);
+            }
+            return cachedCompilation;
+        }
 
         string resolvedProjectName = projectName
             ?? (!string.IsNullOrWhiteSpace(options.RootDirectory) ? Path.GetFileName(options.RootDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : null)
@@ -163,35 +384,53 @@ public sealed class Compilation
         var roots = new CompilationUnit?[pathsList.Count];
         var fileDms = new DiagnosticsManager?[pathsList.Count];
 
+        var changedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var cachedTreeMap = new Dictionary<string, SyntaxTree>(StringComparer.OrdinalIgnoreCase);
+        if (cachedCompilation != null && !cachedCompilation.Options.RequiresReanalysis(options))
+        {
+            foreach (var t in cachedCompilation.SyntaxTrees)
+                cachedTreeMap[t.FilePath] = t;
+        }
+
         var syntaxSw = Stopwatch.StartNew();
         Parallel.For(0, pathsList.Count, i =>
         {
             string path = pathsList[i];
-            try
+            if (cachedTreeMap.TryGetValue(path, out var cachedTree) && cachedTree.IsEquivalent(path))
             {
-                var text = new SourceText(new SourceFile(path));
-                sourceTexts[i] = text;
-
-                bool isEntryFile = options.EntryFile != null &&
-                    (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
-
-                bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
-                bool allowImplicit = options.ImplicitTopLevel || (isSingleFileScript && (options.EntryFile == null || isEntryFile));
-
-                var dm = new DiagnosticsManager(text);
-                fileDms[i] = dm;
-
-                var lexer = new Lexer(text, dm);
-                lexer.Lex();
-
-                var parser = new Parser(text, dm, allowImplicit);
-                var root = parser.Parse(lexer.Tokens);
-                roots[i] = root;
+                sourceTexts[i] = cachedTree.SourceText;
+                roots[i] = cachedTree.Root;
+                fileDms[i] = cachedTree.DiagnosticsManager;
             }
-            catch (Exception ex)
+            else
             {
-                fileReadErrors[i] = (path, FormatFileError(path, ex), !IsUserFacingError(ex));
+                lock (changedPaths) { changedPaths.Add(path); }
+                try
+                {
+                    var text = new SourceText(new SourceFile(path));
+                    sourceTexts[i] = text;
+
+                    bool isEntryFile = options.EntryFile != null &&
+                        (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+
+                    bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
+                    bool allowImplicit = options.ImplicitTopLevel || (isSingleFileScript && (options.EntryFile == null || isEntryFile));
+
+                    var dm = new DiagnosticsManager(text);
+                    fileDms[i] = dm;
+
+                    var lexer = new Lexer(text, dm);
+                    lexer.Lex();
+
+                    var parser = new Parser(text, dm, allowImplicit);
+                    var root = parser.Parse(lexer.Tokens);
+                    roots[i] = root;
+                }
+                catch (Exception ex)
+                {
+                    fileReadErrors[i] = (path, FormatFileError(path, ex), !IsUserFacingError(ex));
+                }
             }
         });
         syntaxSw.Stop();
@@ -296,7 +535,17 @@ public sealed class Compilation
         var syntaxTrees = new SyntaxTree[validRoots.Count];
 
         for (int i = 0; i < validRoots.Count; i++)
-            syntaxTrees[i] = new SyntaxTree(validRoots[i], validSourceTexts[i], validFileDms[i], validPaths[i]);
+        {
+            if (cachedTreeMap.TryGetValue(validPaths[i], out var cachedTree) &&
+                ReferenceEquals(cachedTree.Root, validRoots[i]))
+            {
+                syntaxTrees[i] = cachedTree;
+            }
+            else
+            {
+                syntaxTrees[i] = new SyntaxTree(validRoots[i], validSourceTexts[i], validFileDms[i], validPaths[i]);
+            }
+        }
 
         var resolver = new Resolver();
         var referencedContexts = referencedCompilations
@@ -305,7 +554,7 @@ public sealed class Compilation
             .ToList();
 
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.Resolve(syntaxTrees, referencedContexts, diagnostics: resolutionDm, options: effectiveOptions);
+        var context = resolver.ResolveIncremental(syntaxTrees, changedPaths, referencedContexts, cachedCompilation, diagnostics: resolutionDm, options: effectiveOptions);
 
         foreach (var diag in resolutionDm.Diagnostics)
         {
@@ -326,6 +575,50 @@ public sealed class Compilation
                 validFileDms[0].Report(diag);
         }
         semSw.Stop();
+
+        // Check if any changed file changed public signatures
+        bool signaturesChanged = false;
+        if (cachedCompilation == null || changedPaths.Count == pathsList.Count)
+        {
+            signaturesChanged = true;
+        }
+        else
+        {
+            foreach (var changedPath in changedPaths)
+            {
+                var oldSymbols = cachedCompilation.Context.GetTreeSymbols(changedPath);
+                var newSymbols = context.GetTreeSymbols(changedPath);
+                if (oldSymbols.Count != newSymbols.Count)
+                {
+                    signaturesChanged = true;
+                    break;
+                }
+                for (int s = 0; s < oldSymbols.Count; s++)
+                {
+                    var oldSym = cachedCompilation.Context.GetSymbol(oldSymbols[s]);
+                    var newSym = context.GetSymbol(newSymbols[s]);
+                    if (oldSym?.Name.Text != newSym?.Name.Text || oldSym?.Kind != newSym?.Kind)
+                    {
+                        signaturesChanged = true;
+                        break;
+                    }
+                }
+                if (signaturesChanged)
+                    break;
+            }
+        }
+
+        var reusableModels = new Dictionary<SyntaxTree, SemanticModel>();
+        if (!signaturesChanged && cachedCompilation != null)
+        {
+            foreach (var tree in syntaxTrees)
+            {
+                if (!changedPaths.Contains(tree.FilePath) && cachedCompilation.GetSemanticModel(tree.FilePath) is { } cachedModel)
+                {
+                    reusableModels[tree] = cachedModel;
+                }
+            }
+        }
 
         var allProjectedDiagnostics = new List<DiagnosticInfo>();
         for (int i = 0; i < validPaths.Count; i++)
@@ -358,13 +651,15 @@ public sealed class Compilation
         return new Compilation(
             resolvedProjectName,
             syntaxTrees,
-            effectiveOptions,
+            options,
             referencedCompilations,
             context,
             orderedProjected,
             artifact: null,
             phaseTimers: phaseTimers,
-            fileErrors: fileErrorsMap);
+            fileErrors: fileErrorsMap,
+            models: reusableModels,
+            entryFile: effectiveEntryFile);
     }
 
     private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
@@ -415,10 +710,6 @@ public sealed class Compilation
     /// Spawns an interactive <see cref="AnalysisSession"/> rooted in this compilation.
     /// </summary>
     public AnalysisSession CreateSession() => new(this);
-
-    /// <summary>Reserved entry point for future editor semantic queries.</summary>
-    internal SemanticModel GetSemanticModel(SyntaxTree syntaxTree) =>
-        throw new NotImplementedException("Semantic-model queries are not implemented yet.");
 
     private static List<DiagnosticInfo> ProjectDiagnostics(
         IReadOnlyList<Diagnostic> diagnostics,

@@ -23,7 +23,7 @@ public static class CommandLine
     {
         get
         {
-            var informational = typeof(CommandLine).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            var informational = typeof(CommandLine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             if (!string.IsNullOrWhiteSpace(informational))
             {
                 int plusIndex = informational.IndexOf('+');

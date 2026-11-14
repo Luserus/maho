@@ -27,10 +27,17 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         this.context = context;
 
         if (context.Options?.GlobalAliases is { Count: > 0 } globalAliases)
+        {
+            context.CurrentTreeFilePath = context.Options?.ProjectFilePath ?? "<global-aliases>";
             RegisterGlobalAliases(globalAliases);
+        }
 
         foreach (var tree in context.SyntaxTrees)
+        {
+            context.CurrentTreeFilePath = tree.FilePath;
             ResolveCompilationUnit(tree.Root);
+        }
+        context.CurrentTreeFilePath = null;
     }
 
     private void RegisterGlobalAliases(IReadOnlyDictionary<string, string> globalAliases)

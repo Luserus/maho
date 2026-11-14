@@ -56,7 +56,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_LoadsProject_AndResolvesOptions()
+    public void MiryoBuildSystem_LoadsProject_AndResolvesOptions()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_BuildSystemTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -74,7 +74,7 @@ public sealed class BuildSystemTests
             string helperFile = Path.Combine(tempDir, "Helper.mh");
             File.WriteAllText(helperFile, "public struct Helper;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.Equal("App", project.ProjectName);
             Assert.Equal(tempDir, project.ProjectDirectory);
@@ -144,7 +144,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_LoadsProject_WithSourcesObject_ResolvesSourceFiles()
+    public void MiryoBuildSystem_LoadsProject_WithSourcesObject_ResolvesSourceFiles()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_SourcesObjTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -166,7 +166,7 @@ public sealed class BuildSystemTests
             string extraFile = Path.Combine(tempDir, "Extra.mh");
             File.WriteAllText(extraFile, "public struct Extra;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.NotNull(project.Configuration.Sources);
             Assert.Equal("$", project.Configuration.Sources.Directory);
@@ -183,7 +183,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_LoadsProject_WithExplicitSourceFiles_FiltersOutUnlistedFiles()
+    public void MiryoBuildSystem_LoadsProject_WithExplicitSourceFiles_FiltersOutUnlistedFiles()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_ExplicitSourcesTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -203,7 +203,7 @@ public sealed class BuildSystemTests
             string ignoredFile = Path.Combine(tempDir, "Ignored.mh");
             File.WriteAllText(ignoredFile, "public struct Ignored;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.Single(project.SourceFiles);
             Assert.Equal(Path.GetFullPath(mainFile), project.SourceFiles[0]);
@@ -215,7 +215,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_LoadsProject_WithCustomDirectory_ResolvesFromSubdirectory()
+    public void MiryoBuildSystem_LoadsProject_WithCustomDirectory_ResolvesFromSubdirectory()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CustomDirTest_" + Guid.NewGuid().ToString("N"));
         string srcDir = Path.Combine(tempDir, "src");
@@ -236,7 +236,7 @@ public sealed class BuildSystemTests
             string rootFile = Path.Combine(tempDir, "RootIgnored.mh");
             File.WriteAllText(rootFile, "public struct RootIgnored;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.Single(project.SourceFiles);
             Assert.Equal(Path.GetFullPath(srcFile), project.SourceFiles[0]);
@@ -248,7 +248,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_LoadsProject_WithSourcesArrayShorthand_ResolvesFiles()
+    public void MiryoBuildSystem_LoadsProject_WithSourcesArrayShorthand_ResolvesFiles()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_ArrayShorthandTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -262,7 +262,7 @@ public sealed class BuildSystemTests
             string mainFile = Path.Combine(tempDir, "Main.mh");
             File.WriteAllText(mainFile, "public struct Main;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.Single(project.SourceFiles);
             Assert.Equal(Path.GetFullPath(mainFile), project.SourceFiles[0]);
@@ -274,7 +274,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_MissingSourceFile_ThrowsFileNotFoundException()
+    public void MiryoBuildSystem_MissingSourceFile_ThrowsFileNotFoundException()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_MissingFileTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -287,7 +287,7 @@ public sealed class BuildSystemTests
                 };
                 """);
 
-            Assert.Throws<FileNotFoundException>(() => MahoBuildSystem.LoadProject(projectFile));
+            Assert.Throws<FileNotFoundException>(() => MiryoBuildSystem.LoadProject(projectFile));
         }
         finally
         {
@@ -296,7 +296,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_MissingDirectory_ThrowsDirectoryNotFoundException()
+    public void MiryoBuildSystem_MissingDirectory_ThrowsDirectoryNotFoundException()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_MissingDirTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -309,7 +309,7 @@ public sealed class BuildSystemTests
                 };
                 """);
 
-            Assert.Throws<DirectoryNotFoundException>(() => MahoBuildSystem.LoadProject(projectFile));
+            Assert.Throws<DirectoryNotFoundException>(() => MiryoBuildSystem.LoadProject(projectFile));
         }
         finally
         {
@@ -318,7 +318,7 @@ public sealed class BuildSystemTests
     }
 
     [Fact]
-    public void MahoBuildSystem_EntryFile_EnsuresInclusionWithNonStandardExtension()
+    public void MiryoBuildSystem_EntryFile_EnsuresInclusionWithNonStandardExtension()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_EntryNonMhTest_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -335,7 +335,7 @@ public sealed class BuildSystemTests
             string helperFile = Path.Combine(tempDir, "Helper.mh");
             File.WriteAllText(helperFile, "public struct Helper;");
 
-            var project = MahoBuildSystem.LoadProject(projectFile);
+            var project = MiryoBuildSystem.LoadProject(projectFile);
 
             Assert.Equal(2, project.SourceFiles.Count);
             Assert.Contains(Path.GetFullPath(mainFile), project.SourceFiles);

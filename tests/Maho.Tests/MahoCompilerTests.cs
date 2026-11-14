@@ -22,9 +22,9 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeText_ReturnsStructuredPayloads()
+    public void CompileSource_ReturnsStructuredPayloads()
     {
-        Compilation result = MahoCompiler.AnalyzeText(CompilerTestBed.FullPrelude + """
+        Compilation result = MahoCompiler.CompileSource(CompilerTestBed.FullPrelude + """
             namespace Basic;
 
             public class Result;
@@ -40,9 +40,9 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeText_InvalidInput_ReturnsStructuredDiagnostics()
+    public void CompileSource_InvalidInput_ReturnsStructuredDiagnostics()
     {
-        Compilation result = MahoCompiler.AnalyzeText("""
+        Compilation result = MahoCompiler.CompileSource("""
             public static func Main() -> int
             {
                 §;

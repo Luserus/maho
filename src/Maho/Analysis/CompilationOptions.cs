@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Maho;
@@ -75,4 +76,36 @@ public sealed record CompilationOptions
 
     /// <summary> Default options with user-friendly out-of-the-box settings. </summary>
     public static CompilationOptions Default => new();
+
+    /// <summary>
+    /// Checks whether changing from this options instance to <paramref name="other"/> requires re-analyzing the AST and semantics.
+    /// Non-destructive options such as formatting, color mode, or WarningsAsErrors return false.
+    /// </summary>
+    /// <param name="other">The compilation options instance to compare against.</param>
+    /// <returns><see langword="true"/> if semantic re-analysis is required; otherwise <see langword="false"/>.</returns>
+    public bool RequiresReanalysis(CompilationOptions? other)
+    {
+        if (other is null) return true;
+        if (ImplicitTopLevel != other.ImplicitTopLevel) return true;
+        if (MacroRecursionLimit != other.MacroRecursionLimit) return true;
+        if (!string.Equals(EntryFile, other.EntryFile, StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.Equals(RootDirectory, other.RootDirectory, StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.Equals(ProjectFilePath, other.ProjectFilePath, StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (ReferencedProjects.Count != other.ReferencedProjects.Count) return true;
+        for (int i = 0; i < ReferencedProjects.Count; i++)
+        {
+            if (!string.Equals(ReferencedProjects[i], other.ReferencedProjects[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        if (GlobalAliases.Count != other.GlobalAliases.Count) return true;
+        foreach (var (k, v) in GlobalAliases)
+        {
+            if (!other.GlobalAliases.TryGetValue(k, out var otherVal) || !string.Equals(v, otherVal, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
 }

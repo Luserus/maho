@@ -46,56 +46,76 @@ public static class MahoCompiler
     /// <summary>
     /// Compiles an in-memory source string and returns a <see cref="Compilation"/>.
     /// </summary>
-    public static Compilation CompileSource(string source, string filePath = "source.mh", CompilationOptions? options = null) =>
-        Compilation.FromSource(source, filePath, options);
-
-    /// <summary> Backward-compatible alias for <see cref="CompileSource"/>. </summary>
-    public static Compilation AnalyzeText(string text, string filePath = "source.mh") =>
-        Compilation.FromSource(text, filePath);
-
-    /// <summary> Backward-compatible alias for single-file analysis. </summary>
-    public static Compilation AnalyzeFile(string filePath) =>
-        Compilation.FromFiles([filePath]);
+    /// <param name="source">The in-memory Maho source code.</param>
+    /// <param name="filePath">The virtual or physical source file path.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse unchanged AST and semantics.</param>
+    /// <returns>An immutable <see cref="Compilation"/> instance.</returns>
+    public static Compilation CompileSource(string source, string filePath = "source.mh", CompilationOptions? options = null, Compilation? cachedCompilation = null) =>
+        Compilation.FromSource(source, filePath, options, cachedCompilation: cachedCompilation);
 
     /// <summary>
     /// Analyzes a collection of source files and returns an immutable <see cref="Compilation"/>.
     /// </summary>
+    /// <param name="filePaths">The collection of source file paths on disk.</param>
+    /// <param name="rootPath">Optional root workspace directory path.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="projectName">Optional explicit project or assembly name.</param>
+    /// <param name="referencedCompilations">Optional external referenced project compilations.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse unchanged AST trees and semantics.</param>
+    /// <returns>An immutable <see cref="Compilation"/> instance.</returns>
     public static Compilation AnalyzeFiles(
         IEnumerable<string> filePaths,
         string? rootPath = null,
         CompilationOptions? options = null,
         string? projectName = null,
-        IReadOnlyList<Compilation>? referencedCompilations = null)
+        IReadOnlyList<Compilation>? referencedCompilations = null,
+        Compilation? cachedCompilation = null)
     {
         options ??= CompilationOptions.Default;
 
         if (rootPath is not null && options.RootDirectory is null)
             options = options with { RootDirectory = rootPath };
 
-        return Compilation.FromFiles(filePaths, projectName, options, referencedCompilations);
+        return Compilation.FromFiles(filePaths, projectName, options, referencedCompilations, cachedCompilation);
     }
 
     /// <summary>
     /// Compiler API entry point that constructs an immutable <see cref="Compilation"/>.
     /// </summary>
+    /// <param name="filePaths">The collection of source file paths on disk.</param>
+    /// <param name="projectName">Optional explicit project or assembly name.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="referencedCompilations">Optional external referenced project compilations.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse unchanged AST trees and semantics.</param>
+    /// <returns>An immutable <see cref="Compilation"/> instance.</returns>
     public static Compilation CreateCompilation(
         IEnumerable<string> filePaths,
         string? projectName = null,
         CompilationOptions? options = null,
-        IReadOnlyList<Compilation>? referencedCompilations = null) =>
-        Compilation.FromFiles(filePaths, projectName, options, referencedCompilations);
+        IReadOnlyList<Compilation>? referencedCompilations = null,
+        Compilation? cachedCompilation = null) =>
+        Compilation.FromFiles(filePaths, projectName, options, referencedCompilations, cachedCompilation);
 
     /// <summary>
     /// Compiles a collection of source files and returns an immutable <see cref="Compilation"/>.
     /// </summary>
+    /// <param name="filePaths">The collection of source file paths on disk.</param>
+    /// <param name="rootPath">Optional root workspace directory path.</param>
+    /// <param name="options">Optional compilation configuration options.</param>
+    /// <param name="projectName">Optional explicit project or assembly name.</param>
+    /// <param name="referencedCompilations">Optional external referenced project compilations.</param>
+    /// <param name="cachedCompilation">Optional previously resolved compilation to reuse unchanged AST trees and semantics.</param>
+    /// <returns>An immutable <see cref="Compilation"/> instance.</returns>
     public static Compilation CompileFiles(
         IEnumerable<string> filePaths,
         string? rootPath = null,
         CompilationOptions? options = null,
         string? projectName = null,
-        IReadOnlyList<Compilation>? referencedCompilations = null)
+        IReadOnlyList<Compilation>? referencedCompilations = null,
+        Compilation? cachedCompilation = null)
     {
-        var compilation = AnalyzeFiles(filePaths, rootPath, options, projectName, referencedCompilations);
+        var compilation = AnalyzeFiles(filePaths, rootPath, options, projectName, referencedCompilations, cachedCompilation);
 
         if (!compilation.HasErrors)
             throw new CompilerPipelineNotImplementedException("The lowering and code-generation pipeline has not been implemented.", compilation);

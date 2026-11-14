@@ -361,9 +361,8 @@ public sealed class DeclarationResolutionTests
         var syntaxTree = SyntaxTree.CreateSingleRoot(root);
         var resolvedTree = new ResolvedTree();
         var globalNamespace = new NamespaceTrieNode();
-        var symbols = new SymbolStore([], [], [], [], [], [], [], [], [], [], [], [], [], []);
         var scopes = new List<Scope> { new(null) };
-        var context = new ResolutionContext([syntaxTree], resolvedTree, globalNamespace, symbols, scopes);
+        var context = new ResolutionContext([syntaxTree], resolvedTree, globalNamespace, scopes);
 
         new SymbolDiscoveryPass().Resolve(context);
 

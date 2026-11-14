@@ -29,10 +29,4 @@ internal sealed class TopLevelBlockDeclaration : TopLevelDeclaration
         Members = members;
         CloseBrace = closeBrace;
     }
-
-    /// <summary> Compatibility constructor. </summary>
-    public TopLevelBlockDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, Token openBrace, IReadOnlyList<TopLevel> members, Token closeBrace)
-        : this(modifiers.Count > 0 ? modifiers[0] : null, openBrace, members, closeBrace)
-    {
-    }
 }

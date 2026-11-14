@@ -75,6 +75,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 2. Resolve global variable initializers
         foreach (var global in context.GlobalVariableSymbols)
         {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(global));
             if (global.Syntax is { } varDecl && visitedDeclarations.Add(varDecl))
                 ResolveVariableDeclaration(varDecl, global.EnclosingScope, default);
         }
@@ -82,6 +83,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 3. Resolve field initializers
         foreach (var field in context.FieldSymbols)
         {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
             if (field.Syntax is { } varDecl && visitedDeclarations.Add(varDecl))
                 ResolveVariableDeclaration(varDecl, field.EnclosingScope, default);
         }
@@ -89,6 +91,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 4. Resolve function bodies
         foreach (var function in context.FunctionSymbols)
         {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
             if (function.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
             {
                 var scope = context.GetSyntaxScope(syntax.Body, GetOwnedScope(function));
@@ -99,6 +102,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 5. Resolve method bodies
         foreach (var method in context.MethodSymbols)
         {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(method));
             if (method.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
             {
                 var scope = context.GetSyntaxScope(syntax.Body, GetOwnedScope(method));
@@ -109,6 +113,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 6. Resolve property accessors
         foreach (var property in context.PropertySymbols)
         {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(property));
             if (property.Syntax is { } syntax)
             {
                 foreach (var accessor in syntax.Body.Accessors)
@@ -122,6 +127,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
             }
         }
+
+        context.CurrentTreeFilePath = null;
     }
 
     /// <summary>
@@ -272,6 +279,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             if (tree.Root is CompilationUnit unit && unit.EnablesTopLevelStatements)
             {
+                context.CurrentTreeFilePath = tree.FilePath;
                 var scope = context.GetSyntaxScope(unit, context.GlobalScope);
                 SymbolHandle? main = null;
 
@@ -288,6 +296,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 CollapseRemainingLocals(scope, main ?? default);
             }
         }
+        context.CurrentTreeFilePath = null;
     }
 
     /// <summary>
