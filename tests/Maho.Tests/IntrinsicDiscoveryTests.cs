@@ -415,31 +415,30 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
-        Assert.Contains("first field must be a reference type", diag.Message);
+        Assert.Contains("first field must be a pointer or reference type", diag.Message);
     }
 
     [Fact]
-    public void AbiMismatch_StrWithRawPointer_EmitsMH0544()
+    public void Str_ValidABI_WithRawPointer_Succeeds()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("ValueType")] public struct ValType;
+            [IntrinsicType("Struct")] public struct Struct : ValType;
             [IntrinsicType("Int8")] public struct Int8;
-            [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
             [IntrinsicType("Pointer")] public struct Pointer<T> { NUInt address; }
 
             [IntrinsicType("Str")]
             public struct Str
             {
                 Int8* data;
-                Int64 length;
+                NUInt length;
             }
             """);
 
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
-        Assert.Contains("first field must be a reference type", diag.Message);
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Str));
     }
 
     [Fact]
@@ -480,7 +479,24 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
-        Assert.Contains("first field must be a pointer type", diag.Message);
+        Assert.Contains("first field must be a pointer or reference type", diag.Message);
+    }
+
+    [Fact]
+    public void Array_ValidABI_WithReference_Succeeds()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+
+            [IntrinsicType("Array")]
+            public struct Array<T>
+            {
+                T& data;
+                NUInt length;
+            }
+            """);
+
+        Assert.Empty(compilation.Diagnostics);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
     }
 
     [Fact]
@@ -561,6 +577,23 @@ public sealed class IntrinsicDiscoveryTests
     }
 
     [Fact]
+    public void Span_ValidABI_WithRawPointer_Succeeds()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+
+            [IntrinsicType("Span")]
+            public struct Span<T>
+            {
+                T* data;
+                NUInt length;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
+    }
+
+    [Fact]
     public void AbiMismatch_SpanWrongFirstField_EmitsMH0544()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
@@ -568,14 +601,14 @@ public sealed class IntrinsicDiscoveryTests
             [IntrinsicType("Span")]
             public struct Span<T>
             {
-                T* wrongPtr;
+                Int64 wrongField;
                 NUInt length;
             }
             """);
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
-        Assert.Contains("first field must be a reference type", diag.Message);
+        Assert.Contains("first field must be a reference or pointer type", diag.Message);
     }
 
     [Fact]
@@ -1404,5 +1437,35 @@ public sealed class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0244" && d.Message.Contains("cannot implement both 'Copy' and 'Move'"));
+    }
+
+    [Fact]
+    public void Delegate_ValidABI_WithReference_Succeeds()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            intrinsic attribute IntrinsicFunction(Str signature);
+            intrinsic attribute OperatorFunction(Str name);
+
+            [IntrinsicType("Unit")]
+            public struct void;
+
+            public interface Callable<TReturn, TParams...>
+            {
+                [OperatorFunction("Callable")]
+                public func Invoke(TParams args) -> TReturn;
+            }
+
+            [IntrinsicType("Delegate")]
+            public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+            {
+                NUInt codeAddress;
+                ValType& env;
+                [IntrinsicFunction("Delegate.Invoke(TParams...)")]
+                public func Callable.Invoke(TParams args) -> TReturn;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Delegate));
     }
 }

@@ -1,0 +1,99 @@
+namespace Std;
+
+intrinsic attribute IntrinsicType(Str name);
+
+intrinsic attribute IntrinsicFunction(Str name);
+
+intrinsic attribute OperatorFunction(Str name);
+
+[IntrinsicType("ValueType")]
+struct ValType;
+
+[IntrinsicType("Struct")]
+struct Struct : ValType;
+
+[IntrinsicType("Int8")]
+struct Int8;
+
+[IntrinsicType("NUInt")]
+struct NUInt;
+
+[IntrinsicType("Reference")]
+struct Reference<T>
+{
+    NUInt address;
+}
+
+[IntrinsicType("Pointer")]
+struct Pointer<T>
+{
+    NUInt address;
+}
+
+[IntrinsicType("Str")]
+struct Str
+{
+    Int8& buffer;
+    NUInt length;
+}
+
+[IntrinsicType("Unit")]
+struct Unit;
+
+interface Callable<TReturn, TArgs...>
+{
+    [OperatorFunction("Callable")]
+    func Invoke(TArgs... args) -> TReturn; 
+}
+
+[IntrinsicType("Function")]
+struct Function<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
+{
+    NUInt address;
+
+    [IntrinsicFunction("Function.Invoke(TParams...)")]
+    func Callable.Invoke(TArgs... args) -> TReturn;
+
+    func GetAddress() -> NUInt
+    {
+        return address;
+    }
+
+    func Func() -> Unit
+    {
+
+    }
+}
+
+[IntrinsicType("Delegate")]
+struct Delegate<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
+{
+    NUInt address;
+    ValType* context;
+
+    [IntrinsicFunction("Delegate.Invoke(TParams...)")]
+    func Callable.Invoke(TArgs... args) -> TReturn;
+}
+
+interface Add<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Addition")]
+    static func Add(TLeft lhs, TRight rhs) -> TResult;
+}
+
+[IntrinsicType("Int32")]
+struct Int32 : Add<Int32, Int32, Int32>, Callable<Int32, Int32>
+{
+    [IntrinsicFunction("Int32.Add(Int32, Int32)")]
+    static func Add.Add(Int32 lhs, Int32 rhs) -> Int32;
+
+    func Callable.Invoke(Int32 i) -> Int32
+    {
+        return i;
+    }
+
+    func Abs() -> Int32
+    {
+        return 0;
+    }
+}

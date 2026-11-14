@@ -931,6 +931,23 @@ internal sealed class ResolutionContext
         return current;
     }
 
+    /// <summary>
+    /// Unwraps any aliases transitively, returning the underlying symbol handle.
+    /// </summary>
+    public SymbolHandle UnwrapAlias(SymbolHandle handle)
+    {
+        var visited = new HashSet<SymbolHandle>();
+        var curr = handle;
+        while (curr.Kind == SymbolKind.Alias && visited.Add(curr))
+        {
+            var alias = GetAliasSymbol(curr);
+            if (alias is null || !alias.Target.IsResolved || alias.Target.Handle is not { } targetH)
+                break;
+            curr = targetH;
+        }
+        return curr;
+    }
+
     private void Register(Scope scope, Symbol symbol, NamespaceTrieNode? containingNamespace = null)
     {
         if (symbol.Name.Text == "_")
@@ -982,6 +999,168 @@ internal sealed class ResolutionContext
 
         return new SymbolName(parts);
     }
+
+    public static string GetQualifiedSymbolName(SymbolHandle handle, ResolutionContext? context)
+    {
+        if (context is null)
+            return handle.ToString() ?? string.Empty;
+
+        var sym = (Symbol?)context.GetTypeSymbol(handle) ??
+                  (Symbol?)context.GetNestedTypeSymbol(handle) ??
+                  (Symbol?)context.GetAliasSymbol(handle) ??
+                  (Symbol?)context.GetGenericParameterSymbol(handle) ??
+                  context.GetSymbol(handle);
+
+        if (sym is null)
+            return handle.ToString() ?? string.Empty;
+
+        return GetQualifiedSymbolName(sym, context);
+    }
+
+    public static string GetQualifiedSymbolName(Symbol sym, ResolutionContext? context)
+    {
+        if (sym is AliasSymbol alias)
+        {
+            if (alias.Target.IsResolved && alias.Target.Handle is { } targetH && context is not null)
+                return GetQualifiedSymbolName(targetH, context);
+            return alias.Name.Text;
+        }
+
+        if (sym is GenericParameterSymbol gp)
+            return gp.Name.Text;
+
+        if (sym is NestedTypeSymbol nested)
+        {
+            if (nested.Parent is { } parentH && context is not null)
+                return $"{GetQualifiedSymbolName(parentH, context)}.{nested.Name.Text}";
+            return nested.Name.Text;
+        }
+
+        if (sym is TypeSymbol typeSym)
+        {
+            if (typeSym.ContainingNamespace != null && typeSym.ContainingNamespace != context?.GlobalNamespace)
+            {
+                var ns = GetNamespacePath(typeSym.ContainingNamespace, context?.GlobalNamespace);
+                if (!string.IsNullOrEmpty(ns))
+                    return $"{ns}.{typeSym.Name.Text}";
+            }
+
+            return typeSym.Name.Text;
+        }
+
+        if (sym is FunctionSymbol fn)
+        {
+            if (fn.ContainingNamespace != null && fn.ContainingNamespace != context?.GlobalNamespace)
+            {
+                var ns = GetNamespacePath(fn.ContainingNamespace, context?.GlobalNamespace);
+                if (!string.IsNullOrEmpty(ns))
+                    return $"{ns}.{fn.Name.Text}";
+            }
+            return fn.Name.Text;
+        }
+
+        return sym.Name.Text;
+    }
+
+    public static string GetLabelSymbolName(SymbolHandle handle, ResolutionContext? context, Scope? scope)
+    {
+        if (context is null)
+            return handle.ToString() ?? string.Empty;
+
+        var sym = (Symbol?)context.GetTypeSymbol(handle) ??
+                  (Symbol?)context.GetNestedTypeSymbol(handle) ??
+                  (Symbol?)context.GetAliasSymbol(handle) ??
+                  (Symbol?)context.GetGenericParameterSymbol(handle) ??
+                  context.GetSymbol(handle);
+
+        if (sym is null)
+            return handle.ToString() ?? string.Empty;
+
+        return GetLabelSymbolName(sym, context, scope);
+    }
+
+    public static string GetLabelSymbolName(Symbol sym, ResolutionContext? context, Scope? scope)
+    {
+        if (sym is AliasSymbol alias)
+            return alias.Name.Text;
+
+        if (sym is GenericParameterSymbol gp)
+            return gp.Name.Text;
+
+        if (sym is NestedTypeSymbol nested)
+        {
+            if (nested.Parent is { } parentH && context is not null)
+                return $"{GetLabelSymbolName(parentH, context, scope)}.{nested.Name.Text}";
+            return nested.Name.Text;
+        }
+
+        if (sym is TypeSymbol typeSym)
+        {
+            if (typeSym.ContainingNamespace == null || typeSym.ContainingNamespace == context?.GlobalNamespace)
+                return typeSym.Name.Text;
+
+            if (scope != null && IsNamespaceImported(scope, typeSym.ContainingNamespace))
+                return typeSym.Name.Text;
+
+            var ns = GetNamespacePath(typeSym.ContainingNamespace, context?.GlobalNamespace);
+            return !string.IsNullOrEmpty(ns) ? $"{ns}.{typeSym.Name.Text}" : typeSym.Name.Text;
+        }
+
+        if (sym is FunctionSymbol fn)
+        {
+            if (fn.ContainingNamespace == null || fn.ContainingNamespace == context?.GlobalNamespace)
+                return fn.Name.Text;
+
+            if (scope != null && IsNamespaceImported(scope, fn.ContainingNamespace))
+                return fn.Name.Text;
+
+            var ns = GetNamespacePath(fn.ContainingNamespace, context?.GlobalNamespace);
+            return !string.IsNullOrEmpty(ns) ? $"{ns}.{fn.Name.Text}" : fn.Name.Text;
+        }
+
+        return sym.Name.Text;
+    }
+
+    public static bool IsNamespaceImported(Scope scope, NamespaceTrieNode targetNs)
+    {
+        for (var current = scope; current != null; current = current.Parent)
+        {
+            foreach (var usingNs in current.UsingNamespaces)
+            {
+                if (usingNs == targetNs || usingNs.Name.Text == targetNs.Name.Text)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsNamespaceImported(Scope scope, string nsName)
+    {
+        for (var current = scope; current != null; current = current.Parent)
+        {
+            foreach (var usingNs in current.UsingNamespaces)
+            {
+                if (usingNs.Name.Text == nsName)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public static string GetNamespacePath(NamespaceTrieNode node, NamespaceTrieNode? globalNs)
+    {
+        var parts = new List<string>();
+        var curr = node;
+        while (curr != null && curr != globalNs && !string.IsNullOrEmpty(curr.Name.Text))
+        {
+            parts.Add(curr.Name.Text);
+            curr = curr.Parent;
+        }
+        parts.Reverse();
+        return string.Join(".", parts);
+    }
+
+
 
     public SymbolName GetScopedSymbolName(NamedSyntax name) =>
         GetSymbolName(name, GetHygiene(name));
@@ -1040,11 +1219,23 @@ internal sealed class ResolutionContext
 
             case TupleType:
             case UniformTupleType:
+            case FunctionTypeSyntax:
+            case DelegateTypeSyntax:
+            case UnionType:
+            case LiteralGenericArgument:
                 parts.Add(new SymbolPart(string.Empty));
                 break;
 
+            case NamedExpressionGenericArgument named:
+                parts.Add(new SymbolPart(named.Expression.Identifier));
+                break;
+
+            case NeverTypeSyntax never:
+                parts.Add(new SymbolPart(never.ExclamationMark));
+                break;
+
             default:
-                throw new System.ArgumentOutOfRangeException(nameof(type));
+                throw new System.ArgumentOutOfRangeException(nameof(type), $"Unhandled type syntax: {type.GetType().FullName}");
         }
     }
 }

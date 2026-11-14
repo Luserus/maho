@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Maho.Resolution.ControlFlow;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution.Passes;
 
@@ -40,23 +41,34 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         // 1. Build CFG and analyze reachability for all functions, methods, and accessors
         foreach (var function in context.FunctionSymbols)
         {
-            if (function.Syntax is { } fnDecl && fnDecl.Body is { } body)
+            if (function.Flags.HasFlag(FunctionFlags.Intrinsic))
+                continue;
+
+            if (function.Syntax is { } fnDecl && fnDecl.Body is not FunctionEmptyBody && fnDecl.Body is { } body)
             {
                 var handle = ResolutionContext.GetHandle(function);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
                 AnalyzeReachability(cfg);
+                VerifyReturnsAndDivergence(function.Name.Text, function.ReturnType, cfg, fnDecl.Signature.Identifier.GetSpan() ?? default, fnDecl.GetSource());
             }
         }
 
         foreach (var method in context.MethodSymbols)
         {
-            if (method.Syntax is { } methodDecl && methodDecl.Body is { } body)
+            if (method.Flags.HasFlag(FunctionFlags.Intrinsic))
+                continue;
+
+            if (method.Parent is { } parentHandle && context.GetTypeSymbol(parentHandle) is { TypeKind: TypeKind.Interface })
+                continue;
+
+            if (method.Syntax is { } methodDecl && methodDecl.Body is not FunctionEmptyBody && methodDecl.Body is { } body)
             {
                 var handle = ResolutionContext.GetHandle(method);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
                 AnalyzeReachability(cfg);
+                VerifyReturnsAndDivergence(method.Name.Text, method.ReturnType, cfg, methodDecl.Signature.Identifier.GetSpan() ?? default, methodDecl.GetSource());
             }
         }
 
@@ -66,7 +78,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             {
                 foreach (var accessor in syntax.Body.Accessors)
                 {
-                    if (accessor.Body is { } body)
+                    if (accessor.Body is not FunctionEmptyBody && accessor.Body is { } body)
                     {
                         var handle = ResolutionContext.GetHandle(prop);
                         var cfg = BuildCFG(body, handle);
@@ -202,6 +214,8 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             {
                 case LocalExpressionStatement exprStmt:
                     block.Instructions.Add(exprStmt.Expression);
+                    if (ContainsTryOperator(exprStmt.Expression))
+                        block.AddSuccessor(exit);
 
                     // Branching expressions (if, while) construct their own sub-graphs
                     if (exprStmt.Expression is IfExpression ifExpr)
@@ -212,12 +226,23 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     {
                         block = ProcessWhile(whileExpr, block, exit, newBlock);
                     }
-                    else if (exprStmt.IsFinalExpression)
+                    else
                     {
-                        // In expression-bodied functions or final block expressions, this is an implicit return
-                        block.Terminator = BlockTerminator.Return(exprStmt.Expression);
-                        block.AddSuccessor(exit);
-                        block = newBlock();
+                        var exprType = context.GetExpressionType(exprStmt.Expression);
+                        if (exprType is { IsNever: true })
+                        {
+                            block.Terminator = BlockTerminator.Unreachable();
+                            block = newBlock();
+                            break;
+                        }
+
+                        if (exprStmt.IsFinalExpression)
+                        {
+                            // In expression-bodied functions or final block expressions, this is an implicit return
+                            block.Terminator = BlockTerminator.Return(exprStmt.Expression);
+                            block.AddSuccessor(exit);
+                            block = newBlock();
+                        }
                     }
                     break;
 
@@ -231,6 +256,8 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
                 case LocalVariableDeclarationStatement varStmt:
                     block.Instructions.Add(varStmt.Declaration);
+                    if (varStmt.Declaration.Declarator.Initializer is { Initializer: { } initVal } && ContainsTryOperator(initVal))
+                        block.AddSuccessor(exit);
                     break;
 
                 case LocalGotoStatement gotoStmt:
@@ -311,7 +338,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
     /// <summary>
     /// Lowers a <see cref="WhileExpression"/> loop into header, body, and exit basic blocks with a backedge.
     /// </summary>
-    private static BasicBlock ProcessWhile(
+    private BasicBlock ProcessWhile(
         WhileExpression whileExpr,
         BasicBlock current,
         BasicBlock exit,
@@ -333,10 +360,138 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
         // Body executes statements then unconditionally loops back to header
         bodyBlock.Instructions.Add(whileExpr.Body);
-        bodyBlock.Terminator = BlockTerminator.Branch(headerBlock);
-        bodyBlock.AddSuccessor(headerBlock);
+        if (whileExpr.Body is BlockExpression blockBody)
+        {
+            var endBody = ProcessLocals(blockBody.Locals, bodyBlock, exit, newBlock);
+            if (endBody.Terminator.Kind == BlockTerminatorKind.Unreachable && endBody.Successors.Count == 0)
+            {
+                endBody.Terminator = BlockTerminator.Branch(headerBlock);
+                endBody.AddSuccessor(headerBlock);
+            }
+        }
+        else
+        {
+            bodyBlock.Terminator = BlockTerminator.Branch(headerBlock);
+            bodyBlock.AddSuccessor(headerBlock);
+        }
 
         return exitBlock;
+    }
+
+    private static bool ContainsTryOperator(Expression expr)
+    {
+        switch (expr)
+        {
+            case UnaryExpression u:
+                if (u.Position == UnaryPosition.Postfix && u.OperatorToken.Kind == TokenKind.QuestionMark)
+                    return true;
+                return ContainsTryOperator(u.Operand);
+
+            case BinaryExpression b:
+                return ContainsTryOperator(b.LeftExpression) || ContainsTryOperator(b.RightExpression);
+
+            case CallExpression c:
+                if (ContainsTryOperator(c.Callee)) return true;
+                foreach (var arg in c.Arguments)
+                    if (ContainsTryOperator(arg)) return true;
+                return false;
+
+            case ParenthesizedExpression p:
+                return ContainsTryOperator(p.Expression);
+
+            case MemberAccessExpression m:
+                return ContainsTryOperator(m.Expression);
+
+            default:
+                return false;
+        }
+    }
+
+    private void VerifyReturnsAndDivergence(
+        string name,
+        TypeRef returnType,
+        ControlFlowGraph cfg,
+        TextSpan span,
+        SourceText? source)
+    {
+        if (returnType.IsError || returnType.IsUnresolved || returnType.IsInferred)
+            return;
+
+        bool exitReachable = cfg.Exit.IsReachable;
+
+        // 1. If Exit block is NOT reachable, all reachable paths in the function diverge
+        if (!exitReachable)
+        {
+            if (!returnType.IsNever)
+            {
+                context.Diagnostics.ReportFunctionMustReturnNever(
+                    span,
+                    name,
+                    returnType.ToDisplayString(context),
+                    source);
+            }
+            return;
+        }
+
+        // 2. If the function's declared return type IS Never (!), but Exit IS reachable
+        if (returnType.IsNever)
+        {
+            var unitQualified = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var uH))
+                ? ResolutionContext.GetQualifiedSymbolName(uH, context)
+                : KnownIntrinsics.Unit;
+            var unitLabel = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out uH))
+                ? ResolutionContext.GetLabelSymbolName(uH, context, null)
+                : KnownIntrinsics.Unit;
+            context.Diagnostics.ReportReturnTypeMismatch(
+                span,
+                unitQualified,
+                "!",
+                exprLabel: unitLabel,
+                returnLabel: "!",
+                source: source);
+            return;
+        }
+
+        // 3. If declared return type is Unit, fallthrough is valid implicit return
+        if (IsUnitType(returnType))
+        {
+            return;
+        }
+
+        // 4. Non-Unit, non-Never return type:
+        // Report MH2017 if any reachable block falls through to Exit without returning a value
+        bool hasMissingReturn = false;
+        foreach (var block in cfg.Blocks)
+        {
+            if (block.IsReachable &&
+                block.Terminator.Kind == BlockTerminatorKind.Fallthrough &&
+                (block.Terminator.Target == cfg.Exit || block.Successors.Contains(cfg.Exit)))
+            {
+                hasMissingReturn = true;
+                break;
+            }
+        }
+
+        if (hasMissingReturn)
+        {
+            context.Diagnostics.ReportMissingReturn(span, name, source);
+        }
+    }
+
+    private bool IsUnitType(TypeRef t)
+    {
+        if (t.Handle is { } h)
+        {
+            var unwrapped = context.UnwrapAlias(h);
+            if (hVoid is not null && unwrapped == hVoid.Value) return true;
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
+                return true;
+
+            var sym = context.GetSymbol(unwrapped);
+            if (sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Unit, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("void", StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>

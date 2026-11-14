@@ -27,7 +27,13 @@ internal sealed class FixedArraySemanticType : SemanticType
         if (!ElementType.Equals(array.ElementType))
             return false;
 
-        return Size == array.Size || Nullable.Equals(Size.GetSpan(), array.Size.GetSpan());
+        if (Size == array.Size || Nullable.Equals(Size.GetSpan(), array.Size.GetSpan()))
+            return true;
+
+        if (Size is LiteralExpression litA && array.Size is LiteralExpression litB)
+            return litA.Literal.Value == litB.Literal.Value;
+
+        return false;
     }
 
     public override int GetHashCode() => HashCode.Combine(Kind, ElementType);

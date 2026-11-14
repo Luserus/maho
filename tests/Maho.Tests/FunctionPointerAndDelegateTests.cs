@@ -305,4 +305,99 @@ public sealed class FunctionPointerAndDelegateTests
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Callable"));
     }
+
+    [Fact]
+    public void FunctionType_RightAssociativeParsing_NestedReturnTypes()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            func() -> func() -> func() -> int32 fn;
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        var topFn = Assert.IsType<TopLevelVariableDeclaration>(root.Members[0]);
+        var level1 = Assert.IsType<FunctionTypeSyntax>(topFn.Declaration.Type);
+        Assert.Empty(level1.ParameterTypes);
+
+        var level2 = Assert.IsType<FunctionTypeSyntax>(level1.ReturnType);
+        Assert.Empty(level2.ParameterTypes);
+
+        var level3 = Assert.IsType<FunctionTypeSyntax>(level2.ReturnType);
+        Assert.Empty(level3.ParameterTypes);
+
+        var baseType = Assert.IsType<SimpleType>(level3.ReturnType);
+        Assert.Equal("int32", baseType.Name.Value);
+    }
+
+    [Fact]
+    public void Resolve_RightAssociativeFunctionType_ChainedInvocations()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{StdPrelude}}
+
+            public class Host
+            {
+                public func Some() -> func() -> func() -> int32
+                {
+                    return () => () => 42;
+                }
+
+                public func Main() -> int32
+                {
+                    var x = Some;
+                    var f1 = x();
+                    var f2 = f1();
+                    return f2();
+                }
+            }
+            """);
+
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void Resolve_RightAssociativeFunctionType_DirectChainedCall()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{StdPrelude}}
+
+            public class Host
+            {
+                public func Some() -> func() -> func() -> int32
+                {
+                    return () => () => 42;
+                }
+
+                public func Main() -> int32
+                {
+                    return Some()()();
+                }
+            }
+            """);
+
+        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void Resolve_RightAssociativeFunctionType_OvercallingReportsMH0611()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{StdPrelude}}
+
+            public class Host
+            {
+                public func Some() -> func() -> func() -> int32
+                {
+                    return () => () => 42;
+                }
+
+                public func Main() -> void
+                {
+                    Some()()()();
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0611");
+    }
 }

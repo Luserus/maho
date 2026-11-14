@@ -1,8 +1,12 @@
-struct Int32;
-
-Int32 Main()
+struct Test
 {
-    // Intended error for testing
-    UnknownType (a, b, c) = (1, 2, 3);
-    return 0;
+
+}
+
+func Main()
+{
+    Test t;
+    Test t2;
+
+    1 - 2; // should report binary operator not found error with fully qualified main text and concise label
 }

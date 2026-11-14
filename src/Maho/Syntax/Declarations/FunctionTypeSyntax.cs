@@ -10,7 +10,7 @@ internal sealed class FunctionTypeSyntax : TypeSyntax
     public Token OpenParen { get; }
     public SeparatedSyntaxList<TypeSyntax> ParameterTypes { get; }
     public Token CloseParen { get; }
-    public Token ArrowToken { get; }
+    public Token? ArrowToken { get; }
     public TypeSyntax ReturnType { get; }
 
     public FunctionTypeSyntax(
@@ -18,7 +18,7 @@ internal sealed class FunctionTypeSyntax : TypeSyntax
         Token openParen,
         SeparatedSyntaxList<TypeSyntax> parameterTypes,
         Token closeParen,
-        Token arrowToken,
+        Token? arrowToken,
         TypeSyntax returnType)
     {
         FuncKeyword = funcKeyword;

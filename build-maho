@@ -384,6 +384,11 @@ else
     echo "  Layout:         $BIN_DIR (maho/ and miryo/)"
 fi
 
+# Stop any running compiler server daemons so subsequent commands immediately use the newly built binaries
+if [ -x "$BIN_DIR/miryo/miryo" ]; then
+    "$BIN_DIR/miryo/miryo" compiler-server shutdown >/dev/null 2>&1 || true
+fi
+
 if [ "$install_to_home" = true ]; then
     target_home="${MAHO_HOME:-$HOME/.maho}"
     echo ""

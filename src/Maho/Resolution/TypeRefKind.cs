@@ -34,5 +34,7 @@ internal enum TypeRefKind : byte
     /// <summary>Delegate type (<c>delegate(params) -&gt; ReturnType</c>).</summary>
     Delegate,
     /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
-    Literal
+    Literal,
+    /// <summary>Never / bottom type (<c>!</c>).</summary>
+    Never
 }

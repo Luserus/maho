@@ -14,5 +14,6 @@ internal enum SemanticTypeKind : byte
     Untagged,
     Function,
     Delegate,
-    Literal
+    Literal,
+    Generic
 }

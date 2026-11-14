@@ -422,13 +422,20 @@ internal sealed partial class Parser
             return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
         var closeParen = LookaheadConsume();
 
-        if (LookaheadGetCombinedOperatorData().Kind is not TokenKind.MinusGreaterThan)
-            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
-        var arrowToken = LookaheadConsumeOperator();
-
-        var (returnType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
-        if (!retSuccess)
-            return (new SimpleType(funcKeyword), false, retCtx);
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (LookaheadGetCombinedOperatorData().Kind is TokenKind.MinusGreaterThan)
+        {
+            arrowToken = LookaheadConsumeOperator();
+            var (retType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+            if (!retSuccess)
+                return (new SimpleType(funcKeyword), false, retCtx);
+            returnType = retType;
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
+        }
 
         return (new FunctionTypeSyntax(funcKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
     }
@@ -458,13 +465,20 @@ internal sealed partial class Parser
             return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
         var closeParen = LookaheadConsume();
 
-        if (LookaheadGetCombinedOperatorData().Kind is not TokenKind.MinusGreaterThan)
-            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
-        var arrowToken = LookaheadConsumeOperator();
-
-        var (returnType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
-        if (!retSuccess)
-            return (new SimpleType(delKeyword), false, retCtx);
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (LookaheadGetCombinedOperatorData().Kind is TokenKind.MinusGreaterThan)
+        {
+            arrowToken = LookaheadConsumeOperator();
+            var (retType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+            if (!retSuccess)
+                return (new SimpleType(delKeyword), false, retCtx);
+            returnType = retType;
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
+        }
 
         return (new DelegateTypeSyntax(delKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
     }
@@ -524,6 +538,9 @@ internal sealed partial class Parser
     {
         if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
             return LookaheadParseTupleType();
+
+        if (LookaheadCurrentToken.Kind is TokenKind.ExclamationMark)
+            return (new NeverTypeSyntax(LookaheadConsume()), true);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);

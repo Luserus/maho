@@ -450,7 +450,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses the next member declaration inside a type body. </summary>
-    private Member ParseMember()
+    private Member ParseMember(IReadOnlyList<AttributeListSyntax>? initialAttributes = null)
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
@@ -470,7 +470,19 @@ internal sealed partial class Parser
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseMemberBlockDeclaration(null);
 
-        IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
+        IReadOnlyList<AttributeListSyntax> attributes;
+        if (initialAttributes is not null && initialAttributes.Count > 0)
+        {
+            var parsed = ParseAttributeLists();
+            if (parsed.Count > 0)
+                attributes = [.. initialAttributes, .. parsed];
+            else
+                attributes = initialAttributes;
+        }
+        else
+        {
+            attributes = ParseAttributeLists();
+        }
         var modifiers = ParseModifiers();
 
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)

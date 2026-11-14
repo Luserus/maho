@@ -53,6 +53,7 @@ internal static class KnownIntrinsics
     public const string FixedArray = "FixedArray";
     public const string Array = "Array";
     public const string Span = "Span";
+    public const string Optional = "Optional";
 
     // Operator Full Names
     public const string OpAddition = "Addition";
@@ -114,6 +115,8 @@ internal static class KnownIntrinsics
     public const string OpCopy = "Copy";
     public const string OpMove = "Move";
     public const string OpCallable = "Callable";
+    public const string OpUnwrap = "Unwrap";
+    public const string OpTry = "Try";
 
     public static readonly HashSet<string> AllKnownTypes =
     [
@@ -123,8 +126,27 @@ internal static class KnownIntrinsics
         Bool, Char, Str, Unit,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
         Pointer, Reference,
-        FixedArray, Array, Span
+        FixedArray, Array, Span, Optional
     ];
+
+    public static readonly HashSet<string> IntegerTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Int8, Int16, Int32, Int64, Int128, NInt,
+        UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
+        "int", "int32", "int64", "int8", "int16", "int128",
+        "uint8", "uint16", "uint32", "uint64", "uint128", "nuint", "nint",
+        "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128"
+    };
+
+    public static readonly HashSet<string> FloatTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Float16, Float32, Float64, Float128,
+        "float", "float16", "float32", "float64", "float128",
+        "f16", "f32", "f64", "f128", "double"
+    };
+
+    public static bool IsIntegerType(string name) => IntegerTypes.Contains(name);
+    public static bool IsFloatType(string name) => FloatTypes.Contains(name);
 
     public static readonly HashSet<string> ZeroInstanceFieldPrimitives =
     [
@@ -154,7 +176,8 @@ internal static class KnownIntrinsics
         OpLeftShiftAssignment, OpRightShiftAssignment,
         OpRotateLeftAssignment, OpRotateRightAssignment,
         OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast,
-        OpNew, OpPut, OpCopy, OpMove, OpCallable
+        OpNew, OpPut, OpCopy, OpMove, OpCallable,
+        OpUnwrap, OpTry
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -216,6 +239,8 @@ internal static class KnownIntrinsics
             case OpCopy: kind = OperatorKind.Copy; return true;
             case OpMove: kind = OperatorKind.Move; return true;
             case OpCallable: kind = OperatorKind.Callable; return true;
+            case OpUnwrap: kind = OperatorKind.Unwrap; return true;
+            case OpTry: kind = OperatorKind.Try; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -279,6 +304,8 @@ internal static class KnownIntrinsics
         OperatorKind.Copy => OpCopy,
         OperatorKind.Move => OpMove,
         OperatorKind.Callable => OpCallable,
+        OperatorKind.Unwrap => OpUnwrap,
+        OperatorKind.Try => OpTry,
         _ => string.Empty
     };
 }

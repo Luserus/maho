@@ -30,7 +30,7 @@ public sealed class FunctionSyntaxTests
     }
 
     [Fact]
-    public void FunctionDeclaration_OmittedReturnType_SynthesizesVoid()
+    public void FunctionDeclaration_OmittedReturnType_SynthesizesUnit()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public func DoWork()
@@ -47,7 +47,7 @@ public sealed class FunctionSyntaxTests
         Assert.Null(sig.ArrowToken);
         Assert.NotNull(sig.ReturnType);
         var retType = Assert.IsType<SimpleType>(sig.ReturnType);
-        Assert.Equal("void", retType.Name.Value);
+        Assert.Equal("Unit", retType.Name.Value);
         Assert.IsType<FunctionBlockBody>(funcDecl.Function.Body);
     }
 

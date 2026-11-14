@@ -274,6 +274,7 @@ internal sealed partial class Parser
         var openBrace = Consume();
         var variants = new List<EnumVariant>();
         var members = new List<Member>();
+        IReadOnlyList<AttributeListSyntax>? pendingMemberAttributes = null;
 
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
@@ -281,8 +282,11 @@ internal sealed partial class Parser
                 break;
 
             var variantAttrs = ParseAttributeLists();
-            if (CurrentToken.Kind is not TokenKind.Identifier)
+            if (IsCurrentTokenModifier || LooksLikeEnumMemberDeclaration() || CurrentToken.Kind is not TokenKind.Identifier)
+            {
+                pendingMemberAttributes = variantAttrs;
                 break;
+            }
 
             var variantName = ParseNamedSyntax();
             EnumVariant variant;
@@ -347,7 +351,8 @@ internal sealed partial class Parser
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
             var start = current;
-            var member = ParseMember();
+            var member = ParseMember(pendingMemberAttributes);
+            pendingMemberAttributes = null;
             members.Add(member);
             RecoverMemberIfStalled(start);
         }
@@ -359,6 +364,12 @@ internal sealed partial class Parser
     private bool LooksLikeEnumMemberDeclaration()
     {
         if (IsCurrentTokenModifier)
+            return true;
+
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Func or MatchingKeywordKind.Var or
+            MatchingKeywordKind.Const or MatchingKeywordKind.Struct or MatchingKeywordKind.Enum or MatchingKeywordKind.Interface or
+            MatchingKeywordKind.Type or MatchingKeywordKind.Using or MatchingKeywordKind.Macro or MatchingKeywordKind.Literal or
+            MatchingKeywordKind.Attribute)
             return true;
 
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Identifier)
@@ -724,7 +735,7 @@ internal sealed partial class Parser
         }
         else
         {
-            returnType = new SimpleType(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.Identifier, Array.Empty<SyntaxTrivia>(), Array.Empty<SyntaxTrivia>(), MatchingKeywordKind.None, "void"));
+            returnType = new SimpleType(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
         }
 
         List<TypeConstraintClause> constraints = [];
@@ -839,8 +850,17 @@ internal sealed partial class Parser
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'func' in function pointer type");
         var parameterTypes = ParseFunctionTypeParameterList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the function pointer parameter list");
-        var arrowToken = ExpectMinusGreaterThan("before return type in function pointer type");
-        var returnType = ParseTypeSyntax();
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (IsMinusGreaterThan())
+        {
+            arrowToken = ConsumeOperator();
+            returnType = ParseTypeSyntax();
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.Identifier, Array.Empty<SyntaxTrivia>(), Array.Empty<SyntaxTrivia>(), MatchingKeywordKind.None, "Unit"));
+        }
         return new FunctionTypeSyntax(funcKeyword, openParen, parameterTypes, closeParen, arrowToken, returnType);
     }
 
@@ -850,8 +870,17 @@ internal sealed partial class Parser
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'delegate' in delegate type");
         var parameterTypes = ParseFunctionTypeParameterList();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the delegate parameter list");
-        var arrowToken = ExpectMinusGreaterThan("before return type in delegate type");
-        var returnType = ParseTypeSyntax();
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (IsMinusGreaterThan())
+        {
+            arrowToken = ConsumeOperator();
+            returnType = ParseTypeSyntax();
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.Identifier, Array.Empty<SyntaxTrivia>(), Array.Empty<SyntaxTrivia>(), MatchingKeywordKind.None, "Unit"));
+        }
         return new DelegateTypeSyntax(delegateKeyword, openParen, parameterTypes, closeParen, arrowToken, returnType);
     }
 
@@ -911,6 +940,9 @@ internal sealed partial class Parser
     {
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseParenthesizedType();
+
+        if (CurrentToken.Kind is TokenKind.ExclamationMark)
+            return new NeverTypeSyntax(Consume());
 
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {

@@ -112,7 +112,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -143,7 +143,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -179,7 +179,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -367,7 +367,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -399,7 +399,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -547,7 +547,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -574,7 +574,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -678,7 +678,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -711,7 +711,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -747,7 +747,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -890,7 +890,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -1021,7 +1021,7 @@ public sealed class MacroTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>());
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var method = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());

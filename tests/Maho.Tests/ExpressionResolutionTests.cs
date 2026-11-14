@@ -154,7 +154,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Bool, out var hBool));
@@ -188,7 +188,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Bool, out var hBool));
@@ -229,7 +229,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -305,7 +305,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -622,7 +622,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -669,7 +669,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -765,7 +765,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -791,7 +791,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -842,7 +842,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -899,7 +899,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -933,7 +933,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -1000,7 +1000,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var hInt64));
 
@@ -1049,7 +1049,7 @@ public sealed class ExpressionResolutionTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -1068,5 +1068,82 @@ public sealed class ExpressionResolutionTests
         Assert.True(context.ResolvedTree.TryGetReference(binExpr, out var opHandle));
         var opSym = Assert.IsAssignableFrom<MethodSymbol>(context.GetSymbol(opHandle));
         Assert.Equal("UInt64.Add(UInt64, Int32)", opSym.IntrinsicSignature);
+    }
+
+    [Fact]
+    public void Assignment_ConcreteToLiteralVariable_CollapsesLocalVariable()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public func Some() -> int32
+                {
+                    return 10;
+                }
+
+                public func Main() -> int32
+                {
+                    var x = 100;
+                    x = Some();
+                    return x;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+        var context = compilation.Context!;
+        Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
+
+        var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
+            .First(t => t.Type.Name.ToString() == "Host");
+        var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
+        var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Main");
+        var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
+        var scope = context.GetSyntaxScope(funcBody, context.Scopes[0]);
+
+        var symX = Assert.IsType<LocalVariableSymbol>(scope[new SymbolName(new SymbolPart("x"))][0]);
+        Assert.Equal(hInt32, symX.Type.Handle);
+    }
+
+    [Fact]
+    public void Assignment_LiteralToLiteralVariable_Succeeds()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public func Main() -> int32
+                {
+                    var x = 100;
+                    x = 200;
+                    return x;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void Assignment_IncompatibleToLiteralVariable_ReportsMH2003()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public class Host
+            {
+                public func Main() -> void
+                {
+                    var x = 100;
+                    x = true;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2003");
     }
 }

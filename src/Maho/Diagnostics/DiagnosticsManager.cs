@@ -78,19 +78,26 @@ internal sealed class DiagnosticsManager
         string lhsTypeName,
         TextSpan rhsSpan,
         string rhsTypeName,
+        string? lhsLabel = null,
+        string? rhsLabel = null,
+        string? opName = null,
         string? note = null,
         string? help = null,
         SourceText? source = null)
     {
+        var lhsDisplay = lhsLabel ?? lhsTypeName;
+        var rhsDisplay = rhsLabel ?? rhsTypeName;
         var builder = BuildError("MH2001", $"cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'", opSpan, source)
             .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
-            .WithSecondaryLabel(lhsSpan, $"this expression has type '{lhsTypeName}'")
-            .WithSecondaryLabel(rhsSpan, $"this expression has type '{rhsTypeName}'");
+            .WithSecondaryLabel(lhsSpan, lhsDisplay)
+            .WithSecondaryLabel(rhsSpan, rhsDisplay);
 
         if (note is not null)
             builder.WithNote(note);
         if (help is not null)
             builder.WithHelp(help);
+        else if (!string.IsNullOrEmpty(opName))
+            builder.WithHelp($"implement an operator interface marked with [OperatorFunction(\"{opName}\")] to support '{op}' for '{lhsTypeName}' and '{rhsTypeName}'");
 
         builder.Report();
     }
@@ -103,33 +110,57 @@ internal sealed class DiagnosticsManager
         string op,
         TextSpan operandSpan,
         string operandTypeName,
+        string? operandLabel = null,
+        string? opName = null,
         string? note = null,
         string? help = null,
         SourceText? source = null)
     {
+        var operandDisplay = operandLabel ?? operandTypeName;
         var builder = BuildError("MH2002", $"cannot apply unary operator '{op}' to operand of type '{operandTypeName}'", opSpan, source)
             .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
-            .WithSecondaryLabel(operandSpan, $"this expression has type '{operandTypeName}'");
+            .WithSecondaryLabel(operandSpan, operandDisplay);
 
         if (note is not null)
             builder.WithNote(note);
         if (help is not null)
             builder.WithHelp(help);
+        else if (!string.IsNullOrEmpty(opName))
+            builder.WithHelp($"implement an operator interface marked with [OperatorFunction(\"{opName}\")] to support '{op}' for '{operandTypeName}'");
 
         builder.Report();
     }
 
     /// <summary> Reports an assignment type mismatch. </summary>
-    public void ReportAssignmentTypeMismatch(TextSpan span, string rhsTypeName, string lhsTypeName, SourceText? source = null) =>
+    public void ReportAssignmentTypeMismatch(
+        TextSpan span,
+        string rhsTypeName,
+        string lhsTypeName,
+        string? rhsLabel = null,
+        string? lhsLabel = null,
+        SourceText? source = null)
+    {
+        var rhsDisplay = rhsLabel ?? rhsTypeName;
         BuildError("MH2003", $"cannot assign expression of type '{rhsTypeName}' to variable of type '{lhsTypeName}'", span, source)
-            .WithPrimaryLabel(span, $"expression has type '{rhsTypeName}', but target has type '{lhsTypeName}'", source)
+            .WithPrimaryLabel(span, rhsDisplay, source)
             .Report();
+    }
 
     /// <summary> Reports a function/method argument type mismatch. </summary>
-    public void ReportArgumentTypeMismatch(TextSpan span, int index, string argTypeName, string paramTypeName, SourceText? source = null) =>
+    public void ReportArgumentTypeMismatch(
+        TextSpan span,
+        int index,
+        string argTypeName,
+        string paramTypeName,
+        string? argLabel = null,
+        string? paramLabel = null,
+        SourceText? source = null)
+    {
+        var argDisplay = argLabel ?? argTypeName;
         BuildError("MH2004", $"argument {index}: cannot convert from '{argTypeName}' to '{paramTypeName}'", span, source)
-            .WithPrimaryLabel(span, $"has type '{argTypeName}', but expected '{paramTypeName}'", source)
+            .WithPrimaryLabel(span, argDisplay, source)
             .Report();
+    }
 
     /// <summary> Reports a call argument count mismatch. </summary>
     public void ReportArgumentCountMismatch(TextSpan span, int expected, int actual, SourceText? source = null) =>
@@ -138,16 +169,32 @@ internal sealed class DiagnosticsManager
             .Report();
 
     /// <summary> Reports a return type mismatch. </summary>
-    public void ReportReturnTypeMismatch(TextSpan span, string exprTypeName, string returnTypeName, SourceText? source = null) =>
+    public void ReportReturnTypeMismatch(
+        TextSpan span,
+        string exprTypeName,
+        string returnTypeName,
+        string? exprLabel = null,
+        string? returnLabel = null,
+        SourceText? source = null)
+    {
+        var exprDisplay = exprLabel ?? exprTypeName;
         BuildError("MH2006", $"cannot convert return expression of type '{exprTypeName}' to return type '{returnTypeName}'", span, source)
-            .WithPrimaryLabel(span, $"expression has type '{exprTypeName}', but function returns '{returnTypeName}'", source)
+            .WithPrimaryLabel(span, exprDisplay, source)
             .Report();
+    }
 
     /// <summary> Reports a condition expression type mismatch. </summary>
-    public void ReportConditionTypeMismatch(TextSpan span, string actualTypeName, SourceText? source = null) =>
+    public void ReportConditionTypeMismatch(
+        TextSpan span,
+        string actualTypeName,
+        string? actualLabel = null,
+        SourceText? source = null)
+    {
+        var actualDisplay = actualLabel ?? actualTypeName;
         BuildError("MH2007", $"condition expression must have type 'Bool', but found '{actualTypeName}'", span, source)
-            .WithPrimaryLabel(span, $"condition has type '{actualTypeName}' instead of 'Bool'", source)
+            .WithPrimaryLabel(span, actualDisplay, source)
             .Report();
+    }
 
     /// <summary> Reports an uninferrable variable type. </summary>
     public void ReportCannotInferType(TextSpan span, string name, SourceText? source = null) =>
@@ -608,11 +655,21 @@ internal sealed class DiagnosticsManager
             .Report();
 
     /// <summary> Reports incompatible branch types in conditional expression. </summary>
-    public void ReportAmbiguousConditionalBranches(TextSpan span, string thenType, string elseType, SourceText? source = null) =>
+    public void ReportAmbiguousConditionalBranches(
+        TextSpan span,
+        string thenType,
+        string elseType,
+        string? thenLabel = null,
+        string? elseLabel = null,
+        SourceText? source = null)
+    {
+        var thenDisplay = thenLabel ?? thenType;
+        var elseDisplay = elseLabel ?? elseType;
         BuildError("MH2011", $"conditional branches evaluate to different types '{thenType}' and '{elseType}'; explicit cast to a common base type is required", span, source)
-            .WithPrimaryLabel(span, $"branches evaluate to '{thenType}' and '{elseType}'", source)
+            .WithPrimaryLabel(span, $"branches evaluate to '{thenDisplay}' and '{elseDisplay}'", source)
             .WithHelp("cast branches explicitly to a common base type or interface")
             .Report();
+    }
 
     /// <summary> Reports conflicting return types in inferred function. </summary>
     public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null) =>
@@ -621,24 +678,47 @@ internal sealed class DiagnosticsManager
             .Report();
 
     /// <summary> Reports ambiguous literal conversion when multiple literal overloads exist. </summary>
-    public void ReportAmbiguousLiteralConversion(TextSpan span, string typeName, string overloads, SourceText? source = null) =>
+    public void ReportAmbiguousLiteralConversion(
+        TextSpan span,
+        string typeName,
+        string overloads,
+        string? labelTypeName = null,
+        SourceText? source = null)
+    {
+        var labelType = labelTypeName ?? typeName;
         BuildError("MH2013", $"ambiguous literal conversion for type '{typeName}'; multiple literal overloads exist ({overloads}); explicit suffix required", span, source)
             .WithPrimaryLabel(span, $"ambiguous literal overloads: {overloads}", source)
             .WithHelp("provide an explicit literal suffix to select the intended overload")
             .Report();
+    }
 
     /// <summary> Reports that a member was not found on a type. </summary>
-    public void ReportMemberNotFound(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+    public void ReportMemberNotFound(
+        TextSpan span,
+        string memberName,
+        string typeName,
+        string? labelTypeName = null,
+        SourceText? source = null)
+    {
+        var labelType = labelTypeName ?? typeName;
         BuildError("MH2014", $"type '{typeName}' does not contain a definition for '{memberName}'", span, source)
-            .WithPrimaryLabel(span, $"'{memberName}' not found on '{typeName}'", source)
+            .WithPrimaryLabel(span, $"'{memberName}' not found on '{labelType}'", source)
             .Report();
+    }
 
     /// <summary> Reports that an expression is not callable or has no matching Call operator overload. </summary>
-    public void ReportTypeNotCallable(TextSpan span, string typeName, SourceText? source = null) =>
+    public void ReportTypeNotCallable(
+        TextSpan span,
+        string typeName,
+        string? labelTypeName = null,
+        SourceText? source = null)
+    {
+        var labelType = labelTypeName ?? typeName;
         BuildError("MH0611", $"type '{typeName}' is not callable or has no matching overload for 'Call'", span, source)
-            .WithPrimaryLabel(span, $"'{typeName}' is not callable", source)
+            .WithPrimaryLabel(span, $"'{labelType}' is not callable", source)
             .WithHelp($"implement 'Callable<TReturn, ...>' to make instances of '{typeName}' invocable")
             .Report();
+    }
 
     /// <summary> Reports an attempt to match on an untagged sum type without discriminant. </summary>
     public void ReportUntaggedMatchDisallowed(TextSpan span, string sumTypeName, SourceText? source = null) =>
@@ -685,5 +765,19 @@ internal sealed class DiagnosticsManager
         BuildError("MH2016", "lambda block body must end with an explicit return statement; trailing expressions are not permitted", span, source)
             .WithPrimaryLabel(span, "trailing expression not permitted in lambda block body", source)
             .WithHelp("add an explicit 'return' statement")
+            .Report();
+
+    /// <summary> Reports that not all reachable code paths return a value in a non-Unit function. </summary>
+    public void ReportMissingReturn(TextSpan span, string functionName, SourceText? source = null) =>
+        BuildError("MH2017", $"not all code paths return a value in function '{functionName}'", span, source)
+            .WithPrimaryLabel(span, $"missing return statement on at least one reachable code path in '{functionName}'", source)
+            .WithHelp("ensure all reachable code paths end with a 'return' statement or return type '!'")
+            .Report();
+
+    /// <summary> Reports that all code paths in a function diverge, so it must be declared with return type '!'. </summary>
+    public void ReportFunctionMustReturnNever(TextSpan span, string functionName, string declaredReturnType, SourceText? source = null) =>
+        BuildError("MH2018", $"function '{functionName}' never returns and must be declared with return type '!'", span, source)
+            .WithPrimaryLabel(span, $"function declared with return type '{declaredReturnType}', but never returns", source)
+            .WithHelp($"all execution paths diverge; declare the return type as '!' (e.g. func {functionName}(...) -> !)")
             .Report();
 }

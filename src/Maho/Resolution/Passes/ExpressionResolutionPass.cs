@@ -245,9 +245,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     {
         if (t.Handle is { } h)
         {
-            if (h == hVoid)
+            var unwrapped = context.UnwrapAlias(h);
+            if (hVoid is not null && unwrapped == hVoid.Value)
                 return true;
-            if (context.GetTypeSymbol(h) is { } typeSym && typeSym.Name.Text.Equals("void", StringComparison.OrdinalIgnoreCase))
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
+                return true;
+
+            var sym = context.GetSymbol(unwrapped);
+            if (sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Unit, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("void", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
         return false;
@@ -366,9 +371,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     {
                         context.Diagnostics.ReportReturnTypeMismatch(
                             exprStmt.Expression.GetSpan() ?? default,
-                            t.ToDisplayString(context),
-                            expectedReturnType.ToDisplayString(context),
-                            exprStmt.GetSource());
+                            t.ToQualifiedString(context),
+                            expectedReturnType.ToQualifiedString(context),
+                            exprLabel: t.ToLabelString(context, scope),
+                            returnLabel: expectedReturnType.ToLabelString(context, scope),
+                            source: exprStmt.GetSource());
                     }
                 }
                 break;
@@ -406,6 +413,18 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             if (lambdaReturnTypes.Count > 0)
                 lambdaReturnTypes.Peek().Add(returnedType);
 
+            if (expectedReturnType.IsNever)
+            {
+                context.Diagnostics.ReportReturnTypeMismatch(
+                    span,
+                    returnedType.ToQualifiedString(context),
+                    "!",
+                    exprLabel: returnedType.ToLabelString(context, scope),
+                    returnLabel: "!",
+                    source: returnStmt.GetSource());
+                return;
+            }
+
             if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
             {
                 if (returnedType.IsLiteral)
@@ -416,9 +435,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     {
                         context.Diagnostics.ReportReturnTypeMismatch(
                             span,
-                            returnedType.ToDisplayString(context),
-                            expectedReturnType.ToDisplayString(context),
-                            returnStmt.GetSource());
+                            returnedType.ToQualifiedString(context),
+                            expectedReturnType.ToQualifiedString(context),
+                            exprLabel: returnedType.ToLabelString(context, scope),
+                            returnLabel: expectedReturnType.ToLabelString(context, scope),
+                            source: returnStmt.GetSource());
                     }
                     returnedType = collapsed;
                 }
@@ -427,9 +448,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 {
                     context.Diagnostics.ReportReturnTypeMismatch(
                         span,
-                        returnedType.ToDisplayString(context),
-                        expectedReturnType.ToDisplayString(context),
-                        returnStmt.GetSource());
+                        returnedType.ToQualifiedString(context),
+                        expectedReturnType.ToQualifiedString(context),
+                        exprLabel: returnedType.ToLabelString(context, scope),
+                        returnLabel: expectedReturnType.ToLabelString(context, scope),
+                        source: returnStmt.GetSource());
                 }
             }
         }
@@ -441,15 +464,36 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             if (lambdaReturnTypes.Count > 0)
                 lambdaReturnTypes.Peek().Add(voidType);
 
+            var unitQualified = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var uH))
+                ? ResolutionContext.GetQualifiedSymbolName(uH, context)
+                : KnownIntrinsics.Unit;
+            var unitLabel = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out uH))
+                ? ResolutionContext.GetLabelSymbolName(uH, context, scope)
+                : KnownIntrinsics.Unit;
+
+            if (expectedReturnType.IsNever)
+            {
+                context.Diagnostics.ReportReturnTypeMismatch(
+                    span,
+                    unitQualified,
+                    "!",
+                    exprLabel: unitLabel,
+                    returnLabel: "!",
+                    source: returnStmt.GetSource());
+                return;
+            }
+
             if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError)
             {
                 if (!IsVoidType(expectedReturnType))
                 {
                     context.Diagnostics.ReportReturnTypeMismatch(
                         span,
-                        "void",
-                        expectedReturnType.ToDisplayString(context),
-                        returnStmt.GetSource());
+                        unitQualified,
+                        expectedReturnType.ToQualifiedString(context),
+                        exprLabel: unitLabel,
+                        returnLabel: expectedReturnType.ToLabelString(context, scope),
+                        source: returnStmt.GetSource());
                 }
             }
         }
@@ -573,9 +617,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         {
                             context.Diagnostics.ReportAssignmentTypeMismatch(
                                 initExpr.GetSpan() ?? default,
-                                initType.ToDisplayString(context),
-                                st.ToDisplayString(context),
-                                declaration.GetSource());
+                                initType.ToQualifiedString(context),
+                                st.ToQualifiedString(context),
+                                rhsLabel: initType.ToLabelString(context, scope),
+                                lhsLabel: st.ToLabelString(context, scope),
+                                source: declaration.GetSource());
                         }
                     }
                     else
@@ -586,9 +632,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         {
                             context.Diagnostics.ReportAssignmentTypeMismatch(
                                 initExpr.GetSpan() ?? default,
-                                initType.ToDisplayString(context),
-                                st.ToDisplayString(context),
-                                declaration.GetSource());
+                                initType.ToQualifiedString(context),
+                                st.ToQualifiedString(context),
+                                rhsLabel: initType.ToLabelString(context, scope),
+                                lhsLabel: st.ToLabelString(context, scope),
+                                source: declaration.GetSource());
                         }
                     }
                 }
@@ -1049,13 +1097,17 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 5. No compatible operator overload found: report MH2001
         if (!lhs.IsUnresolved && !lhs.IsError && !lhs.IsInferred && !rhs.IsUnresolved && !rhs.IsError && !rhs.IsInferred)
         {
+            var opName = KnownIntrinsics.GetOperatorName(opKind);
             context.Diagnostics.ReportTypeMismatch(
                 binary.OperatorToken.Span,
                 binary.OperatorToken.Value,
                 binary.LeftExpression.GetSpan() ?? default,
-                lhs.ToDisplayString(context),
+                lhs.ToQualifiedString(context),
                 binary.RightExpression.GetSpan() ?? default,
-                rhs.ToDisplayString(context),
+                rhs.ToQualifiedString(context),
+                lhsLabel: lhs.ToLabelString(context, scope),
+                rhsLabel: rhs.ToLabelString(context, scope),
+                opName: opName,
                 source: binary.GetSource());
         }
 
@@ -1281,17 +1333,53 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return operand;
 
         // 4. Overload lookup through DiscoveredOperators for user-defined types
-        if (TryResolveUnaryOverload(opKind, operand, unary, out var overloadResult))
+        if (opKind == OperatorKind.Try)
+        {
+            if (TryResolveUnaryOverload(opKind, operand, unary, out var tryResult))
+            {
+                if (tryResult.SpecialType is UnionSemanticType union && union.Variants.Count == 2)
+                {
+                    var returnPayloadType = union.Variants[0];
+                    var failType = union.Variants[1];
+
+                    // Check enclosing function return type
+                    var enclosingReturn = GetEnclosingFunctionReturnType(containingFunction);
+                    if (enclosingReturn is { IsError: false, IsUnresolved: false } encRet)
+                    {
+                        if (!encRet.IsAssignableFrom(failType, context) &&
+                            !TryResolveImplicitCast(failType, encRet, out _))
+                        {
+                            context.Diagnostics.ReportReturnTypeMismatch(
+                                unary.OperatorToken.Span,
+                                failType.ToQualifiedString(context),
+                                encRet.ToQualifiedString(context),
+                                exprLabel: failType.ToLabelString(context, scope),
+                                returnLabel: encRet.ToLabelString(context, scope),
+                                source: unary.GetSource());
+                        }
+                    }
+
+                    return returnPayloadType;
+                }
+                return tryResult;
+            }
+        }
+        else if (TryResolveUnaryOverload(opKind, operand, unary, out var overloadResult))
+        {
             return overloadResult;
+        }
 
         // 5. No unary overload found: report MH2002
         if (!operand.IsUnresolved && !operand.IsError && !operand.IsInferred)
         {
+            var opName = KnownIntrinsics.GetOperatorName(opKind);
             context.Diagnostics.ReportUnaryTypeMismatch(
                 unary.OperatorToken.Span,
                 unary.OperatorToken.Value,
                 unary.Operand.GetSpan() ?? default,
-                operand.ToDisplayString(context),
+                operand.ToQualifiedString(context),
+                operandLabel: operand.ToLabelString(context, scope),
+                opName: opName,
                 source: unary.GetSource());
         }
 
@@ -1308,7 +1396,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     {
         TokenKind.Minus => OperatorKind.UnaryNegation,
         TokenKind.Plus => OperatorKind.UnaryPositive,
-        TokenKind.ExclamationMark => OperatorKind.LogicalNot,
+        TokenKind.ExclamationMark => position == UnaryPosition.Prefix ? OperatorKind.LogicalNot : OperatorKind.Unwrap,
+        TokenKind.QuestionMark => position == UnaryPosition.Postfix ? OperatorKind.Try : OperatorKind.None,
         TokenKind.Tilde => OperatorKind.BitwiseNot,
         TokenKind.PlusPlus => position == UnaryPosition.Prefix ? OperatorKind.PrefixIncrement : OperatorKind.PostfixIncrement,
         TokenKind.MinusMinus => position == UnaryPosition.Prefix ? OperatorKind.PrefixDecrement : OperatorKind.PostfixDecrement,
@@ -1332,12 +1421,34 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (operand.Handle is not { } opHandle)
+        var opHandle = operand.Handle;
+        if (opHandle is null)
+        {
+            if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
+                opHandle = hOpt;
+            else if (operand.Kind == TypeRefKind.FixedArray && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
+                opHandle = hFix;
+            else if (operand.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+                opHandle = hArr;
+            else if (operand.Kind == TypeRefKind.Span && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
+                opHandle = hSpan;
+            else if (operand.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
+                opHandle = hTup;
+        }
+
+        if (opHandle is null)
             return false;
 
-        var operandTypeSym = context.GetTypeSymbol(opHandle);
+        var operandTypeSym = (Symbol?)context.GetTypeSymbol(opHandle.Value) ?? context.GetSymbol(opHandle.Value);
         if (operandTypeSym is null)
             return false;
+
+        // Build generic parameter mapping if operand is generic (e.g. Optional<T>)
+        Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+        if (operand.SpecialType is OptionalSemanticType optSem && operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
+        }
 
         var scope = GetOwnedScope(operandTypeSym);
         foreach (var candidate in candidates)
@@ -1356,7 +1467,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         if (method.Parameters.Count == 0 || (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p && p.Type.IsAssignableFrom(operand, context)))
                         {
                             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
-                            result = method.ReturnType;
+                            var rawReturn = method.ReturnType;
+                            result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
                             return true;
                         }
                     }
@@ -1384,7 +1496,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private TypeRef ResolveAssignment(AssignmentExpression assignment, Scope scope, SymbolHandle containingFunction)
     {
         var lhs = ResolveExpression(assignment.LhsExpression, scope, containingFunction);
-        if (!lhs.IsInferred && !lhs.IsUnresolved && !lhs.IsError)
+        if (!lhs.IsInferred && !lhs.IsUnresolved && !lhs.IsError && !lhs.IsLiteral)
             expectedExpressionTypes[assignment.RhsExpression] = lhs;
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
@@ -1398,7 +1510,17 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         var opToken = assignment.EqualsOperator.Kind;
         if (opToken == TokenKind.Equals)
         {
-            // 2. If RHS is an unconstrained literal, eagerly collapse it to the target LHS type
+            // 2a. If LHS is an unconstrained literal (e.g. var x = 100; x = Some();), collapse LHS to RHS type if compatible
+            if (lhs.IsLiteral && !rhs.IsLiteral && !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred)
+            {
+                if (IsLiteralCompatibleWith(lhs, rhs))
+                {
+                    var collapsed = CollapseExpression(assignment.LhsExpression, rhs, scope, containingFunction);
+                    return collapsed.IsError ? TypeRef.Error : rhs;
+                }
+            }
+
+            // 2b. If RHS is an unconstrained literal, eagerly collapse it to the target LHS type
             if (rhs.IsLiteral && !lhs.IsLiteral && !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred)
             {
                 var collapsed = CollapseExpression(assignment.RhsExpression, lhs, scope, containingFunction);
@@ -1414,15 +1536,26 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             {
                 context.Diagnostics.ReportAssignmentTypeMismatch(
                     assignment.EqualsOperator.Span,
-                    rhs.ToDisplayString(context),
-                    lhs.ToDisplayString(context),
-                    assignment.GetSource());
+                    rhs.ToQualifiedString(context),
+                    lhs.ToQualifiedString(context),
+                    rhsLabel: rhs.ToLabelString(context, scope),
+                    lhsLabel: lhs.ToLabelString(context, scope),
+                    source: assignment.GetSource());
             }
 
             return lhs;
         }
 
         // Compound assignments (+=, -=, etc.) return LHS type
+        if (lhs.IsLiteral && !rhs.IsLiteral && !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred)
+        {
+            if (IsLiteralCompatibleWith(lhs, rhs))
+            {
+                var collapsed = CollapseExpression(assignment.LhsExpression, rhs, scope, containingFunction);
+                return collapsed.IsError ? TypeRef.Error : rhs;
+            }
+        }
+
         return lhs;
     }
 
@@ -1467,6 +1600,16 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         var calleeType = ResolveExpression(call.Callee, scope, containingFunction);
+
+        if (calleeType.IsLiteral)
+        {
+            if (expectedExpressionTypes.TryGetValue(call, out var expected) && !expected.IsLiteral && !expected.IsInferred)
+            {
+                return calleeType;
+            }
+
+            calleeType = CollapseLiteralToDefault(calleeType);
+        }
 
         // Pre-propagate expected parameter types into argument expressions (for lambdas)
         if (calleeType.SpecialType is FunctionSemanticType fT)
@@ -1543,7 +1686,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 5. Non-callable type error reporting: MH0611
         if (!calleeType.IsInferred)
         {
-            context.Diagnostics.ReportTypeNotCallable(call.Callee.GetSpan() ?? default, calleeType.ToDisplayString(context), call.GetSource());
+            context.Diagnostics.ReportTypeNotCallable(call.Callee.GetSpan() ?? default, calleeType.ToQualifiedString(context), labelTypeName: calleeType.ToLabelString(context, scope), source: call.GetSource());
             return TypeRef.Error;
         }
 
@@ -1561,17 +1704,54 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private bool TryResolveCallableOperator(CallExpression call, TypeRef calleeType, List<TypeRef> argTypes, out TypeRef result)
     {
         result = TypeRef.Unresolved;
-        if (calleeType.Handle is not { } typeHandle || context.GetTypeSymbol(typeHandle) is not { } typeSym)
+        var typeHandle = calleeType.Handle;
+        if (typeHandle is null)
+        {
+            if (calleeType.Kind == TypeRefKind.FixedArray && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
+                typeHandle = hFix;
+            else if (calleeType.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+                typeHandle = hArr;
+            else if (calleeType.Kind == TypeRefKind.Span && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
+                typeHandle = hSpan;
+            else if (calleeType.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
+                typeHandle = hTup;
+            else if (calleeType.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
+                typeHandle = hOpt;
+        }
+
+        if (typeHandle is null)
+            return false;
+
+        var typeSym = (Symbol?)context.GetTypeSymbol(typeHandle.Value) ?? context.GetSymbol(typeHandle.Value);
+        if (typeSym is null)
             return false;
 
         if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out var candidates))
             return false;
+
+        // Build generic mapping if calleeType is generic (e.g. Optional<T>, FixedArray<T, N>)
+        Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+        if (calleeType.SpecialType is OptionalSemanticType optSem && typeSym is TypeSymbol ts1 && ts1.GenericParameters.Count >= 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts1.GenericParameters[0]] = optSem.ElementType };
+        }
+        else if (calleeType.SpecialType is FixedArraySemanticType fixSem && typeSym is TypeSymbol ts2 && ts2.GenericParameters.Count >= 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts2.GenericParameters[0]] = fixSem.ElementType };
+        }
 
         var typeScope = GetOwnedScope(typeSym);
         foreach (var candidate in candidates)
         {
             var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
             if (ifaceSym is null) continue;
+
+            IReadOnlyList<TypeRef> baseTypes = typeSym switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
 
             foreach (var sym in typeScope.Symbols.Values)
             {
@@ -1583,7 +1763,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
                             isCandidate = true;
                     }
-                    else if (typeSym.BaseTypes.Any(b => b.Handle == candidate.InterfaceHandle))
+                    else if (baseTypes.Any(b => b.Handle == candidate.InterfaceHandle))
                     {
                         if (context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod &&
                             (method.Name.Text == opMethod.Name.Text || method.Name.Text == "Invoke" || method.Name.Text == "Call"))
@@ -1599,17 +1779,21 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                             bool matches = true;
                             for (int i = 0; i < argTypes.Count; i++)
                             {
-                                if (context.GetParameterSymbol(method.Parameters[i]) is { } param &&
-                                    !param.Type.IsAssignableFrom(argTypes[i], context))
+                                if (context.GetParameterSymbol(method.Parameters[i]) is { } param)
                                 {
-                                    matches = false;
-                                    break;
+                                    var effParam = typeArgs is not null ? SubstituteTypeRef(param.Type, typeArgs) : param.Type;
+                                    if (!effParam.IsAssignableFrom(argTypes[i], context))
+                                    {
+                                        matches = false;
+                                        break;
+                                    }
                                 }
                             }
                             if (matches)
                             {
                                 context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(method));
-                                result = method.ReturnType;
+                                var rawRet = method.ReturnType;
+                                result = typeArgs is not null ? SubstituteTypeRef(rawRet, typeArgs) : rawRet;
                                 return true;
                             }
                         }
@@ -1691,9 +1875,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 context.Diagnostics.ReportArgumentTypeMismatch(
                     call.Arguments[i].GetSpan() ?? default,
                     i + 1,
-                    argTypes[i].ToDisplayString(context),
-                    param.Type.ToDisplayString(context),
-                    call.GetSource());
+                    argTypes[i].ToQualifiedString(context),
+                    param.Type.ToQualifiedString(context),
+                    argLabel: argTypes[i].ToLabelString(context, scope),
+                    paramLabel: param.Type.ToLabelString(context, scope),
+                    source: call.GetSource());
             }
         }
 
@@ -1727,9 +1913,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 context.Diagnostics.ReportArgumentTypeMismatch(
                     call.Arguments[i].GetSpan() ?? default,
                     i + 1,
-                    argTypes[i].ToDisplayString(context),
-                    expectedType.ToDisplayString(context),
-                    call.GetSource());
+                    argTypes[i].ToQualifiedString(context),
+                    expectedType.ToQualifiedString(context),
+                    argLabel: argTypes[i].ToLabelString(context, scope),
+                    paramLabel: expectedType.ToLabelString(context, scope),
+                    source: call.GetSource());
             }
         }
 
@@ -1933,8 +2121,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     context.Diagnostics.ReportMemberNotFound(
                         access.Identifier.Span,
                         memberName,
-                        receiverType.ToDisplayString(context),
-                        access.GetSource());
+                        receiverType.ToQualifiedString(context),
+                        labelTypeName: receiverType.ToLabelString(context, scope),
+                        source: access.GetSource());
                     return TypeRef.Error;
                 }
             }
@@ -2032,8 +2221,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             context.Diagnostics.ReportConditionTypeMismatch(
                 conditional.Condition.GetSpan() ?? default,
-                condType.ToDisplayString(context),
-                conditional.GetSource());
+                condType.ToQualifiedString(context),
+                actualLabel: condType.ToLabelString(context, ifScope),
+                source: conditional.GetSource());
         }
 
         var thenType = ResolveExpression(conditional.ThenExpression, ifScope, containingFunction);
@@ -2068,9 +2258,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // Branches mismatch! Do not widen to common base / Object!
         context.Diagnostics.ReportAmbiguousConditionalBranches(
             conditional.GetSpan() ?? default,
-            thenType.ToDisplayString(context),
-            elseType.ToDisplayString(context),
-            conditional.GetSource());
+            thenType.ToQualifiedString(context),
+            elseType.ToQualifiedString(context),
+            thenLabel: thenType.ToLabelString(context, ifScope),
+            elseLabel: elseType.ToLabelString(context, ifScope),
+            source: conditional.GetSource());
 
         return TypeRef.Error;
     }
@@ -2093,8 +2285,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             context.Diagnostics.ReportConditionTypeMismatch(
                 loop.Condition.GetSpan() ?? default,
-                condType.ToDisplayString(context),
-                loop.GetSource());
+                condType.ToQualifiedString(context),
+                actualLabel: condType.ToLabelString(context, whileScope),
+                source: loop.GetSource());
         }
 
         ResolveExpression(loop.Body, whileScope, containingFunction);
@@ -2261,9 +2454,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         var span = lambda.Body.GetSpan() ?? lambda.EqualsGreaterThanToken.Span;
                         context.Diagnostics.ReportReturnTypeMismatch(
                             span,
-                            bodyType.ToDisplayString(context),
-                            expRet.ToDisplayString(context),
-                            lambda.EqualsGreaterThanToken.Source);
+                            bodyType.ToQualifiedString(context),
+                            expRet.ToQualifiedString(context),
+                            exprLabel: bodyType.ToLabelString(context, lambdaScope),
+                            returnLabel: expRet.ToLabelString(context, lambdaScope),
+                            source: lambda.EqualsGreaterThanToken.Source);
                     }
                     resolvedReturnType = expRet;
                 }
@@ -2685,7 +2880,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 elemType = itemType;
         }
 
-        return TypeRef.Array(elemType);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrayHandle);
+        return TypeRef.FixedArray(elemType, collection.Expressions.Count, fixedArrayHandle != default ? fixedArrayHandle : null);
     }
 
     /// <summary>
@@ -2804,9 +3000,10 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     var overloadNames = string.Join(", ", literalOverloads.Select(m => m.Name.Text));
                     context.Diagnostics.ReportAmbiguousLiteralConversion(
                         lit.GetSpan() ?? default,
-                        targetType.ToDisplayString(context),
+                        targetType.ToQualifiedString(context),
                         overloadNames,
-                        lit.GetSource());
+                        labelTypeName: targetType.ToLabelString(context, scope),
+                        source: lit.GetSource());
                     context.SetExpressionType(lit, TypeRef.Error);
                     return TypeRef.Error;
                 }
@@ -2837,13 +3034,17 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
                 else
                 {
+                    var opName = KnownIntrinsics.GetOperatorName(opKind);
                     context.Diagnostics.ReportTypeMismatch(
                         binary.OperatorToken.Span,
                         binary.OperatorToken.Value,
                         binary.LeftExpression.GetSpan() ?? default,
-                        targetType.ToDisplayString(context),
+                        targetType.ToQualifiedString(context),
                         binary.RightExpression.GetSpan() ?? default,
-                        targetType.ToDisplayString(context),
+                        targetType.ToQualifiedString(context),
+                        lhsLabel: targetType.ToLabelString(context, scope),
+                        rhsLabel: targetType.ToLabelString(context, scope),
+                        opName: opName,
                         source: binary.GetSource());
                     context.SetExpressionType(binary, TypeRef.Error);
                     return TypeRef.Error;
@@ -2861,11 +3062,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 }
                 else
                 {
+                    var opName = KnownIntrinsics.GetOperatorName(uOpKind);
                     context.Diagnostics.ReportUnaryTypeMismatch(
                         unary.OperatorToken.Span,
                         unary.OperatorToken.Value,
                         unary.Operand.GetSpan() ?? default,
-                        targetType.ToDisplayString(context),
+                        targetType.ToQualifiedString(context),
+                        operandLabel: targetType.ToLabelString(context, scope),
+                        opName: opName,
                         source: unary.GetSource());
                     context.SetExpressionType(unary, TypeRef.Error);
                     return TypeRef.Error;
@@ -2889,11 +3093,81 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         context.Diagnostics.ReportMemberNotFound(
                             access.Identifier.Span,
                             access.Identifier.Value,
-                            targetType.ToDisplayString(context),
+                            targetType.ToQualifiedString(context),
+                            labelTypeName: targetType.ToLabelString(context, scope),
                             source: access.GetSource());
                         context.SetExpressionType(call, TypeRef.Error);
                         return TypeRef.Error;
                     }
+                }
+                else if (call.Callee is LiteralExpression litCallee)
+                {
+                    var argTypes = new List<TypeRef>(call.Arguments.Count);
+                    foreach (var arg in call.Arguments)
+                        argTypes.Add(ResolveExpression(arg, scope, containingFunction));
+
+                    MethodSymbol? cand1 = null;
+                    if (targetType.Handle is { } targetH && context.GetTypeSymbol(targetH) is { } targetTypeSym)
+                    {
+                        var litKind = litCallee.Literal.Kind is TokenKind.Float ? CompileTimeLiteralKind.Float :
+                                      litCallee.Literal.Kind is TokenKind.String ? CompileTimeLiteralKind.Str :
+                                      litCallee.Literal.Kind is TokenKind.Char ? CompileTimeLiteralKind.Char : CompileTimeLiteralKind.Int;
+                        var litOverloads = GetMatchingLiteralMethods(targetType, litKind);
+                        if (litOverloads.Count > 1)
+                        {
+                            var overloadNames = string.Join(", ", litOverloads.Select(m => m.Name.Text));
+                            context.Diagnostics.ReportAmbiguousLiteralConversion(
+                                litCallee.GetSpan() ?? default,
+                                targetType.ToQualifiedString(context),
+                                overloadNames,
+                                labelTypeName: targetType.ToLabelString(context, scope),
+                                source: call.GetSource());
+                            context.SetExpressionType(call, TypeRef.Error);
+                            return TypeRef.Error;
+                        }
+                        if (litOverloads.Count == 1)
+                        {
+                            if (TryResolveCallableOperator(call, targetType, argTypes, out var ret1) && targetType.IsAssignableFrom(ret1, context))
+                            {
+                                if (context.ResolvedTree.TryGetReference(call, out var mHandle) && context.GetMethodSymbol(mHandle) is { } m1)
+                                    cand1 = m1;
+                            }
+                        }
+                    }
+
+                    MethodSymbol? cand2 = null;
+                    var defaultType = CollapseLiteralToDefault(TypeRef.Literal(CompileTimeLiteralKind.Int, litCallee.Literal.Value));
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var ret2) && targetType.IsAssignableFrom(ret2, context))
+                    {
+                        if (context.ResolvedTree.TryGetReference(call, out var mHandle2) && context.GetMethodSymbol(mHandle2) is { } m2)
+                            cand2 = m2;
+                    }
+
+                    if (cand1 != null && cand2 != null && cand1 != cand2)
+                    {
+                        var span = litCallee.GetSpan() ?? default;
+                        context.Diagnostics.ReportAmbiguousLiteralConversion(span, targetType.ToQualifiedString(context), litCallee.Literal.Value, labelTypeName: targetType.ToLabelString(context, scope), source: call.GetSource());
+                        context.SetExpressionType(call, TypeRef.Error);
+                        return TypeRef.Error;
+                    }
+
+                    var chosenMethod = cand1 ?? cand2;
+                    if (chosenMethod != null)
+                    {
+                        context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(chosenMethod));
+                        context.SetExpressionType(call, chosenMethod.ReturnType);
+                        return chosenMethod.ReturnType;
+                    }
+
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var defRet))
+                    {
+                        context.SetExpressionType(call, defRet);
+                        return defRet;
+                    }
+
+                    context.Diagnostics.ReportTypeNotCallable(litCallee.GetSpan() ?? default, defaultType.ToQualifiedString(context), labelTypeName: defaultType.ToLabelString(context, scope), source: call.GetSource());
+                    context.SetExpressionType(call, TypeRef.Error);
+                    return TypeRef.Error;
                 }
                 return TypeRef.Unresolved;
 
@@ -3038,7 +3312,10 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
         var operandHandles = new List<SymbolHandle>();
         if (from.Handle is { } fh) operandHandles.Add(fh);
+        else if (from.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optFromH)) operandHandles.Add(optFromH);
+
         if (to.Handle is { } th && !operandHandles.Contains(th)) operandHandles.Add(th);
+        else if (to.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optToH) && !operandHandles.Contains(optToH)) operandHandles.Add(optToH);
 
         foreach (var candidate in candidates)
         {
@@ -3052,6 +3329,16 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 if (operandTypeSym is null)
                     continue;
 
+                Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+                if (to.SpecialType is OptionalSemanticType optTo && operandTypeSym is TypeSymbol toSym && toSym.GenericParameters.Count == 1)
+                {
+                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [toSym.GenericParameters[0]] = optTo.ElementType };
+                }
+                else if (from.SpecialType is OptionalSemanticType optFrom && operandTypeSym is TypeSymbol fromSym && fromSym.GenericParameters.Count == 1)
+                {
+                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [fromSym.GenericParameters[0]] = optFrom.ElementType };
+                }
+
                 var scope = GetOwnedScope(operandTypeSym);
                 foreach (var sym in scope.Symbols.Values)
                 {
@@ -3062,7 +3349,11 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                             if (method.Parameters.Count == 1)
                             {
                                 var paramType = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
-                                if (paramType.Equals(from) && method.ReturnType.Equals(to))
+                                var effectiveParam = typeArgs is not null ? SubstituteTypeRef(paramType, typeArgs) : paramType;
+                                var effectiveReturn = typeArgs is not null ? SubstituteTypeRef(method.ReturnType, typeArgs) : method.ReturnType;
+
+                                if ((effectiveParam.Equals(from) || effectiveParam.IsAssignableFrom(from, context)) &&
+                                    (to.Equals(effectiveReturn) || to.IsAssignableFrom(effectiveReturn, context)))
                                 {
                                     castMethod = method;
                                     return true;
@@ -3181,5 +3472,45 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         }
 
         return false;
+    }
+
+    private static TypeRef SubstituteTypeRef(TypeRef type, Dictionary<SymbolHandle, TypeRef> typeArgs)
+    {
+        if (type.Handle is { } h && typeArgs.TryGetValue(h, out var substituted))
+            return substituted;
+
+        if (type.SpecialType is OptionalSemanticType o)
+            return TypeRef.Optional(SubstituteTypeRef(o.ElementType, typeArgs), type.Handle);
+
+        if (type.SpecialType is UnionSemanticType u)
+            return TypeRef.Union(u.Variants.Select(v => SubstituteTypeRef(v, typeArgs)).ToList(), u.IsUntagged);
+
+        if (type.SpecialType is PointerSemanticType p)
+            return TypeRef.Pointer(SubstituteTypeRef(p.ElementType, typeArgs));
+
+        if (type.SpecialType is ReferenceSemanticType r)
+            return TypeRef.Reference(SubstituteTypeRef(r.ElementType, typeArgs));
+
+        if (type.SpecialType is ArraySemanticType a)
+            return TypeRef.Array(SubstituteTypeRef(a.ElementType, typeArgs));
+
+        if (type.SpecialType is SpanSemanticType s)
+            return TypeRef.Span(SubstituteTypeRef(s.ElementType, typeArgs));
+
+        if (type.SpecialType is FixedArraySemanticType f)
+            return TypeRef.FixedArray(SubstituteTypeRef(f.ElementType, typeArgs), f.Size, type.Handle);
+
+        return type;
+    }
+
+    private TypeRef? GetEnclosingFunctionReturnType(SymbolHandle containingFunction)
+    {
+        if (containingFunction != default)
+        {
+            var sym = context.GetSymbol(containingFunction);
+            if (sym is FunctionSymbol fn) return fn.ReturnType;
+            if (sym is MethodSymbol m) return m.ReturnType;
+        }
+        return null;
     }
 }

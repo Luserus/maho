@@ -26,6 +26,21 @@ internal sealed class DiscoveredIntrinsics
 
     public bool Contains(string name) => intrinsics.ContainsKey(name);
 
+    public bool TryGetIntrinsicName(SymbolHandle handle, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? intrinsicName)
+    {
+        foreach (var (key, value) in intrinsics)
+        {
+            if (value.Handle == handle)
+            {
+                intrinsicName = key;
+                return true;
+            }
+        }
+
+        intrinsicName = null;
+        return false;
+    }
+
     public bool TryGetDeclarationInfo(string name, out TextSpan span, out SourceText? source)
     {
         if (intrinsics.TryGetValue(name, out var entry))

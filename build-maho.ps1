@@ -369,6 +369,11 @@ else {
     Write-Host "  Layout:         $BinDir (maho\ and miryo\)"
 }
 
+# Stop any running compiler server daemons so subsequent commands immediately use the newly built binaries
+if (Test-Path $miryoBin) {
+    & $miryoBin compiler-server shutdown 2>$null | Out-Null
+}
+
 if ($Install) {
     $targetHome = if ($env:MAHO_HOME) { $env:MAHO_HOME } else { Join-Path $HOME ".maho" }
     Write-Host "==> Installing Maho toolchain to $targetHome..." -ForegroundColor Green
