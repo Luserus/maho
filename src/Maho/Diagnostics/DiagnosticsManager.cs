@@ -856,4 +856,18 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, $"function declared with return type '{declaredReturnType}', but never returns", source)
             .WithHelp($"all execution paths diverge; declare the return type as '!' (e.g. func {functionName}(...) -> !)")
             .Report();
+
+    /// <summary> Reports an attempt to access an instance member on a type without an instance reference. </summary>
+    public void ReportCannotAccessInstanceMemberOnType(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+        BuildError("MH2019", $"an object reference is required for the non-static field, method, or property '{memberName}' on type '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"non-static member '{memberName}' cannot be accessed through type '{typeName}'", source)
+            .WithHelp("create or provide an instance of the type to access this member")
+            .Report();
+
+    /// <summary> Reports an attempt to access a static member through an instance reference. </summary>
+    public void ReportCannotAccessStaticMemberOnInstance(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+        BuildError("MH2020", $"static member '{memberName}' cannot be accessed with an instance reference on type '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"static member '{memberName}' cannot be accessed via instance", source)
+            .WithHelp($"qualify it with the type name instead: '{typeName}.{memberName}'")
+            .Report();
 }

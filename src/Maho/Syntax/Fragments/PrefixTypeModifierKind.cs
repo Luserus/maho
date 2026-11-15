@@ -5,6 +5,7 @@ internal enum PrefixTypeModifierKind
 {
     Span,
     Untagged,
-    Dyn
+    Dyn,
+    Ref
 }
 

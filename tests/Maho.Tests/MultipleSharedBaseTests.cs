@@ -27,7 +27,7 @@ public sealed class MultipleSharedBaseTests
         public interface Arrow<T>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow() -> T&;
+            public func Arrow() -> ref T;
         }
 
         [IntrinsicType("Reference")]
@@ -37,7 +37,7 @@ public sealed class MultipleSharedBaseTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Arrow.Arrow() -> T&;
+            public func Arrow.Arrow() -> ref T;
         }
 
         [IntrinsicType("Pointer")]
@@ -47,7 +47,7 @@ public sealed class MultipleSharedBaseTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Arrow.Arrow() -> T&;
+            public func Arrow.Arrow() -> ref T;
         }
 
         [IntrinsicType("Str")]

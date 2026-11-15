@@ -24,7 +24,7 @@ struct Metadata<T>;
 interface Arrow<T>
 {
     [OperatorFunction("IndirectMemberAccess")]
-    func Arrow() -> T&;
+    func Arrow() -> ref T;
 }
 
 [IntrinsicType("Reference")]
@@ -34,7 +34,7 @@ struct Reference<T> : Arrow<T>
     Metadata<T> metadata;
 
     [IntrinsicFunction("Reference.Deref()")]
-    func Arrow.Arrow() -> T&;
+    func Arrow.Arrow() -> ref T;
 }
 
 [IntrinsicType("Pointer")]
@@ -44,7 +44,7 @@ struct Pointer<T> : Arrow<T>
     Metadata<T> metadata;
 
     [IntrinsicFunction("Pointer.Deref()")]
-    func Arrow.Arrow() -> T&;
+    func Arrow.Arrow() -> ref T;
 }
 
 [IntrinsicType("Str")]

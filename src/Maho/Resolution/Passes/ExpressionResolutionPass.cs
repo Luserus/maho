@@ -984,6 +984,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 2. 'this' receiver expression inside non-static member functions
         if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
         {
+            var thisSyms = scope[new SymbolName(new SymbolPart(named.Identifier, 0, context.GetHygiene(named)))];
+            if (thisSyms.Count > 0 && thisSyms[0] is ParameterSymbol thisParam)
+            {
+                context.ResolvedTree.AddReference(named, ResolutionContext.GetHandle(thisParam));
+                return thisParam.Type;
+            }
+
             var containingSym = context.GetSymbol(containingFunction);
             SymbolHandle? parentHandle = containingSym switch
             {
@@ -2045,17 +2052,17 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
         if (isArrowAccess)
         {
-            if (receiverType.SpecialType is ReferenceSemanticType refType)
+            if (TryResolveIndirectMemberAccessOperator(receiverType, out var opReturnType))
             {
-                receiverType = refType.ElementType;
-            }
-            else if (receiverType.SpecialType is PointerSemanticType ptrType)
-            {
-                receiverType = ptrType.ElementType;
-            }
-            else if (TryResolveIndirectMemberAccessOperator(receiverType, out var elemType))
-            {
-                receiverType = elemType;
+                if (access.Identifier.Kind is TokenKind.MinusGreaterThan)
+                {
+                    return opReturnType;
+                }
+
+                if (opReturnType.SpecialType is AliasSemanticType alias)
+                    receiverType = alias.TargetType;
+                else
+                    receiverType = opReturnType;
             }
             else
             {
@@ -2068,6 +2075,13 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 return TypeRef.Error;
             }
         }
+        else
+        {
+            if (receiverType.SpecialType is AliasSemanticType alias)
+            {
+                receiverType = alias.TargetType;
+            }
+        }
 
         if (receiverType.SpecialType is DynSemanticType dynReceiver)
         {
@@ -2076,7 +2090,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
         // Check if access.Expression is a TypeSymbol (static access / enum variant)
         bool isStaticAccessOnType = access.Expression is TypeAsExpression;
-        if (!isStaticAccessOnType && access.Expression is NamedExpression namedExpr)
+        if (!isStaticAccessOnType && access.Expression is NamedExpression namedExpr && namedExpr.Identifier.MatchingKind is not MatchingKeywordKind.This)
         {
             if (context.ResolvedTree.TryGetReference(namedExpr, out var namedH) && context.GetSymbol(namedH) is TypeSymbol)
                 isStaticAccessOnType = true;
@@ -2239,6 +2253,68 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
             if (member is not null)
             {
+                if (member is MethodSymbol method)
+                {
+                    bool isMethodStatic = method.Flags.HasFlag(FunctionFlags.Static);
+                    if (isStaticAccessOnType && !isMethodStatic)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                        context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? receiverType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+                    else if (!isStaticAccessOnType && isMethodStatic)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                        context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? receiverType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+                }
+                else if (member is FieldSymbol)
+                {
+                    if (isStaticAccessOnType)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                        context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? receiverType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+                }
+                else if (member is PropertySymbol prop)
+                {
+                    bool isPropStatic = prop.Flags.HasFlag(FunctionFlags.Static);
+                    if (isStaticAccessOnType && !isPropStatic)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                        context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? receiverType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+                    else if (!isStaticAccessOnType && isPropStatic)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                        context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? receiverType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+                }
+
                 context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(member));
                 return GetTypeFromSymbol(member);
             }
@@ -2261,23 +2337,115 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     private bool TryResolveIndirectMemberAccessOperator(TypeRef type, out TypeRef elemType)
     {
         elemType = TypeRef.Unresolved;
-        if (type.Handle is not { } handle)
+        var handle = type.Handle;
+        if (handle is null)
+        {
+            if (type.SpecialType is ReferenceSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH))
+                    handle = refH;
+            }
+            else if (type.SpecialType is PointerSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH))
+                    handle = ptrH;
+            }
+        }
+
+        if (handle is null)
             return false;
+
+        var operandTypeSym = (Symbol?)context.GetTypeSymbol(handle.Value) ?? context.GetSymbol(handle.Value);
+        if (operandTypeSym is null)
+            return false;
+
+        Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+        if (type.SpecialType is ReferenceSemanticType refSem && operandTypeSym is TypeSymbol tsRef && tsRef.GenericParameters.Count == 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [tsRef.GenericParameters[0]] = refSem.ElementType };
+        }
+        else if (type.SpecialType is PointerSemanticType ptrSem && operandTypeSym is TypeSymbol tsPtr && tsPtr.GenericParameters.Count == 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [tsPtr.GenericParameters[0]] = ptrSem.ElementType };
+        }
+        else if (type.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef>();
+            for (int i = 0; i < tsGen.GenericParameters.Count; i++)
+                typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
+        }
 
         if (context.DiscoveredOperators.TryGetOperators(OperatorKind.IndirectMemberAccess, out var candidates))
         {
+            var typeScope = GetOwnedScope(operandTypeSym);
+            IReadOnlyList<TypeRef> baseTypes = operandTypeSym switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+
             foreach (var cand in candidates)
             {
-                if (TypeRef.IsSubtypeOf(handle, cand.InterfaceHandle, context))
+                var ifaceSym = context.GetTypeSymbol(cand.InterfaceHandle);
+                if (ifaceSym is null)
+                    continue;
+
+                // 1. Search method on operandTypeSym
+                foreach (var sym in typeScope.Symbols.Values)
+                {
+                    if (sym is MethodSymbol method)
+                    {
+                        bool isCandidate = false;
+                        if (method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                        {
+                            if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                                isCandidate = true;
+                        }
+                        else if (baseTypes.Any(b => b.Handle == cand.InterfaceHandle))
+                        {
+                            if (context.GetMethodSymbol(cand.MethodHandle) is { } opMethod &&
+                                method.Name.Text == opMethod.Name.Text)
+                            {
+                                isCandidate = true;
+                            }
+                        }
+
+                        if (isCandidate)
+                        {
+                            var rawRet = method.ReturnType;
+                            elemType = typeArgs is not null ? SubstituteTypeRef(rawRet, typeArgs) : rawRet;
+                            return true;
+                        }
+                    }
+                }
+
+                // 2. If implemented via interface / inheritance, resolve using cand.MethodHandle and map interface type arguments
+                if (TypeRef.IsSubtypeOf(handle.Value, cand.InterfaceHandle, context))
                 {
                     if (context.GetMethodSymbol(cand.MethodHandle) is { } m)
                     {
-                        if (m.ReturnType.SpecialType is ReferenceSemanticType r)
+                        Dictionary<SymbolHandle, TypeRef>? candTypeArgs = typeArgs;
+                        if (ifaceSym.GenericParameters.Count > 0)
                         {
-                            elemType = r.ElementType;
-                            return true;
+                            candTypeArgs = new Dictionary<SymbolHandle, TypeRef>();
+                            var matchingBase = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
+                            if (matchingBase.SpecialType is GenericSemanticType bGen && bGen.TypeArguments.Count == ifaceSym.GenericParameters.Count)
+                            {
+                                for (int i = 0; i < ifaceSym.GenericParameters.Count; i++)
+                                {
+                                    var substituted = typeArgs is not null ? SubstituteTypeRef(bGen.TypeArguments[i], typeArgs) : bGen.TypeArguments[i];
+                                    candTypeArgs[ifaceSym.GenericParameters[i]] = substituted;
+                                }
+                            }
+                            else if (typeArgs is not null)
+                            {
+                                candTypeArgs = typeArgs;
+                            }
                         }
-                        elemType = m.ReturnType;
+
+                        var rawRet = m.ReturnType;
+                        elemType = candTypeArgs is not null ? SubstituteTypeRef(rawRet, candTypeArgs) : rawRet;
                         return true;
                     }
                 }

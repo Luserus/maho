@@ -744,7 +744,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var handle in symbol.Parameters)
         {
             if (context.GetParameterSymbol(handle) is { } parameter)
-                fnParamTypes.Add(parameter.Type);
+            {
+                if (symbol.Flags.HasFlag(FunctionFlags.Static) || parameter.Syntax?.Declarator.ReceiverKind == ReceiverKind.None)
+                    fnParamTypes.Add(parameter.Type);
+            }
         }
         symbol.Type = TypeRef.Function(symbol.ReturnType, fnParamTypes);
 
@@ -823,7 +826,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         foreach (var handle in symbol.Parameters)
         {
             if (context.GetParameterSymbol(handle) is { } parameter)
-                fnParamTypes.Add(parameter.Type);
+            {
+                if (symbol.Flags.HasFlag(FunctionFlags.Static) || parameter.Syntax?.Declarator.ReceiverKind == ReceiverKind.None)
+                    fnParamTypes.Add(parameter.Type);
+            }
         }
 
 
@@ -890,6 +896,44 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             return;
 
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
+
+        if (symbol.Syntax.Declarator.ReceiverKind != ReceiverKind.None)
+        {
+            var containingMethod = symbol.ContainingSymbol is { } cs ? context.GetSymbol(cs) : null;
+            SymbolHandle? parentHandle = containingMethod switch
+            {
+                MethodSymbol m => m.Parent,
+                _ => null
+            };
+
+            if (parentHandle is not null)
+            {
+                var baseType = TypeRef.Resolved(parentHandle.Value);
+                var parentSym = context.GetSymbol(parentHandle.Value);
+                IReadOnlyList<SymbolHandle>? genParams = parentSym switch
+                {
+                    TypeSymbol ts => ts.GenericParameters,
+                    NestedTypeSymbol nts => nts.GenericParameters,
+                    _ => null
+                };
+                if (genParams is not null && genParams.Count > 0)
+                {
+                    baseType = TypeRef.Generic(parentHandle.Value, parentSym?.Name.Text ?? "", genParams.Select(TypeRef.Resolved).ToList());
+                }
+
+                symbol.Type = symbol.Syntax.Declarator.ReceiverKind switch
+                {
+                    ReceiverKind.Value => baseType,
+                    ReceiverKind.Alias => TypeRef.Alias(baseType, isMutable: false),
+                    ReceiverKind.MutAlias => TypeRef.Alias(baseType, isMutable: true),
+                    ReceiverKind.Reference => TypeRef.Reference(baseType),
+                    ReceiverKind.MutReference => TypeRef.Reference(baseType),
+                    ReceiverKind.Pointer => TypeRef.Pointer(baseType),
+                    _ => baseType
+                };
+                return;
+            }
+        }
 
         bool isUntagged = symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged);
 
@@ -1274,6 +1318,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         if (syntax is PrefixModifiedType prefixModified)
         {
+            if (prefixModified.Modifier is RefTypeModifier refMod)
+            {
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+                return TypeRef.Alias(inner, isMutable: refMod.IsMutable);
+            }
+
             if (prefixModified.Modifier is UntaggedTypeModifier)
             {
                 var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext: true);
@@ -1943,7 +1993,16 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 {
                     var memberName = new SymbolPart(access.Identifier);
                     var variantSyms = typeScope[new SymbolName(memberName)];
-                    var accessible = variantSyms.Where(cand => cand is not MethodSymbol m || !m.Flags.HasFlag(FunctionFlags.InterfaceScoped)).ToList();
+                    var accessible = variantSyms.Where(cand =>
+                    {
+                        if (cand is MethodSymbol m)
+                            return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped) && m.Flags.HasFlag(FunctionFlags.Static);
+                        if (cand is PropertySymbol p)
+                            return !p.Flags.HasFlag(FunctionFlags.InterfaceScoped) && p.Flags.HasFlag(FunctionFlags.Static);
+                        if (cand is FieldSymbol)
+                            return false;
+                        return true;
+                    }).ToList();
                     if (accessible.Count > 0)
                     {
                         context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
@@ -3029,6 +3088,23 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 if (!nameMatches)
                     continue;
 
+                // Check receiver parameter compatibility
+                bool ifaceHasReceiver = ifaceMethod.Parameters.Count > 0 &&
+                                        context.GetParameterSymbol(ifaceMethod.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+                bool methodHasReceiver = method.Parameters.Count > 0 &&
+                                         context.GetParameterSymbol(method.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+
+                if (ifaceHasReceiver != methodHasReceiver)
+                    continue;
+
+                if (ifaceHasReceiver)
+                {
+                    var ifaceReceiverKind = context.GetParameterSymbol(ifaceMethod.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+                    var methodReceiverKind = context.GetParameterSymbol(method.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+                    if (ifaceReceiverKind != methodReceiverKind)
+                        continue;
+                }
+
                 // Check parameter count and generic arity
                 if (method.Parameters.Count != expectedParamTypes.Count)
                     continue;
@@ -3036,9 +3112,10 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 if (method.GenericParameters.Count != ifaceMethod.GenericParameters.Count)
                     continue;
 
-                // Check parameter types
+                // Check parameter types (skipping receiver parameter if present)
+                int startIdx = ifaceHasReceiver ? 1 : 0;
                 bool paramsMatch = true;
-                for (int i = 0; i < expectedParamTypes.Count; i++)
+                for (int i = startIdx; i < expectedParamTypes.Count; i++)
                 {
                     var actualParamType = context.GetParameterSymbol(method.Parameters[i])?.Type ?? TypeRef.Unresolved;
                     if (!IsTypeEquivalent(actualParamType, expectedParamTypes[i]))

@@ -1056,20 +1056,20 @@ public sealed class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void OperatorFunction_IndirectMemberAccessReturningNonReference_ReportsMH0242()
+    public void OperatorFunction_IndirectMemberAccessReturningVoid_ReportsMH0242()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             public attribute OperatorFunction(Str fullName);
 
-            public interface BadDeref<TResult>
+            public interface BadDeref
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow() -> TResult;
+                public func Arrow() -> void;
             }
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type must be a reference (&)"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type cannot be void"));
     }
 
     [Fact]

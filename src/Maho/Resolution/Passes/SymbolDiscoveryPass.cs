@@ -516,6 +516,10 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         context.RegisterSyntaxScope(declaration.Body, functionScope);
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
+        bool hasReceiver = declaration.Signature.Parameters.Count > 0 && declaration.Signature.Parameters[0].Declarator.IsReceiver;
+        if (hasReceiver)
+            symbol.Flags &= ~FunctionFlags.Static;
+
         if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
             symbol.Flags |= FunctionFlags.InterfaceScoped;

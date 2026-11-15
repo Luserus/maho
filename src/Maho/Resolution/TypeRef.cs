@@ -23,7 +23,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal or TypeRefKind.Never => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -33,7 +33,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Resolved => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -75,6 +75,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public static TypeRef Reference(TypeRef element) =>
         new TypeRef(TypeRefKind.Reference, null, new ReferenceSemanticType(element));
+
+    public static TypeRef Alias(TypeRef element, bool isMutable = false) =>
+        new TypeRef(TypeRefKind.Alias, null, new AliasSemanticType(element, isMutable));
 
     public static TypeRef Array(TypeRef element) =>
         new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element));
@@ -214,6 +217,17 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
             return targetDyn.TargetType.IsAssignableFrom(source, context);
         }
+
+        if (SpecialType is AliasSemanticType targetAlias)
+        {
+            if (source.SpecialType is AliasSemanticType sourceAlias)
+                return targetAlias.TargetType.IsAssignableFrom(sourceAlias.TargetType, context);
+
+            return targetAlias.TargetType.IsAssignableFrom(source, context);
+        }
+
+        if (source.SpecialType is AliasSemanticType srcAlias)
+            return IsAssignableFrom(srcAlias.TargetType, context);
 
         if (SpecialType is ReferenceSemanticType targetRef)
         {
@@ -597,6 +611,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (SpecialType is ReferenceSemanticType r)
             return Reference(r.ElementType.Substitute(typeArgs));
 
+        if (SpecialType is AliasSemanticType al)
+            return Alias(al.TargetType.Substitute(typeArgs), al.IsMutable);
+
         if (SpecialType is ArraySemanticType a)
             return Array(a.ElementType.Substitute(typeArgs));
 
@@ -630,7 +647,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
 
@@ -806,6 +823,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         if (SpecialType is ReferenceSemanticType refType)
             return $"{refType.ElementType.ToLabelString(context, scope)}&";
+
+        if (SpecialType is AliasSemanticType aliasLabel)
+            return aliasLabel.IsMutable ? $"mut ref {aliasLabel.TargetType.ToLabelString(context, scope)}" : $"ref {aliasLabel.TargetType.ToLabelString(context, scope)}";
 
         if (SpecialType is TupleSemanticType tup)
             return $"({string.Join(", ", tup.Elements.Select(e => e.Type.ToLabelString(context, scope) + (e.Name is not null ? " " + e.Name : ""))!)})";

@@ -89,6 +89,13 @@ internal sealed partial class Parser
                     break;
                 
                 var arrow = ConsumeOperator();
+                while (IsMinusGreaterThan())
+                {
+                    var nextArrow = ConsumeOperator();
+                    left = new MemberAccessExpression(left, arrow, nextArrow);
+                    arrow = nextArrow;
+                }
+
                 var identifier = ExpectIdentifierToken("after '->'");
                 left = new MemberAccessExpression(left, arrow, identifier);
                 continue;

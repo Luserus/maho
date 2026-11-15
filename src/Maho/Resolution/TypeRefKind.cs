@@ -38,5 +38,7 @@ internal enum TypeRefKind : byte
     /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
     Literal,
     /// <summary>Never / bottom type (<c>!</c>).</summary>
-    Never
+    Never,
+    /// <summary>Storage alias type (<c>ref T</c> or <c>mut ref T</c>).</summary>
+    Alias
 }

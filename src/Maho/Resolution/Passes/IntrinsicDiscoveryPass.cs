@@ -1256,8 +1256,10 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         }
 
         string fullName = KnownIntrinsics.GetOperatorName(opKind);
-        bool isStatic = method.Flags.HasFlag(FunctionFlags.Static);
-        int paramCount = method.Syntax?.Signature.Parameters.Count ?? method.Parameters.Count;
+        bool hasReceiver = method.Syntax?.Signature.Parameters.Any(p => p.Declarator.IsReceiver) ?? false;
+        bool isStatic = !hasReceiver && method.Flags.HasFlag(FunctionFlags.Static);
+        int totalParamCount = method.Syntax?.Signature.Parameters.Count ?? method.Parameters.Count;
+        int paramCount = hasReceiver ? totalParamCount - 1 : totalParamCount;
         var returnTypeSyntax = method.Syntax?.Signature.ReturnType;
         bool isVoidReturn = returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope);
         bool isRefReturn = returnTypeSyntax is not null && IsReferenceType(returnTypeSyntax, method.EnclosingScope);
@@ -1411,9 +1413,9 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "cannot accept parameters", source);
                     return;
                 }
-                if (!isRefReturn)
+                if (isVoidReturn)
                 {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be a reference (&)", source);
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
                     return;
                 }
                 break;

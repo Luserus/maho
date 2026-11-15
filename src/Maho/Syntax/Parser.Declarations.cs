@@ -694,11 +694,87 @@ internal sealed partial class Parser
     private SeparatedSyntaxList<Parameter> ParseParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
+        int paramIndex = 0;
 
         while (CurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
         {
             var attributes = ParseAttributeLists();
             var modifiers = ParseModifiers();
+
+            // Check for explicit receiver parameter 'this'
+            if (CurrentToken.MatchingKind is MatchingKeywordKind.This ||
+                (CurrentToken.MatchingKind is MatchingKeywordKind.Ref && Peek().MatchingKind is MatchingKeywordKind.This) ||
+                (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && (Peek().MatchingKind is MatchingKeywordKind.This || (Peek(1).MatchingKind is MatchingKeywordKind.Ref && Peek(2).MatchingKind is MatchingKeywordKind.This))))
+            {
+                if (paramIndex > 0)
+                {
+                    diagnostics.ReportUnexpectedToken(CurrentToken.Span, GetTokenDisplay(CurrentToken), CurrentToken.Source);
+                }
+
+                var paramModifiers = new List<Token>(modifiers);
+                bool isMut = false;
+                bool isRef = false;
+
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut)
+                {
+                    isMut = true;
+                    paramModifiers.Add(Consume());
+                }
+
+                if (CurrentToken.MatchingKind is MatchingKeywordKind.Ref)
+                {
+                    isRef = true;
+                    paramModifiers.Add(Consume());
+                }
+
+                Token thisToken = ExpectToken(TokenKind.Identifier, "'this'", "for receiver parameter");
+
+                bool isAmpersand = false;
+                bool isAsterisk = false;
+                if (CurrentToken.Kind is TokenKind.Ampersand)
+                {
+                    isAmpersand = true;
+                    paramModifiers.Add(Consume());
+                }
+                else if (CurrentToken.Kind is TokenKind.Asterisk)
+                {
+                    isAsterisk = true;
+                    paramModifiers.Add(Consume());
+                }
+
+                ReceiverKind receiverKind;
+                if (isRef)
+                {
+                    receiverKind = isMut ? ReceiverKind.MutAlias : ReceiverKind.Alias;
+                }
+                else if (isAmpersand)
+                {
+                    receiverKind = isMut ? ReceiverKind.MutReference : ReceiverKind.Reference;
+                }
+                else if (isAsterisk)
+                {
+                    receiverKind = ReceiverKind.Pointer;
+                }
+                else
+                {
+                    receiverKind = ReceiverKind.Value;
+                }
+
+                var syntheticType = new SimpleType(new Token(text, thisToken.Span, TokenKind.Identifier, [], [], MatchingKeywordKind.This, "this"));
+                var receiverIdentifier = new SimpleName(thisToken);
+                var receiverDeclarator = new ParameterVariableDeclarator(paramModifiers, syntheticType, receiverIdentifier, receiverKind);
+                var receiverVariableDecl = new Parameter(attributes, receiverDeclarator, null);
+
+                nodesAndSeparators.Add(receiverVariableDecl);
+                paramIndex++;
+
+                if (CurrentToken.Kind is TokenKind.Comma)
+                    nodesAndSeparators.Add(Consume());
+                else
+                    break;
+
+                continue;
+            }
 
             var type = ParseTypeSyntax();
             NamedSyntax identifier;
@@ -725,6 +801,7 @@ internal sealed partial class Parser
             var variableDecl = new Parameter(attributes, declarator, initializer);
 
             nodesAndSeparators.Add(variableDecl);
+            paramIndex++;
 
             if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());
@@ -957,6 +1034,16 @@ internal sealed partial class Parser
             else if (CurrentToken.MatchingKind is MatchingKeywordKind.Dyn)
             {
                 prefixModifiers.Add(new DynTypeModifier(Consume()));
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().MatchingKind is MatchingKeywordKind.Ref)
+            {
+                var mutToken = Consume();
+                var refToken = Consume();
+                prefixModifiers.Add(new RefTypeModifier(mutToken, refToken));
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Ref)
+            {
+                prefixModifiers.Add(new RefTypeModifier(null, Consume()));
             }
             else
             {

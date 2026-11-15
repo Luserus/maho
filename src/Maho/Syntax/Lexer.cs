@@ -425,6 +425,8 @@ internal sealed partial class Lexer
             3 when identifier.SequenceEqual("put") => MatchingKeywordKind.Put,
             3 when identifier.SequenceEqual("set") => MatchingKeywordKind.Set,
             3 when identifier.SequenceEqual("var") => MatchingKeywordKind.Var,
+            3 when identifier.SequenceEqual("ref") => MatchingKeywordKind.Ref,
+            3 when identifier.SequenceEqual("mut") => MatchingKeywordKind.Mut,
             3 when identifier.SequenceEqual("dyn") => MatchingKeywordKind.Dyn,
             3 when identifier.SequenceEqual("int") => MatchingKeywordKind.Int,
             3 when identifier.SequenceEqual("str") => MatchingKeywordKind.Str,

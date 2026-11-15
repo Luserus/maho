@@ -505,7 +505,7 @@ public sealed class InterfaceValidationTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 }
 
