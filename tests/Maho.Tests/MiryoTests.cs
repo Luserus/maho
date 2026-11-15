@@ -262,10 +262,15 @@ public sealed class MiryoTests
 
             using var swOut = new StringWriter();
             using var swErr = new StringWriter();
-            int exitCode = MiryoCommandLine.Run(["build", "--config", configFile, tempDir], swOut, swErr);
+            int exitCode = MiryoCommandLine.Run(["build", "--color", "never", "--config", configFile, tempDir], swOut, swErr);
 
             // Per specification: lowering pipeline not implemented -> exit code 1
             Assert.Equal(1, exitCode);
+            string output = swOut.ToString();
+            Assert.Contains("build failed in", output);
+            Assert.Contains("errors: 1, warnings: 0", output);
+            Assert.DoesNotContain("compilation failed due to", output);
+            Assert.DoesNotContain("compilation failed due to", swErr.ToString());
         }
         finally
         {
@@ -275,7 +280,7 @@ public sealed class MiryoTests
     }
 
     [Fact]
-    public void MiryoCommandLine_Check_SucceedsWithExitCodeZero()
+    public void MiryoCommandLine_BuildCheckFlag_SucceedsWithExitCodeZero()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Miryo_CheckOk_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
@@ -298,15 +303,84 @@ public sealed class MiryoTests
 
             using var swOut = new StringWriter();
             using var swErr = new StringWriter();
-            int exitCode = MiryoCommandLine.Run(["check", "--config", configFile, tempDir], swOut, swErr);
+            int exitCode = MiryoCommandLine.Run(["build", "--check", "--color", "never", "--config", configFile, tempDir], swOut, swErr);
 
             Assert.Equal(0, exitCode);
+            string output = swOut.ToString();
+            Assert.Contains("succeeded |", output);
+            Assert.Contains("build succeeded in", output);
+            Assert.Contains("errors: 0, warnings: 0", output);
+            Assert.DoesNotContain("compilation failed due to", output);
+            Assert.DoesNotContain("compilation failed due to", swErr.ToString());
         }
         finally
         {
             Directory.SetCurrentDirectory(originalCwd);
             Directory.Delete(tempDir, true);
         }
+    }
+
+    [Fact]
+    public void MiryoCommandLine_Build_WithSourceErrors_DisplaysDiagnosticsAndSummaryStats()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Miryo_ErrSummary_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string originalCwd = Directory.GetCurrentDirectory();
+
+        try
+        {
+            Directory.SetCurrentDirectory(tempDir);
+            string projectFile = Path.Combine(tempDir, "App.mhpr");
+            string programFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(projectFile, "EntryFile : \"Program.mh\";\nImplicitTopLevel : true;\n");
+            File.WriteAllText(programFile, "public struct Widget;\npublic struct Widget;");
+
+            string mahocDll = Path.Combine(AppContext.BaseDirectory, "mahoc.dll");
+            string configFile = Path.Combine(tempDir, "miryo.config");
+            File.WriteAllText(configFile, $"""
+                [tools]
+                mahoc = ["{mahocDll}"]
+                """);
+
+            using var swOut = new StringWriter();
+            using var swErr = new StringWriter();
+            int exitCode = MiryoCommandLine.Run(["build", "--check", "--color", "never", "--config", configFile, tempDir], swOut, swErr);
+
+            Assert.Equal(1, exitCode);
+            string output = swOut.ToString();
+            string errOutput = swErr.ToString();
+
+            // Pipeline stages
+            Assert.Contains("Analyzing project configuration...", output);
+            Assert.Contains("Executing core compile...", output);
+            Assert.Contains("failed    |", output);
+
+            // End build status and stats
+            Assert.Contains("build failed in", output);
+            Assert.Contains("errors: 1, warnings: 0", output);
+
+            // Stderr should contain diagnostics under compiler:, but NOT "compilation failed due to"
+            Assert.Contains("compiler:", errOutput);
+            Assert.Contains("Widget", errOutput);
+            Assert.DoesNotContain("compilation failed due to", errOutput);
+            Assert.DoesNotContain("compilation failed due to", output);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(originalCwd);
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void MiryoCommandLine_CheckCommand_IsUnknownCommand()
+    {
+        using var swOut = new StringWriter();
+        using var swErr = new StringWriter();
+        int exitCode = MiryoCommandLine.Run(["check"], swOut, swErr);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("unknown command 'check'", swErr.ToString());
     }
 
     [Fact]
@@ -348,7 +422,6 @@ public sealed class MiryoTests
         Assert.Contains("build [path]", errOutput);
         Assert.Contains("run [path]", errOutput);
         Assert.Contains("new <name>", errOutput);
-        Assert.Contains("check [path]", errOutput);
         Assert.Contains("clean [path]", errOutput);
     }
 

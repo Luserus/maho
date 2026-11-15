@@ -97,9 +97,6 @@ public static class MiryoCommandLine
             case "clean":
                 return ExecuteClean(invocation.Arguments, stdout, stderr, invocation);
 
-            case "check":
-                return ExecuteCheck(invocation.Arguments, stdout, stderr, invocation: invocation, toolchain: toolchain);
-
             case "compiler-server":
                 return ExecuteCompilerServer(invocation.Arguments, stdout, stderr, invocation);
 
@@ -258,6 +255,9 @@ public static class MiryoCommandLine
         bool stopAtIl = false;
         string? outputDir = null;
         string? colorMode = null;
+        bool buildAll = false;
+        var targetProjects = new List<string>();
+        var excludedProjects = new List<string>();
         bool useColors = ShouldUseColors(colorMode);
 
         for (int i = 0; i < args.Length; i++)
@@ -283,6 +283,41 @@ public static class MiryoCommandLine
                     break;
                 case "--check":
                     checkOnly = true;
+                    break;
+                case "-p" or "--project":
+                    if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
+                    {
+                        stderr.WriteLine($"{FormatError("error", useColors)}: the -p/--project option requires a project name.");
+                        return 1;
+                    }
+
+                    string projArg = args[++i];
+                    foreach (var p in projArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        targetProjects.Add(p);
+                    break;
+                case string p when p.StartsWith("--project=", StringComparison.OrdinalIgnoreCase):
+                    string pVal = p[(p.IndexOf('=') + 1)..];
+                    foreach (var proj in pVal.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        targetProjects.Add(proj);
+                    break;
+                case "--all":
+                    buildAll = true;
+                    break;
+                case "--exclude":
+                    if (i + 1 >= args.Length || args[i + 1].StartsWith('-'))
+                    {
+                        stderr.WriteLine($"{FormatError("error", useColors)}: the --exclude option requires a project name.");
+                        return 1;
+                    }
+
+                    string exclArg = args[++i];
+                    foreach (var p in exclArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        excludedProjects.Add(p);
+                    break;
+                case string e when e.StartsWith("--exclude=", StringComparison.OrdinalIgnoreCase):
+                    string eVal = e[(e.IndexOf('=') + 1)..];
+                    foreach (var proj in eVal.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        excludedProjects.Add(proj);
                     break;
                 case "--color":
                     if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
@@ -341,6 +376,34 @@ public static class MiryoCommandLine
         }
 
         toolchain ??= new LocalToolchainManager();
+
+        if (!noProject)
+        {
+            var wsOrProj = MiryoBuildSystem.FindWorkspaceOrProject(fullTargetPath);
+            if (wsOrProj is { IsWorkspace: true } wsInfo)
+            {
+                return ExecuteWorkspaceBuild(
+                    wsInfo.FilePath,
+                    targetProjects,
+                    buildAll,
+                    excludedProjects,
+                    outputDir,
+                    checkOnly,
+                    stopAtIl,
+                    colorMode,
+                    config,
+                    toolchain,
+                    invocation,
+                    stdout,
+                    stderr);
+            }
+
+            if (targetProjects.Count > 0 || buildAll || excludedProjects.Count > 0)
+            {
+                stderr.WriteLine($"{FormatError("error", useColors)}: options -p/--project, --all, and --exclude can only be used when building a workspace.");
+                return 1;
+            }
+        }
         string targetVersion = invocation?.TargetVersion ?? toolchain.ActiveVersion;
         string? mahocPath = toolchain.FindTool("mahoc", targetVersion) ?? config.FindTool("mahoc");
 
@@ -402,6 +465,8 @@ public static class MiryoCommandLine
                 stderr.Flush();
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.WriteLine();
+                stdout.WriteLine("errors: 1, warnings: 0");
                 stdout.Flush();
                 return 1;
             }
@@ -427,6 +492,8 @@ public static class MiryoCommandLine
                     stderr.Flush();
                     stdout.WriteLine();
                     stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                    stdout.WriteLine();
+                    stdout.WriteLine("errors: 1, warnings: 0");
                     stdout.Flush();
                     return 1;
                 }
@@ -444,6 +511,8 @@ public static class MiryoCommandLine
                 stderr.Flush();
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.WriteLine();
+                stdout.WriteLine("errors: 1, warnings: 0");
                 stdout.Flush();
 
                 return 1;
@@ -465,6 +534,8 @@ public static class MiryoCommandLine
                 stderr.Flush();
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.WriteLine();
+                stdout.WriteLine("errors: 1, warnings: 0");
                 stdout.Flush();
 
                 return 1;
@@ -488,6 +559,8 @@ public static class MiryoCommandLine
                     stderr.Flush();
                     stdout.WriteLine();
                     stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                    stdout.WriteLine();
+                    stdout.WriteLine("errors: 1, warnings: 0");
                     stdout.Flush();
 
                     return 1;
@@ -593,6 +666,8 @@ public static class MiryoCommandLine
                 stderr.Flush();
                 stdout.WriteLine();
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+                stdout.WriteLine();
+                stdout.WriteLine("errors: 1, warnings: 0");
                 stdout.Flush();
                 return 1;
             }
@@ -628,6 +703,8 @@ public static class MiryoCommandLine
 
             long elapsedTicks = compileTimer.Elapsed.Ticks;
             bool hasErrors = process.ExitCode != 0;
+            int errorCount = hasErrors ? 1 : 0;
+            int warningCount = 0;
             bool laterStagesNotImplemented = false;
 
             if (!string.IsNullOrWhiteSpace(resultJson))
@@ -640,6 +717,14 @@ public static class MiryoCommandLine
 
                 if (root.TryGetProperty("hasErrors", out JsonElement errors))
                     hasErrors = errors.GetBoolean();
+
+                if (root.TryGetProperty("errorCount", out JsonElement ec))
+                    errorCount = ec.GetInt32();
+                else if (hasErrors)
+                    errorCount = Math.Max(1, errorCount);
+
+                if (root.TryGetProperty("warningCount", out JsonElement wc))
+                    warningCount = wc.GetInt32();
 
                 laterStagesNotImplemented = root.TryGetProperty("pipelineError", out JsonElement pipeline) &&
                     pipeline.ValueKind == JsonValueKind.String &&
@@ -667,11 +752,14 @@ public static class MiryoCommandLine
             if (laterStagesNotImplemented)
                 stdout.WriteLine($"build {FormatFailed("failed", useColors)} due to later stages not being implemented");
 
+            bool buildSuccessful = process.ExitCode == 0 && !laterStagesNotImplemented;
             stdout.WriteLine();
-            stdout.WriteLine($"build {FormatStatus(process.ExitCode == 0, useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+            stdout.WriteLine($"build {FormatStatus(buildSuccessful, useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+            stdout.WriteLine();
+            stdout.WriteLine($"errors: {errorCount}, warnings: {warningCount}");
             stdout.Flush();
 
-            return process.ExitCode;
+            return buildSuccessful ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -684,6 +772,8 @@ public static class MiryoCommandLine
             stderr.Flush();
             stdout.WriteLine();
             stdout.WriteLine($"build {FormatFailed("failed", useColors)} in {FormatElapsed(buildTimer.Elapsed)}");
+            stdout.WriteLine();
+            stdout.WriteLine("errors: 1, warnings: 0");
             stdout.Flush();
 
             return 1;
@@ -729,6 +819,435 @@ public static class MiryoCommandLine
                 return args[i][(args[i].IndexOf('=') + 1)..].ToLowerInvariant();
         }
         return null;
+    }
+
+    private static int ExecuteWorkspaceBuild(
+        string workspaceFilePath,
+        List<string> targetProjects,
+        bool buildAll,
+        List<string> excludedProjects,
+        string? outputDir,
+        bool checkOnly,
+        bool stopAtIl,
+        string? colorMode,
+        MiryoConfiguration config,
+        IToolchainManager toolchain,
+        MiryoInvocation? invocation,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        bool useColors = ShouldUseColors(colorMode);
+        var workspaceTimer = Stopwatch.StartNew();
+
+        MiryoWorkspace workspace;
+        try
+        {
+            workspace = MiryoBuildSystem.LoadWorkspace(workspaceFilePath, outputDir);
+        }
+        catch (Exception ex)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: failed to load workspace '{workspaceFilePath}': {ex.Message}");
+            return 1;
+        }
+
+        string targetVersion = invocation?.TargetVersion ?? toolchain.ActiveVersion;
+        string? mahocPath = toolchain.FindTool("mahoc", targetVersion) ?? config.FindTool("mahoc");
+
+        if (mahocPath is null)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: Could not locate 'mahoc' compiler executable.");
+            stderr.WriteLine($"searched candidates: {string.Join(", ", config.GetToolCandidates("mahoc"))}");
+            stderr.WriteLine("ensure 'mahoc' is built in bin/maho/ or configure its path in miryo.config.");
+            return 1;
+        }
+
+        string? serverPath = config.FindTool("mahoc_server");
+        string? compilerPackagePath = config.FindDirectory("mahoc_compiler");
+
+        stdout.WriteLine($"Building workspace '{workspace.Name}' ({workspace.Projects.Count} projects)");
+        stdout.WriteLine($"From: {workspace.WorkspaceFilePath}");
+        stdout.WriteLine();
+
+        // Validate explicit target projects exist
+        var missingTargets = new List<string>();
+        foreach (var name in targetProjects)
+        {
+            if (workspace.DependencyGraph.FindProject(name) is null)
+                missingTargets.Add(name);
+        }
+
+        if (missingTargets.Count > 0)
+        {
+            string available = string.Join(", ", workspace.Projects.Select(p => p.ProjectName));
+            stderr.WriteLine($"{FormatError("error", useColors)}: project{(missingTargets.Count == 1 ? string.Empty : "s")} '{string.Join("', '", missingTargets)}' not found in workspace '{workspace.Name}'. Available projects: {available}");
+            return 1;
+        }
+
+        // Determine targets to build
+        List<string> targets;
+        if (targetProjects.Count > 0)
+        {
+            targets = targetProjects;
+        }
+        else if (buildAll)
+        {
+            targets = workspace.Projects.Select(p => p.ProjectName).ToList();
+        }
+        else if (workspace.Configuration.Default.Length > 0)
+        {
+            targets = workspace.Configuration.Default.ToList();
+        }
+        else
+        {
+            targets = workspace.Projects.Select(p => p.ProjectName).ToList();
+        }
+
+        // Apply CLI exclusions
+        var excludedSet = new HashSet<string>(excludedProjects, StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlyList<IReadOnlyList<MahoProject>> tiers;
+        try
+        {
+            tiers = workspace.DependencyGraph.GetExecutionPlan(targets);
+        }
+        catch (Exception ex)
+        {
+            stderr.WriteLine($"{FormatError("error", useColors)}: {ex.Message}");
+            return 1;
+        }
+
+        // Filter out excluded projects from tiers
+        if (excludedSet.Count > 0)
+        {
+            tiers = tiers
+                .Select(tier => (IReadOnlyList<MahoProject>)tier.Where(p => !excludedSet.Contains(p.ProjectName)).ToList())
+                .Where(tier => tier.Count > 0)
+                .ToList();
+        }
+
+        var plan = new List<(MahoProject Project, int TierIndex)>();
+        for (int t = 0; t < tiers.Count; t++)
+        {
+            foreach (var proj in tiers[t])
+            {
+                plan.Add((proj, t));
+            }
+        }
+
+        int totalPlanCount = plan.Count;
+        int totalWorkspaceProjects = workspace.Projects.Count;
+        int skippedCount = totalWorkspaceProjects - totalPlanCount;
+        int succeededCount = 0;
+        int failedCount = 0;
+        int totalErrors = 0;
+        int totalWarnings = 0;
+
+        var failedProjects = new HashSet<MahoProject>();
+        var projectDiagnostics = new List<(MahoProject Project, string Diagnostics, int Errors, int Warnings)>();
+
+        for (int i = 0; i < plan.Count; i++)
+        {
+            int step = i + 1;
+            var (project, tierIdx) = plan[i];
+
+            // Check if any transitive dependency failed
+            var deps = workspace.DependencyGraph.GetTransitiveDependencies(project);
+            var failedDep = deps.FirstOrDefault(d => failedProjects.Contains(d));
+            if (failedDep != null)
+            {
+                stdout.WriteLine($"[{step}/{totalPlanCount}] Skipping '{project.ProjectName}' (Tier {tierIdx}) due to failure in '{failedDep.ProjectName}'");
+                stdout.WriteLine();
+                skippedCount++;
+                failedProjects.Add(project);
+                continue;
+            }
+
+            stdout.WriteLine($"[{step}/{totalPlanCount}] Building '{project.ProjectName}' (Tier {tierIdx})...");
+            StartPipelineStage(stdout, "Analyzing project configuration...");
+            var configTimer = Stopwatch.StartNew();
+            bool configValid = true;
+            string? configError = null;
+
+            if (!Directory.Exists(project.ProjectDirectory))
+            {
+                configValid = false;
+                configError = $"Project directory not found: {project.ProjectDirectory}";
+            }
+            else
+            {
+                foreach (var file in project.SourceFiles)
+                {
+                    if (!File.Exists(file))
+                    {
+                        configValid = false;
+                        configError = $"Source file not found: {file}";
+                        break;
+                    }
+                }
+            }
+
+            configTimer.Stop();
+            CompletePipelineStage(stdout, success: configValid, configTimer.Elapsed, useColors);
+
+            if (!configValid)
+            {
+                stdout.WriteLine($"Errors: {FormatFailed("1", useColors)}, Warnings: 0");
+                stdout.WriteLine();
+                failedCount++;
+                totalErrors++;
+                failedProjects.Add(project);
+                projectDiagnostics.Add((project, $"error: {configError}", 1, 0));
+                continue;
+            }
+
+            StartPipelineStage(stdout, "Executing core compile...");
+            var compileResult = CompileProject(
+                mahocPath,
+                project,
+                workspace.TargetDirectory,
+                checkOnly,
+                stopAtIl,
+                useColors,
+                serverPath,
+                compilerPackagePath);
+
+            CompletePipelineStage(stdout, success: compileResult.Success, compileResult.CompileElapsed, useColors);
+
+            string errorText = compileResult.ErrorCount > 0 ? FormatFailed(compileResult.ErrorCount.ToString(), useColors) : "0";
+            string warnText = compileResult.WarningCount > 0 ? (useColors ? $"{AnsiYellow}{compileResult.WarningCount}{AnsiReset}" : compileResult.WarningCount.ToString()) : "0";
+            stdout.WriteLine($"Errors: {errorText}, Warnings: {warnText}");
+            stdout.WriteLine();
+
+            totalErrors += compileResult.ErrorCount;
+            totalWarnings += compileResult.WarningCount;
+
+            if (!compileResult.Success)
+            {
+                failedCount++;
+                failedProjects.Add(project);
+            }
+            else
+            {
+                succeededCount++;
+            }
+
+            if (!string.IsNullOrWhiteSpace(compileResult.Diagnostics))
+            {
+                projectDiagnostics.Add((project, compileResult.Diagnostics, compileResult.ErrorCount, compileResult.WarningCount));
+            }
+        }
+
+        if (projectDiagnostics.Count > 0)
+        {
+            stdout.Flush();
+            foreach (var (proj, diags, errCount, warnCount) in projectDiagnostics)
+            {
+                stderr.WriteLine();
+                string header = errCount > 0
+                    ? $"compiler errors in '{proj.ProjectFilePath}':"
+                    : $"compiler warnings in '{proj.ProjectFilePath}':";
+                stderr.WriteLine(header);
+                stderr.WriteLine(diags.TrimEnd());
+            }
+            stderr.Flush();
+        }
+
+        bool allSuccess = failedCount == 0;
+        string statusText = allSuccess ? "succeeded" : "failed";
+        string statusFormatted = allSuccess ? FormatSuccess(statusText, useColors) : FormatFailed(statusText, useColors);
+
+        stdout.WriteLine();
+        stdout.WriteLine($"workspace build {statusFormatted} in {FormatElapsed(workspaceTimer.Elapsed)}");
+        stdout.WriteLine();
+        stdout.WriteLine($"succeeded: {succeededCount}, skipped: {skippedCount}, failed: {failedCount}");
+        stdout.WriteLine($"errors: {totalErrors}, warnings: {totalWarnings}");
+        stdout.Flush();
+
+        return allSuccess ? 0 : 1;
+    }
+
+    private sealed class ProjectCompilationResult
+    {
+        public bool Success { get; init; }
+        public TimeSpan CompileElapsed { get; init; }
+        public int ExitCode { get; init; }
+        public int ErrorCount { get; init; }
+        public int WarningCount { get; init; }
+        public string Output { get; init; } = "";
+        public string Diagnostics { get; init; } = "";
+        public bool LaterStagesNotImplemented { get; init; }
+    }
+
+    private static ProjectCompilationResult CompileProject(
+        string mahocPath,
+        MahoProject project,
+        string outputDir,
+        bool checkOnly,
+        bool stopAtIl,
+        bool useColors,
+        string? serverPath,
+        string? compilerPackagePath)
+    {
+        var mahocArgs = new List<string>
+        {
+            "--color",
+            useColors ? "always" : "never"
+        };
+
+        if (checkOnly)
+            mahocArgs.Add("--check");
+        else if (stopAtIl)
+            mahocArgs.Add("--emit-il");
+
+        mahocArgs.Add("-o");
+        mahocArgs.Add(outputDir);
+
+        if (project.EntryFile is not null)
+        {
+            mahocArgs.Add("--entry");
+            mahocArgs.Add(project.EntryFile);
+        }
+
+        mahocArgs.Add($"--implicit-toplevel={(project.ImplicitTopLevel ? "true" : "false")}");
+
+        if (project.GlobalUnsafeEnabled)
+            mahocArgs.Add("--unsafe");
+
+        foreach (var (aliasName, target) in project.GlobalAliases)
+        {
+            mahocArgs.Add("--alias");
+            mahocArgs.Add($"{aliasName}={target}");
+        }
+
+        foreach (string referencedProject in project.ProjectsReferenced)
+        {
+            string referencePath = Path.IsPathRooted(referencedProject)
+                ? referencedProject
+                : Path.GetFullPath(Path.Combine(project.ProjectDirectory, referencedProject));
+            mahocArgs.Add("--reference-project");
+            mahocArgs.Add(referencePath);
+        }
+
+        mahocArgs.Add("--project-name");
+        mahocArgs.Add(project.ProjectName);
+        mahocArgs.Add("--module-name");
+        mahocArgs.Add(ToKebabCase(project.ProjectName));
+        mahocArgs.Add("--project-directory");
+        mahocArgs.Add(project.ProjectDirectory);
+        mahocArgs.Add("--source-paths-stdin");
+
+        if (serverPath is not null)
+        {
+            mahocArgs.Add("--server-path");
+            mahocArgs.Add(serverPath);
+        }
+
+        if (compilerPackagePath is not null)
+        {
+            mahocArgs.Add("--compiler-package");
+            mahocArgs.Add(compilerPackagePath);
+        }
+
+        var psi = MiryoConfiguration.CreateProcessStartInfo(mahocPath, mahocArgs);
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+
+        string resultPipeName = $"miryo-result-{Guid.NewGuid():N}";
+        psi.ArgumentList.Add("--result-pipe");
+        psi.ArgumentList.Add(resultPipeName);
+
+        var compileTimer = Stopwatch.StartNew();
+
+        using var resultPipe = new NamedPipeServerStream(resultPipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        using var process = Process.Start(psi);
+
+        if (process is null)
+        {
+            compileTimer.Stop();
+            return new ProjectCompilationResult
+            {
+                Success = false,
+                CompileElapsed = compileTimer.Elapsed,
+                ExitCode = 1,
+                ErrorCount = 1,
+                Diagnostics = "error: failed to launch 'mahoc' process."
+            };
+        }
+
+        foreach (string sourcePath in project.SourceFiles)
+            process.StandardInput.WriteLine(sourcePath);
+        process.StandardInput.Close();
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var diagnosticsTask = process.StandardError.ReadToEndAsync();
+        using var pipeTimeout = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(5));
+        Task pipeConnection = resultPipe.WaitForConnectionAsync(pipeTimeout.Token);
+        Task processExit = process.WaitForExitAsync();
+
+        if (Task.WhenAny(pipeConnection, processExit).GetAwaiter().GetResult() == processExit)
+        {
+            string compilerDiagnostics = diagnosticsTask.GetAwaiter().GetResult();
+            return new ProjectCompilationResult
+            {
+                Success = false,
+                CompileElapsed = compileTimer.Elapsed,
+                ExitCode = process.ExitCode != 0 ? process.ExitCode : 1,
+                ErrorCount = 1,
+                Diagnostics = $"error: mahoc exited before writing its result pipe (exit code {process.ExitCode}). {compilerDiagnostics}".TrimEnd()
+            };
+        }
+
+        pipeConnection.GetAwaiter().GetResult();
+        using var resultReader = new StreamReader(resultPipe, Encoding.UTF8, leaveOpen: true);
+        string resultJson = resultReader.ReadToEnd();
+        process.WaitForExit();
+
+        compileTimer.Stop();
+        string compilerOutput = outputTask.GetAwaiter().GetResult();
+        string diagnostics = diagnosticsTask.GetAwaiter().GetResult();
+
+        long elapsedTicks = compileTimer.Elapsed.Ticks;
+        bool hasErrors = process.ExitCode != 0;
+        int errorCount = hasErrors ? 1 : 0;
+        int warningCount = 0;
+        bool laterStagesNotImplemented = false;
+
+        if (!string.IsNullOrWhiteSpace(resultJson))
+        {
+            using JsonDocument result = JsonDocument.Parse(resultJson);
+            var root = result.RootElement;
+
+            if (root.TryGetProperty("elapsedTicks", out JsonElement ticks))
+                elapsedTicks = ticks.GetInt64();
+
+            if (root.TryGetProperty("hasErrors", out JsonElement errors))
+                hasErrors = errors.GetBoolean();
+
+            if (root.TryGetProperty("errorCount", out JsonElement ec))
+                errorCount = ec.GetInt32();
+            else if (hasErrors)
+                errorCount = Math.Max(1, errorCount);
+
+            if (root.TryGetProperty("warningCount", out JsonElement wc))
+                warningCount = wc.GetInt32();
+
+            laterStagesNotImplemented = root.TryGetProperty("pipelineError", out JsonElement pipeline) &&
+                pipeline.ValueKind == JsonValueKind.String &&
+                pipeline.GetString()?.Contains("lowering and code-generation", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        return new ProjectCompilationResult
+        {
+            Success = !hasErrors && process.ExitCode == 0,
+            CompileElapsed = TimeSpan.FromTicks(elapsedTicks),
+            ExitCode = process.ExitCode,
+            ErrorCount = errorCount,
+            WarningCount = warningCount,
+            Output = compilerOutput,
+            Diagnostics = diagnostics,
+            LaterStagesNotImplemented = laterStagesNotImplemented
+        };
     }
 
     private static int ExecuteCompile(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
@@ -783,25 +1302,76 @@ public static class MiryoCommandLine
             runtimeArgs = [];
         }
 
+        string? colorMode = invocation?.ColorMode ?? ExtractColorMode(args);
+        bool useColors = ShouldUseColors(colorMode);
+
+        string? targetPath = null;
+        string? projectArg = null;
+
+        for (int i = 0; i < buildArgs.Length; i++)
+        {
+            if ((buildArgs[i] == "-p" || buildArgs[i] == "--project") && i + 1 < buildArgs.Length)
+            {
+                projectArg = buildArgs[i + 1];
+                i++;
+            }
+            else if (buildArgs[i].StartsWith("--project=", StringComparison.OrdinalIgnoreCase))
+            {
+                projectArg = buildArgs[i][(buildArgs[i].IndexOf('=') + 1)..];
+            }
+            else if (!buildArgs[i].StartsWith('-') && targetPath is null)
+            {
+                targetPath = buildArgs[i];
+            }
+        }
+
+        targetPath ??= Directory.GetCurrentDirectory();
+        if (Directory.Exists(targetPath) || File.Exists(targetPath))
+        {
+            var wsOrProj = MiryoBuildSystem.FindWorkspaceOrProject(targetPath);
+            if (wsOrProj is { IsWorkspace: true } wsInfo)
+            {
+                MiryoWorkspace ws;
+                try
+                {
+                    ws = MiryoBuildSystem.LoadWorkspace(wsInfo.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    stderr.WriteLine($"{FormatError("error", useColors)}: failed to load workspace '{wsInfo.FilePath}': {ex.Message}");
+                    return 1;
+                }
+
+                if (string.IsNullOrWhiteSpace(projectArg))
+                {
+                    if (ws.Configuration.Default.Length == 1)
+                    {
+                        projectArg = ws.Configuration.Default[0];
+                    }
+                    else if (ws.Projects.Count == 1)
+                    {
+                        projectArg = ws.Projects[0].ProjectName;
+                    }
+                    else
+                    {
+                        stderr.WriteLine($"{FormatError("error", useColors)}: workspace '{ws.Name}' contains multiple projects. Specify which project to run using '-p <project_name>'.");
+                        return 1;
+                    }
+
+                    buildArgs = [.. buildArgs, "-p", projectArg];
+                }
+            }
+        }
+
         int buildExit = ExecuteBuild(buildArgs, stdout, stderr, checkOnly: false, invocation: invocation, toolchain: toolchain);
 
         if (buildExit != 0)
             return buildExit;
 
-        string? colorMode = invocation?.ColorMode ?? ExtractColorMode(args);
-        bool useColors = ShouldUseColors(colorMode);
         stderr.WriteLine($"{FormatError("error", useColors)}: run {FormatFailed("failed", useColors)}: Native code execution pipeline not implemented yet.");
 
         return 1;
     }
-
-    private static int ExecuteCheck(
-        string[] args,
-        TextWriter stdout,
-        TextWriter stderr,
-        MiryoInvocation? invocation = null,
-        IToolchainManager? toolchain = null) =>
-        ExecuteBuild(args, stdout, stderr, checkOnly: true, invocation: invocation, toolchain: toolchain);
 
     private static int ExecuteTest(MiryoInvocation invocation, IToolchainManager toolchain, TextWriter stdout, TextWriter stderr)
     {
@@ -1061,18 +1631,63 @@ public static class MiryoCommandLine
         bool useColors = ShouldUseColors(colorMode);
         targetDir ??= Directory.GetCurrentDirectory();
 
-        if (!Directory.Exists(targetDir))
+        if (!Directory.Exists(targetDir) && !File.Exists(targetDir))
         {
             stderr.WriteLine($"{FormatError("error", useColors)}: directory not found: {targetDir}");
             return 1;
         }
 
+        var wsOrProj = MiryoBuildSystem.FindWorkspaceOrProject(targetDir);
+        if (wsOrProj is { IsWorkspace: true } wsInfo)
+        {
+            try
+            {
+                var ws = MiryoBuildSystem.LoadWorkspace(wsInfo.FilePath);
+                int wsCleanedCount = 0;
+                var cleanedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                void TryClean(string dir)
+                {
+                    if (Directory.Exists(dir) && cleanedDirs.Add(dir))
+                    {
+                        try
+                        {
+                            Directory.Delete(dir, true);
+                            wsCleanedCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            stderr.WriteLine($"{FormatError("error", useColors)}: failed to delete '{dir}': {ex.Message}");
+                        }
+                    }
+                }
+
+                TryClean(ws.TargetDirectory);
+
+                foreach (var proj in ws.Projects)
+                {
+                    TryClean(Path.Combine(proj.ProjectDirectory, "target"));
+                    TryClean(Path.Combine(proj.ProjectDirectory, "bin"));
+                    TryClean(Path.Combine(proj.ProjectDirectory, "obj"));
+                }
+
+                stdout.WriteLine($"cleaned {wsCleanedCount} build artifact directories.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                stderr.WriteLine($"{FormatError("error", useColors)}: failed to clean workspace: {ex.Message}");
+                return 1;
+            }
+        }
+
+        string cleanBaseDir = Directory.Exists(targetDir) ? targetDir : (Path.GetDirectoryName(targetDir) ?? targetDir);
         string[] cleanTargets = ["target", "bin", "obj"];
         int cleanedCount = 0;
 
         foreach (string target in cleanTargets)
         {
-            string dir = Path.Combine(targetDir, target);
+            string dir = Path.Combine(cleanBaseDir, target);
 
             if (Directory.Exists(dir))
             {
@@ -1101,9 +1716,8 @@ public static class MiryoCommandLine
         writer.WriteLine();
         writer.WriteLine("Commands:");
         writer.WriteLine("  new <name>       Create a new Maho project scaffolding (--bin or --lib)");
-        writer.WriteLine("  build [path]     Compile the project or directory");
+        writer.WriteLine("  build [path]     Compile the project, workspace, or directory");
         writer.WriteLine("  compile [flags]  Directly invoke the compiler (mahoc)");
-        writer.WriteLine("  check [path]     Verify syntax and semantics without code generation");
         writer.WriteLine("  run [path]       Build and execute the program");
         writer.WriteLine("  test [path]      Run test suite for project or directory");
         writer.WriteLine("  ls [options]     Send request to language server (maho-ls)");
@@ -1139,6 +1753,9 @@ public static class MiryoCommandLine
         writer.WriteLine("Usage: miryo build [path] [options]");
         writer.WriteLine();
         writer.WriteLine("Options:");
+        writer.WriteLine("  -p, --project <name>  Build only the specified project and its dependencies");
+        writer.WriteLine("  --all                 Build all projects in the workspace");
+        writer.WriteLine("  --exclude <name>      Exclude specific projects from being built");
         writer.WriteLine("  -np, --no-project     Compile directory source files without requiring a .mhpr file");
         writer.WriteLine("  --stop-at-il          Compile up to Maho Intermediate Language (IL) and halt");
         writer.WriteLine("  --check               Verify syntax and semantics without code generation");
@@ -1151,6 +1768,7 @@ public static class MiryoCommandLine
     private const string AnsiReset = "\u001b[0m";
     private const string AnsiRed = "\u001b[31;1m";
     private const string AnsiGreen = "\u001b[32;1m";
+    private const string AnsiYellow = "\u001b[33;1m";
 
     private static bool ShouldUseColors(string? colorMode) => colorMode switch
     {
@@ -1167,7 +1785,7 @@ public static class MiryoCommandLine
 
     private static string FormatStatus(bool success, bool useColors)
     {
-        string text = success ? "success" : "failed";
+        string text = success ? "succeeded" : "failed";
         return success ? FormatSuccess(text, useColors) : FormatFailed(text, useColors);
     }
 
@@ -1182,8 +1800,8 @@ public static class MiryoCommandLine
     private static void CompletePipelineStage(TextWriter writer, bool success, TimeSpan elapsed, bool useColors)
     {
         string status = success
-            ? FormatSuccess("success", useColors)
-            : $"{FormatFailed("failed", useColors)} ";
+            ? FormatSuccess("succeeded", useColors)
+            : $"{FormatFailed("failed", useColors)}   ";
         writer.WriteLine($"{status} | {FormatElapsed(elapsed)}");
         writer.Flush();
     }

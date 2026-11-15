@@ -135,6 +135,37 @@ public sealed class CommandLineTests
     }
 
     [Fact]
+    public void CommandLine_Errors_WithColorAlways_ColorsFailedInSummary()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliErrColor_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sourceFile = Path.Combine(tempDir, "Program.mh");
+            File.WriteAllText(sourceFile, "public struct Widget;\npublic struct Widget;");
+
+            using var sw = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(sw);
+                int exitCode = CommandLine.Run(["--color", "always", sourceFile]);
+                Assert.Equal(1, exitCode);
+                string output = sw.ToString();
+                Assert.Contains("compilation \u001b[31;1mfailed\u001b[0m due to 1 error", output);
+            }
+            finally
+            {
+                Console.SetError(originalError);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public void CommandLine_MultipleErrors_ReportsPluralErrorsWithoutTiming()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "Maho_CliFailStatusMultiple_" + Guid.NewGuid().ToString("N"));

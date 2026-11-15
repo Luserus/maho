@@ -18,6 +18,136 @@ public sealed class MahoProjectFileParser
         return parser.ParseConfiguration();
     }
 
+    public static MiryoWorkspaceConfiguration ParseWorkspace(string text)
+    {
+        var parser = new MahoProjectFileParser(text);
+        return parser.ParseWorkspaceConfiguration();
+    }
+
+    private MiryoWorkspaceConfiguration ParseWorkspaceConfiguration()
+    {
+        string? name = null;
+        string[] members = [];
+        string[] defaultProjects = [];
+        string[] exclude = [];
+        MiryoWorkspaceSharedConfiguration? shared = null;
+        string? targetDirectory = null;
+        HashSet<string> seenProperties = [];
+
+        SkipWhitespace();
+
+        while (!IsAtEnd)
+        {
+            string propName = ParseIdentifier("for the workspace property name");
+
+            if (!seenProperties.Add(propName))
+                throw Error($"Workspace property '{propName}' cannot be specified more than once.");
+
+            SkipWhitespace();
+            Expect(':', $"after workspace property '{propName}'");
+            SkipWhitespace();
+
+            switch (propName)
+            {
+                case "Name":
+                    name = ParseString("for Name");
+                    break;
+                case "Members":
+                    members = ParseStringArray("for Members");
+                    break;
+                case "Default":
+                case "DefaultProjects":
+                    defaultProjects = ParseStringArray($"for {propName}");
+                    break;
+                case "Exclude":
+                    exclude = ParseStringArray("for Exclude");
+                    break;
+                case "Shared":
+                    shared = ParseSharedConfiguration("for Shared");
+                    break;
+                case "TargetDirectory":
+                case "TargetDir":
+                    targetDirectory = ParseString($"for {propName}");
+                    break;
+                default:
+                    throw Error($"Unknown workspace property '{propName}'.");
+            }
+
+            SkipWhitespace();
+            Expect(';', $"after workspace property '{propName}'");
+            SkipWhitespace();
+        }
+
+        return new MiryoWorkspaceConfiguration
+        {
+            Name = name,
+            Members = members,
+            Default = defaultProjects,
+            Exclude = exclude,
+            Shared = shared,
+            TargetDirectory = targetDirectory
+        };
+    }
+
+    private MiryoWorkspaceSharedConfiguration ParseSharedConfiguration(string context)
+    {
+        SkipWhitespace();
+        Expect('{', context);
+        SkipWhitespace();
+
+        Dictionary<string, string> globalAliases = [];
+        bool? globalUnsafeEnabled = null;
+        HashSet<string> seenProperties = [];
+
+        while (CurrentChar is not '}')
+        {
+            string key = CurrentChar is '"'
+                ? ParseString("for Shared property name")
+                : ParseIdentifier("for Shared property name");
+
+            if (!seenProperties.Add(key))
+                throw Error($"Property '{key}' cannot be specified more than once in Shared.");
+
+            SkipWhitespace();
+            Expect(':', $"after Shared property '{key}'");
+            SkipWhitespace();
+
+            switch (key)
+            {
+                case "GlobalAliases":
+                    globalAliases = ParseStringMap("for GlobalAliases in Shared");
+                    break;
+                case "GlobalUnsafeEnabled":
+                    globalUnsafeEnabled = ParseBoolean("for GlobalUnsafeEnabled in Shared");
+                    break;
+                default:
+                    throw Error($"Unknown property '{key}' in Shared.");
+            }
+
+            SkipWhitespace();
+
+            if (CurrentChar is ',')
+            {
+                current++;
+                SkipWhitespace();
+                if (CurrentChar is '}')
+                    break;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        Expect('}', context);
+
+        return new MiryoWorkspaceSharedConfiguration
+        {
+            GlobalAliases = globalAliases,
+            GlobalUnsafeEnabled = globalUnsafeEnabled
+        };
+    }
+
     private MahoProjectConfiguration ParseConfiguration()
     {
         string? entryFile = null;
@@ -190,7 +320,7 @@ public sealed class MahoProjectFileParser
 
         while (CurrentChar is not '}')
         {
-            string key = ParseString(context);
+            string key = CurrentChar is '"' ? ParseString(context) : ParseIdentifier(context);
             SkipWhitespace();
             Expect(':', $"after alias '{key}'");
             SkipWhitespace();

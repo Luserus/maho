@@ -48,33 +48,79 @@ Options:
 - `--config <path>`: Specifies a custom `miryo.config` file to load project templates from.
 
 ### `miryo build [options] [path]`
-Builds a `.mhpr` project file or a project in the specified directory:
-1. Locates and parses the `.mhpr` project file.
-2. Recursively builds any referenced projects declared in `ProjectsReferenced`.
-3. Resolves all source files matching the project's discovery rules.
+Builds a `.mhpr` project file, a `.mrws` workspace file, or a directory containing either:
+1. Locates and parses the `.mrws` workspace file or `.mhpr` project file.
+2. In workspace mode, computes topological execution tiers and dependency graphs across all member projects.
+3. Recursively discovers all member projects (including nested `.mrws` workspaces) and referenced projects.
 4. Locates `mahoc` using search paths defined in `miryo.config`.
-5. Spawns `mahoc` passing source files and flags (`--entry`, `--implicit-toplevel`, `--unsafe`, `--alias`, etc.).
+5. Spawns `mahoc` passing source files, shared configuration (aliases, unsafe), and flags (`--entry`, `--implicit-toplevel`, `--unsafe`, `--alias`, etc.).
 
 Options:
-- `--check`: Analyzes and type-checks the project without compiling down to intermediate representations.
-- `--emit-il`: Emits intermediate language (`.mil`) representations.
-- `-o`, `--output-dir <dir>`: Sets output artifact directory (defaults to `target/`).
+- `-p`, `--project <name>`: Builds only the specified project and its transitive dependencies within the workspace.
+- `--all`: Builds all projects in the workspace, overriding the workspace `Default` configuration.
+- `--exclude <name>`: Excludes specific projects from being built in this run.
+- `--check`: Analyzes and type-checks the project or workspace without compiling down to intermediate representations or emitting artifacts.
+- `--stop-at-il` / `--emit-il`: Emits intermediate language (`.mil`) representations.
+- `-np`, `--no-project`: Compiles directory source files directly without requiring a `.mhpr` or `.mrws` file.
+- `-o`, `--output <dir>`: Sets output artifact directory (defaults to `target/` in project or workspace root).
+- `--color <mode>`: Controls ANSI colored diagnostics (`auto`, `always`, `never`).
 - `--config <path>`: Path to a custom `miryo.config`.
 
 ### `miryo run [build-options] [path] [-- [runtime-args...]]`
-Builds the project and runs the compiled binary:
+Builds the project (or default workspace project) and runs the compiled binary:
+- When executed in a workspace, runs the single default project or requires `-p <name>` if multiple projects exist.
 - Arguments before `--` are passed to `miryo build`.
 - Arguments after `--` are forwarded directly to the running executable.
 
 ### `miryo clean [path]`
-Removes the `target/` build output and `obj/` temporary directories for the specified project.
+Removes build artifact directories (`target/`, `bin/`, `obj/`) for the specified project or all projects in the workspace.
 
 ### `miryo compiler-server shutdown [--config <path>]`
 Gracefully stops any active `mahoc-server` background daemons running for the user and toolchain.
 
 ---
 
-## 3. Configuration File (`miryo.config`)
+## 3. Workspaces (`.mrws`)
+
+Miryo workspaces group multiple projects (`.mhpr`) and nested sub-workspaces into a unified multi-project repository. Workspaces use the same DSL syntax as project files:
+
+```
+Name : "MahoToolchain";
+
+Members : [
+    "src/Core",
+    "src/Cli/Cli.mhpr",
+    "submodules/Tools.mrws",
+    "samples/*"
+];
+
+Default : [ "Cli" ];
+
+Exclude : [
+    "samples/Broken/*"
+];
+
+TargetDirectory : "target";
+
+Shared : {
+    GlobalAliases : {
+        Int : "Std.Int32",
+        String : "Std.String"
+    },
+    GlobalUnsafeEnabled : true
+};
+```
+
+### Workspace Features
+- **Hierarchical Nesting**: Workspaces can list other `.mrws` files in `Members`. Child paths are automatically rebased relative to the child workspace's directory, and all projects flatten into a global topological execution DAG.
+- **Cycle Detection**: Cycles among projects (`A -> B -> A`) or nested workspaces (`A.mrws -> B.mrws -> A.mrws`) are detected with informative error traces.
+- **Topological Tiers**: Projects are grouped into execution tiers `[Tier 0, Tier 1, ...]`. Independent projects in earlier tiers build before downstream consumers.
+- **Failure Short-Circuiting**: If a dependency in an earlier tier fails, dependent projects in later tiers are skipped automatically while unrelated projects continue building.
+- **Shared Configuration**: `Shared` properties such as `GlobalAliases` and `GlobalUnsafeEnabled` are inherited by all member projects.
+
+---
+
+## 4. Configuration File (`miryo.config`)
 
 Miryo uses an INI-style configuration file to configure toolchain paths, templates, and environment variables.
 

@@ -162,6 +162,69 @@ public static class MiryoBuildSystem
     }
 
     /// <summary>
+    /// Searches a directory for a unique <c>.mrws</c> workspace file.
+    /// Returns the workspace file path if exactly one is found, or null if none are found.
+    /// Throws <see cref="InvalidOperationException"/> if multiple workspace files are found.
+    /// </summary>
+    public static string? FindWorkspaceFile(string directoryPath)
+    {
+        string fullDirPath = Path.GetFullPath(directoryPath);
+        if (!Directory.Exists(fullDirPath))
+            return null;
+
+        string[] wsFiles = Directory.GetFiles(fullDirPath, "*.mrws");
+        if (wsFiles.Length == 1)
+            return wsFiles[0];
+
+        if (wsFiles.Length > 1)
+        {
+            var fileNames = string.Join(", ", wsFiles.Select(Path.GetFileName));
+            throw new InvalidOperationException($"Multiple workspace files found in '{directoryPath}': {fileNames}. Specify which workspace file to compile.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Loads a domain-specific <c>.mrws</c> workspace file, parsing configuration, loading members,
+    /// and building the topological dependency graph.
+    /// </summary>
+    public static MiryoWorkspace LoadWorkspace(string workspaceFilePath, string? customTargetDirectory = null)
+    {
+        return MiryoWorkspaceLoader.Load(workspaceFilePath, customTargetDirectory);
+    }
+
+    /// <summary>
+    /// Discovers whether a target path refers to a workspace or project file (directly or within a directory).
+    /// </summary>
+    public static (string FilePath, bool IsWorkspace)? FindWorkspaceOrProject(string targetPath)
+    {
+        string fullPath = Path.GetFullPath(targetPath);
+        if (File.Exists(fullPath))
+        {
+            string ext = Path.GetExtension(fullPath);
+            if (string.Equals(ext, ".mrws", StringComparison.OrdinalIgnoreCase))
+                return (fullPath, true);
+            if (string.Equals(ext, ".mhpr", StringComparison.OrdinalIgnoreCase))
+                return (fullPath, false);
+            return null;
+        }
+
+        if (Directory.Exists(fullPath))
+        {
+            string? wsFile = FindWorkspaceFile(fullPath);
+            if (wsFile != null)
+                return (wsFile, true);
+
+            string? projFile = FindProjectFile(fullPath);
+            if (projFile != null)
+                return (projFile, false);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Loads a domain-specific <c>.mhpr</c> project file, parses its configuration, and discovers source files.
     /// </summary>
     public static MahoProject LoadProject(string projectFilePath)
