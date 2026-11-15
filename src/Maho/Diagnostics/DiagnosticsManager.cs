@@ -491,6 +491,55 @@ internal sealed class DiagnosticsManager
             .WithHelp("break the inheritance cycle by removing one of the base types")
             .Report();
 
+    /// <summary> Reports an inconsistent or cyclic inheritance order. </summary>
+    public void ReportInconsistentInheritanceOrder(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0110", $"inconsistent or cyclic inheritance order detected for type '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"cannot compute a consistent C3 linearization for '{typeName}'", source)
+            .WithHelp("reorder or simplify base types to resolve conflicting inheritance orders")
+            .Report();
+
+    /// <summary> Reports that a base constructor requires explicit initialization in the most-derived constructor. </summary>
+    public void ReportBaseConstructorRequiresExplicitInit(TextSpan span, string baseName, SourceText? source = null) =>
+        BuildError("MH0250", $"base '{baseName}' has no default constructor; derived type must explicitly initialize it", span, source)
+            .WithPrimaryLabel(span, $"base '{baseName}' must be initialized here", source)
+            .WithHelp($"add ':{baseName}(...)' to the constructor's base initializer list")
+            .Report();
+
+    /// <summary> Reports that a base initializer clause was placed on an ordinary (non-constructor) function. </summary>
+    public void ReportInvalidBaseInitializerOnOrdinaryFunction(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0251", "base initializer clause can only be specified on a constructor function", span, source)
+            .WithPrimaryLabel(span, "base initializer clause is not allowed on ordinary functions", source)
+            .WithHelp("remove the ': Base(...)' clause or declare this function as a constructor 'func Ctor.Construct'")
+            .Report();
+
+    /// <summary> Reports that a base initializer specifies a type that is not an inherited base of the enclosing type. </summary>
+    public void ReportTypeIsNotBaseOf(TextSpan span, string targetName, string typeName, SourceText? source = null) =>
+        BuildError("MH0252", $"type '{targetName}' is not a base type of '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{targetName}' is not inherited by '{typeName}'", source)
+            .WithHelp($"remove '{targetName}' from the base initializer list or add it to the inheritance list of '{typeName}'")
+            .Report();
+
+    /// <summary> Reports that a base type is initialized more than once in a constructor base initializer list. </summary>
+    public void ReportDuplicateBaseInitializer(TextSpan span, string baseName, SourceText? source = null) =>
+        BuildError("MH0253", $"base '{baseName}' is already initialized in this base initializer list", span, source)
+            .WithPrimaryLabel(span, $"duplicate initialization of base '{baseName}'", source)
+            .WithHelp($"remove the redundant ':{baseName}(...)' initializer")
+            .Report();
+
+    /// <summary> Reports an attempt to take a thin reference to a non-contiguous / split base. </summary>
+    public void ReportNonContiguousBaseConversion(TextSpan span, string baseName, SourceText? source = null) =>
+        BuildError("MH0320", $"cannot convert derived reference to non-contiguous base '{baseName}'; use 'dyn {baseName}&' instead", span, source)
+            .WithPrimaryLabel(span, $"sub-object '{baseName}' is non-contiguous in memory", source)
+            .WithHelp($"convert to dynamic existential reference 'dyn {baseName}&' instead")
+            .Report();
+
+    /// <summary> Reports an ambiguous member access across sibling base types. </summary>
+    public void ReportAmbiguousMemberAccess(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
+        BuildError("MH0410", $"ambiguous member '{memberName}' in type '{typeName}'; disambiguate by casting with 'as'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is declared in multiple base types", source)
+            .WithHelp($"disambiguate by casting the receiver: '(expr as Base).{memberName}'")
+            .Report();
+
     /// <summary> Reports a duplicate variable declaration pointing to both declaration sites. </summary>
     public void ReportDuplicateVariableDeclaration(
         string variableName,

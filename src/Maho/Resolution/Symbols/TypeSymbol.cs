@@ -10,6 +10,7 @@ internal abstract class TypeSymbol : Symbol
     public NamespaceTrieNode? ContainingNamespace { get; }
 
     public List<TypeRef> BaseTypes { get; internal set; }
+    public List<SymbolHandle> LinearizedBases { get; internal set; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
@@ -24,6 +25,7 @@ internal abstract class TypeSymbol : Symbol
         ContainingNamespace = containingNamespace;
         GenericParameters = [];
         BaseTypes = [];
+        LinearizedBases = [];
         Attributes = [];
 
         Syntax = syntax;

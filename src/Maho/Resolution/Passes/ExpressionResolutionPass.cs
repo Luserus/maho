@@ -106,6 +106,14 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             if (method.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
             {
                 var scope = context.GetSyntaxScope(syntax.Body, GetOwnedScope(method));
+                if (syntax.Signature.BaseClause is { } baseClause)
+                {
+                    foreach (var init in baseClause.Initializers)
+                    {
+                        foreach (var arg in init.Arguments)
+                            ResolveExpression(arg, scope, ResolutionContext.GetHandle(method));
+                    }
+                }
                 ResolveFunctionBody(syntax.Body, scope, ResolutionContext.GetHandle(method), method.ReturnType);
             }
         }
@@ -450,18 +458,27 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                             returnLabel: expectedReturnType.ToLabelString(context, scope),
                             source: returnStmt.GetSource());
                     }
-                    returnedType = collapsed;
                 }
                 else if (!expectedReturnType.IsAssignableFrom(returnedType, context) &&
                          !TryResolveImplicitCast(returnedType, expectedReturnType, out _))
                 {
-                    context.Diagnostics.ReportReturnTypeMismatch(
-                        span,
-                        returnedType.ToQualifiedString(context),
-                        expectedReturnType.ToQualifiedString(context),
-                        exprLabel: returnedType.ToLabelString(context, scope),
-                        returnLabel: expectedReturnType.ToLabelString(context, scope),
-                        source: returnStmt.GetSource());
+                    if (TypeRef.IsNonContiguousSplitBase(expectedReturnType, returnedType, context, out var splitBaseName))
+                    {
+                        context.Diagnostics.ReportNonContiguousBaseConversion(
+                            span,
+                            splitBaseName!,
+                            returnStmt.GetSource());
+                    }
+                    else
+                    {
+                        context.Diagnostics.ReportReturnTypeMismatch(
+                            span,
+                            returnedType.ToQualifiedString(context),
+                            expectedReturnType.ToQualifiedString(context),
+                            exprLabel: returnedType.ToLabelString(context, scope),
+                            returnLabel: expectedReturnType.ToLabelString(context, scope),
+                            source: returnStmt.GetSource());
+                    }
                 }
             }
         }
@@ -639,13 +656,23 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                         if (!st.IsAssignableFrom(initType, context) &&
                             !TryResolveImplicitCast(initType, st, out _))
                         {
-                            context.Diagnostics.ReportAssignmentTypeMismatch(
-                                initExpr.GetSpan() ?? default,
-                                initType.ToQualifiedString(context),
-                                st.ToQualifiedString(context),
-                                rhsLabel: initType.ToLabelString(context, scope),
-                                lhsLabel: st.ToLabelString(context, scope),
-                                source: declaration.GetSource());
+                            if (TypeRef.IsNonContiguousSplitBase(st, initType, context, out var splitBaseName))
+                            {
+                                context.Diagnostics.ReportNonContiguousBaseConversion(
+                                    initExpr.GetSpan() ?? default,
+                                    splitBaseName!,
+                                    declaration.GetSource());
+                            }
+                            else
+                            {
+                                context.Diagnostics.ReportAssignmentTypeMismatch(
+                                    initExpr.GetSpan() ?? default,
+                                    initType.ToQualifiedString(context),
+                                    st.ToQualifiedString(context),
+                                    rhsLabel: initType.ToLabelString(context, scope),
+                                    lhsLabel: st.ToLabelString(context, scope),
+                                    source: declaration.GetSource());
+                            }
                         }
                     }
                 }
@@ -795,7 +822,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 break;
 
             case AsExpression asExpr:
-                result = ResolveAs(asExpr, scope);
+                result = ResolveAs(asExpr, scope, containingFunction);
                 break;
 
             case ArrayCreationExpression arrayCreation:
@@ -1543,13 +1570,23 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred &&
                 assignment.RhsExpression is not CollectionExpression)
             {
-                context.Diagnostics.ReportAssignmentTypeMismatch(
-                    assignment.EqualsOperator.Span,
-                    rhs.ToQualifiedString(context),
-                    lhs.ToQualifiedString(context),
-                    rhsLabel: rhs.ToLabelString(context, scope),
-                    lhsLabel: lhs.ToLabelString(context, scope),
-                    source: assignment.GetSource());
+                if (TypeRef.IsNonContiguousSplitBase(lhs, rhs, context, out var splitBaseName))
+                {
+                    context.Diagnostics.ReportNonContiguousBaseConversion(
+                        assignment.RhsExpression.GetSpan() ?? assignment.EqualsOperator.Span,
+                        splitBaseName!,
+                        assignment.GetSource());
+                }
+                else
+                {
+                    context.Diagnostics.ReportAssignmentTypeMismatch(
+                        assignment.EqualsOperator.Span,
+                        rhs.ToQualifiedString(context),
+                        lhs.ToQualifiedString(context),
+                        rhsLabel: rhs.ToLabelString(context, scope),
+                        lhsLabel: lhs.ToLabelString(context, scope),
+                        source: assignment.GetSource());
+                }
             }
 
             return lhs;
@@ -1881,14 +1918,24 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 !argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
                 !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsInferred)
             {
-                context.Diagnostics.ReportArgumentTypeMismatch(
-                    call.Arguments[i].GetSpan() ?? default,
-                    i + 1,
-                    argTypes[i].ToQualifiedString(context),
-                    param.Type.ToQualifiedString(context),
-                    argLabel: argTypes[i].ToLabelString(context, scope),
-                    paramLabel: param.Type.ToLabelString(context, scope),
-                    source: call.GetSource());
+                if (TypeRef.IsNonContiguousSplitBase(param.Type, argTypes[i], context, out var splitBaseName))
+                {
+                    context.Diagnostics.ReportNonContiguousBaseConversion(
+                        call.Arguments[i].GetSpan() ?? default,
+                        splitBaseName!,
+                        call.GetSource());
+                }
+                else
+                {
+                    context.Diagnostics.ReportArgumentTypeMismatch(
+                        call.Arguments[i].GetSpan() ?? default,
+                        i + 1,
+                        argTypes[i].ToQualifiedString(context),
+                        param.Type.ToQualifiedString(context),
+                        argLabel: argTypes[i].ToLabelString(context, scope),
+                        paramLabel: param.Type.ToLabelString(context, scope),
+                        source: call.GetSource());
+                }
             }
         }
 
@@ -1919,14 +1966,24 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                 !argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
                 !expectedType.IsError && !expectedType.IsUnresolved && !expectedType.IsInferred)
             {
-                context.Diagnostics.ReportArgumentTypeMismatch(
-                    call.Arguments[i].GetSpan() ?? default,
-                    i + 1,
-                    argTypes[i].ToQualifiedString(context),
-                    expectedType.ToQualifiedString(context),
-                    argLabel: argTypes[i].ToLabelString(context, scope),
-                    paramLabel: expectedType.ToLabelString(context, scope),
-                    source: call.GetSource());
+                if (TypeRef.IsNonContiguousSplitBase(expectedType, argTypes[i], context, out var splitBaseName))
+                {
+                    context.Diagnostics.ReportNonContiguousBaseConversion(
+                        call.Arguments[i].GetSpan() ?? default,
+                        splitBaseName!,
+                        call.GetSource());
+                }
+                else
+                {
+                    context.Diagnostics.ReportArgumentTypeMismatch(
+                        call.Arguments[i].GetSpan() ?? default,
+                        i + 1,
+                        argTypes[i].ToQualifiedString(context),
+                        expectedType.ToQualifiedString(context),
+                        argLabel: argTypes[i].ToLabelString(context, scope),
+                        paramLabel: expectedType.ToLabelString(context, scope),
+                        source: call.GetSource());
+                }
             }
         }
 
@@ -1962,6 +2019,40 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         if (receiverType.IsLiteral)
         {
             return receiverType;
+        }
+
+        bool isArrowAccess = access.Dot.Kind == TokenKind.MinusGreaterThan;
+        TypeRef originalReceiverType = receiverType;
+
+        if (isArrowAccess)
+        {
+            if (receiverType.SpecialType is ReferenceSemanticType refType)
+            {
+                receiverType = refType.ElementType;
+            }
+            else if (receiverType.SpecialType is PointerSemanticType ptrType)
+            {
+                receiverType = ptrType.ElementType;
+            }
+            else if (TryResolveIndirectMemberAccessOperator(receiverType, out var elemType))
+            {
+                receiverType = elemType;
+            }
+            else
+            {
+                context.Diagnostics.ReportMemberNotFound(
+                    access.Dot.Span,
+                    "->",
+                    receiverType.ToQualifiedString(context),
+                    labelTypeName: receiverType.ToLabelString(context, scope),
+                    source: access.GetSource());
+                return TypeRef.Error;
+            }
+        }
+
+        if (receiverType.SpecialType is DynSemanticType dynReceiver)
+        {
+            receiverType = dynReceiver.TargetType;
         }
 
         // Check if access.Expression is a TypeSymbol (static access / enum variant)
@@ -2085,7 +2176,17 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         SymbolHandle? recvHandle = receiverType.Handle;
         if (recvHandle is null)
         {
-            if (receiverType.SpecialType is FunctionSemanticType)
+            if (receiverType.SpecialType is ReferenceSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH))
+                    recvHandle = refH;
+            }
+            else if (receiverType.SpecialType is PointerSemanticType)
+            {
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH))
+                    recvHandle = ptrH;
+            }
+            else if (receiverType.SpecialType is FunctionSemanticType)
             {
                 if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH))
                     recvHandle = fnH;
@@ -2103,42 +2204,174 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
         if (recvHandle is not null)
         {
-            var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
-            if (typeSymObj is not null)
-            {
-                var recvScope = GetOwnedScope(typeSymObj);
-                var syms = recvScope[new SymbolName(new SymbolPart(memberName))];
-                bool isExplicitInterfaceAccess = access.Expression is TypeAsExpression;
-                var accessible = syms.Where(cand =>
-                {
-                    if (cand is MethodSymbol m)
-                    {
-                        if (isExplicitInterfaceAccess)
-                            return true;
-                        return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
-                    }
-                    return !isExplicitInterfaceAccess;
-                }).ToList();
-                if (accessible.Count > 0)
-                {
-                    context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(accessible[0]));
-                    return GetTypeFromSymbol(accessible[0]);
-                }
+            bool isExplicitInterfaceAccess = access.Expression is TypeAsExpression;
+            var (member, isAmbiguous, _) = FindMemberInTypeHierarchy(recvHandle.Value, memberName, isExplicitInterfaceAccess);
 
-                if (!isStaticAccessOnType)
-                {
-                    context.Diagnostics.ReportMemberNotFound(
-                        access.Identifier.Span,
-                        memberName,
-                        receiverType.ToQualifiedString(context),
-                        labelTypeName: receiverType.ToLabelString(context, scope),
-                        source: access.GetSource());
-                    return TypeRef.Error;
-                }
+            if (isAmbiguous)
+            {
+                var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
+                context.Diagnostics.ReportAmbiguousMemberAccess(
+                    access.Identifier.Span,
+                    memberName,
+                    typeSymObj?.Name.Text ?? receiverType.ToString(),
+                    access.GetSource());
+                return TypeRef.Error;
+            }
+
+            if (member is not null)
+            {
+                context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(member));
+                return GetTypeFromSymbol(member);
+            }
+
+            if (!isStaticAccessOnType)
+            {
+                context.Diagnostics.ReportMemberNotFound(
+                    access.Identifier.Span,
+                    memberName,
+                    originalReceiverType.ToQualifiedString(context),
+                    labelTypeName: originalReceiverType.ToLabelString(context, scope),
+                    source: access.GetSource());
+                return TypeRef.Error;
             }
         }
 
         return TypeRef.Unresolved;
+    }
+
+    private bool TryResolveIndirectMemberAccessOperator(TypeRef type, out TypeRef elemType)
+    {
+        elemType = TypeRef.Unresolved;
+        if (type.Handle is not { } handle)
+            return false;
+
+        if (context.DiscoveredOperators.TryGetOperators(OperatorKind.IndirectMemberAccess, out var candidates))
+        {
+            foreach (var cand in candidates)
+            {
+                if (TypeRef.IsSubtypeOf(handle, cand.InterfaceHandle, context))
+                {
+                    if (context.GetMethodSymbol(cand.MethodHandle) is { } m)
+                    {
+                        if (m.ReturnType.SpecialType is ReferenceSemanticType r)
+                        {
+                            elemType = r.ElementType;
+                            return true;
+                        }
+                        elemType = m.ReturnType;
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private (Symbol? Member, bool IsAmbiguous, List<Symbol>? Ambiguities) FindMemberInTypeHierarchy(
+        SymbolHandle typeHandle,
+        string memberName,
+        bool isExplicitInterfaceAccess)
+    {
+        typeHandle = context.UnwrapAlias(typeHandle);
+        var typeSymObj = (Symbol?)context.GetTypeSymbol(typeHandle) ?? context.GetSymbol(typeHandle);
+        if (typeSymObj is null)
+            return (null, false, null);
+
+        var recvScope = GetOwnedScope(typeSymObj);
+        var directSyms = recvScope[new SymbolName(new SymbolPart(memberName))];
+        var directAccessible = directSyms.Where(cand =>
+        {
+            if (cand is MethodSymbol m)
+            {
+                if (isExplicitInterfaceAccess)
+                    return true;
+                return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
+            }
+            return !isExplicitInterfaceAccess;
+        }).ToList();
+
+        if (directAccessible.Count > 0)
+            return (directAccessible[0], false, null);
+
+        IReadOnlyList<SymbolHandle> bases = typeSymObj switch
+        {
+            TypeSymbol ts => ts.LinearizedBases,
+            NestedTypeSymbol nts => nts.LinearizedBases,
+            _ => []
+        };
+
+        if (bases.Count <= 1)
+        {
+            IReadOnlyList<TypeRef> fallbackBases = typeSymObj switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+
+            if (fallbackBases.Count > 0)
+            {
+                var fbList = new List<SymbolHandle> { typeHandle };
+                foreach (var fb in fallbackBases)
+                {
+                    if (fb.Handle is { } fbh)
+                        fbList.Add(context.UnwrapAlias(fbh));
+                }
+                bases = fbList;
+            }
+        }
+
+        if (bases.Count <= 1)
+            return (null, false, null);
+
+        var candidateBases = new List<(SymbolHandle BaseHandle, Symbol Member)>();
+        foreach (var bh in bases.Skip(1))
+        {
+            var unwrappedBh = context.UnwrapAlias(bh);
+            var bSym = (Symbol?)context.GetTypeSymbol(unwrappedBh) ?? context.GetSymbol(unwrappedBh);
+            if (bSym is null)
+                continue;
+
+            var bScope = GetOwnedScope(bSym);
+            var bSyms = bScope[new SymbolName(new SymbolPart(memberName))];
+            var bAccessible = bSyms.Where(cand =>
+            {
+                if (cand is MethodSymbol m)
+                {
+                    if (isExplicitInterfaceAccess)
+                        return true;
+                    return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
+                }
+                return !isExplicitInterfaceAccess;
+            }).ToList();
+
+            if (bAccessible.Count > 0)
+            {
+                candidateBases.Add((unwrappedBh, bAccessible[0]));
+            }
+        }
+
+        if (candidateBases.Count == 0)
+            return (null, false, null);
+
+        if (candidateBases.Count == 1)
+            return (candidateBases[0].Member, false, null);
+
+        // Filter out candidates where BaseHandle is a supertype of another candidate's base handle
+        var nonShadowed = candidateBases.Where(c1 =>
+            !candidateBases.Any(c2 => c1.BaseHandle != c2.BaseHandle && TypeRef.IsSubtypeOf(c2.BaseHandle, c1.BaseHandle, context))
+        ).ToList();
+
+        // Deduplicate identical member handles (e.g. from shared root base)
+        var uniqueMembers = nonShadowed
+            .GroupBy(c => ResolutionContext.GetHandle(c.Member))
+            .Select(g => g.First())
+            .ToList();
+
+        if (uniqueMembers.Count == 1)
+            return (uniqueMembers[0].Member, false, null);
+
+        return (null, true, uniqueMembers.Select(c => c.Member).ToList());
     }
 
     /// <summary>
@@ -2869,8 +3102,21 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     /// <param name="asExpr">The as-expression syntax node.</param>
     /// <param name="scope">The current lexical scope.</param>
     /// <returns>The resolved target type.</returns>
-    private TypeRef ResolveAs(AsExpression asExpr, Scope scope) =>
-        ResolveTypeSyntax(asExpr.Type, scope);
+    private TypeRef ResolveAs(AsExpression asExpr, Scope scope, SymbolHandle containingFunction)
+    {
+        var targetType = ResolveTypeSyntax(asExpr.Type, scope);
+        var exprType = ResolveExpression(asExpr.Expression, scope, containingFunction);
+
+        if (TypeRef.IsNonContiguousSplitBase(targetType, exprType, context, out var splitBaseName))
+        {
+            context.Diagnostics.ReportNonContiguousBaseConversion(
+                asExpr.GetSpan() ?? default,
+                splitBaseName!,
+                asExpr.GetSource());
+        }
+
+        return targetType;
+    }
 
     /// <summary>
     /// Resolves a collection literal expression (<c>[a, b, c]</c>) and types it as an array.
@@ -2901,6 +3147,29 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     /// <returns>The resolved <see cref="TypeRef"/>, or <see cref="TypeRef.Unresolved"/> if not found.</returns>
     private TypeRef ResolveTypeSyntax(TypeSyntax syntax, Scope scope)
     {
+        if (syntax is ModifiedType modified)
+        {
+            var inner = ResolveTypeSyntax(modified.Type, scope);
+            return modified.Modifier switch
+            {
+                PointerTypeModifier => TypeRef.Pointer(inner),
+                ReferenceTypeModifier => TypeRef.Reference(inner),
+                OptionalTypeModifier => TypeRef.Optional(inner),
+                ArrayTypeModifier => TypeRef.Array(inner),
+                _ => TypeRef.Error
+            };
+        }
+
+        if (syntax is PrefixModifiedType prefixModified)
+        {
+            var inner = ResolveTypeSyntax(prefixModified.Type, scope);
+            if (prefixModified.Modifier is DynTypeModifier)
+                return TypeRef.Dyn(inner);
+            if (prefixModified.Modifier is UntaggedTypeModifier)
+                return TypeRef.Untagged(inner);
+            return TypeRef.Error;
+        }
+
         var name = ResolutionContext.GetSymbolName(syntax);
         var syms = scope.ResolveType(name);
         if (syms.Count > 0)
@@ -3492,7 +3761,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
             return TypeRef.Optional(SubstituteTypeRef(o.ElementType, typeArgs), type.Handle);
 
         if (type.SpecialType is UnionSemanticType u)
-            return TypeRef.Union(u.Variants.Select(v => SubstituteTypeRef(v, typeArgs)).ToList(), u.IsUntagged);
+            return TypeRef.Union([.. u.Variants.Select(v => SubstituteTypeRef(v, typeArgs))], u.IsUntagged);
 
         if (type.SpecialType is PointerSemanticType p)
             return TypeRef.Pointer(SubstituteTypeRef(p.ElementType, typeArgs));
@@ -3508,6 +3777,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
 
         if (type.SpecialType is FixedArraySemanticType f)
             return TypeRef.FixedArray(SubstituteTypeRef(f.ElementType, typeArgs), f.Size, type.Handle);
+
+        if (type.SpecialType is DynSemanticType dyn)
+            return TypeRef.Dyn(SubstituteTypeRef(dyn.TargetType, typeArgs));
+
+        if (type.SpecialType is UntaggedSemanticType untagged)
+            return TypeRef.Untagged(SubstituteTypeRef(untagged.InnerType, typeArgs));
 
         return type;
     }

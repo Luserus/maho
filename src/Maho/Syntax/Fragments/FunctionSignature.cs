@@ -39,6 +39,9 @@ internal sealed class FunctionSignature : SyntaxNode
     /// <summary> Type constraint clauses appearing after the return type. </summary>
     public IReadOnlyList<TypeConstraintClause> Constraints { get; }
 
+    /// <summary> Base initializer clause appearing on a function signature, e.g. ': Base1(a), Base2(b)'. </summary>
+    public BaseInitializerClause? BaseClause { get; }
+
     /// <summary> All modifiers (pre-modifiers and post-modifiers combined). </summary>
     public IReadOnlyList<Token> Modifiers { get; }
 
@@ -53,7 +56,8 @@ internal sealed class FunctionSignature : SyntaxNode
         IReadOnlyList<Token> postModifiers,
         Token? arrowToken,
         TypeSyntax returnType,
-        IReadOnlyList<TypeConstraintClause> constraints)
+        IReadOnlyList<TypeConstraintClause> constraints,
+        BaseInitializerClause? baseClause = null)
     {
         PreModifiers = preModifiers;
         FuncKeyword = funcKeyword;
@@ -65,6 +69,7 @@ internal sealed class FunctionSignature : SyntaxNode
         ArrowToken = arrowToken;
         ReturnType = returnType;
         Constraints = constraints;
+        BaseClause = baseClause;
 
         if (postModifiers.Count == 0)
         {

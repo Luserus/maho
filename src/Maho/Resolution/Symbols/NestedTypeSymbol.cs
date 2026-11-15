@@ -11,6 +11,7 @@ internal abstract class NestedTypeSymbol : Symbol
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }
     public List<TypeRef> BaseTypes { get; internal set; }
+    public List<SymbolHandle> LinearizedBases { get; internal set; }
     public List<SymbolHandle> Attributes { get; internal set; }
 
 
@@ -24,6 +25,7 @@ internal abstract class NestedTypeSymbol : Symbol
         Parent = parent;
         GenericParameters = [];
         BaseTypes = [];
+        LinearizedBases = [];
         Attributes = [];
         Syntax = syntax;
     }

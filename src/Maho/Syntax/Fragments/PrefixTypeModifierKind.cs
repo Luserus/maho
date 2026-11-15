@@ -4,6 +4,7 @@ namespace Maho.Syntax;
 internal enum PrefixTypeModifierKind
 {
     Span,
-    Untagged
+    Untagged,
+    Dyn
 }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Maho.Diagnostics;
+using Maho.Resolution.Layout;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -199,6 +200,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
 
         CheckDuplicateTypeDeclarations();
         CheckCyclicTypeHierarchies();
+        LinearizeAndDeduplicateAllBases();
+        ValidateConstructorBaseInitializers();
         CheckDuplicateAndPartialFunctions();
         CheckDuplicateVariables();
         CheckDuplicateProperties();
@@ -345,6 +348,8 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
         bool isStruct = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH) && handle == structH;
         bool isArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayH) && handle == arrayH;
+        bool isFixedArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrH) && handle == fixedArrH;
+        bool isMetadata = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Metadata, out var metaH) && handle == metaH;
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
         bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
@@ -354,7 +359,7 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         if (isValueType)
             return;
 
-        if (isStruct || isArray || isEnum || isFunction || isDelegate || isUnit || isTuple)
+        if (isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isUnit || isTuple)
         {
             if (valTypeH != default)
             {
@@ -376,6 +381,9 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
         if (structH != default)
         {
+            if (valTypeH != default && existingBases.Any(b => b.Handle == valTypeH))
+                return;
+
             var structRef = TypeRef.Resolved(structH);
             if (!existingBases.Any(b => b.Handle == structH))
             {
@@ -1269,6 +1277,12 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
             {
                 var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext: true);
                 return TypeRef.Untagged(inner);
+            }
+
+            if (prefixModified.Modifier is DynTypeModifier)
+            {
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+                return TypeRef.Dyn(inner);
             }
 
             var innerType = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
@@ -2228,6 +2242,159 @@ internal sealed class DeclarationResolutionPass : ResolutionPass
                 reported.Add(handle);
                 var span = type.Syntax?.Name.GetSpan() ?? type.Syntax?.GetSpan() ?? default;
                 context.Diagnostics.ReportCyclicTypeHierarchy(span, type.Name.ToString(), type.Syntax?.GetSource());
+            }
+        }
+    }
+
+    private void LinearizeAndDeduplicateAllBases()
+    {
+        TypeContiguityAnalyzer.ClearCache();
+
+        foreach (var type in context.TypeSymbols)
+        {
+            LinearizeType(type, ResolutionContext.GetHandle(type), b => type.LinearizedBases = b);
+        }
+
+        foreach (var type in context.NestedTypeSymbols)
+        {
+            LinearizeType(type, ResolutionContext.GetHandle(type), b => type.LinearizedBases = b);
+        }
+    }
+
+    private void LinearizeType(Symbol typeSymbol, SymbolHandle handle, Action<List<SymbolHandle>> setLinearizedBases)
+    {
+        if (C3Linearizer.TryLinearize(handle, context, out var linearization))
+        {
+            setLinearizedBases(linearization);
+        }
+        else
+        {
+            var span = (typeSymbol as TypeSymbol)?.Syntax?.Name.GetSpan() ??
+                       (typeSymbol as NestedTypeSymbol)?.Syntax?.Name.GetSpan() ?? default;
+            var source = (typeSymbol as TypeSymbol)?.Syntax?.GetSource() ??
+                         (typeSymbol as NestedTypeSymbol)?.Syntax?.GetSource();
+            context.Diagnostics.ReportInconsistentInheritanceOrder(span, typeSymbol.Name.ToString(), source);
+        }
+    }
+
+    private void ValidateConstructorBaseInitializers()
+    {
+        // 1. Top-level functions cannot have base initializers
+        foreach (var function in context.FunctionSymbols)
+        {
+            if (function.Syntax?.Signature.BaseClause is { } baseClause)
+            {
+                context.Diagnostics.ReportInvalidBaseInitializerOnOrdinaryFunction(
+                    baseClause.GetSpan() ?? default,
+                    function.Syntax.GetSource());
+            }
+        }
+
+        // 2. Member methods
+        foreach (var method in context.MethodSymbols)
+        {
+            if (method.Syntax is null)
+                continue;
+
+            bool isConstructor = method.Name.Text == "Construct";
+            var baseClause = method.Syntax.Signature.BaseClause;
+
+            if (!isConstructor)
+            {
+                if (baseClause is not null)
+                {
+                    context.Diagnostics.ReportInvalidBaseInitializerOnOrdinaryFunction(
+                        baseClause.GetSpan() ?? default,
+                        method.Syntax.GetSource());
+                }
+                continue;
+            }
+
+            // Method IS a constructor
+            if (method.Parent is not { } parentHandle)
+                continue;
+
+            var parentSym = context.GetSymbol(parentHandle);
+            string parentName = parentSym?.Name.Text ?? "Type";
+            IReadOnlyList<SymbolHandle> linearizedBases = parentSym switch
+            {
+                TypeSymbol ts => ts.LinearizedBases,
+                NestedTypeSymbol nts => nts.LinearizedBases,
+                _ => []
+            };
+
+            var validBaseHandles = new HashSet<SymbolHandle>(linearizedBases.Skip(1));
+            var initializedBases = new HashSet<SymbolHandle>();
+
+            if (baseClause is not null)
+            {
+                var scope = GetOwnedScope(method);
+                foreach (var init in baseClause.Initializers)
+                {
+                    var targetType = ResolveType(init.BaseType, scope, reportDiagnostics: true);
+                    if (targetType.Handle is { } targetHandle)
+                    {
+                        targetHandle = context.UnwrapAlias(targetHandle);
+                        if (!validBaseHandles.Contains(targetHandle))
+                        {
+                            var targetName = context.GetTypeSymbol(targetHandle)?.Name.Text ?? targetType.ToString();
+                            context.Diagnostics.ReportTypeIsNotBaseOf(
+                                init.BaseType.GetSpan() ?? default,
+                                targetName,
+                                parentName,
+                                method.Syntax.GetSource());
+                        }
+                        else
+                        {
+                            if (!initializedBases.Add(targetHandle))
+                            {
+                                var targetName = context.GetTypeSymbol(targetHandle)?.Name.Text ?? targetType.ToString();
+                                context.Diagnostics.ReportDuplicateBaseInitializer(
+                                    init.BaseType.GetSpan() ?? default,
+                                    targetName,
+                                    method.Syntax.GetSource());
+                            }
+                        }
+                    }
+                }
+            }
+
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH);
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH);
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH);
+
+            // Check if any base in the hierarchy requires explicit initialization
+            foreach (var bHandle in validBaseHandles)
+            {
+                // Skip built-in ValType / Struct / Enum
+                if (bHandle == valTypeH || bHandle == structH || bHandle == enumH)
+                    continue;
+
+                if (context.GetSymbol(bHandle) is not { } bSym)
+                    continue;
+
+                // Check if bSym has constructors
+                var bScope = GetOwnedScope(bSym);
+                var constructors = bScope.Symbols.Values
+                    .OfType<MethodSymbol>()
+                    .Where(m => m.Name.Text == "Construct")
+                    .ToList();
+
+                // If bSym declares at least one constructor, and none of them is parameterless (0 parameters),
+                // then it requires explicit initialization!
+                if (constructors.Count > 0 && !constructors.Any(m => m.Parameters.Count == 0))
+                {
+                    if (!initializedBases.Contains(bHandle))
+                    {
+                        var span = baseClause?.GetSpan() ??
+                                   method.Syntax.Signature.Identifier.GetSpan() ??
+                                   method.Syntax.GetSpan() ?? default;
+                        context.Diagnostics.ReportBaseConstructorRequiresExplicitInit(
+                            span,
+                            bSym.Name.Text,
+                            method.Syntax.GetSource());
+                    }
+                }
             }
         }
     }

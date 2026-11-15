@@ -18,16 +18,33 @@ struct Int8;
 [IntrinsicType("NUInt")]
 struct NUInt;
 
+[IntrinsicType("Metadata")]
+struct Metadata<T>;
+
+interface Arrow<T>
+{
+    [OperatorFunction("IndirectMemberAccess")]
+    func Arrow() -> T&;
+}
+
 [IntrinsicType("Reference")]
-struct Reference<T>
+struct Reference<T> : Arrow<T>
 {
     NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("Reference.Deref()")]
+    func Arrow.Arrow() -> T&;
 }
 
 [IntrinsicType("Pointer")]
-struct Pointer<T>
+struct Pointer<T> : Arrow<T>
 {
     NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("Pointer.Deref()")]
+    func Arrow.Arrow() -> T&;
 }
 
 [IntrinsicType("Str")]

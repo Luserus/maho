@@ -492,30 +492,36 @@ internal sealed partial class Parser
         if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Delegate && LookaheadPeek().Kind is TokenKind.LeftParen)
             return LookaheadParseDelegateType();
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+        List<PrefixTypeModifier> prefixModifiers = [];
+        while (true)
         {
-            var ampersand = LookaheadConsume();
-            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
-            if (!innerSuccess)
-                return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), false, innerContext);
-
-            return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), true, LookaheadResultContext.Success);
-        }
-
-        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
-        {
-            var untagged = LookaheadConsume();
-            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
-            if (!innerSuccess)
-                return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), false, innerContext);
-
-            return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), true, LookaheadResultContext.Success);
+            if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+            {
+                prefixModifiers.Add(new SpanTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
+            {
+                prefixModifiers.Add(new UntaggedTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Dyn)
+            {
+                prefixModifiers.Add(new DynTypeModifier(LookaheadConsume()));
+            }
+            else
+            {
+                break;
+            }
         }
 
         var (type, success) = LookaheadParsePrimaryType();
 
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
+
+        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
+        {
+            type = new PrefixModifiedType(prefixModifiers[i], type);
+        }
 
         if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
             (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))

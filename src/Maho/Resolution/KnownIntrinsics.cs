@@ -48,6 +48,7 @@ internal static class KnownIntrinsics
     // Pointer and Reference
     public const string Pointer = "Pointer";
     public const string Reference = "Reference";
+    public const string Metadata = "Metadata";
 
     // Arrays and Spans
     public const string FixedArray = "FixedArray";
@@ -125,7 +126,7 @@ internal static class KnownIntrinsics
         Float16, Float32, Float64, Float128,
         Bool, Char, Str, Unit,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
-        Pointer, Reference,
+        Pointer, Reference, Metadata,
         FixedArray, Array, Span, Optional
     ];
 
@@ -155,7 +156,7 @@ internal static class KnownIntrinsics
         Float16, Float32, Float64, Float128,
         Bool, Char, Unit,
         ValueType, Struct, Enum, Tuple,
-        FixedArray
+        FixedArray, Metadata
     ];
 
     public static readonly HashSet<string> AllOperatorNames =

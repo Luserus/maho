@@ -12,6 +12,7 @@ internal enum SemanticTypeKind : byte
     Tuple,
     Union,
     Untagged,
+    Dyn,
     Function,
     Delegate,
     Literal,

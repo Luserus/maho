@@ -29,6 +29,8 @@ internal enum TypeRefKind : byte
     Union,
     /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
     Untagged,
+    /// <summary>Dynamic existential type modifier (<c>dyn T</c>).</summary>
+    Dyn,
     /// <summary>Function pointer type (<c>func(params) -&gt; ReturnType</c>).</summary>
     Function,
     /// <summary>Delegate type (<c>delegate(params) -&gt; ReturnType</c>).</summary>

@@ -3,6 +3,7 @@ global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.Sy
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Maho.Resolution.Layout;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -22,7 +23,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal or TypeRefKind.Never => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -32,7 +33,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Resolved => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -42,6 +43,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public bool IsLiteral => Kind == TypeRefKind.Literal;
     public CompileTimeLiteralType? AsLiteral => SpecialType as CompileTimeLiteralType;
+
+    public bool IsDyn => Kind == TypeRefKind.Dyn;
+    public DynSemanticType? AsDyn => SpecialType as DynSemanticType;
+
+    public bool IsSized => SpecialType is not DynSemanticType;
 
     public bool IsError => Kind == TypeRefKind.Error || (SpecialType is not null && SpecialType.IsError);
 
@@ -107,6 +113,12 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         return new TypeRef(TypeRefKind.Untagged, null, new UntaggedSemanticType(inner));
     }
+
+    public static TypeRef Dyn(TypeRef targetType) =>
+        new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType));
+
+    public static TypeRef Dyn(TypeRef targetType, IReadOnlyList<TypeRef> composed) =>
+        new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType, composed));
 
     public static TypeRef Function(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
         new TypeRef(TypeRefKind.Function, null, new FunctionSemanticType(returnType, parameterTypes));
@@ -193,6 +205,42 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                 return sourceUnion.Variants.All(sv => targetUnion.Variants.Any(tv => tv.IsAssignableFrom(sv, context)));
 
             return targetUnion.Variants.Any(v => v.IsAssignableFrom(source, context));
+        }
+
+        if (SpecialType is DynSemanticType targetDyn)
+        {
+            if (source.SpecialType is DynSemanticType sourceDyn)
+                return targetDyn.TargetType.IsAssignableFrom(sourceDyn.TargetType, context);
+
+            return targetDyn.TargetType.IsAssignableFrom(source, context);
+        }
+
+        if (SpecialType is ReferenceSemanticType targetRef)
+        {
+            if (source.SpecialType is ReferenceSemanticType sourceRef)
+            {
+                if (targetRef.ElementType.SpecialType is DynSemanticType targetDynElem)
+                    return targetDynElem.TargetType.IsAssignableFrom(sourceRef.ElementType, context);
+
+                if (IsNonContiguousSplitBase(this, source, context, out _))
+                    return false;
+
+                return targetRef.ElementType.IsAssignableFrom(sourceRef.ElementType, context);
+            }
+        }
+
+        if (SpecialType is PointerSemanticType targetPtr)
+        {
+            if (source.SpecialType is PointerSemanticType sourcePtr)
+            {
+                if (targetPtr.ElementType.SpecialType is DynSemanticType targetDynElem)
+                    return targetDynElem.TargetType.IsAssignableFrom(sourcePtr.ElementType, context);
+
+                if (IsNonContiguousSplitBase(this, source, context, out _))
+                    return false;
+
+                return targetPtr.ElementType.IsAssignableFrom(sourcePtr.ElementType, context);
+            }
         }
 
         if (SpecialType is DelegateSemanticType targetDel)
@@ -455,7 +503,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Char, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("char", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
+    internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
     {
         subHandle = context.UnwrapAlias(subHandle);
         superHandle = context.UnwrapAlias(superHandle);
@@ -489,6 +537,46 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return false;
     }
 
+    public static bool IsNonContiguousSplitBase(TypeRef target, TypeRef source, ResolutionContext context, out string? baseName)
+    {
+        baseName = null;
+        TypeRef targetElem;
+        TypeRef sourceElem;
+
+        if (target.SpecialType is ReferenceSemanticType targetRef && source.SpecialType is ReferenceSemanticType sourceRef)
+        {
+            targetElem = targetRef.ElementType;
+            sourceElem = sourceRef.ElementType;
+        }
+        else if (target.SpecialType is PointerSemanticType targetPtr && source.SpecialType is PointerSemanticType sourcePtr)
+        {
+            targetElem = targetPtr.ElementType;
+            sourceElem = sourcePtr.ElementType;
+        }
+        else
+            return false;
+
+        if (targetElem.IsDyn)
+            return false;
+
+        if (targetElem.Handle is { } targetHandle && sourceElem.Handle is { } sourceHandle)
+        {
+            targetHandle = context.UnwrapAlias(targetHandle);
+            sourceHandle = context.UnwrapAlias(sourceHandle);
+
+            if (targetHandle != sourceHandle && IsSubtypeOf(sourceHandle, targetHandle, context))
+            {
+                if (!TypeContiguityAnalyzer.IsBaseContiguous(sourceHandle, targetHandle, context))
+                {
+                    baseName = context.GetTypeSymbol(targetHandle)?.Name.Text ?? "Base";
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public override string ToString() => Kind switch
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
@@ -498,7 +586,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
         TypeRefKind.FixedArray or TypeRefKind.Span or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
 
@@ -619,6 +707,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (SpecialType is UntaggedSemanticType untagged)
             return $"untagged {untagged.InnerType.ToQualifiedString(context)}";
 
+        if (SpecialType is DynSemanticType dynType)
+            return $"dyn {dynType.TargetType.ToQualifiedString(context)}";
+
         if (Handle is { } handle)
             return ResolutionContext.GetQualifiedSymbolName(handle, context);
 
@@ -680,6 +771,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         if (SpecialType is UntaggedSemanticType untagged)
             return $"untagged {untagged.InnerType.ToLabelString(context, scope)}";
+
+        if (SpecialType is DynSemanticType dynLabel)
+            return $"dyn {dynLabel.TargetType.ToLabelString(context, scope)}";
 
         if (Handle is { } handle)
             return ResolutionContext.GetLabelSymbolName(handle, context, scope);

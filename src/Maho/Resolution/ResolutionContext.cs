@@ -766,6 +766,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is MethodSymbol method)
             return method;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetMethodSymbol(handle) is { } refMethod)
+                return refMethod;
+        }
+
         return null;
     }
 
@@ -778,6 +784,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is TypeSymbol t)
             return t;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetTypeSymbol(handle) is { } refType)
+                return refType;
+        }
+
         return null;
     }
 
@@ -789,6 +801,12 @@ internal sealed class ResolutionContext
             return NestedTypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedTypeSymbol t)
             return t;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetNestedTypeSymbol(handle) is { } refType)
+                return refType;
+        }
 
         return null;
     }
@@ -862,6 +880,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FieldSymbol f)
             return f;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetFieldSymbol(handle) is { } refField)
+                return refField;
+        }
+
         return null;
     }
 
@@ -873,6 +897,12 @@ internal sealed class ResolutionContext
             return PropertySymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is PropertySymbol p)
             return p;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetPropertySymbol(handle) is { } refProp)
+                return refProp;
+        }
 
         return null;
     }
@@ -886,27 +916,47 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is EnumVariantSymbol v)
             return v;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetEnumVariantSymbol(handle) is { } refEnum)
+                return refEnum;
+        }
+
         return null;
     }
 
-    public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
+    public Symbol? GetSymbol(SymbolHandle handle)
     {
-        SymbolKind.Type => GetTypeSymbol(handle),
-        SymbolKind.NestedType => GetNestedTypeSymbol(handle),
-        SymbolKind.Function => GetFunctionSymbol(handle),
-        SymbolKind.Method => GetMethodSymbol(handle),
-        SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
-        SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
-        SymbolKind.Field => GetFieldSymbol(handle),
-        SymbolKind.Property => GetPropertySymbol(handle),
-        SymbolKind.Alias => GetAliasSymbol(handle),
-        SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
-        SymbolKind.Parameter => GetParameterSymbol(handle),
-        SymbolKind.Attribute => GetAttributeSymbol(handle),
-        SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
-        SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
-        _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
-    };
+        var sym = handle.Kind switch
+        {
+            SymbolKind.Type => GetTypeSymbol(handle),
+            SymbolKind.NestedType => GetNestedTypeSymbol(handle),
+            SymbolKind.Function => GetFunctionSymbol(handle),
+            SymbolKind.Method => GetMethodSymbol(handle),
+            SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
+            SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
+            SymbolKind.Field => GetFieldSymbol(handle),
+            SymbolKind.Property => GetPropertySymbol(handle),
+            SymbolKind.Alias => GetAliasSymbol(handle),
+            SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
+            SymbolKind.Parameter => GetParameterSymbol(handle),
+            SymbolKind.Attribute => GetAttributeSymbol(handle),
+            SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
+            SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
+            _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
+        };
+
+        if (sym is not null)
+            return sym;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetSymbol(handle) is { } refSym)
+                return refSym;
+        }
+
+        return null;
+    }
 
     public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
 

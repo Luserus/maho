@@ -180,7 +180,8 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto
         and not MatchingKeywordKind.True and not MatchingKeywordKind.False
         and not MatchingKeywordKind.Null and not MatchingKeywordKind.This
-        and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate;
+        and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
+        and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)

@@ -249,6 +249,30 @@ internal sealed partial class Parser
 
     private TypeConstraint ParseTypeConstraint() => new TypeTypeConstraint(ParseTypeSyntax());
 
+    private BaseInitializerClause ParseBaseInitializerClause()
+    {
+        var colon = Consume();
+        var nodesAndSeparators = new List<SyntaxNode>();
+
+        while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken &&
+               CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
+        {
+            var baseType = ParseTypeSyntax();
+            var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after base type in initializer");
+            var arguments = ParseExpressionArgumentList();
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close base initializer argument list");
+
+            nodesAndSeparators.Add(new BaseInitializer(baseType, openParen, arguments, closeParen));
+
+            if (CurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(Consume());
+            else
+                break;
+        }
+
+        return new BaseInitializerClause(colon, new SeparatedSyntaxList<BaseInitializer>(nodesAndSeparators));
+    }
+
     private TypeBlockBody ParseTypeBlockBody()
     {
         var openBrace = Consume();
@@ -739,10 +763,19 @@ internal sealed partial class Parser
         }
 
         List<TypeConstraintClause> constraints = [];
-        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
-            constraints.Add(ParseTypeConstraintClause());
+        BaseInitializerClause? baseClause = null;
 
-        var signature = new FunctionSignature(preModifiers, funcKeyword, identifier, openParen, parameters, closeParen, postModifiers, arrowToken, returnType, constraints);
+        while (true)
+        {
+            if (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+                constraints.Add(ParseTypeConstraintClause());
+            else if (CurrentToken.Kind is TokenKind.Colon && baseClause is null)
+                baseClause = ParseBaseInitializerClause();
+            else
+                break;
+        }
+
+        var signature = new FunctionSignature(preModifiers, funcKeyword, identifier, openParen, parameters, closeParen, postModifiers, arrowToken, returnType, constraints, baseClause);
 
         var body = ParseFunctionBody();
 
@@ -910,21 +943,33 @@ internal sealed partial class Parser
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Delegate && Peek().Kind is TokenKind.LeftParen)
             return ParseDelegateType();
 
-        if (CurrentToken.Kind is TokenKind.Ampersand)
+        List<PrefixTypeModifier> prefixModifiers = [];
+        while (true)
         {
-            var ampersand = Consume();
-            var innerType = ParseTypeSyntax();
-            return new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType);
-        }
-
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
-        {
-            var untagged = Consume();
-            var innerType = ParseTypeSyntax();
-            return new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType);
+            if (CurrentToken.Kind is TokenKind.Ampersand)
+            {
+                prefixModifiers.Add(new SpanTypeModifier(Consume()));
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
+            {
+                prefixModifiers.Add(new UntaggedTypeModifier(Consume()));
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Dyn)
+            {
+                prefixModifiers.Add(new DynTypeModifier(Consume()));
+            }
+            else
+            {
+                break;
+            }
         }
 
         var type = ParsePrimaryType();
+
+        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
+        {
+            type = new PrefixModifiedType(prefixModifiers[i], type);
+        }
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
             (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))

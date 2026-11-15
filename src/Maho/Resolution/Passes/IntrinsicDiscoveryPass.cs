@@ -390,7 +390,7 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
             return false;
         }
 
-        if (intrinsicName != KnownIntrinsics.FixedArray && intrinsicName != KnownIntrinsics.Tuple && GetGenericParameterCount(symbol) > 0)
+        if (intrinsicName != KnownIntrinsics.FixedArray && intrinsicName != KnownIntrinsics.Tuple && intrinsicName != KnownIntrinsics.Metadata && GetGenericParameterCount(symbol) > 0)
         {
             var span = syntax?.Name.GetSpan() ?? default;
             context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, intrinsicName, "cannot have generic parameters", syntax?.GetSource());
@@ -424,7 +424,20 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         }
 
         var instanceFields = GetInstanceFields(symbol);
-        if (instanceFields.Count != 1)
+        bool hasValidMetadataField = false;
+        if (instanceFields.Count == 2)
+        {
+            var secondFieldType = instanceFields[1].Syntax?.Type;
+            if (secondFieldType is not null &&
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Metadata, out var metaHandle))
+            {
+                var resolvedSecond = ResolveTypeSymbol(secondFieldType, instanceFields[1].EnclosingScope);
+                if (resolvedSecond == metaHandle)
+                    hasValidMetadataField = true;
+            }
+        }
+
+        if (instanceFields.Count != 1 && !hasValidMetadataField)
         {
             var span = syntax?.Name.GetSpan() ?? default;
             context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, intrinsicName, "must have exactly 1 instance field", syntax?.GetSource());
@@ -440,7 +453,7 @@ internal sealed class IntrinsicDiscoveryPass : ResolutionPass
         if (resolvedFieldHandle != nuintHandle)
         {
             var span = fieldSymbol.Syntax?.Type.GetSpan() ?? fieldSymbol.Syntax?.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, intrinsicName, $"instance field must be of type '{KnownIntrinsics.NUInt}'", fieldSymbol.Syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, intrinsicName, $"first instance field must be of type '{KnownIntrinsics.NUInt}'", fieldSymbol.Syntax?.GetSource());
             return;
         }
 
