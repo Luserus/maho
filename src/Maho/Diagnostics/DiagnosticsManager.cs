@@ -540,6 +540,33 @@ internal sealed class DiagnosticsManager
             .WithHelp($"disambiguate by casting the receiver: '(expr as Base).{memberName}'")
             .Report();
 
+    /// <summary> Reports that a concrete type does not implement a required abstract interface member. </summary>
+    public void ReportUnimplementedInterfaceMember(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string memberName,
+        SourceText? source = null,
+        TextSpan? interfaceMemberSpan = null,
+        SourceText? interfaceMemberSource = null,
+        string? detail = null)
+    {
+        var msg = detail is null
+            ? $"type '{typeName}' does not implement interface member '{interfaceName}.{memberName}'"
+            : $"type '{typeName}' does not implement interface member '{interfaceName}.{memberName}': {detail}";
+
+        var builder = BuildError("MH0550", msg, span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' does not implement interface member '{interfaceName}.{memberName}'", source);
+
+        if (interfaceMemberSpan is { } memberSpan)
+        {
+            builder.WithSecondaryLabel(memberSpan, $"interface member '{interfaceName}.{memberName}' declared here", interfaceMemberSource);
+        }
+
+        builder.WithHelp($"implement '{interfaceName}.{memberName}' on '{typeName}' or provide a default implementation in '{interfaceName}'")
+            .Report();
+    }
+
     /// <summary> Reports a duplicate variable declaration pointing to both declaration sites. </summary>
     public void ReportDuplicateVariableDeclaration(
         string variableName,

@@ -115,6 +115,11 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0543` | `DuplicateIntrinsicType` | Intrinsic type declared more than once across compilation and referenced libraries. |
 | `MH0544` | `IntrinsicAbiMismatch` | Type fails to satisfy the required memory layout or field ABI contract for its intrinsic type. |
 
+### 3.4 Interface Conformance (`MH0550` - `MH0559`)
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH0550` | `UnimplementedInterfaceMember` | Concrete type does not implement a required abstract interface method or property. |
+
 ### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |
 | :--- | :--- | :--- |

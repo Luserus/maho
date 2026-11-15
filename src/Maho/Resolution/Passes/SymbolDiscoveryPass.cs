@@ -478,7 +478,7 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
                 ResolveFieldDeclaration(declaration.Declaration, scope, containingType);
                 break;
             case MemberPropertyDeclaration declaration:
-                ResolvePropertyDeclaration(declaration, scope);
+                ResolvePropertyDeclaration(declaration, scope, containingType);
                 break;
         }
     }
@@ -557,9 +557,28 @@ internal sealed class SymbolDiscoveryPass : ResolutionPass
         return symbol;
     }
 
-    private void ResolvePropertyDeclaration(MemberPropertyDeclaration declaration, Scope enclosingScope)
+    private void ResolvePropertyDeclaration(MemberPropertyDeclaration declaration, Scope enclosingScope, SymbolHandle? containingType = null)
     {
-        var symbol = context.CreatePropertySymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Identifier).Last, hasBacking: false, declaration);
+        bool hasBacking = declaration.Body.Accessors.Count > 0;
+        foreach (var a in declaration.Body.Accessors)
+        {
+            if (a.Body is not FunctionEmptyBody)
+            {
+                hasBacking = false;
+                break;
+            }
+        }
+
+        var symbol = context.CreatePropertySymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Identifier).Last, containingType, hasBacking, declaration);
+
+        if (declaration.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
+        {
+            symbol.Flags |= FunctionFlags.InterfaceScoped;
+            var ifaceParts = new SymbolPart[qual.Parts.Count - 1];
+            for (int i = 0; i < ifaceParts.Length; i++)
+                ifaceParts[i] = ResolutionContext.GetSymbolName(qual.Parts[i]).Last;
+            symbol.ExplicitInterfaceName = new SymbolName(ifaceParts);
+        }
 
         foreach (var accessor in declaration.Body.Accessors)
         {

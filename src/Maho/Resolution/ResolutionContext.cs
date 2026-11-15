@@ -596,11 +596,11 @@ internal sealed class ResolutionContext
         }
     }
 
-    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)
+    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, bool hasBacking, MemberPropertyDeclaration? syntax)
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : propertyID++;
-        var symbol = new PropertySymbol(id, enclosingScope, name, hasBacking, syntax);
+        var symbol = new PropertySymbol(id, enclosingScope, name, parent, hasBacking, syntax);
 
         if (isSink)
         {

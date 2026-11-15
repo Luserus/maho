@@ -577,6 +577,50 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return false;
     }
 
+    public TypeRef Substitute(Dictionary<SymbolHandle, TypeRef> typeArgs)
+    {
+        if (typeArgs.Count == 0)
+            return this;
+
+        if (Handle is { } h && typeArgs.TryGetValue(h, out var substituted))
+            return substituted;
+
+        if (SpecialType is OptionalSemanticType o)
+            return Optional(o.ElementType.Substitute(typeArgs), Handle);
+
+        if (SpecialType is UnionSemanticType u)
+            return Union([.. u.Variants.Select(v => v.Substitute(typeArgs))], u.IsUntagged);
+
+        if (SpecialType is PointerSemanticType p)
+            return Pointer(p.ElementType.Substitute(typeArgs));
+
+        if (SpecialType is ReferenceSemanticType r)
+            return Reference(r.ElementType.Substitute(typeArgs));
+
+        if (SpecialType is ArraySemanticType a)
+            return Array(a.ElementType.Substitute(typeArgs));
+
+        if (SpecialType is SpanSemanticType s)
+            return Span(s.ElementType.Substitute(typeArgs));
+
+        if (SpecialType is FixedArraySemanticType f)
+            return FixedArray(f.ElementType.Substitute(typeArgs), f.Size, Handle);
+
+        if (SpecialType is DynSemanticType dyn)
+            return Dyn(dyn.TargetType.Substitute(typeArgs));
+
+        if (SpecialType is UntaggedSemanticType untagged)
+            return Untagged(untagged.InnerType.Substitute(typeArgs));
+
+        if (SpecialType is GenericSemanticType gen)
+        {
+            var newArgs = gen.TypeArguments.Select(arg => arg.Substitute(typeArgs)).ToList();
+            return Generic(gen.TargetHandle, gen.TargetName, newArgs);
+        }
+
+        return this;
+    }
+
     public override string ToString() => Kind switch
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",

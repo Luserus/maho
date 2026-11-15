@@ -59,6 +59,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
     /// <summary>Tracks return expression types encountered in lambda block bodies.</summary>
     private readonly Stack<List<TypeRef>> lambdaReturnTypes = new();
 
+    /// <summary>Tracks the current property accessor kind being resolved (get/set), if any.</summary>
+    private PropertyAccessorKind? currentAccessorKind;
+
     /// <summary>
     /// Executes Pass 5: binds expression types, dispatches operators against library interfaces,
     /// and resolves retroactive literal collapsing across all statements.
@@ -130,7 +133,9 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     {
                         var scope = context.GetSyntaxScope(accessor.Body, property.EnclosingScope);
                         var expectedReturn = accessor.Kind is PropertyAccessorKind.Get ? property.Type : voidType;
+                        currentAccessorKind = accessor.Kind;
                         ResolveFunctionBody(accessor.Body, scope, ResolutionContext.GetHandle(property), expectedReturn);
+                        currentAccessorKind = null;
                     }
                 }
             }
@@ -979,15 +984,29 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         // 2. 'this' receiver expression inside non-static member functions
         if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
         {
-            if (context.GetSymbol(containingFunction) is MethodSymbol m && !m.Flags.HasFlag(FunctionFlags.Static) && m.Parent is { } parentHandle)
+            var containingSym = context.GetSymbol(containingFunction);
+            SymbolHandle? parentHandle = containingSym switch
             {
-                if (lambdaCapturedSymbols.Count > 0)
-                    lambdaCapturedSymbols.Peek().Add(m);
+                MethodSymbol m when !m.Flags.HasFlag(FunctionFlags.Static) => m.Parent,
+                PropertySymbol p when !p.Flags.HasFlag(FunctionFlags.Static) => p.Parent,
+                _ => null
+            };
 
-                context.ResolvedTree.AddReference(named, parentHandle);
-                return TypeRef.Resolved(parentHandle);
+            if (parentHandle is not null)
+            {
+                if (lambdaCapturedSymbols.Count > 0 && containingSym is not null)
+                    lambdaCapturedSymbols.Peek().Add(containingSym);
+
+                context.ResolvedTree.AddReference(named, parentHandle.Value);
+                return TypeRef.Resolved(parentHandle.Value);
             }
             return TypeRef.Unresolved;
+        }
+
+        // Implicit 'value' parameter inside property setters
+        if (named.Identifier.Value == "value" && currentAccessorKind is PropertyAccessorKind.Set && context.GetSymbol(containingFunction) is PropertySymbol prop)
+        {
+            return prop.Type;
         }
 
         // 3. Lexical scope lookup with hygiene tracking
@@ -2287,6 +2306,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     return true;
                 return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
             }
+            if (cand is PropertySymbol p)
+            {
+                if (isExplicitInterfaceAccess)
+                    return true;
+                return !p.Flags.HasFlag(FunctionFlags.InterfaceScoped);
+            }
             return !isExplicitInterfaceAccess;
         }).ToList();
 
@@ -2341,6 +2366,12 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
                     if (isExplicitInterfaceAccess)
                         return true;
                     return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped);
+                }
+                if (cand is PropertySymbol p)
+                {
+                    if (isExplicitInterfaceAccess)
+                        return true;
+                    return !p.Flags.HasFlag(FunctionFlags.InterfaceScoped);
                 }
                 return !isExplicitInterfaceAccess;
             }).ToList();
@@ -2744,7 +2775,7 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         {
             FunctionSymbol fn => fn.ReturnType,
             MethodSymbol m => m.ReturnType,
-            PropertySymbol p => p.Type,
+            PropertySymbol p => currentAccessorKind is PropertyAccessorKind.Set ? voidType : p.Type,
             _ => voidType
         };
     }
@@ -3752,40 +3783,8 @@ internal sealed class ExpressionResolutionPass : ResolutionPass
         return false;
     }
 
-    private static TypeRef SubstituteTypeRef(TypeRef type, Dictionary<SymbolHandle, TypeRef> typeArgs)
-    {
-        if (type.Handle is { } h && typeArgs.TryGetValue(h, out var substituted))
-            return substituted;
-
-        if (type.SpecialType is OptionalSemanticType o)
-            return TypeRef.Optional(SubstituteTypeRef(o.ElementType, typeArgs), type.Handle);
-
-        if (type.SpecialType is UnionSemanticType u)
-            return TypeRef.Union([.. u.Variants.Select(v => SubstituteTypeRef(v, typeArgs))], u.IsUntagged);
-
-        if (type.SpecialType is PointerSemanticType p)
-            return TypeRef.Pointer(SubstituteTypeRef(p.ElementType, typeArgs));
-
-        if (type.SpecialType is ReferenceSemanticType r)
-            return TypeRef.Reference(SubstituteTypeRef(r.ElementType, typeArgs));
-
-        if (type.SpecialType is ArraySemanticType a)
-            return TypeRef.Array(SubstituteTypeRef(a.ElementType, typeArgs));
-
-        if (type.SpecialType is SpanSemanticType s)
-            return TypeRef.Span(SubstituteTypeRef(s.ElementType, typeArgs));
-
-        if (type.SpecialType is FixedArraySemanticType f)
-            return TypeRef.FixedArray(SubstituteTypeRef(f.ElementType, typeArgs), f.Size, type.Handle);
-
-        if (type.SpecialType is DynSemanticType dyn)
-            return TypeRef.Dyn(SubstituteTypeRef(dyn.TargetType, typeArgs));
-
-        if (type.SpecialType is UntaggedSemanticType untagged)
-            return TypeRef.Untagged(SubstituteTypeRef(untagged.InnerType, typeArgs));
-
-        return type;
-    }
+    private static TypeRef SubstituteTypeRef(TypeRef type, Dictionary<SymbolHandle, TypeRef> typeArgs) =>
+        type.Substitute(typeArgs);
 
     private TypeRef? GetEnclosingFunctionReturnType(SymbolHandle containingFunction)
     {
