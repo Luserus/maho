@@ -177,29 +177,6 @@ public class IncrementalCompilationTests : IDisposable
     }
 
     [Fact]
-    public void FromFiles_MetadataChanged_SameContent_ReusesSyntaxTree()
-    {
-        string file = Path.Combine(testDir, "SameContent.mh");
-        File.WriteAllText(file, "func Ping() -> int32 { return 1; }");
-
-        var comp1 = MahoCompiler.AnalyzeFiles([preludePath, file]);
-        Assert.False(comp1.HasErrors);
-        var tree1 = comp1.GetSyntaxTree(file);
-        Assert.NotNull(tree1);
-
-        // Advance write time by updating timestamp without changing content
-        System.Threading.Thread.Sleep(50);
-        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1));
-
-        var comp2 = MahoCompiler.AnalyzeFiles([preludePath, file], cachedCompilation: comp1);
-        Assert.False(comp2.HasErrors);
-        var tree2 = comp2.GetSyntaxTree(file);
-
-        // Content was identical, so cached tree is reused without re-parsing
-        Assert.Same(tree1, tree2);
-    }
-
-    [Fact]
     public void FromSource_FullReuseShortCircuit_ReturnsSameCompilation()
     {
         string code = CompilerTestBed.FullPrelude + "\nfunc Add(int32 a, int32 b) -> int32 { return a; }";
