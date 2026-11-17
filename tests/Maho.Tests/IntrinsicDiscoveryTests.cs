@@ -983,6 +983,7 @@ public sealed class IntrinsicDiscoveryTests
     public void OperatorFunction_ValidSignatures_RegisterSuccessfully()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Unit")]
             public struct void;
             public attribute OperatorFunction(Str fullName);
 
@@ -1059,6 +1060,8 @@ public sealed class IntrinsicDiscoveryTests
     public void OperatorFunction_IndirectMemberAccessReturningVoid_ReportsMH0242()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Unit")]
+            public struct void;
             public attribute OperatorFunction(Str fullName);
 
             public interface BadDeref
@@ -1076,6 +1079,8 @@ public sealed class IntrinsicDiscoveryTests
     public void OperatorFunction_ConstructorStatic_ReportsMH0242()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Unit")]
+            public struct void;
             public attribute OperatorFunction(Str fullName);
 
             public interface BadCtor
@@ -1268,6 +1273,8 @@ public sealed class IntrinsicDiscoveryTests
         Assert.Contains(nonStatic.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must be declared static"));
 
         var voidReturn = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            [IntrinsicType("Unit")]
+            public struct void;
             public attribute OperatorFunction(Str name);
 
             public interface BadNew<TTarget>

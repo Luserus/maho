@@ -1,0 +1,791 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Maho.Resolution.Layout;
+using Maho.Syntax;
+using Maho.Text;
+
+namespace Maho.Resolution;
+
+internal sealed partial class DeclarationResolutionPass
+{
+    private void CheckDuplicateTypeDeclarations()
+    {
+        // 1. Top-level types
+        var topGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<TypeSymbol>>();
+
+        foreach (var type in context.TypeSymbols)
+        {
+            if (type.Name.Text == "_")
+                continue;
+
+            var key = (type.ContainingNamespace, type.Name);
+
+            if (!topGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                topGroups[key] = list;
+            }
+
+            list.Add(type);
+        }
+
+        foreach (var (_, group) in topGroups)
+        {
+            if (group.Count <= 1)
+                continue;
+
+            CheckTypeGroup(group);
+        }
+
+        // 2. Nested and local types
+        var nestedGroups = new Dictionary<(Scope, SymbolPart), List<NestedTypeSymbol>>();
+        foreach (var type in context.NestedTypeSymbols)
+        {
+            if (type.Name.Text == "_")
+                continue;
+
+            var key = (type.EnclosingScope, type.Name);
+
+            if (!nestedGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                nestedGroups[key] = list;
+            }
+
+            list.Add(type);
+        }
+
+        foreach (var (_, group) in nestedGroups)
+        {
+            if (group.Count <= 1)
+                continue;
+
+            CheckNestedTypeGroup(group);
+        }
+
+        // 3. Types vs Aliases in same namespace
+        foreach (var alias in context.AliasSymbols)
+        {
+            if (alias.ContainingNamespace != null)
+            {
+                var matchingTypes = alias.ContainingNamespace.GetSymbols(alias.Name);
+
+                foreach (var sym in matchingTypes)
+                {
+                    if (sym is TypeSymbol typeSym)
+                    {
+                        var span = alias.Syntax?.Name.GetSpan() ?? alias.Syntax?.GetSpan() ?? default;
+                        var firstSpan = typeSym.Syntax?.Name.GetSpan() ?? typeSym.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportDuplicateAliasDeclaration(
+                            alias.Name.ToString(),
+                            span,
+                            firstSpan,
+                            alias.Syntax?.GetSource(),
+                            typeSym.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+    }
+
+    private void CheckTypeGroup(List<TypeSymbol> group)
+    {
+        bool allPartial = group.All(static t => t.Flags.HasFlag(TypeFlags.Partial));
+
+        if (allPartial)
+        {
+            var first = group[0];
+
+            for (int i = 1; i < group.Count; i++)
+            {
+                var cur = group[i];
+
+                if (cur.TypeKind != first.TypeKind)
+                {
+                    var span = cur.Syntax?.Name.GetSpan() ?? cur.Syntax?.GetSpan() ?? default;
+                    var firstSpan = first.Syntax?.Name.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+                    context.Diagnostics.ReportConflictingPartialTypeKinds(
+                        cur.Name.ToString(),
+                        first.TypeKind.ToString().ToLowerInvariant(),
+                        cur.TypeKind.ToString().ToLowerInvariant(),
+                        span,
+                        firstSpan,
+                        cur.Syntax?.GetSource(),
+                        first.Syntax?.GetSource());
+                }
+            }
+
+            return;
+        }
+
+        var firstDecl = group[0];
+        var firstDeclSpan = firstDecl.Syntax?.Name.GetSpan() ?? firstDecl.Syntax?.GetSpan() ?? default;
+
+        for (int i = 1; i < group.Count; i++)
+        {
+            var redecl = group[i];
+            var redeclSpan = redecl.Syntax?.Name.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportDuplicateTypeDeclaration(
+                redecl.Name.ToString(),
+                redeclSpan,
+                firstDeclSpan,
+                redecl.Syntax?.GetSource(),
+                firstDecl.Syntax?.GetSource());
+        }
+    }
+
+    private void CheckNestedTypeGroup(List<NestedTypeSymbol> group)
+    {
+        var allPartial = group.All(static t => t.Flags.HasFlag(TypeFlags.Partial));
+
+        if (allPartial)
+        {
+            var first = group[0];
+            for (int i = 1; i < group.Count; i++)
+            {
+                var cur = group[i];
+
+                if (cur.TypeKind != first.TypeKind)
+                {
+                    var span = cur.Syntax?.Name.GetSpan() ?? cur.Syntax?.GetSpan() ?? default;
+                    var firstSpan = first.Syntax?.Name.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+                    context.Diagnostics.ReportConflictingPartialTypeKinds(
+                        cur.Name.ToString(),
+                        first.TypeKind.ToString().ToLowerInvariant(),
+                        cur.TypeKind.ToString().ToLowerInvariant(),
+                        span,
+                        firstSpan,
+                        cur.Syntax?.GetSource(),
+                        first.Syntax?.GetSource());
+                }
+            }
+
+            return;
+        }
+
+        var firstDecl = group[0];
+        var firstDeclSpan = firstDecl.Syntax?.Name.GetSpan() ?? firstDecl.Syntax?.GetSpan() ?? default;
+
+        for (int i = 1; i < group.Count; i++)
+        {
+            var redecl = group[i];
+            var redeclSpan = redecl.Syntax?.Name.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportDuplicateTypeDeclaration(
+                redecl.Name.ToString(),
+                redeclSpan,
+                firstDeclSpan,
+                redecl.Syntax?.GetSource(),
+                firstDecl.Syntax?.GetSource());
+        }
+    }
+
+    private void CheckCyclicTypeHierarchies()
+    {
+        var reported = new HashSet<SymbolHandle>();
+
+        foreach (var type in context.TypeSymbols)
+        {
+            var handle = ResolutionContext.GetHandle(type);
+
+            if (!reported.Contains(handle) && HasInheritanceCycle(handle, [handle]))
+            {
+                reported.Add(handle);
+                var span = type.Syntax?.Name.GetSpan() ?? type.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportCyclicTypeHierarchy(span, type.Name.ToString(), type.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var type in context.NestedTypeSymbols)
+        {
+            var handle = ResolutionContext.GetHandle(type);
+
+            if (!reported.Contains(handle) && HasInheritanceCycle(handle, [handle]))
+            {
+                reported.Add(handle);
+                var span = type.Syntax?.Name.GetSpan() ?? type.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportCyclicTypeHierarchy(span, type.Name.ToString(), type.Syntax?.GetSource());
+            }
+        }
+    }
+
+    private void LinearizeAndDeduplicateAllBases()
+    {
+        TypeContiguityAnalyzer.ClearCache();
+
+        foreach (var type in context.TypeSymbols)
+        {
+            LinearizeType(type, ResolutionContext.GetHandle(type), b => type.LinearizedBases = b);
+        }
+
+        foreach (var type in context.NestedTypeSymbols)
+        {
+            LinearizeType(type, ResolutionContext.GetHandle(type), b => type.LinearizedBases = b);
+        }
+    }
+
+    private void LinearizeType(Symbol typeSymbol, SymbolHandle handle, Action<List<SymbolHandle>> setLinearizedBases)
+    {
+        if (C3Linearizer.TryLinearize(handle, context, out var linearization))
+        {
+            setLinearizedBases(linearization);
+        }
+        else
+        {
+            var span = (typeSymbol as TypeSymbol)?.Syntax?.Name.GetSpan() ??
+                       (typeSymbol as NestedTypeSymbol)?.Syntax?.Name.GetSpan() ?? default;
+            var source = (typeSymbol as TypeSymbol)?.Syntax?.GetSource() ??
+                         (typeSymbol as NestedTypeSymbol)?.Syntax?.GetSource();
+            context.Diagnostics.ReportInconsistentInheritanceOrder(span, typeSymbol.Name.ToString(), source);
+        }
+    }
+
+    private void ValidateConstructorBaseInitializers()
+    {
+        // 1. Top-level functions cannot have base initializers
+        foreach (var function in context.FunctionSymbols)
+        {
+            if (function.Syntax?.Signature.BaseClause is { } baseClause)
+            {
+                context.Diagnostics.ReportInvalidBaseInitializerOnOrdinaryFunction(
+                    baseClause.GetSpan() ?? default,
+                    function.Syntax.GetSource());
+            }
+        }
+
+        // 2. Member methods
+        foreach (var method in context.MethodSymbols)
+        {
+            if (method.Syntax is null)
+                continue;
+
+            bool isConstructor = method.Name.Text == "Construct";
+            var baseClause = method.Syntax.Signature.BaseClause;
+
+            if (!isConstructor)
+            {
+                if (baseClause is not null)
+                {
+                    context.Diagnostics.ReportInvalidBaseInitializerOnOrdinaryFunction(
+                        baseClause.GetSpan() ?? default,
+                        method.Syntax.GetSource());
+                }
+                continue;
+            }
+
+            // Method IS a constructor
+            if (method.Parent is not { } parentHandle)
+                continue;
+
+            var parentSym = context.GetSymbol(parentHandle);
+            string parentName = parentSym?.Name.Text ?? "Type";
+            IReadOnlyList<SymbolHandle> linearizedBases = parentSym switch
+            {
+                TypeSymbol ts => ts.LinearizedBases,
+                NestedTypeSymbol nts => nts.LinearizedBases,
+                _ => []
+            };
+
+            var validBaseHandles = new HashSet<SymbolHandle>(linearizedBases.Skip(1));
+            var initializedBases = new HashSet<SymbolHandle>();
+
+            if (baseClause is not null)
+            {
+                var scope = GetOwnedScope(method);
+                foreach (var init in baseClause.Initializers)
+                {
+                    var targetType = ResolveType(init.BaseType, scope, reportDiagnostics: true);
+                    if (targetType.Handle is { } targetHandle)
+                    {
+                        targetHandle = context.UnwrapAlias(targetHandle);
+                        if (!validBaseHandles.Contains(targetHandle))
+                        {
+                            var targetName = context.GetTypeSymbol(targetHandle)?.Name.Text ?? targetType.ToString();
+                            context.Diagnostics.ReportTypeIsNotBaseOf(
+                                init.BaseType.GetSpan() ?? default,
+                                targetName,
+                                parentName,
+                                method.Syntax.GetSource());
+                        }
+                        else
+                        {
+                            if (!initializedBases.Add(targetHandle))
+                            {
+                                var targetName = context.GetTypeSymbol(targetHandle)?.Name.Text ?? targetType.ToString();
+                                context.Diagnostics.ReportDuplicateBaseInitializer(
+                                    init.BaseType.GetSpan() ?? default,
+                                    targetName,
+                                    method.Syntax.GetSource());
+                            }
+                        }
+                    }
+                }
+            }
+
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH);
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH);
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH);
+
+            // Check if any base in the hierarchy requires explicit initialization
+            foreach (var bHandle in validBaseHandles)
+            {
+                // Skip built-in ValType / Struct / Enum
+                if (bHandle == valTypeH || bHandle == structH || bHandle == enumH)
+                    continue;
+
+                if (context.GetSymbol(bHandle) is not { } bSym)
+                    continue;
+
+                // Check if bSym has constructors
+                var bScope = GetOwnedScope(bSym);
+                var constructors = bScope.Symbols.Values
+                    .OfType<MethodSymbol>()
+                    .Where(m => m.Name.Text == "Construct")
+                    .ToList();
+
+                // If bSym declares at least one constructor, and none of them is parameterless (0 parameters),
+                // then it requires explicit initialization!
+                if (constructors.Count > 0 && !constructors.Any(m => m.Parameters.Count == 0))
+                {
+                    if (!initializedBases.Contains(bHandle))
+                    {
+                        var span = baseClause?.GetSpan() ??
+                                   method.Syntax.Signature.Identifier.GetSpan() ??
+                                   method.Syntax.GetSpan() ?? default;
+                        context.Diagnostics.ReportBaseConstructorRequiresExplicitInit(
+                            span,
+                            bSym.Name.Text,
+                            method.Syntax.GetSource());
+                    }
+                }
+            }
+        }
+    }
+
+    private bool HasInheritanceCycle(SymbolHandle current, HashSet<SymbolHandle> path)
+    {
+        IReadOnlyList<TypeRef> baseTypes;
+
+        if (current.Kind == SymbolKind.Type && context.GetTypeSymbol(current) is { } typeSym)
+            baseTypes = typeSym.BaseTypes;
+        else if (current.Kind == SymbolKind.NestedType && context.GetNestedTypeSymbol(current) is { } nestedTypeSym)
+            baseTypes = nestedTypeSym.BaseTypes;
+        else
+            return false;
+
+        foreach (var baseType in baseTypes)
+        {
+            var underlying = context.GetType(baseType);
+
+            if (underlying is not { } baseHandle)
+                continue;
+
+            if (path.Contains(baseHandle))
+                return true;
+
+            path.Add(baseHandle);
+
+            if (HasInheritanceCycle(baseHandle, path))
+                return true;
+
+            path.Remove(baseHandle);
+        }
+
+        return false;
+    }
+
+    private void CheckDuplicateAndPartialFunctions()
+    {
+        // 1. Top-level functions
+        var topGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<FunctionSignatureInfo>>();
+
+        foreach (var fn in context.FunctionSymbols)
+        {
+            if (fn.Name.Text == "_")
+                continue;
+
+            var key = (fn.ContainingNamespace, fn.Name);
+
+            if (!topGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                topGroups[key] = list;
+            }
+
+            list.Add(new FunctionSignatureInfo(fn, fn.Flags, fn.Syntax, fn.GenericParameters, fn.Parameters, fn.ReturnType));
+        }
+
+        foreach (var (_, group) in topGroups)
+            ValidateFunctionSignatureGroup(group);
+
+        // 2. Member & Local methods
+        var methodGroups = new Dictionary<(Scope, SymbolPart, SymbolName?), List<FunctionSignatureInfo>>();
+
+        foreach (var m in context.MethodSymbols)
+        {
+            if (m.Name.Text == "_")
+                continue;
+
+            var key = (m.EnclosingScope, m.Name, m.ExplicitInterfaceName);
+
+            if (!methodGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                methodGroups[key] = list;
+            }
+
+            list.Add(new FunctionSignatureInfo(m, m.Flags, m.Syntax, m.GenericParameters, m.Parameters, m.ReturnType));
+        }
+
+        foreach (var (_, group) in methodGroups)
+            ValidateFunctionSignatureGroup(group);
+    }
+
+    private void ValidateFunctionSignatureGroup(List<FunctionSignatureInfo> group)
+    {
+        if (group.Count <= 1)
+            return;
+
+        // Partition into sub-groups by parameter signature
+        var subGroups = new List<List<FunctionSignatureInfo>>();
+
+        foreach (var fn in group)
+        {
+            bool added = false;
+
+            foreach (var sub in subGroups)
+            {
+                if (SignaturesMatch(sub[0].GenericParameters, sub[0].Parameters, fn.GenericParameters, fn.Parameters))
+                {
+                    sub.Add(fn);
+                    added = true;
+                    break;
+                }
+            }
+
+            if (!added)
+                subGroups.Add([fn]);
+        }
+
+        foreach (var subGroup in subGroups)
+        {
+            if (subGroup.Count <= 1)
+                continue;
+
+            bool allPartial = subGroup.All(static f => f.Flags.HasFlag(FunctionFlags.Partial));
+
+            if (allPartial)
+            {
+                // Partial function: unlimited without body allowed. At most one with body.
+                var withBodies = new List<FunctionSignatureInfo>();
+                foreach (var fn in subGroup)
+                    if (fn.Syntax?.Body is not null and not FunctionEmptyBody)
+                        withBodies.Add(fn);
+
+                if (withBodies.Count > 1)
+                {
+                    var firstBody = withBodies[0];
+                    var firstSpan = firstBody.Syntax?.Body.GetSpan() ?? firstBody.Syntax?.GetSpan() ?? default;
+
+                    for (int i = 1; i < withBodies.Count; i++)
+                    {
+                        var redecl = withBodies[i];
+                        var redeclSpan = redecl.Syntax?.Body.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
+                        var fnName = redecl.Symbol.Name.ToString();
+                        context.Diagnostics.ReportMultiplePartialFunctionBodies(
+                            fnName,
+                            redeclSpan,
+                            firstSpan,
+                            redecl.Syntax?.GetSource(),
+                            firstBody.Syntax?.GetSource());
+                    }
+                }
+
+                // Check return type consistency
+                var firstReturn = subGroup[0].ReturnType;
+                var firstSyntax = subGroup[0].Syntax;
+
+                for (int i = 1; i < subGroup.Count; i++)
+                {
+                    var cur = subGroup[i];
+                    if (firstReturn != cur.ReturnType && (firstReturn.IsResolved || cur.ReturnType.IsResolved))
+                    {
+                        var span = cur.Syntax?.Signature.ReturnType.GetSpan() ?? cur.Syntax?.GetSpan() ?? default;
+                        var firstSpan = firstSyntax?.Signature.ReturnType.GetSpan() ?? firstSyntax?.GetSpan() ?? default;
+                        var fnName = cur.Symbol.Name.ToString();
+                        context.Diagnostics.ReportConflictingPartialFunctionReturnTypes(
+                            fnName,
+                            span,
+                            firstSpan,
+                            cur.Syntax?.GetSource(),
+                            firstSyntax?.GetSource());
+                    }
+                }
+            }
+            else
+            {
+                // Not all partial -> duplicate function declaration error
+                var first = subGroup[0];
+                var firstSpan = first.Syntax?.Signature.Identifier.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+
+                for (int i = 1; i < subGroup.Count; i++)
+                {
+                    var redecl = subGroup[i];
+                    var redeclSpan = redecl.Syntax?.Signature.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
+                    var fnName = redecl.Symbol.Name.ToString();
+                    context.Diagnostics.ReportDuplicateFunctionDeclaration(
+                        fnName,
+                        redeclSpan,
+                        firstSpan,
+                        redecl.Syntax?.GetSource(),
+                        first.Syntax?.GetSource());
+                }
+            }
+        }
+    }
+
+    private bool SignaturesMatch(IReadOnlyList<SymbolHandle> genericParamsA, List<SymbolHandle> paramsA, IReadOnlyList<SymbolHandle> genericParamsB, List<SymbolHandle> paramsB)
+    {
+        if (genericParamsA.Count != genericParamsB.Count)
+            return false;
+
+        if (paramsA.Count != paramsB.Count)
+            return false;
+
+        for (int i = 0; i < paramsA.Count; i++)
+        {
+            var paramA = context.ParameterSymbols[paramsA[i].ID];
+            var paramB = context.ParameterSymbols[paramsB[i].ID];
+
+            if (!ParameterTypesMatch(paramA.Type, genericParamsA, paramB.Type, genericParamsB, paramA.Syntax, paramB.Syntax))
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool ParameterTypesMatch(TypeRef typeA, IReadOnlyList<SymbolHandle> genericParamsA, TypeRef typeB, IReadOnlyList<SymbolHandle> genericParamsB, Parameter? syntaxA, Parameter? syntaxB)
+    {
+        var unwrappedA = context.UnwrapAlias(typeA);
+        var unwrappedB = context.UnwrapAlias(typeB);
+
+        int genIndexA = -1;
+
+        if (unwrappedA.IsResolved && unwrappedA.Handle is { } hA)
+        {
+            for (int k = 0; k < genericParamsA.Count; k++)
+                if (genericParamsA[k] == hA)
+                {
+                    genIndexA = k;
+                    break;
+                }
+        }
+
+        int genIndexB = -1;
+
+        if (unwrappedB.IsResolved && unwrappedB.Handle is { } hB)
+        {
+            for (int k = 0; k < genericParamsB.Count; k++)
+                if (genericParamsB[k] == hB)
+                {
+                    genIndexB = k;
+                    break;
+                }
+        }
+
+        if (genIndexA >= 0 || genIndexB >= 0)
+            return genIndexA == genIndexB;
+
+        if (unwrappedA.IsSpecial || unwrappedB.IsSpecial)
+        {
+            if (unwrappedA.Kind != unwrappedB.Kind)
+                return false;
+
+            return (unwrappedA.SpecialType, unwrappedB.SpecialType) switch
+            {
+                (PointerSemanticType pA, PointerSemanticType pB) =>
+                    ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
+                (ReferenceSemanticType rA, ReferenceSemanticType rB) =>
+                    ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
+                (SpanSemanticType sA, SpanSemanticType sB) =>
+                    ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
+                (ArraySemanticType aA, ArraySemanticType aB) =>
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null),
+                (FixedArraySemanticType fA, FixedArraySemanticType fB) =>
+                    ParameterTypesMatch(fA.ElementType, genericParamsA, fB.ElementType, genericParamsB, null, null) &&
+                    (fA.Size == fB.Size || Nullable.Equals(fA.Size.GetSpan(), fB.Size.GetSpan())),
+                (OptionalSemanticType oA, OptionalSemanticType oB) =>
+                    ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
+                (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>
+                    tA.Elements.Zip(tB.Elements).All(pair =>
+                        ParameterTypesMatch(pair.First.Type, genericParamsA, pair.Second.Type, genericParamsB, null, null) &&
+                        string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)),
+                _ => unwrappedA.Equals(unwrappedB)
+            };
+        }
+
+        if (unwrappedA.IsResolved && unwrappedB.IsResolved)
+        {
+            var targetA = context.GetType(unwrappedA) ?? unwrappedA.Handle;
+            var targetB = context.GetType(unwrappedB) ?? unwrappedB.Handle;
+
+            return targetA == targetB;
+        }
+
+        if (syntaxA?.Declarator.Type is { } sTypeA && syntaxB?.Declarator.Type is { } sTypeB)
+        {
+            var textA = sTypeA.GetSpan() is { } spA && sTypeA.GetSource() is { } srcA ? srcA.ToString(spA) : null;
+            var textB = sTypeB.GetSpan() is { } spB && sTypeB.GetSource() is { } srcB ? srcB.ToString(spB) : null;
+
+            if (textA != null && textB != null)
+                return string.Equals(textA, textB, StringComparison.Ordinal);
+        }
+
+        return typeA == typeB;
+    }
+
+    private void CheckDuplicateVariables()
+    {
+        // 1. Global variables
+        var globalGroups = new Dictionary<(NamespaceTrieNode?, SymbolPart), List<GlobalVariableSymbol>>();
+
+        foreach (var global in context.GlobalVariableSymbols)
+        {
+            if (global.Name.Text == "_")
+                continue;
+
+            var key = (global.ContainingNamespace, global.Name);
+
+            if (!globalGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                globalGroups[key] = list;
+            }
+
+            list.Add(global);
+        }
+
+        foreach (var (_, group) in globalGroups)
+        {
+            if (group.Count <= 1)
+                continue;
+
+            var first = group[0];
+            var firstSpan = GetVariableIdentifierSpan(first.Syntax, first.Name);
+
+            for (int i = 1; i < group.Count; i++)
+            {
+                var redecl = group[i];
+                var redeclSpan = GetVariableIdentifierSpan(redecl.Syntax, redecl.Name);
+                context.Diagnostics.ReportDuplicateVariableDeclaration(
+                    redecl.Name.ToString(),
+                    redeclSpan,
+                    firstSpan,
+                    redecl.Syntax?.GetSource(),
+                    first.Syntax?.GetSource());
+            }
+        }
+
+        // 2. Fields in product types
+        var fieldGroups = new Dictionary<(SymbolHandle?, SymbolPart), List<FieldSymbol>>();
+
+        foreach (var field in context.FieldSymbols)
+        {
+            if (field.Name.Text == "_")
+                continue;
+
+            var key = (field.Parent, field.Name);
+            if (!fieldGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                fieldGroups[key] = list;
+            }
+
+            list.Add(field);
+        }
+
+        foreach (var (_, group) in fieldGroups)
+        {
+            if (group.Count <= 1)
+                continue;
+
+            var first = group[0];
+            var firstSpan = GetVariableIdentifierSpan(first.Syntax, first.Name);
+
+            for (int i = 1; i < group.Count; i++)
+            {
+                var redecl = group[i];
+                var redeclSpan = GetVariableIdentifierSpan(redecl.Syntax, redecl.Name);
+                context.Diagnostics.ReportDuplicateVariableDeclaration(
+                    redecl.Name.ToString(),
+                    redeclSpan,
+                    firstSpan,
+                    redecl.Syntax?.GetSource(),
+                    first.Syntax?.GetSource());
+            }
+        }
+    }
+
+    private TextSpan GetVariableIdentifierSpan(VariableDeclaration? syntax, SymbolPart name)
+    {
+        if (syntax != null)
+        {
+            var declarator = syntax.Declarator;
+            if (declarator.Identifier is TupleName tupleName)
+            {
+                foreach (var elem in tupleName.Elements)
+                    if (context.GetScopedSymbolName(elem).Last == name)
+                        return elem.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
+            }
+            else if (context.GetScopedSymbolName(declarator.Identifier).Last == name)
+                return declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? syntax.GetSpan() ?? default;
+
+            return syntax.GetSpan() ?? default;
+        }
+
+        return default;
+    }
+
+    private void CheckDuplicateProperties()
+    {
+        var propGroups = new Dictionary<(Scope, SymbolPart), List<PropertySymbol>>();
+
+        foreach (var prop in context.PropertySymbols)
+        {
+            if (prop.Name.Text == "_")
+                continue;
+
+            var key = (prop.EnclosingScope, prop.Name);
+
+            if (!propGroups.TryGetValue(key, out var list))
+            {
+                list = [];
+                propGroups[key] = list;
+            }
+
+            list.Add(prop);
+        }
+
+        foreach (var (_, group) in propGroups)
+        {
+            if (group.Count <= 1)
+                continue;
+
+            var first = group[0];
+            var firstSpan = first.Syntax?.Identifier.GetSpan() ?? first.Syntax?.GetSpan() ?? default;
+
+            for (int i = 1; i < group.Count; i++)
+            {
+                var redecl = group[i];
+                var redeclSpan = redecl.Syntax?.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportDuplicatePropertyDeclaration(
+                    redecl.Name.ToString(),
+                    redeclSpan,
+                    firstSpan,
+                    redecl.Syntax?.GetSource(),
+                    first.Syntax?.GetSource());
+            }
+        }
+    }
+
+}
