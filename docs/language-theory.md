@@ -194,9 +194,10 @@ The generic parameter forms mean:
 ### 3.4 Type syntax and generic application
 
 ```text
-type                    ::= primary-type { type-modifier } [ "." type ]
+type                    ::= [ prefix-type-modifier ] primary-type { postfix-type-modifier } [ "." type ]
                           | function-type
                           | delegate-type
+prefix-type-modifier    ::= [ "mut" ] ( "&" | "*" )
 primary-type            ::= identifier [ generic-argument-clause ] [ uniform-tuple-suffix ]
                           | tuple-type
 function-type           ::= "func" "(" parameter-type-list ")" "->" type
@@ -206,7 +207,8 @@ parameter-type          ::= type [ identifier ]
 tuple-type              ::= "(" tuple-type-element { "," tuple-type-element } [","] ")"
 tuple-type-element      ::= type [ identifier ]
 uniform-tuple-suffix    ::= "(" identifier { "," identifier } [","] ")"
-type-modifier           ::= array-modifier | "?" | "*" | "&"
+postfix-type-modifier   ::= array-modifier | span-modifier | "?" | "*" | "&" | "mut*" | "mut&"
+span-modifier           ::= "[" "&" "]"
 array-modifier          ::= "[" [ expression ] "]"
 
 generic-argument-clause ::= "<" generic-argument
@@ -237,7 +239,10 @@ function-declaration    ::= modifiers "func" declaration-name [ generic-paramete
                           "(" parameter-list ")" modifiers [ "->" type ] modifiers
                           { type-constraint-clause } function-body
 parameter-list          ::= [ parameter { "," parameter } [","] ]
-parameter               ::= { attribute-list } modifiers type declaration-name [ "=" expression ]
+parameter               ::= receiver-parameter
+                          | { attribute-list } modifiers type declaration-name [ "=" expression ]
+receiver-parameter      ::= [ "mut" ] ( "&" | "*" ) "this"
+                          | "this" [ ( "&" | "*" | "mut&" | "mut*" ) ]
 function-body           ::= ";" | "{" { local } "}" | "=>" expression ";"
 
 variable-declaration    ::= type variable-declarator

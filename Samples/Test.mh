@@ -5,8 +5,5 @@ struct Test
 
 func Main()
 {
-    Test t;
-    Test t2;
-
-    1 - 2; // should report binary operator not found error with fully qualified main text and concise label
+    
 }

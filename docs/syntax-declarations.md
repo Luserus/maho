@@ -22,7 +22,8 @@ These model identifier-like structures and name composition.
 - `SimpleType`
 - `QualifiedType`
 - `GenericType`
-- `ModifiedType`
+- `ModifiedType` (postfix-modified types, e.g. `T?`, `T*`, `T mut*`, `T&`, `T mut&`, `T[&]`, `T[]`, `T[N]`)
+- `PrefixModifiedType` (prefix-modified alias types, e.g. `&T`, `*T`, `mut &T`, `mut *T`)
 - `TupleType`
 - `TupleTypeElement`
 - `UniformTupleType`
@@ -38,7 +39,7 @@ These files define how type references are represented independently of semantic
 - `TypeDeclaration`
 - `FunctionDeclaration`
 - `VariableDeclaration`
-- `Parameter`
+- `Parameter` (supports explicit receiver parameters via `ReceiverKind`: `Value`, `Alias` `&this`, `MutAlias` `mut &this`, `UnsafeAlias` `*this`, `MutUnsafeAlias` `mut *this`, `Reference` `this&`, `MutReference` `mut this&`, `Pointer` `this*`, `MutPointer` `this mut*`)
 
 These are the shared declaration nouns.
 

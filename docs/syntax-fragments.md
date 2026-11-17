@@ -24,12 +24,17 @@ These types separate the existence of a declaration from the shape of its body.
 
 ### Type modifiers
 
-- `PostfixTypeModifier`
-- `ArrayTypeModifier`
-- `ReferenceTypeModifier`
-- `PointerTypeModifier`
-- `OptionalTypeModifier`
-- `PostfixTypeModifierKind`
+- **Prefix Modifiers**:
+  - `SafeAliasTypeModifier`: `&Type` (safe alias) or `mut &Type` (mutable safe alias).
+  - `UnsafeAliasTypeModifier`: `*Type` (unsafe alias) or `mut *Type` (mutable unsafe alias).
+  - `PrefixTypeModifierKind`: enumerates safe vs unsafe prefix alias modifiers.
+- **Postfix Modifiers**:
+  - `ReferenceTypeModifier`: `Type&` (safe immutable reference) or `Type mut&` (mutable reference).
+  - `PointerTypeModifier`: `Type*` (immutable pointer) or `Type mut*` (mutable pointer).
+  - `SpanTypeModifier`: `Type[&]` (contiguous safe memory span).
+  - `ArrayTypeModifier`: `Type[]` (dynamic array) or `Type[size]` (fixed-size array).
+  - `OptionalTypeModifier`: `Type?` (nullable / optional value).
+  - `PostfixTypeModifierKind`: enumerates postfix modifier kinds.
 
 This cluster models type-shape decoration without forcing every type node to inline every modifier case.
 

@@ -70,21 +70,21 @@ public sealed class SyntaxTree
                 return true;
             }
 
-            // 2. Metadata changed: hash only if metadata changed to determine whether content actually changed.
-            string diskHash;
-            using (var stream = System.IO.File.OpenRead(currentDiskPath))
-            {
-                var hashBytes = System.Security.Cryptography.SHA256.HashData(stream);
-                diskHash = System.Convert.ToHexString(hashBytes);
-            }
+            // // 2. Metadata changed: hash only if metadata changed to determine whether content actually changed.
+            // string diskHash;
+            // using (var stream = System.IO.File.OpenRead(currentDiskPath))
+            // {
+            //     var hashBytes = System.Security.Cryptography.SHA256.HashData(stream);
+            //     diskHash = System.Convert.ToHexString(hashBytes);
+            // }
 
-            if (string.Equals(ContentHash, diskHash, System.StringComparison.OrdinalIgnoreCase))
-            {
-                // Hashes match despite metadata difference: update cached metadata so subsequent checks hit fast path.
-                LastWriteTimeUtc = fi.LastWriteTimeUtc;
-                FileLength = fi.Length;
-                return true;
-            }
+            // if (string.Equals(ContentHash, diskHash, System.StringComparison.OrdinalIgnoreCase))
+            // {
+            //     // Hashes match despite metadata difference: update cached metadata so subsequent checks hit fast path.
+            //     LastWriteTimeUtc = fi.LastWriteTimeUtc;
+            //     FileLength = fi.Length;
+            //     return true;
+            // }
 
             // Hashes do not match: content changed, file must be analyzed.
             return false;

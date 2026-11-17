@@ -69,21 +69,24 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
 - **Attribute Verification**: Discovers and validates compiler-recognized attribute declarations:
   - `[IntrinsicType("...")]`: must accept exactly one `Str` parameter.
   - `[OperatorFunction("...")]`: must accept one `Str` parameter naming the operator kind.
-  - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions.
+  - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions with canonical signature contracts (e.g. `"Int32.LessThanOrEqual(Int32, Int32)"`).
 - **Intrinsic Hierarchy & Implicit Deriving**:
-  - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations.
-  - *Struct* (`Std.Struct`, `[IntrinsicType("Struct")]`): derives from `Std.ValType`. All user structs implicitly derive from `Std.Struct` (and transitively `Std.ValType`).
-  - *Unit* (`Unit`, `[IntrinsicType("Unit")]`): derives from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
-  - *Function & Delegate* (`Std.Function`, `Std.Delegate`): derive from `Std.ValType`.
+  - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations; has zero base types.
+  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Array`, `FixedArray`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
+  - *Implicit Struct Deriving*: User-defined structs, primitive scalars (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`), `Str`, and `Span<T>` implicitly inherit `Struct` (and transitively `ValType`) without explicit base declarations.
+  - *Implicit Enum Deriving*: User-defined enums and `Optional<T>` implicitly inherit `Enum` (and transitively `ValType`).
+  - *Never* (`Never`, `[IntrinsicType("Never")]`): bottom type assignable to any type; has zero base types and implements no constructors or operations.
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
-  - *Primitive Scalars* (`Int8`-`Int64`, `UInt8`-`UInt64`, `Float32`, `Float64`, `Bool`, `Char`, `Void`): must have zero instance fields and zero generic parameters (`MH0544`).
+  - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0544`). `Char` represents a 4-byte Unicode scalar value.
   - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0544`).
   - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `Pointer<ValType>` environment pointer (`MH0544`).
-  - *Pointer & Reference* (`Pointer<T>`, `Reference<T>`): requires `NUInt` to be declared; must have exactly 1 generic parameter and 1 instance field of type `nuint`.
+  - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` to be declared; must have exactly 1 generic parameter and 1 instance field of type `nuint`.
   - *Str*: requires `Int8`, `Reference`, and `Int64`; must have 2 instance fields (`Int8&` buffer reference and `Int64` byte length).
   - *Array & Span*: verified against their element types and length fields.
 - **Lazy Intrinsic Requirement (`MH0240`)**: Intrinsics are lazily required. Minimal or empty compilations do not fail verification; `MH0240` is reported only when a syntactic construct requiring an intrinsic is used without declaration.
-- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Add`, `Subtract`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
+- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
+  - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `&this` for immutable access, while `MutDeref<TReturn>` / `MutArrow<TReturn>` declare `mut &this` for mutable access.
+  - *AddressOf*: every type is implicitly populated with an `AddressOf(&this) -> T&` operator overload.
 
 ---
 
@@ -117,8 +120,15 @@ The expression resolution pass types AST expressions and enforces Maho's operato
   - Capturing lambdas evaluate to `Std.Delegate<TReturn, TParams...>`.
   - Block bodies strictly require an explicit `return` statement; trailing expressions are rejected with `MH2016`.
   - Bidirectional contextual typing infers untyped parameter types when assigned to typed variables or passed as arguments to functions expecting function/delegate types; un-inferrable parameters emit `MH2015`.
-- **Operator Overload Resolution**:
-  - Binary and unary operators resolve strictly to explicit interface implementations on the operand types (e.g. `<Int32 as Add>::Add`). Emits `MH2001` or `MH2002` if missing.
+- **Universal L-Values & Reference Aliasing**:
+  - Any expression returning a mutable alias (`mut &T` or `mut *T`) is recognized as a valid, assignable L-value location.
+  - Safe (`&T`) and unsafe (`*T`) reference aliases must be initialized at their declaration site (`MH0125`).
+  - Taking the address of an expression `&expr` invokes the `AddressOf` operator on the expression's underlying type.
+  - The bottom type `Never` is unconditionally assignable to any target type without requiring an assignment operator implementation.
+- **Operator Overload Resolution & Receiver Mutability**:
+  - Binary and unary operators resolve strictly to explicit interface implementations on the operand types (e.g. `<Int32 as Addition>::Add`). Emits `MH2001` or `MH2002` if missing.
+  - Unary and member operator dispatch enforces receiver mutability: methods declaring `mut &this` or `this mut*` require a mutable operand/receiver (`ReferenceSemanticType.IsMutable`, `PointerSemanticType.IsMutable`, or `AliasSemanticType.IsMutable`).
+  - `Deref<&T>` and `Arrow<&T>` provide safe immutable dereferencing; `MutDeref<mut &T>` and `MutArrow<mut &T>` provide mutable dereferencing yielding assignable L-values.
 - **Two-Phase Object Allocation & Construction**:
   - Placement allocation (`put<arena> Type(...)`) resolves the `Put` operator.
   - Heap allocation (`new<allocator> Type(...)`) resolves the `New` operator.

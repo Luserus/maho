@@ -42,6 +42,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0103` | `EmptyCharacterLiteral` | Character literal `''` without payload. |
 | `MH0104` | `UnterminatedMultiLineComment` | Multi-line comment reaching EOF without closing `*/`. |
 | `MH0105` | `InvalidEscapeSequence` | Unrecognized escape sequence in string or character literal. |
+| `MH0110` | `InconsistentInheritanceOrder` | Inconsistent or cyclic C3 linearization order detected across multiple base types. |
 
 ### 2.2 Parser & Grammar Recovery (`MH0120` - `MH0159`)
 | Code | Name | Description |
@@ -51,7 +52,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0122` | `ExpectedIdentifier` | Declaration, parameter, or reference expected an identifier token. |
 | `MH0123` | `ExpectedType` | Declaration, type argument, or cast expected a type syntax node. |
 | `MH0124` | `ExpectedBody` | Type, function, or property expected a block body or expression body. |
-| `MH0125` | `ExpectedParameter` | Parameter list expected parameter declaration. |
+| `MH0125` | `UninitializedAliasVariable` | Alias variable (`&T` or `*T`) must be initialized at its declaration site. |
 | `MH0126` | `ExpectedGenericParameter` | Generic parameter list expected generic parameter identifier. |
 | `MH0127` | `UnexpectedToken` | Token violates language grammar in current context. |
 | `MH0128` | `MissingToken` | Synthesized missing token inserted during error recovery. |
@@ -72,13 +73,19 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0203` | `InvalidMacroEscape` | Malformed or mispositioned macro parameter reference `@name`. |
 | `MH0230` | `InvalidTokenConcatenation` | Invalid token pasting with `##` operator in macro template. |
 
-### 2.5 Semantic Syntax & ABI Requirements (`MH0240` - `MH0249`)
+### 2.5 Semantic Syntax & ABI Requirements (`MH0240` - `MH0299`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0240` | `MissingIntrinsicForSyntax` | Syntax requires an intrinsic type that was not declared or failed verification. |
 | `MH0242` | `InvalidOperatorFunctionSignature` | Invalid signature for operator function declaration. |
 | `MH0243` | `DestructorNandCopy` | Type cannot implement both `Destructor` and `Copy`; types with destructors must use move semantics. |
 | `MH0244` | `CopyNandMove` | Type cannot implement both `Copy` and `Move`; a type must be exclusively Copy or exclusively Move. |
+| `MH0250` | `BaseConstructorRequiresExplicitInit` | Base type has no default constructor; derived constructor must explicitly initialize it. |
+| `MH0251` | `InvalidBaseInitializerOnOrdinaryFunction` | Base initializer clause `: Base(...)` can only be placed on a constructor. |
+| `MH0252` | `TypeIsNotBaseOf` | Type specified in base initializer clause is not an inherited base of the enclosing type. |
+| `MH0253` | `DuplicateBaseInitializer` | Base type is initialized more than once in a constructor base initializer list. |
+| `MH0320` | `NonContiguousBaseConversion` | Cannot convert derived reference to non-contiguous/split base; use `dyn Base&` instead. |
+| `MH0410` | `AmbiguousMemberAccess` | Ambiguous member access across multiple sibling base types; disambiguate via `(expr as Base).Member`. |
 
 ---
 
@@ -164,6 +171,10 @@ These diagnostics are emitted by Pass 5 (`ExpressionResolutionPass`) and Pass 6 
 | `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse or member lookup. |
 | `MH2015` | `CannotInferLambdaParameterType` | Cannot infer type for lambda parameter; explicit type annotation is required. |
 | `MH2016` | `LambdaBlockBodyRequiresReturn` | Lambda block body must end with an explicit return statement; trailing expressions are not permitted. |
+| `MH2017` | `MissingReturn` | Not all reachable code paths return a value in a non-Unit returning function. |
+| `MH2018` | `FunctionMustReturnNever` | Function diverges on all code paths and must be declared with return type `Never`. |
+| `MH2019` | `CannotAccessInstanceMemberOnType` | Non-static field, method, or property cannot be accessed through a type name without an instance reference. |
+| `MH2020` | `CannotAccessStaticMemberOnInstance` | Static member cannot be accessed via an instance reference; qualify it with the type name instead. |
 
 ---
 
