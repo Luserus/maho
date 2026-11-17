@@ -132,10 +132,24 @@ internal static class KnownIntrinsics
     public const string FnValueTypeAssign = "ValueType.Assign()";
     public const string FnStructAssign = "Struct.Assign()";
     public const string FnInt32Add = "Int32.Add(Int32, Int32)";
-    public const string FnInt32Sub = "Int32.Sub(Int32, Int32)";
-    public const string FnInt32Mul = "Int32.Mul(Int32, Int32)";
-    public const string FnInt32Div = "Int32.Div(Int32, Int32)";
-    public const string FnInt32Rem = "Int32.Rem(Int32, Int32)";
+    public const string FnInt32Sub = "Int32.Subtract(Int32, Int32)";
+    public const string FnInt32Mul = "Int32.Multiply(Int32, Int32)";
+    public const string FnInt32Div = "Int32.Divide(Int32, Int32)";
+    public const string FnInt32Rem = "Int32.Remainder(Int32, Int32)";
+    public const string FnInt32Equality = "Int32.Equality(Int32, Int32)";
+    public const string FnInt32Inequality = "Int32.Inequality(Int32, Int32)";
+    public const string FnInt32LessThan = "Int32.LessThan(Int32, Int32)";
+    public const string FnInt32LessThanOrEqual = "Int32.LessThanOrEqual(Int32, Int32)";
+    public const string FnInt32GreaterThan = "Int32.GreaterThan(Int32, Int32)";
+    public const string FnInt32GreaterThanOrEqual = "Int32.GreaterThanOrEqual(Int32, Int32)";
+    public const string FnInt32BitwiseAnd = "Int32.BitwiseAnd(Int32, Int32)";
+    public const string FnInt32BitwiseOr = "Int32.BitwiseOr(Int32, Int32)";
+    public const string FnInt32BitwiseXor = "Int32.BitwiseXor(Int32, Int32)";
+    public const string FnInt32LeftShift = "Int32.LeftShift(Int32, Int32)";
+    public const string FnInt32RightShift = "Int32.RightShift(Int32, Int32)";
+    public const string FnInt32UnaryNegation = "Int32.UnaryNegation(Int32)";
+    public const string FnInt32UnaryPositive = "Int32.UnaryPositive(Int32)";
+    public const string FnInt32BitwiseNot = "Int32.BitwiseNot(Int32)";
 
     public static readonly HashSet<string> AllKnownTypes =
     [

@@ -38,6 +38,18 @@ public sealed class AliasAndReferenceCombinationsTests
             public func Deref(&this) -> TReturn;
         }
 
+        public interface MutDeref<TReturn>
+        {
+            [OperatorFunction("Dereference")]
+            public func Deref(mut &this) -> TReturn;
+        }
+
+        public interface MutArrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            public func Arrow(mut &this) -> TReturn;
+        }
+
         public interface Addr<T>
         {
             [OperatorFunction("AddressOf")]
@@ -60,15 +72,15 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutableReference")]
-        public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>
+        public struct MutableReference<T> : MutArrow<mut &T>, MutDeref<mut &T>
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutableReference.Deref()")]
-            public func Deref.Deref(mut &this) -> mut &T;
+            public func MutDeref.Deref(mut &this) -> mut &T;
 
-            public func Arrow.Arrow(mut &this) -> mut &T
+            public func MutArrow.Arrow(mut &this) -> mut &T
             {
                 return *this;
             }
@@ -90,15 +102,15 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutablePointer")]
-        public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T>
+        public struct MutablePointer<T> : MutArrow<mut &T>, MutDeref<mut &T>
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutablePointer.Deref()")]
-            public func Deref.Deref(mut &this) -> mut &T;
+            public func MutDeref.Deref(mut &this) -> mut &T;
 
-            public func Arrow.Arrow(mut &this) -> mut &T
+            public func MutArrow.Arrow(mut &this) -> mut &T
             {
                 return *this;
             }
@@ -540,6 +552,96 @@ public sealed class AliasAndReferenceCombinationsTests
                 {
                     return this;
                 }
+            }
+            """;
+
+        var compilation = Compilation.FromSource(source);
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void MutDeref_And_MutArrow_Separate_Interfaces_With_Receiver_Parameters()
+    {
+        var source = Prelude + """
+            public struct Item
+            {
+                public Int32 value;
+            }
+
+            public func TestDerefAndArrow(Item* ro, Item mut* rw)
+            {
+                &Item a = *ro;
+                mut &Item b = *rw;
+                *rw = a;
+            }
+            """;
+
+        var compilation = Compilation.FromSource(source);
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void Receiver_Kind_Mismatch_Between_Interface_And_Implementation_Reports_MH0550()
+    {
+        var source = Prelude + """
+            public interface IFoo
+            {
+                public func Bar(&this) -> Int32;
+            }
+
+            public struct MyFoo : IFoo
+            {
+                public func Bar(mut &this) -> Int32
+                {
+                    Int32 i;
+                    return i;
+                }
+            }
+            """;
+
+        var compilation = Compilation.FromSource(source);
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0550");
+    }
+
+    [Fact]
+    public void Clear_Comparison_Operator_Names_And_Contracts()
+    {
+        var source = Prelude + """
+            [IntrinsicType("Bool")]
+            public struct Bool;
+
+            public interface LessThanOrEqual<TResult, TLeft, TRight>
+            {
+                [OperatorFunction("LessThanOrEqual")]
+                public static func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+            }
+
+            public interface GreaterThanOrEqual<TResult, TLeft, TRight>
+            {
+                [OperatorFunction("GreaterThanOrEqual")]
+                public static func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+            }
+
+            public struct Number : LessThanOrEqual<Bool, Number, Number>,
+                                  GreaterThanOrEqual<Bool, Number, Number>
+            {
+                public static func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
+                {
+                    Bool b;
+                    return b;
+                }
+
+                public static func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
+                {
+                    Bool b;
+                    return b;
+                }
+            }
+
+            public func Compare(Number a, Number b) -> Bool
+            {
+                return a <= b;
             }
             """;
 

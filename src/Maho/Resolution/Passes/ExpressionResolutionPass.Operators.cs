@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -308,9 +309,9 @@ internal sealed partial class ExpressionResolutionPass
                 return derefResult;
 
             if (operand.SpecialType is ReferenceSemanticType refType)
-                return refType.ElementType;
+                return TypeRef.Alias(refType.ElementType, isMutable: refType.IsMutable);
             if (operand.SpecialType is PointerSemanticType ptrType)
-                return ptrType.ElementType;
+                return TypeRef.Alias(ptrType.ElementType, isMutable: ptrType.IsMutable);
             return TypeRef.Error;
         }
 
@@ -463,6 +464,13 @@ internal sealed partial class ExpressionResolutionPass
                 typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
         }
 
+        IReadOnlyList<TypeRef> baseTypes = operandTypeSym switch
+        {
+            TypeSymbol tSym => tSym.BaseTypes,
+            NestedTypeSymbol nts => nts.BaseTypes,
+            _ => []
+        };
+
         var scope = GetOwnedScope(operandTypeSym);
         foreach (var candidate in candidates)
         {
@@ -472,17 +480,68 @@ internal sealed partial class ExpressionResolutionPass
 
             foreach (var sym in scope.Symbols.Values)
             {
-                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                if (sym is MethodSymbol method)
                 {
-                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    bool isCandidate = false;
+                    if (method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    {
+                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                            isCandidate = true;
+                    }
+                    else if (baseTypes.Any(b => b.Handle == candidate.InterfaceHandle))
+                    {
+                        if (context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod &&
+                            method.Name.Text == opMethod.Name.Text)
+                        {
+                            isCandidate = true;
+                        }
+                    }
+
+                    if (isCandidate)
                     {
                         // Check if instance method on receiver or static unary accepting operand
-                        if (method.Parameters.Count == 0 || (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p && p.Type.IsAssignableFrom(operand, context)))
+                        if (method.Parameters.Count == 0)
                         {
                             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
                             var rawReturn = method.ReturnType;
                             result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
                             return true;
+                        }
+                        else if (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p)
+                        {
+                            if (p.Syntax?.Declarator.IsReceiver == true)
+                            {
+                                bool requiresMut = p.Syntax.Declarator.ReceiverKind is ReceiverKind.MutAlias or ReceiverKind.MutReference or ReceiverKind.MutPointer or ReceiverKind.MutUnsafeAlias;
+                                if (requiresMut)
+                                {
+                                    bool isOperandMut = false;
+                                    if (operand.SpecialType is ReferenceSemanticType rSem)
+                                        isOperandMut = rSem.IsMutable;
+                                    else if (operand.SpecialType is PointerSemanticType pSem)
+                                        isOperandMut = pSem.IsMutable;
+                                    else if (operand.SpecialType is AliasSemanticType aSem)
+                                        isOperandMut = aSem.IsMutable;
+                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mpH) && operand.Handle == mpH)
+                                        isOperandMut = true;
+                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mrH) && operand.Handle == mrH)
+                                        isOperandMut = true;
+
+                                    if (!isOperandMut)
+                                        continue;
+                                }
+
+                                context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
+                                var rawReturn = method.ReturnType;
+                                result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
+                                return true;
+                            }
+                            else if (p.Type.IsAssignableFrom(operand, context))
+                            {
+                                context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
+                                var rawReturn = method.ReturnType;
+                                result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
+                                return true;
+                            }
                         }
                     }
                 }

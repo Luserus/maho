@@ -405,6 +405,28 @@ internal sealed partial class ExpressionResolutionPass
 
                         if (isCandidate)
                         {
+                            if (method.Parameters.Count > 0 && context.GetParameterSymbol(method.Parameters[0]) is { } p && p.Syntax?.Declarator.IsReceiver == true)
+                            {
+                                bool requiresMut = p.Syntax.Declarator.ReceiverKind is ReceiverKind.MutAlias or ReceiverKind.MutReference or ReceiverKind.MutPointer or ReceiverKind.MutUnsafeAlias;
+                                if (requiresMut)
+                                {
+                                    bool isOperandMut = false;
+                                    if (type.SpecialType is ReferenceSemanticType rSem)
+                                        isOperandMut = rSem.IsMutable;
+                                    else if (type.SpecialType is PointerSemanticType pSem)
+                                        isOperandMut = pSem.IsMutable;
+                                    else if (type.SpecialType is AliasSemanticType aSem)
+                                        isOperandMut = aSem.IsMutable;
+                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mpH) && type.Handle == mpH)
+                                        isOperandMut = true;
+                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mrH) && type.Handle == mrH)
+                                        isOperandMut = true;
+
+                                    if (!isOperandMut)
+                                        continue;
+                                }
+                            }
+
                             var rawRet = method.ReturnType;
                             elemType = typeArgs is not null ? SubstituteTypeRef(rawRet, typeArgs) : rawRet;
                             return true;
