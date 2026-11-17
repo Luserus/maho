@@ -28,14 +28,34 @@ build-maho
 - `--debug` (or `-d`): Builds Debug configuration and emits `.pdb` symbols and `.deps.json`.
 - `--all`: Compiles and publishes for all major platforms (`linux-x64`, `linux-arm64`, `win-x64`, `osx-x64`, `osx-arm64`) into `bin/<platform>/`.
 
+### Output Directory Structure (`bin/`)
+
+```text
+bin/
+├── miryo/                     # Project manager & build orchestrator
+│   ├── miryo                  # Host executable
+│   ├── miryo.config           # Toolchain configuration (paths, defaults)
+│   └── runtime/               # Shared .NET host runtime
+└── maho/                      # Compiler toolchain
+    ├── tools/<version>/       # Toolchain binaries (mahoc, maho-server, maho-ls)
+    ├── compiler/<version>/    # Compiler library (Maho.dll, manifest.json)
+    ├── server/                # Persistent daemon manager (server-manager, MahoServer.dll)
+    ├── shims/                 # Launch shims / symlinks for user PATH (mahoc, etc.)
+    └── runtime/               # Shared .NET runtime
+```
+
 ---
 
 ## 2. Running the Compiler
 
-Run the compiled executable directly on source files or directories:
+Run the compiled executable directly on source files or directories using either the shim or versioned tool path:
 
 ```bash
+# Using the shim
 ./bin/maho/shims/mahoc [options] [source-paths...]
+
+# Or directly using the versioned binary
+./bin/maho/tools/0.2/mahoc [options] [source-paths...]
 ```
 
 `source-paths` can be:

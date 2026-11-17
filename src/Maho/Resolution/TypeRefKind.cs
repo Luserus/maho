@@ -29,6 +29,16 @@ internal enum TypeRefKind : byte
     Union,
     /// <summary>Untagged sum type modifier (<c>untagged T</c>).</summary>
     Untagged,
+    /// <summary>Dynamic existential type modifier (<c>dyn T</c>).</summary>
+    Dyn,
+    /// <summary>Function pointer type (<c>func(params) -&gt; ReturnType</c>).</summary>
+    Function,
+    /// <summary>Delegate type (<c>delegate(params) -&gt; ReturnType</c>).</summary>
+    Delegate,
     /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
-    Literal
+    Literal,
+    /// <summary>Never / bottom type (<c>!</c>).</summary>
+    Never,
+    /// <summary>Storage alias type (<c>ref T</c> or <c>mut ref T</c>).</summary>
+    Alias
 }

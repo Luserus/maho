@@ -397,27 +397,136 @@ internal sealed partial class Parser
         return (lessThan, genericArguments, greaterThan, true);
     }
 
+    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseFunctionType()
+    {
+        var funcKeyword = LookaheadConsume();
+        if (LookaheadCurrentToken.Kind is not TokenKind.LeftParen)
+            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var openParen = LookaheadConsume();
+
+        var nodesAndSeparators = new List<SyntaxNode>();
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var (paramType, success, ctx) = LookaheadParseTypeSyntax();
+            if (!success)
+                return (new SimpleType(funcKeyword), false, ctx);
+            nodesAndSeparators.Add(paramType);
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(LookaheadConsume());
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+            return (new SimpleType(funcKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var closeParen = LookaheadConsume();
+
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (LookaheadGetCombinedOperatorData().Kind is TokenKind.MinusGreaterThan)
+        {
+            arrowToken = LookaheadConsumeOperator();
+            var (retType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+            if (!retSuccess)
+                return (new SimpleType(funcKeyword), false, retCtx);
+            returnType = retType;
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
+        }
+
+        return (new FunctionTypeSyntax(funcKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
+    }
+
+    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseDelegateType()
+    {
+        var delKeyword = LookaheadConsume();
+        if (LookaheadCurrentToken.Kind is not TokenKind.LeftParen)
+            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var openParen = LookaheadConsume();
+
+        var nodesAndSeparators = new List<SyntaxNode>();
+        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
+        {
+            var (paramType, success, ctx) = LookaheadParseTypeSyntax();
+            if (!success)
+                return (new SimpleType(delKeyword), false, ctx);
+            nodesAndSeparators.Add(paramType);
+
+            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+                nodesAndSeparators.Add(LookaheadConsume());
+            else
+                break;
+        }
+
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
+            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
+        var closeParen = LookaheadConsume();
+
+        Token? arrowToken = null;
+        TypeSyntax returnType;
+        if (LookaheadGetCombinedOperatorData().Kind is TokenKind.MinusGreaterThan)
+        {
+            arrowToken = LookaheadConsumeOperator();
+            var (retType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
+            if (!retSuccess)
+                return (new SimpleType(delKeyword), false, retCtx);
+            returnType = retType;
+        }
+        else
+        {
+            returnType = new SimpleType(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
+        }
+
+        return (new DelegateTypeSyntax(delKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
+    }
+
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
     private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseTypeSyntax()
     {
-        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Func && LookaheadPeek().Kind is TokenKind.LeftParen)
+            return LookaheadParseFunctionType();
+
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Delegate && LookaheadPeek().Kind is TokenKind.LeftParen)
+            return LookaheadParseDelegateType();
+
+        List<PrefixTypeModifier> prefixModifiers = [];
+        while (true)
         {
-            var ampersand = LookaheadConsume();
-            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
-            if (!innerSuccess)
-                return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), false, innerContext);
-
-            return (new PrefixModifiedType(new SpanTypeModifier(ampersand), innerType), true, LookaheadResultContext.Success);
-        }
-
-        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
-        {
-            var untagged = LookaheadConsume();
-            var (innerType, innerSuccess, innerContext) = LookaheadParseTypeSyntax();
-            if (!innerSuccess)
-                return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), false, innerContext);
-
-            return (new PrefixModifiedType(new UntaggedTypeModifier(untagged), innerType), true, LookaheadResultContext.Success);
+            if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Ampersand)
+            {
+                var mut = LookaheadConsume();
+                var amp = LookaheadConsume();
+                prefixModifiers.Add(new SafeAliasTypeModifier(amp, mut));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Asterisk)
+            {
+                var mut = LookaheadConsume();
+                var star = LookaheadConsume();
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(star, mut));
+            }
+            else if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+            {
+                prefixModifiers.Add(new SafeAliasTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.Kind is TokenKind.Asterisk)
+            {
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
+            {
+                prefixModifiers.Add(new UntaggedTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Dyn)
+            {
+                prefixModifiers.Add(new DynTypeModifier(LookaheadConsume()));
+            }
+            else
+            {
+                break;
+            }
         }
 
         var (type, success) = LookaheadParsePrimaryType();
@@ -425,7 +534,13 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
+        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
+        {
+            type = new PrefixModifiedType(prefixModifiers[i], type);
+        }
+
         if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+            (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && (LookaheadPeek().Kind is TokenKind.Ampersand || LookaheadPeek().Kind is TokenKind.Asterisk)) ||
             (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
             (type, success) = LookaheadParseModifiedType(type);
 
@@ -668,6 +783,7 @@ internal sealed partial class Parser
         TypeSyntax type = baseType;
 
         while (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+               (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && (LookaheadPeek().Kind is TokenKind.Ampersand || LookaheadPeek().Kind is TokenKind.Asterisk)) ||
                (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
         {
             var (modifier, success) = LookaheadCurrentToken.Kind switch
@@ -677,6 +793,8 @@ internal sealed partial class Parser
                 TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParsePointerTypeModifier(),
                 TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseReferenceTypeModifier(),
                 TokenKind.Dot => LookaheadParseVariadicTypeModifier(),
+                _ when LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseMutReferenceTypeModifier(),
+                _ when LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParseMutPointerTypeModifier(),
                 _ => throw new System.InvalidOperationException(),
             };
 
@@ -689,10 +807,24 @@ internal sealed partial class Parser
         return (type, true);
     }
 
+    private (ReferenceTypeModifier Modifier, bool Success) LookaheadParseMutReferenceTypeModifier()
+    {
+        var mutToken = LookaheadConsume();
+        var ampersand = LookaheadConsume();
+        return (new ReferenceTypeModifier(ampersand, mutToken), true);
+    }
+
     /// <summary> Speculatively parses an array or fixed-size array type modifier. </summary>
     private (PostfixTypeModifier Type, bool Success) LookaheadParseArrayOrFixedArrayTypeModifier()
     {
         var openBracket = LookaheadConsume();
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand && LookaheadPeek().Kind is TokenKind.RightBracket)
+        {
+            var ampersand = LookaheadConsume();
+            var closeBracket = LookaheadConsume();
+            return (new SpanTypeModifier(openBracket, ampersand, closeBracket), true);
+        }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
         {
@@ -727,6 +859,14 @@ internal sealed partial class Parser
     {
         var asterisk = LookaheadConsume();
         return (new PointerTypeModifier(asterisk), true);
+    }
+
+    /// <summary> Speculatively parses a mutable pointer type modifier. </summary>
+    private (PointerTypeModifier Type, bool Success) LookaheadParseMutPointerTypeModifier()
+    {
+        var mutToken = LookaheadConsume();
+        var asterisk = LookaheadConsume();
+        return (new PointerTypeModifier(asterisk, mutToken), true);
     }
 
     /// <summary> Speculatively parses an optional type modifier. </summary>
@@ -769,6 +909,7 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Static:
                 case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
+                case MatchingKeywordKind.Mut:
                     list.Add(LookaheadConsume());
                     break;
 

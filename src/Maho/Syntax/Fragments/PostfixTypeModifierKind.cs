@@ -5,6 +5,7 @@ internal enum PostfixTypeModifierKind
 {
     Array,
     FixedArray,
+    Span,
     Pointer,
     Optional,
     Reference,

@@ -1,0 +1,428 @@
+namespace Std;
+
+intrinsic attribute IntrinsicType(Str name);
+
+intrinsic attribute IntrinsicFunction(Str name);
+
+intrinsic attribute OperatorFunction(Str name);
+
+[IntrinsicType("ValueType")]
+struct ValType;
+
+[IntrinsicType("Struct")]
+struct Struct : ValType;
+
+[IntrinsicType("Enum")]
+struct Enum : ValType;
+
+[IntrinsicType("Unit")]
+struct Unit : ValType;
+
+[IntrinsicType("Never")]
+struct Never;
+
+[IntrinsicType("Bool")]
+struct Bool;
+
+[IntrinsicType("Char")]
+struct Char;
+
+[IntrinsicType("Int8")]
+struct Int8;
+
+[IntrinsicType("Int16")]
+struct Int16;
+
+[IntrinsicType("Int64")]
+struct Int64;
+
+[IntrinsicType("Int128")]
+struct Int128;
+
+[IntrinsicType("NInt")]
+struct NInt;
+
+[IntrinsicType("UInt8")]
+struct UInt8;
+
+[IntrinsicType("UInt16")]
+struct UInt16;
+
+[IntrinsicType("UInt32")]
+struct UInt32;
+
+[IntrinsicType("UInt64")]
+struct UInt64;
+
+[IntrinsicType("UInt128")]
+struct UInt128;
+
+[IntrinsicType("NUInt")]
+struct NUInt;
+
+[IntrinsicType("Float16")]
+struct Float16;
+
+[IntrinsicType("Float32")]
+struct Float32;
+
+[IntrinsicType("Float64")]
+struct Float64;
+
+[IntrinsicType("Float128")]
+struct Float128;
+
+[IntrinsicType("Metadata")]
+struct Metadata<T> : ValType;
+
+interface Deref<TReturn>
+{
+    [OperatorFunction("Dereference")]
+    func Deref(&this) -> TReturn;
+}
+
+interface MutDeref<TReturn>
+{
+    [OperatorFunction("Dereference")]
+    func Deref(mut &this) -> TReturn;
+}
+
+interface Arrow<TReturn>
+{
+    [OperatorFunction("IndirectMemberAccess")]
+    func Arrow(&this) -> TReturn;
+}
+
+interface MutArrow<TReturn>
+{
+    [OperatorFunction("IndirectMemberAccess")]
+    func Arrow(mut &this) -> TReturn;
+}
+
+[IntrinsicType("Reference")]
+struct Reference<T> : ValType, Arrow<&T>, Deref<&T>
+{
+    NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("Reference.Deref()")]
+    func Deref.Deref(&this) -> &T;
+
+    func Arrow.Arrow(&this) -> &T
+    {
+        return *this;
+    }
+}
+
+[IntrinsicType("MutableReference")]
+struct MutableReference<T> : ValType, MutArrow<mut &T>, MutDeref<mut &T>
+{
+    NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("MutableReference.Deref()")]
+    func MutDeref.Deref(mut &this) -> mut &T;
+
+    func MutArrow.Arrow(mut &this) -> mut &T
+    {
+        return *this;
+    }
+}
+
+[IntrinsicType("Pointer")]
+struct Pointer<T> : ValType, Arrow<&T>, Deref<&T>
+{
+    NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("Pointer.Deref()")]
+    func Deref.Deref(&this) -> &T;
+
+    func Arrow.Arrow(&this) -> &T
+    {
+        return *this;
+    }
+}
+
+[IntrinsicType("MutablePointer")]
+struct MutablePointer<T> : ValType, MutArrow<mut &T>, MutDeref<mut &T>
+{
+    NUInt address;
+    Metadata<T> metadata;
+
+    [IntrinsicFunction("MutablePointer.Deref()")]
+    func MutDeref.Deref(mut &this) -> mut &T;
+
+    func MutArrow.Arrow(mut &this) -> mut &T
+    {
+        return *this;
+    }
+}
+
+[IntrinsicType("Str")]
+struct Str
+{
+    Int8& buffer;
+    NUInt length;
+}
+
+[IntrinsicType("Array")]
+struct Array<T> : ValType
+{
+    T* data;
+    NUInt length;
+}
+
+[IntrinsicType("Span")]
+struct Span<T>
+{
+    T& reference;
+    NUInt length;
+}
+
+[IntrinsicType("FixedArray")]
+struct FixedArray<T, N : int> : ValType;
+
+[IntrinsicType("Tuple")]
+struct Tuple : ValType;
+
+interface Callable<TReturn, TArgs...>
+{
+    [OperatorFunction("Callable")]
+    func Invoke(TArgs... args) -> TReturn;
+}
+
+[IntrinsicType("Function")]
+struct Function<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
+{
+    NUInt address;
+
+    [IntrinsicFunction("Function.Invoke(TParams...)")]
+    func Callable.Invoke(TArgs... args) -> TReturn;
+
+    func GetAddress() -> NUInt
+    {
+        return address;
+    }
+}
+
+[IntrinsicType("Delegate")]
+struct Delegate<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
+{
+    NUInt address;
+    ValType* context;
+
+    [IntrinsicFunction("Delegate.Invoke(TParams...)")]
+    func Callable.Invoke(TArgs... args) -> TReturn;
+}
+
+[IntrinsicType("Optional")]
+enum Optional<T>
+{
+    Some(T value),
+    None;
+}
+
+interface Addition<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Addition")]
+    static func Add(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Subtraction<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Subtraction")]
+    static func Subtract(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Multiplication<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Multiplication")]
+    static func Multiply(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Division<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Division")]
+    static func Divide(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Remainder<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Remainder")]
+    static func Remainder(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface BitwiseAnd<TResult, TLeft, TRight>
+{
+    [OperatorFunction("BitwiseAnd")]
+    static func BitwiseAnd(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface BitwiseOr<TResult, TLeft, TRight>
+{
+    [OperatorFunction("BitwiseOr")]
+    static func BitwiseOr(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface BitwiseXor<TResult, TLeft, TRight>
+{
+    [OperatorFunction("BitwiseXor")]
+    static func BitwiseXor(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface LeftShift<TResult, TLeft, TRight>
+{
+    [OperatorFunction("LeftShift")]
+    static func LeftShift(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface RightShift<TResult, TLeft, TRight>
+{
+    [OperatorFunction("RightShift")]
+    static func RightShift(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Equality<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Equality")]
+    static func Equality(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface Inequality<TResult, TLeft, TRight>
+{
+    [OperatorFunction("Inequality")]
+    static func Inequality(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface LessThan<TResult, TLeft, TRight>
+{
+    [OperatorFunction("LessThan")]
+    static func LessThan(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface LessThanOrEqual<TResult, TLeft, TRight>
+{
+    [OperatorFunction("LessThanOrEqual")]
+    static func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface GreaterThan<TResult, TLeft, TRight>
+{
+    [OperatorFunction("GreaterThan")]
+    static func GreaterThan(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface GreaterThanOrEqual<TResult, TLeft, TRight>
+{
+    [OperatorFunction("GreaterThanOrEqual")]
+    static func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+}
+
+interface UnaryNegation<TResult, TOperand>
+{
+    [OperatorFunction("UnaryNegation")]
+    static func Negate(TOperand op) -> TResult;
+}
+
+interface UnaryPositive<TResult, TOperand>
+{
+    [OperatorFunction("UnaryPositive")]
+    static func Positive(TOperand op) -> TResult;
+}
+
+interface BitwiseNot<TResult, TOperand>
+{
+    [OperatorFunction("BitwiseNot")]
+    static func BitwiseNot(TOperand op) -> TResult;
+}
+
+[IntrinsicType("Int32")]
+struct Int32 : Addition<Int32, Int32, Int32>,
+               Subtraction<Int32, Int32, Int32>,
+               Multiplication<Int32, Int32, Int32>,
+               Division<Int32, Int32, Int32>,
+               Remainder<Int32, Int32, Int32>,
+               BitwiseAnd<Int32, Int32, Int32>,
+               BitwiseOr<Int32, Int32, Int32>,
+               BitwiseXor<Int32, Int32, Int32>,
+               LeftShift<Int32, Int32, Int32>,
+               RightShift<Int32, Int32, Int32>,
+               Equality<Bool, Int32, Int32>,
+               Inequality<Bool, Int32, Int32>,
+               LessThan<Bool, Int32, Int32>,
+               LessThanOrEqual<Bool, Int32, Int32>,
+               GreaterThan<Bool, Int32, Int32>,
+               GreaterThanOrEqual<Bool, Int32, Int32>,
+               UnaryNegation<Int32, Int32>,
+               UnaryPositive<Int32, Int32>,
+               BitwiseNot<Int32, Int32>,
+               Callable<Int32, Int32>
+{
+    [IntrinsicFunction("Int32.Add(Int32, Int32)")]
+    static func Addition.Add(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.Subtract(Int32, Int32)")]
+    static func Subtraction.Subtract(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.Multiply(Int32, Int32)")]
+    static func Multiplication.Multiply(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.Divide(Int32, Int32)")]
+    static func Division.Divide(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.Remainder(Int32, Int32)")]
+    static func Remainder.Remainder(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.BitwiseAnd(Int32, Int32)")]
+    static func BitwiseAnd.BitwiseAnd(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.BitwiseOr(Int32, Int32)")]
+    static func BitwiseOr.BitwiseOr(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.BitwiseXor(Int32, Int32)")]
+    static func BitwiseXor.BitwiseXor(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.LeftShift(Int32, Int32)")]
+    static func LeftShift.LeftShift(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.RightShift(Int32, Int32)")]
+    static func RightShift.RightShift(Int32 lhs, Int32 rhs) -> Int32;
+
+    [IntrinsicFunction("Int32.Equality(Int32, Int32)")]
+    static func Equality.Equality(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.Inequality(Int32, Int32)")]
+    static func Inequality.Inequality(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.LessThan(Int32, Int32)")]
+    static func LessThan.LessThan(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")]
+    static func LessThanOrEqual.LessThanOrEqual(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")]
+    static func GreaterThan.GreaterThan(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")]
+    static func GreaterThanOrEqual.GreaterThanOrEqual(Int32 lhs, Int32 rhs) -> Bool;
+
+    [IntrinsicFunction("Int32.UnaryNegation(Int32)")]
+    static func UnaryNegation.Negate(Int32 op) -> Int32;
+
+    [IntrinsicFunction("Int32.UnaryPositive(Int32)")]
+    static func UnaryPositive.Positive(Int32 op) -> Int32;
+
+    [IntrinsicFunction("Int32.BitwiseNot(Int32)")]
+    static func BitwiseNot.BitwiseNot(Int32 op) -> Int32;
+
+    func Callable.Invoke(Int32 i) -> Int32
+    {
+        return i;
+    }
+
+    func Abs() -> Int32
+    {
+        return 0;
+    }
+}

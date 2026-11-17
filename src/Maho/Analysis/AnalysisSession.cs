@@ -78,7 +78,7 @@ public sealed class AnalysisSession
         }
         else
         {
-            CurrentContext = Compilation.FromSource(string.Empty, "<empty>", Options).Context!;
+            CurrentContext = Compilation.FromSource(string.Empty, "<empty>", Options).Context;
         }
     }
 

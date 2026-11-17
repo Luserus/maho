@@ -23,7 +23,7 @@ public static class CommandLine
     {
         get
         {
-            var informational = typeof(CommandLine).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            var informational = typeof(CommandLine).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             if (!string.IsNullOrWhiteSpace(informational))
             {
                 int plusIndex = informational.IndexOf('+');
@@ -220,11 +220,12 @@ public static class CommandLine
         // Miryo receives pipeline state through its result pipe and owns the final build-stage
         // message. Source diagnostics remain on stderr in both direct and build invocations.
         string? renderedPipelineError = options.ResultPipeName is null ? pipelineError : null;
+        bool includeSummary = options.ResultPipeName is null;
         string diagnosticsOutput = options.DiagnosticsFormat switch
         {
             DiagnosticsFormat.Json => BuildDiagnosticsJsonOutput(primaryInput, analysis, renderedPipelineError),
-            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, renderedPipelineError, options.PathStyle, options.WarningsAsErrors),
-            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, renderedPipelineError, options.ColorMode, options.PathStyle, options.WarningsAsErrors)
+            DiagnosticsFormat.Text => BuildDiagnosticsTextOutput(primaryInput, analysis, renderedPipelineError, options.PathStyle, options.WarningsAsErrors, includeSummary),
+            _ => BuildDiagnosticsPrettyOutput(primaryInput, analysis, renderedPipelineError, options.ColorMode, options.PathStyle, options.WarningsAsErrors, includeSummary)
         };
 
         if (options.DiagnosticsRequested || !string.IsNullOrEmpty(diagnosticsOutput))
@@ -347,10 +348,33 @@ public static class CommandLine
         using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.Out);
         pipe.Connect(5000);
         using var writer = new StreamWriter(pipe, new UTF8Encoding(false)) { AutoFlush = true };
+
+        int errorCount = 0;
+        int warningCount = 0;
+
+        foreach (CompilerBatchFileResult file in analysis.Files)
+        {
+            foreach (DiagnosticInfo diagnostic in file.Diagnostics)
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                    errorCount++;
+                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                    warningCount++;
+            }
+
+            if (file.AnalysisError is not null)
+                errorCount++;
+        }
+
+        if (pipelineError is not null)
+            errorCount++;
+
         writer.WriteLine(JsonSerializer.Serialize(new
         {
             elapsedTicks = analysis.Elapsed.Ticks,
             hasErrors = analysis.HasErrors,
+            errorCount,
+            warningCount,
             pipelineError
         }, PipeJsonOptions));
     }
@@ -381,7 +405,8 @@ public static class CommandLine
         CompilerProjectAnalysisResult analysis,
         string? pipelineError,
         DiagnosticPathStyle pathStyle = DiagnosticPathStyle.Relative,
-        bool warningsAsErrors = false)
+        bool warningsAsErrors = false,
+        bool includeSummary = true)
     {
         StringBuilder output = new();
         string displayRoot = pathStyle switch
@@ -436,7 +461,7 @@ public static class CommandLine
             output.AppendLine($"error MH9000: {pipelineError}");
         }
 
-        if (errorCount > 0)
+        if (includeSummary && errorCount > 0)
         {
             output.AppendLine($"compilation failed due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
         }
@@ -450,7 +475,8 @@ public static class CommandLine
         string? pipelineError,
         DiagnosticColorMode colorMode,
         DiagnosticPathStyle pathStyle,
-        bool warningsAsErrors = false)
+        bool warningsAsErrors = false,
+        bool includeSummary = true)
     {
         string projectRoot = GetDisplayRoot(inputPath);
         var renderer = new TerminalDiagnosticRenderer(
@@ -488,8 +514,12 @@ public static class CommandLine
             sb.AppendLine($"error[MH9000]: {pipelineError}");
         }
 
-        if (errorCount > 0)
-            sb.AppendLine($"compilation failed due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
+        if (includeSummary && errorCount > 0)
+        {
+            bool useColors = TerminalDiagnosticRenderer.ShouldEnableColors(colorMode);
+            string failedText = useColors ? $"{TerminalDiagnosticRenderer.Red}failed{TerminalDiagnosticRenderer.Reset}" : "failed";
+            sb.AppendLine($"compilation {failedText} due to {errorCount} {(errorCount == 1 ? "error" : "errors")}");
+        }
 
         return sb.ToString();
     }
@@ -857,7 +887,8 @@ public static class CommandLine
             }
         }
 
-        diagnosticsDestination ??= generalOutput;
+        if (resultPipeName is null && projectDirectory is null && !sourcePathsStdin)
+            diagnosticsDestination ??= generalOutput;
 
         options = new CliOptions(
             diagnosticsRequested,

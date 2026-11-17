@@ -48,7 +48,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Role flags used to describe how one token kind behaves in expression parsing. </summary>
-    [System.Flags]
+    [Flags]
     private enum OperatorRole : byte
     {
         None = 0,
@@ -162,7 +162,7 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                                    MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged;
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged or MatchingKeywordKind.Mut;
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
@@ -179,7 +179,10 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Match
         and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto
         and not MatchingKeywordKind.True and not MatchingKeywordKind.False
-        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This;
+        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This
+        and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
+        and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
+        and not MatchingKeywordKind.Mut;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -427,15 +430,18 @@ internal sealed partial class Parser
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseTopLevelMacroInvocationDeclaration();
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Global or MatchingKeywordKind.Const && Peek().Kind is TokenKind.LeftBrace)
+        {
+            var attachedKeyword = Consume();
+            return ParseTopLevelBlock(attachedKeyword, topLevelStatementsEnabled);
+        }
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseTopLevelBlock([], [], topLevelStatementsEnabled);
-        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart)
+            return ParseTopLevelBlock(null, topLevelStatementsEnabled);
+        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
-        else if (LooksLikeTopLevelConstructor(allowSemicolon: false))
-            return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
             if (success || context is LookaheadResultContext.MissingDelimeter)
@@ -446,7 +452,7 @@ internal sealed partial class Parser
     }
 
     /// <summary> Parses the next member declaration inside a type body. </summary>
-    private Member ParseMember()
+    private Member ParseMember(IReadOnlyList<AttributeListSyntax>? initialAttributes = null)
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
@@ -458,7 +464,27 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseMemberMacroInvocationDeclaration();
 
-        IReadOnlyList<AttributeListSyntax> attributes = ParseAttributeLists();
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is TokenKind.LeftBrace)
+        {
+            var attachedKeyword = Consume();
+            return ParseMemberBlockDeclaration(attachedKeyword);
+        }
+        else if (CurrentToken.Kind is TokenKind.LeftBrace)
+            return ParseMemberBlockDeclaration(null);
+
+        IReadOnlyList<AttributeListSyntax> attributes;
+        if (initialAttributes is not null && initialAttributes.Count > 0)
+        {
+            var parsed = ParseAttributeLists();
+            if (parsed.Count > 0)
+                attributes = [.. initialAttributes, .. parsed];
+            else
+                attributes = initialAttributes;
+        }
+        else
+        {
+            attributes = ParseAttributeLists();
+        }
         var modifiers = ParseModifiers();
 
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Literal)
@@ -467,16 +493,14 @@ internal sealed partial class Parser
             return new MemberMacroDeclaration(ParseMacroDeclaration(attributes, modifiers));
         else if (CurrentToken.Kind is TokenKind.Dollar)
             return ParseMemberMacroInvocationDeclaration();
-        else if (CurrentToken.Kind is TokenKind.LeftBrace)
-            return ParseMemberBlockDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseMemberAttributeDeclaration(attributes, modifiers);
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseMemberTypeDeclaration(attributes, modifiers);
-        else if (LooksLikeMemberConstructor())
-            return ParseMemberConstructor(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
+            return new MemberFunctionDeclaration(ParseFunction(attributes, modifiers));
         else
-            return ParseMemberFieldDeclarationOrFunctionOrProperty(attributes, modifiers);
+            return ParseMemberFieldOrPropertyDeclaration(attributes, modifiers);
     }
 
     /// <summary> Parses the next local construct inside a block or function body. </summary>
@@ -499,7 +523,7 @@ internal sealed partial class Parser
             return ParseLocalStatement(parseMode);
 
         if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier ||
-            LooksLikeTopLevelConstructor(allowSemicolon: false))
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
             return ParseLocalDeclaration(parseMode);
 
         return ParseLocalStatement(parseMode);

@@ -52,11 +52,15 @@ The macro expansion pass resolves and expands syntactic macros across the AST:
 The discovery pass builds the initial symbol graph and lexical scope hierarchy:
 - **Namespaces**: Constructs a hierarchical `NamespaceTrieNode` for qualified and nested namespaces.
 - **Types**: Discovers all classes, structs, interfaces, enums, and sum types, assigning unique `SymbolHandle` entries and `TypeFlags` (e.g. `TypeFlags.Partial`, `TypeFlags.Untagged`).
-- **Functions & Methods**: Discovers top-level functions, methods within types, local functions, constructors, and accessors. Captures modifiers into `FunctionFlags` (including `FunctionFlags.Partial`, `FunctionFlags.Literal`, `FunctionFlags.Untagged`).
+- **Functions & Methods**: Discovers top-level functions declared with `func`, methods within types, local functions, constructors, and accessors. Captures modifiers into `FunctionFlags` (including `FunctionFlags.Partial`, `FunctionFlags.Literal`, `FunctionFlags.Untagged`).
+- **Lambdas & Closures**: Traverses lambda expressions (`LambdaExpression`), registering lexical scopes and parameter symbols for lambda parameters (`LambdaParameterSyntax`) and nested local declarations inside lambda block bodies.
 - **Variables & Properties**: Discovers global variables, member fields, and properties with their respective enclosing scopes.
 - **Aliases**: Discovers global and local `using` alias declarations and registers global project aliases.
-- **Scopes**: Establishes parent-linked `Scope` instances for namespaces, types, functions, parameter lists, and nested blocks.
-- **Top-Level Statements**: If opted-in via `#pragma toplevel enable` or project configuration, synthesizes a `Main` function scope for top-level code. Variables declared in `global { }` blocks bypass `Main` and become true global variables.
+- **Scopes**: Establishes parent-linked `Scope` instances for namespaces, types, functions, lambdas, parameter lists, and nested blocks.
+- **Top-Level Statements & Scope Directives**: If opted-in via `#pragma toplevel enable` or project configuration, synthesizes a `Main` function scope for top-level code. Block scope directives:
+  - `global { ... }`: Declarations bypass `Main` and become true global/namespace symbols.
+  - `const { ... }`: Establishes compile-time evaluation context for inner declarations.
+  - Inner declarations declare their own modifiers; modifiers do not propagate from block scopes.
 
 ---
 
@@ -65,19 +69,32 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
 - **Attribute Verification**: Discovers and validates compiler-recognized attribute declarations:
   - `[IntrinsicType("...")]`: must accept exactly one `Str` parameter.
   - `[OperatorFunction("...")]`: must accept one `Str` parameter naming the operator kind.
-  - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions.
+  - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions with canonical signature contracts (e.g. `"Int32.LessThanOrEqual(Int32, Int32)"`).
+- **Intrinsic Hierarchy & Implicit Deriving**:
+  - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations; has zero base types.
+  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Array`, `FixedArray`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
+  - *Implicit Struct Deriving*: User-defined structs, primitive scalars (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`), `Str`, and `Span<T>` implicitly inherit `Struct` (and transitively `ValType`) without explicit base declarations.
+  - *Implicit Enum Deriving*: User-defined enums and `Optional<T>` implicitly inherit `Enum` (and transitively `ValType`).
+  - *Never* (`Never`, `[IntrinsicType("Never")]`): bottom type assignable to any type; has zero base types and implements no constructors or operations.
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
-  - *Primitive Scalars* (`Int8`-`Int64`, `UInt8`-`UInt64`, `Float32`, `Float64`, `Bool`, `Char`, `Void`): must have zero instance fields and zero generic parameters (`MH0544`).
-  - *Pointer & Reference* (`Pointer<T>`, `Reference<T>`): requires `NUInt` to be declared; must have exactly 1 generic parameter and 1 instance field of type `nuint`.
+  - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0544`). `Char` represents a 4-byte Unicode scalar value.
+  - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0544`).
+  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `Pointer<ValType>` environment pointer (`MH0544`).
+  - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` to be declared; must have exactly 1 generic parameter and 1 instance field of type `nuint`.
   - *Str*: requires `Int8`, `Reference`, and `Int64`; must have 2 instance fields (`Int8&` buffer reference and `Int64` byte length).
   - *Array & Span*: verified against their element types and length fields.
-- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Add`, `Subtract`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
+- **Lazy Intrinsic Requirement (`MH0240`)**: Intrinsics are lazily required. Minimal or empty compilations do not fail verification; `MH0240` is reported only when a syntactic construct requiring an intrinsic is used without declaration.
+- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
+  - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `&this` for immutable access, while `MutDeref<TReturn>` / `MutArrow<TReturn>` declare `mut &this` for mutable access.
+  - *AddressOf*: every type is implicitly populated with an `AddressOf(&this) -> T&` operator overload.
 
 ---
 
 ### 2.4 Declaration Resolution Pass (`DeclarationResolutionPass`)
 The declaration resolution pass validates and binds declarations across the discovered symbol table:
 - **Type Reference Binding**: Resolves type annotations in base clauses, fields, variables, parameters, return types, properties, and generic constraints.
+- **Function Pointer & Delegate Types**: Resolves `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>` and `DelegateTypeSyntax` (`delegate(...) -> R`) to `Std.Delegate<TReturn, TParams...>`.
+- **Unified Function Typing**: Assigns first-class types to all functions: static and global functions receive `Std.Function`, while instance methods receive `Std.Delegate`. Functions implement `Callable` and can access members on their type directly (`Func.Member`).
 - **Non-Partial Duplicate Types (`MH0530`)**: Verifies that types sharing the same containing scope, name, and generic arity are all declared with `partial`.
 - **Partial Types & Functions (`MH0531`, `MH0532`, `MH0533`, `MH0534`)**: Merges partial declarations, validates kind consistency, enforces that at most one declaration supplies an implementation body, and matches signatures.
 - **Duplicate Variables, Fields & Properties (`MH0535`, `MH0536`)**: Detects collisions in enclosing scopes.
@@ -98,12 +115,24 @@ The expression resolution pass types AST expressions and enforces Maho's operato
   - Unconstrained literals left at the end of a block/function scope fall back to default intrinsic types (`Int32`, `Float64`, `String`, `Char`).
 - **Zero Frontend Constant Folding**:
   - The compiler frontend does not perform constant folding (e.g. `10 + 20` is not folded to `30`). Operator calls remain as AST operator nodes resolving to operator interface methods (`<T as Add>::Add`), leaving optimization to the backend with full semantic knowledge.
-- **Operator Overload Resolution**:
-  - Binary and unary operators resolve strictly to explicit interface implementations on the operand types (e.g. `<Int32 as Add>::Add`). Emits `MH2001` or `MH2002` if missing.
+- **Lambda Expressions & Closures**:
+  - Non-capturing lambdas evaluate to `Std.Function<TReturn, TParams...>`.
+  - Capturing lambdas evaluate to `Std.Delegate<TReturn, TParams...>`.
+  - Block bodies strictly require an explicit `return` statement; trailing expressions are rejected with `MH2016`.
+  - Bidirectional contextual typing infers untyped parameter types when assigned to typed variables or passed as arguments to functions expecting function/delegate types; un-inferrable parameters emit `MH2015`.
+- **Universal L-Values & Reference Aliasing**:
+  - Any expression returning a mutable alias (`mut &T` or `mut *T`) is recognized as a valid, assignable L-value location.
+  - Safe (`&T`) and unsafe (`*T`) reference aliases must be initialized at their declaration site (`MH0125`).
+  - Taking the address of an expression `&expr` invokes the `AddressOf` operator on the expression's underlying type.
+  - The bottom type `Never` is unconditionally assignable to any target type without requiring an assignment operator implementation.
+- **Operator Overload Resolution & Receiver Mutability**:
+  - Binary and unary operators resolve strictly to explicit interface implementations on the operand types (e.g. `<Int32 as Addition>::Add`). Emits `MH2001` or `MH2002` if missing.
+  - Unary and member operator dispatch enforces receiver mutability: methods declaring `mut &this` or `this mut*` require a mutable operand/receiver (`ReferenceSemanticType.IsMutable`, `PointerSemanticType.IsMutable`, or `AliasSemanticType.IsMutable`).
+  - `Deref<&T>` and `Arrow<&T>` provide safe immutable dereferencing; `MutDeref<mut &T>` and `MutArrow<mut &T>` provide mutable dereferencing yielding assignable L-values.
 - **Two-Phase Object Allocation & Construction**:
   - Placement allocation (`put<arena> Type(...)`) resolves the `Put` operator.
   - Heap allocation (`new<allocator> Type(...)`) resolves the `New` operator.
-  - Target constructor resolution matches `.ctor` or `Construct` methods on the type.
+  - Target constructor resolution matches `Construct` method on the type implementing the `Constructor` operator interface.
 - **Callable Operator (`Callable`)**:
   - Non-function instances can be invoked if the type implements `Callable<TReturn, ...>`, reporting `MH0611` if not callable.
 - **Strict Exact Branch Matching (`MH2011`)**:

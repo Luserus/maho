@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -17,25 +18,25 @@ internal sealed class ResolutionContext
     public DiscoveredIntrinsics DiscoveredIntrinsics { get; }
     public DiscoveredOperators DiscoveredOperators { get; }
 
-    public List<AttributeSymbol> AttributeSymbols { get; }
-    public List<NestedAttributeSymbol> NestedAttributeSymbols { get; }
-    public List<TypeSymbol> TypeSymbols { get; }
-    public List<NestedTypeSymbol> NestedTypeSymbols { get; }
-    public List<FunctionSymbol> FunctionSymbols { get; }
-    public List<MethodSymbol> MethodSymbols { get; }
-    public List<GlobalVariableSymbol> GlobalVariableSymbols { get; }
-    public List<FieldSymbol> FieldSymbols { get; }
-    public List<ParameterSymbol> ParameterSymbols { get; }
+    public List<AttributeSymbol> AttributeSymbols { get; } = [];
+    public List<NestedAttributeSymbol> NestedAttributeSymbols { get; } = [];
+    public List<TypeSymbol> TypeSymbols { get; } = [];
+    public List<NestedTypeSymbol> NestedTypeSymbols { get; } = [];
+    public List<FunctionSymbol> FunctionSymbols { get; } = [];
+    public List<MethodSymbol> MethodSymbols { get; } = [];
+    public List<GlobalVariableSymbol> GlobalVariableSymbols { get; } = [];
+    public List<FieldSymbol> FieldSymbols { get; } = [];
+    public List<ParameterSymbol> ParameterSymbols { get; } = [];
     public IEnumerable<LocalVariableSymbol> LocalVariableSymbols =>
         FunctionSymbols.SelectMany(f => f.LocalVariables).Concat(MethodSymbols.SelectMany(m => m.LocalVariables));
-    public List<PropertySymbol> PropertySymbols { get; }
-    public List<GenericParameterSymbol> GenericParameterSymbols { get; }
-    public List<LabelSymbol> LabelSymbols { get; }
-    public List<AliasSymbol> AliasSymbols { get; }
-    public List<MacroSymbol> MacroSymbols { get; }
-    public List<EnumVariantSymbol> EnumVariantSymbols { get; }
+    public List<PropertySymbol> PropertySymbols { get; } = [];
+    public List<GenericParameterSymbol> GenericParameterSymbols { get; } = [];
+    public List<LabelSymbol> LabelSymbols { get; } = [];
+    public List<AliasSymbol> AliasSymbols { get; } = [];
+    public List<MacroSymbol> MacroSymbols { get; } = [];
+    public List<EnumVariantSymbol> EnumVariantSymbols { get; } = [];
 
-    public SymbolStore SinkSymbols { get; } = SymbolStore.CreateEmpty();
+    public SymbolSink SinkSymbols { get; } = new();
     private readonly List<LocalVariableSymbol> sinkLocalVariables = [];
     public IReadOnlyList<LocalVariableSymbol> SinkLocalVariables => sinkLocalVariables;
     public IEnumerable<LocalVariableSymbol> SinkLocalVariableSymbols =>
@@ -46,14 +47,97 @@ internal sealed class ResolutionContext
     private int sinkID = -1;
     private int enumVariantID;
 
+    /// <summary>
+    /// Gets or sets the file path of the syntax tree currently being processed by the resolver.
+    /// </summary>
+    public string? CurrentTreeFilePath { get; set; }
+    private readonly Dictionary<string, List<SymbolHandle>> treeSymbols = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<SymbolHandle, string> symbolTree = [];
+
+    /// <summary>
+    /// Records a declared symbol handle against its declaring source file path for incremental invalidation.
+    /// </summary>
+    /// <param name="filePath">The declaring source file path.</param>
+    /// <param name="handle">The resolved symbol handle.</param>
+    public void TrackTreeSymbol(string filePath, SymbolHandle handle)
+    {
+        if (!treeSymbols.TryGetValue(filePath, out var list))
+        {
+            list = [];
+            treeSymbols[filePath] = list;
+        }
+        list.Add(handle);
+        symbolTree[handle] = filePath;
+    }
+
+    /// <summary>
+    /// Retrieves the source file path where a symbol handle was declared.
+    /// </summary>
+    /// <param name="handle">The symbol handle.</param>
+    /// <returns>The declaring file path, or <see langword="null"/> if not tracked.</returns>
+    public string? GetSymbolTreeFilePath(SymbolHandle handle) =>
+        symbolTree.TryGetValue(handle, out var path) ? path : (GetSymbol(handle) is { } s ? GetSymbolSourceFilePath(s) : null);
+
+    /// <summary>
+    /// Retrieves all symbol handles declared within a specific source file path.
+    /// </summary>
+    /// <param name="filePath">The source file path.</param>
+    /// <returns>A read-only list of declared symbol handles.</returns>
+    public IReadOnlyList<SymbolHandle> GetTreeSymbols(string filePath) =>
+        treeSymbols.TryGetValue(filePath, out var list) ? list : Array.Empty<SymbolHandle>();
+
+    /// <summary>
+    /// Clears and unregisters all symbols declared within the specified source file from their containing namespaces and symbol tables.
+    /// </summary>
+    /// <param name="filePath">The source file path whose symbols should be cleared.</param>
+    public void ClearTreeSymbols(string filePath)
+    {
+        if (treeSymbols.TryGetValue(filePath, out var handles))
+        {
+            foreach (var h in handles)
+            {
+                symbolTree.Remove(h);
+                var sym = GetSymbol(h);
+                var ns = sym switch
+                {
+                    TypeSymbol t => t.ContainingNamespace,
+                    FunctionSymbol f => f.ContainingNamespace,
+                    GlobalVariableSymbol g => g.ContainingNamespace,
+                    AttributeSymbol a => a.ContainingNamespace,
+                    AliasSymbol al => al.ContainingNamespace,
+                    _ => null
+                };
+                if (ns != null && sym != null)
+                {
+                    ns.Symbols.Remove(sym);
+                }
+            }
+            treeSymbols.Remove(filePath);
+        }
+    }
+
     public List<Scope> Scopes { get; }
     public Scope GlobalScope => Scopes[0];
     private Dictionary<SyntaxNode, Scope> SyntaxScopes { get; } = [];
     private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
     private readonly Dictionary<Expression, TypeRef> expressionTypes = [];
     private readonly Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> controlFlowGraphs = [];
+    private readonly Dictionary<string, Dictionary<SyntaxNode, SymbolHandle>> treeNodeSymbols = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<Expression, TypeRef>> treeExpressionTypes = new(StringComparer.OrdinalIgnoreCase);
 
-    public void SetExpressionType(Expression expr, TypeRef type) => expressionTypes[expr] = type;
+    public void SetExpressionType(Expression expr, TypeRef type)
+    {
+        expressionTypes[expr] = type;
+        if (CurrentTreeFilePath != null)
+        {
+            if (!treeExpressionTypes.TryGetValue(CurrentTreeFilePath, out var dict))
+            {
+                dict = [];
+                treeExpressionTypes[CurrentTreeFilePath] = dict;
+            }
+            dict[expr] = type;
+        }
+    }
 
     public TypeRef? GetExpressionType(Expression expr) =>
         expressionTypes.TryGetValue(expr, out var type) ? type : null;
@@ -91,9 +175,6 @@ internal sealed class ResolutionContext
     /// <summary> Other projects or modules referenced by this compilation unit. </summary>
     public IReadOnlyList<ResolutionContext> ReferencedProjects { get; }
 
-    /// <summary> Symbol stores imported from external projects or prior compilation phases. </summary>
-    public IReadOnlyList<SymbolStore> ImportedProjectSymbols { get; }
-
     /// <summary> Compilation options governing recursion limits and diagnostics. </summary>
     public CompilationOptions Options { get; }
 
@@ -114,46 +195,47 @@ internal sealed class ResolutionContext
 
     public ResolutionContext(
         IReadOnlyList<SyntaxTree> syntaxTrees,
-        ResolvedTree resolvedTree,
-        NamespaceTrieNode globalNamespace,
-        SymbolStore symbols,
-        List<Scope> scopes,
+        ResolvedTree? resolvedTree = null,
+        NamespaceTrieNode? globalNamespace = null,
+        List<Scope>? scopes = null,
         IReadOnlyList<ResolutionContext>? referencedProjects = null,
-        IReadOnlyList<SymbolStore>? importedSymbols = null,
         DiagnosticsManager? diagnostics = null,
         CompilationOptions? options = null,
         DiscoveredIntrinsics? discoveredIntrinsics = null,
-        DiscoveredOperators? discoveredOperators = null)
+        DiscoveredOperators? discoveredOperators = null,
+        ResolutionContext? baseContext = null)
     {
         SyntaxTrees = syntaxTrees;
-        ResolvedTree = resolvedTree;
-        Diagnostics = diagnostics ?? new DiagnosticsManager();
-        Options = options ?? new CompilationOptions();
-        DiscoveredIntrinsics = discoveredIntrinsics ?? new DiscoveredIntrinsics();
-        DiscoveredOperators = discoveredOperators ?? new DiscoveredOperators();
+        ResolvedTree = resolvedTree ?? baseContext?.ResolvedTree ?? new ResolvedTree();
+        Diagnostics = diagnostics ?? baseContext?.Diagnostics ?? new DiagnosticsManager();
+        Options = options ?? baseContext?.Options ?? new CompilationOptions();
+        DiscoveredIntrinsics = discoveredIntrinsics ?? baseContext?.DiscoveredIntrinsics.Clone() ?? new DiscoveredIntrinsics();
+        DiscoveredOperators = discoveredOperators ?? baseContext?.DiscoveredOperators.Clone() ?? new DiscoveredOperators();
 
-        GlobalNamespace = globalNamespace;
-        Scopes = scopes;
-        GlobalScope.GlobalNamespace = globalNamespace;
+        GlobalNamespace = globalNamespace ?? baseContext?.GlobalNamespace ?? new NamespaceTrieNode();
+        Scopes = scopes ?? baseContext?.Scopes ?? [new Scope(null)];
+        GlobalScope.GlobalNamespace = GlobalNamespace;
 
-        AttributeSymbols = symbols.AttributeSymbols;
-        NestedAttributeSymbols = symbols.NestedAttributeSymbols;
-        TypeSymbols = symbols.TypeSymbols;
-        NestedTypeSymbols = symbols.NestedTypeSymbols;
-        FunctionSymbols = symbols.FunctionSymbols;
-        MethodSymbols = symbols.MethodSymbols;
-        GlobalVariableSymbols = symbols.GlobalVariableSymbols;
-        FieldSymbols = symbols.FieldSymbols;
-        ParameterSymbols = symbols.ParameterSymbols;
-        PropertySymbols = symbols.PropertySymbols;
-        GenericParameterSymbols = symbols.GenericParameterSymbols;
-        LabelSymbols = symbols.LabelSymbols;
-        AliasSymbols = symbols.AliasSymbols;
-        MacroSymbols = symbols.MacroSymbols;
-        EnumVariantSymbols = symbols.EnumVariantSymbols;
+        if (baseContext != null)
+        {
+            AttributeSymbols.AddRange(baseContext.AttributeSymbols);
+            NestedAttributeSymbols.AddRange(baseContext.NestedAttributeSymbols);
+            TypeSymbols.AddRange(baseContext.TypeSymbols);
+            NestedTypeSymbols.AddRange(baseContext.NestedTypeSymbols);
+            FunctionSymbols.AddRange(baseContext.FunctionSymbols);
+            MethodSymbols.AddRange(baseContext.MethodSymbols);
+            GlobalVariableSymbols.AddRange(baseContext.GlobalVariableSymbols);
+            FieldSymbols.AddRange(baseContext.FieldSymbols);
+            ParameterSymbols.AddRange(baseContext.ParameterSymbols);
+            PropertySymbols.AddRange(baseContext.PropertySymbols);
+            GenericParameterSymbols.AddRange(baseContext.GenericParameterSymbols);
+            LabelSymbols.AddRange(baseContext.LabelSymbols);
+            AliasSymbols.AddRange(baseContext.AliasSymbols);
+            MacroSymbols.AddRange(baseContext.MacroSymbols);
+            EnumVariantSymbols.AddRange(baseContext.EnumVariantSymbols);
+        }
 
-        ReferencedProjects = referencedProjects ?? [];
-        ImportedProjectSymbols = importedSymbols ?? [];
+        ReferencedProjects = referencedProjects ?? baseContext?.ReferencedProjects ?? [];
 
         attributeID = AttributeSymbols.Count;
         nestedAttributeID = NestedAttributeSymbols.Count;
@@ -171,7 +253,20 @@ internal sealed class ResolutionContext
         macroID = MacroSymbols.Count;
         enumVariantID = EnumVariantSymbols.Count;
 
-        if (ReferencedProjects.Count > 0 || ImportedProjectSymbols.Count > 0)
+        ResolvedTree.OnReferenceAdded = (syntax, symbol) =>
+        {
+            if (CurrentTreeFilePath != null)
+            {
+                if (!treeNodeSymbols.TryGetValue(CurrentTreeFilePath, out var dict))
+                {
+                    dict = [];
+                    treeNodeSymbols[CurrentTreeFilePath] = dict;
+                }
+                dict[syntax] = symbol;
+            }
+        };
+
+        if (ReferencedProjects.Count > 0)
             InitializeProjectReferences();
     }
 
@@ -184,43 +279,6 @@ internal sealed class ResolutionContext
             if (!GlobalScope.ImportedScopes.Contains(project.GlobalScope))
                 GlobalScope.ImportedScopes.Add(project.GlobalScope);
         }
-
-        if (ImportedProjectSymbols.Count > 0)
-        {
-            foreach (var store in ImportedProjectSymbols)
-            {
-                var importedScope = CreateScopeFromSymbolStore(store);
-
-                if (!GlobalScope.ImportedScopes.Contains(importedScope))
-                    GlobalScope.ImportedScopes.Add(importedScope);
-            }
-        }
-    }
-
-    private void CreateScopeFromSymbolStoreAndRegister(SymbolStore store, Scope scope)
-    {
-        foreach (var type in store.TypeSymbols)
-            Register(scope, type, type.ContainingNamespace);
-
-        foreach (var function in store.FunctionSymbols)
-            Register(scope, function, function.ContainingNamespace);
-
-        foreach (var global in store.GlobalVariableSymbols)
-            Register(scope, global, global.ContainingNamespace);
-
-        foreach (var attribute in store.AttributeSymbols)
-            Register(scope, attribute, attribute.ContainingNamespace);
-
-        foreach (var alias in store.AliasSymbols)
-            Register(scope, alias, alias.ContainingNamespace);
-    }
-
-    private Scope CreateScopeFromSymbolStore(SymbolStore store)
-    {
-        var scope = new Scope(null);
-        CreateScopeFromSymbolStoreAndRegister(store, scope);
-
-        return scope;
     }
 
     private static void MergeNamespaceTrie(NamespaceTrieNode target, NamespaceTrieNode source)
@@ -538,11 +596,11 @@ internal sealed class ResolutionContext
         }
     }
 
-    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, bool hasBacking, MemberPropertyDeclaration? syntax)
+    public PropertySymbol CreatePropertySymbol(Scope enclosingScope, SymbolPart name, SymbolHandle? parent, bool hasBacking, MemberPropertyDeclaration? syntax)
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : propertyID++;
-        var symbol = new PropertySymbol(id, enclosingScope, name, hasBacking, syntax);
+        var symbol = new PropertySymbol(id, enclosingScope, name, parent, hasBacking, syntax);
 
         if (isSink)
         {
@@ -708,6 +766,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is MethodSymbol method)
             return method;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetMethodSymbol(handle) is { } refMethod)
+                return refMethod;
+        }
+
         return null;
     }
 
@@ -720,6 +784,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is TypeSymbol t)
             return t;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetTypeSymbol(handle) is { } refType)
+                return refType;
+        }
+
         return null;
     }
 
@@ -731,6 +801,12 @@ internal sealed class ResolutionContext
             return NestedTypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedTypeSymbol t)
             return t;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetNestedTypeSymbol(handle) is { } refType)
+                return refType;
+        }
 
         return null;
     }
@@ -804,6 +880,12 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FieldSymbol f)
             return f;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetFieldSymbol(handle) is { } refField)
+                return refField;
+        }
+
         return null;
     }
 
@@ -815,6 +897,12 @@ internal sealed class ResolutionContext
             return PropertySymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is PropertySymbol p)
             return p;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetPropertySymbol(handle) is { } refProp)
+                return refProp;
+        }
 
         return null;
     }
@@ -828,27 +916,47 @@ internal sealed class ResolutionContext
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is EnumVariantSymbol v)
             return v;
 
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetEnumVariantSymbol(handle) is { } refEnum)
+                return refEnum;
+        }
+
         return null;
     }
 
-    public Symbol? GetSymbol(SymbolHandle handle) => handle.Kind switch
+    public Symbol? GetSymbol(SymbolHandle handle)
     {
-        SymbolKind.Type => GetTypeSymbol(handle),
-        SymbolKind.NestedType => GetNestedTypeSymbol(handle),
-        SymbolKind.Function => GetFunctionSymbol(handle),
-        SymbolKind.Method => GetMethodSymbol(handle),
-        SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
-        SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
-        SymbolKind.Field => GetFieldSymbol(handle),
-        SymbolKind.Property => GetPropertySymbol(handle),
-        SymbolKind.Alias => GetAliasSymbol(handle),
-        SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
-        SymbolKind.Parameter => GetParameterSymbol(handle),
-        SymbolKind.Attribute => GetAttributeSymbol(handle),
-        SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
-        SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
-        _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
-    };
+        var sym = handle.Kind switch
+        {
+            SymbolKind.Type => GetTypeSymbol(handle),
+            SymbolKind.NestedType => GetNestedTypeSymbol(handle),
+            SymbolKind.Function => GetFunctionSymbol(handle),
+            SymbolKind.Method => GetMethodSymbol(handle),
+            SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
+            SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
+            SymbolKind.Field => GetFieldSymbol(handle),
+            SymbolKind.Property => GetPropertySymbol(handle),
+            SymbolKind.Alias => GetAliasSymbol(handle),
+            SymbolKind.GenericParameter => GetGenericParameterSymbol(handle),
+            SymbolKind.Parameter => GetParameterSymbol(handle),
+            SymbolKind.Attribute => GetAttributeSymbol(handle),
+            SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
+            SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
+            _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
+        };
+
+        if (sym is not null)
+            return sym;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.GetSymbol(handle) is { } refSym)
+                return refSym;
+        }
+
+        return null;
+    }
 
     public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
 
@@ -866,6 +974,12 @@ internal sealed class ResolutionContext
     {
         if (typeRef.Kind == TypeRefKind.Untagged && typeRef.SpecialType is UntaggedSemanticType untagged)
             return GetType(untagged.InnerType);
+
+        if (typeRef.Kind == TypeRefKind.Function)
+            return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) ? fnH : null;
+
+        if (typeRef.Kind == TypeRefKind.Delegate)
+            return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) ? delH : null;
 
         if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
             return null;
@@ -925,12 +1039,34 @@ internal sealed class ResolutionContext
         return current;
     }
 
+    /// <summary>
+    /// Unwraps any aliases transitively, returning the underlying symbol handle.
+    /// </summary>
+    public SymbolHandle UnwrapAlias(SymbolHandle handle)
+    {
+        var visited = new HashSet<SymbolHandle>();
+        var curr = handle;
+        while (curr.Kind == SymbolKind.Alias && visited.Add(curr))
+        {
+            var alias = GetAliasSymbol(curr);
+            if (alias is null || !alias.Target.IsResolved || alias.Target.Handle is not { } targetH)
+                break;
+            curr = targetH;
+        }
+        return curr;
+    }
+
     private void Register(Scope scope, Symbol symbol, NamespaceTrieNode? containingNamespace = null)
     {
         if (symbol.Name.Text == "_")
             return;
 
-        scope.Symbols[GetHandle(symbol)] = symbol;
+        var handle = GetHandle(symbol);
+        string? treePath = CurrentTreeFilePath ?? GetSymbolSourceFilePath(symbol);
+        if (treePath != null)
+            TrackTreeSymbol(treePath, handle);
+
+        scope.Symbols[handle] = symbol;
 
         if (containingNamespace != null && containingNamespace != GlobalNamespace)
         {
@@ -949,6 +1085,82 @@ internal sealed class ResolutionContext
             symbols ??= [];
             symbols.Add(symbol);
         }
+    }
+
+    private static string? GetSymbolSourceFilePath(Symbol symbol) => symbol switch
+    {
+        TypeSymbol t => t.Syntax?.GetSource()?.FilePath,
+        NestedTypeSymbol nt => nt.Syntax?.GetSource()?.FilePath,
+        FunctionSymbol f => f.Syntax?.GetSource()?.FilePath,
+        MethodSymbol m => m.Syntax?.GetSource()?.FilePath,
+        GlobalVariableSymbol g => g.Syntax?.GetSource()?.FilePath,
+        FieldSymbol fld => fld.Syntax?.GetSource()?.FilePath,
+        ParameterSymbol p => p.Syntax?.GetSource()?.FilePath,
+        PropertySymbol prop => prop.Syntax?.GetSource()?.FilePath,
+        AliasSymbol a => a.Syntax?.GetSource()?.FilePath,
+        _ => null
+    };
+
+    /// <summary>
+    /// Extracts AST-to-symbol, expression-to-type, and CFG bindings belonging to a specific syntax tree from the global resolution context.
+    /// </summary>
+    /// <param name="tree">The syntax tree whose local bindings should be extracted.</param>
+    /// <returns>A tuple containing node symbols, expression types, and control flow graphs for the syntax tree.</returns>
+    public (Dictionary<SyntaxNode, SymbolHandle> NodeSymbols,
+            Dictionary<Expression, TypeRef> ExpressionTypes,
+            Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs) ExtractTreeBindings(SyntaxTree tree)
+    {
+        var nodeSymbols = treeNodeSymbols.TryGetValue(tree.FilePath, out var nodes)
+            ? new Dictionary<SyntaxNode, SymbolHandle>(nodes)
+            : [];
+        var exprTypes = treeExpressionTypes.TryGetValue(tree.FilePath, out var exprs)
+            ? new Dictionary<Expression, TypeRef>(exprs)
+            : [];
+        var cfgs = new Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph>();
+
+        var treeHandles = new HashSet<SymbolHandle>(GetTreeSymbols(tree.FilePath));
+        foreach (var (handle, cfg) in controlFlowGraphs)
+        {
+            if (treeHandles.Contains(handle))
+            {
+                cfgs[handle] = cfg;
+            }
+        }
+
+        return (nodeSymbols, exprTypes, cfgs);
+    }
+
+    /// <summary>
+    /// Merges cached semantic bindings from a reused <see cref="SemanticModel"/> back into the active resolution context.
+    /// </summary>
+    /// <param name="model">The cached semantic model whose bindings are to be incorporated.</param>
+    public void MergeTreeBindings(SemanticModel model)
+    {
+        string path = model.SyntaxTree.FilePath;
+        if (!treeNodeSymbols.TryGetValue(path, out var nodes))
+        {
+            nodes = [];
+            treeNodeSymbols[path] = nodes;
+        }
+        foreach (var (node, handle) in model.NodeSymbols)
+        {
+            ResolvedTree.AddReference(node, handle);
+            nodes[node] = handle;
+        }
+
+        if (!treeExpressionTypes.TryGetValue(path, out var exprs))
+        {
+            exprs = [];
+            treeExpressionTypes[path] = exprs;
+        }
+        foreach (var (expr, type) in model.ExpressionTypes)
+        {
+            expressionTypes[expr] = type;
+            exprs[expr] = type;
+        }
+
+        foreach (var (handle, cfg) in model.ControlFlowGraphs)
+            controlFlowGraphs[handle] = cfg;
     }
 
     public static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode trieNode, SymbolPart ns)
@@ -977,6 +1189,168 @@ internal sealed class ResolutionContext
         return new SymbolName(parts);
     }
 
+    public static string GetQualifiedSymbolName(SymbolHandle handle, ResolutionContext? context)
+    {
+        if (context is null)
+            return handle.ToString() ?? string.Empty;
+
+        var sym = (Symbol?)context.GetTypeSymbol(handle) ??
+                  (Symbol?)context.GetNestedTypeSymbol(handle) ??
+                  (Symbol?)context.GetAliasSymbol(handle) ??
+                  (Symbol?)context.GetGenericParameterSymbol(handle) ??
+                  context.GetSymbol(handle);
+
+        if (sym is null)
+            return handle.ToString() ?? string.Empty;
+
+        return GetQualifiedSymbolName(sym, context);
+    }
+
+    public static string GetQualifiedSymbolName(Symbol sym, ResolutionContext? context)
+    {
+        if (sym is AliasSymbol alias)
+        {
+            if (alias.Target.IsResolved && alias.Target.Handle is { } targetH && context is not null)
+                return GetQualifiedSymbolName(targetH, context);
+            return alias.Name.Text;
+        }
+
+        if (sym is GenericParameterSymbol gp)
+            return gp.Name.Text;
+
+        if (sym is NestedTypeSymbol nested)
+        {
+            if (nested.Parent is { } parentH && context is not null)
+                return $"{GetQualifiedSymbolName(parentH, context)}.{nested.Name.Text}";
+            return nested.Name.Text;
+        }
+
+        if (sym is TypeSymbol typeSym)
+        {
+            if (typeSym.ContainingNamespace != null && typeSym.ContainingNamespace != context?.GlobalNamespace)
+            {
+                var ns = GetNamespacePath(typeSym.ContainingNamespace, context?.GlobalNamespace);
+                if (!string.IsNullOrEmpty(ns))
+                    return $"{ns}.{typeSym.Name.Text}";
+            }
+
+            return typeSym.Name.Text;
+        }
+
+        if (sym is FunctionSymbol fn)
+        {
+            if (fn.ContainingNamespace != null && fn.ContainingNamespace != context?.GlobalNamespace)
+            {
+                var ns = GetNamespacePath(fn.ContainingNamespace, context?.GlobalNamespace);
+                if (!string.IsNullOrEmpty(ns))
+                    return $"{ns}.{fn.Name.Text}";
+            }
+            return fn.Name.Text;
+        }
+
+        return sym.Name.Text;
+    }
+
+    public static string GetLabelSymbolName(SymbolHandle handle, ResolutionContext? context, Scope? scope)
+    {
+        if (context is null)
+            return handle.ToString() ?? string.Empty;
+
+        var sym = (Symbol?)context.GetTypeSymbol(handle) ??
+                  (Symbol?)context.GetNestedTypeSymbol(handle) ??
+                  (Symbol?)context.GetAliasSymbol(handle) ??
+                  (Symbol?)context.GetGenericParameterSymbol(handle) ??
+                  context.GetSymbol(handle);
+
+        if (sym is null)
+            return handle.ToString() ?? string.Empty;
+
+        return GetLabelSymbolName(sym, context, scope);
+    }
+
+    public static string GetLabelSymbolName(Symbol sym, ResolutionContext? context, Scope? scope)
+    {
+        if (sym is AliasSymbol alias)
+            return alias.Name.Text;
+
+        if (sym is GenericParameterSymbol gp)
+            return gp.Name.Text;
+
+        if (sym is NestedTypeSymbol nested)
+        {
+            if (nested.Parent is { } parentH && context is not null)
+                return $"{GetLabelSymbolName(parentH, context, scope)}.{nested.Name.Text}";
+            return nested.Name.Text;
+        }
+
+        if (sym is TypeSymbol typeSym)
+        {
+            if (typeSym.ContainingNamespace == null || typeSym.ContainingNamespace == context?.GlobalNamespace)
+                return typeSym.Name.Text;
+
+            if (scope != null && IsNamespaceImported(scope, typeSym.ContainingNamespace))
+                return typeSym.Name.Text;
+
+            var ns = GetNamespacePath(typeSym.ContainingNamespace, context?.GlobalNamespace);
+            return !string.IsNullOrEmpty(ns) ? $"{ns}.{typeSym.Name.Text}" : typeSym.Name.Text;
+        }
+
+        if (sym is FunctionSymbol fn)
+        {
+            if (fn.ContainingNamespace == null || fn.ContainingNamespace == context?.GlobalNamespace)
+                return fn.Name.Text;
+
+            if (scope != null && IsNamespaceImported(scope, fn.ContainingNamespace))
+                return fn.Name.Text;
+
+            var ns = GetNamespacePath(fn.ContainingNamespace, context?.GlobalNamespace);
+            return !string.IsNullOrEmpty(ns) ? $"{ns}.{fn.Name.Text}" : fn.Name.Text;
+        }
+
+        return sym.Name.Text;
+    }
+
+    public static bool IsNamespaceImported(Scope scope, NamespaceTrieNode targetNs)
+    {
+        for (var current = scope; current != null; current = current.Parent)
+        {
+            foreach (var usingNs in current.UsingNamespaces)
+            {
+                if (usingNs == targetNs || usingNs.Name.Text == targetNs.Name.Text)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsNamespaceImported(Scope scope, string nsName)
+    {
+        for (var current = scope; current != null; current = current.Parent)
+        {
+            foreach (var usingNs in current.UsingNamespaces)
+            {
+                if (usingNs.Name.Text == nsName)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public static string GetNamespacePath(NamespaceTrieNode node, NamespaceTrieNode? globalNs)
+    {
+        var parts = new List<string>();
+        var curr = node;
+        while (curr != null && curr != globalNs && !string.IsNullOrEmpty(curr.Name.Text))
+        {
+            parts.Add(curr.Name.Text);
+            curr = curr.Parent;
+        }
+        parts.Reverse();
+        return string.Join(".", parts);
+    }
+
+
+
     public SymbolName GetScopedSymbolName(NamedSyntax name) =>
         GetSymbolName(name, GetHygiene(name));
 
@@ -986,7 +1360,7 @@ internal sealed class ResolutionContext
         GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene)),
         QualifiedName qualifiedName => GetQualifiedName(qualifiedName, hygiene),
         TupleName => new SymbolName(new SymbolPart(string.Empty, 0, hygiene)),
-        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+        _ => throw new ArgumentOutOfRangeException(nameof(name))
     };
 
     private static SymbolPart GetSymbolPart(NamedSyntax name, HygieneId hygiene = default) => name switch
@@ -994,7 +1368,7 @@ internal sealed class ResolutionContext
         SimpleName simpleName => new SymbolPart(simpleName.Name, 0, hygiene),
         GenericName genericName => new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene),
         TupleName => new SymbolPart(string.Empty, 0, hygiene),
-        _ => throw new System.ArgumentOutOfRangeException(nameof(name))
+        _ => throw new ArgumentOutOfRangeException(nameof(name))
     };
 
     private static SymbolName GetQualifiedName(QualifiedName qualifiedName, HygieneId hygiene = default)
@@ -1034,11 +1408,19 @@ internal sealed class ResolutionContext
 
             case TupleType:
             case UniformTupleType:
+            case FunctionTypeSyntax:
+            case DelegateTypeSyntax:
+            case UnionType:
+            case LiteralGenericArgument:
                 parts.Add(new SymbolPart(string.Empty));
                 break;
 
+            case NamedExpressionGenericArgument named:
+                parts.Add(new SymbolPart(named.Expression.Identifier));
+                break;
+
             default:
-                throw new System.ArgumentOutOfRangeException(nameof(type));
+                throw new ArgumentOutOfRangeException(nameof(type), $"Unhandled type syntax: {type.GetType().FullName}");
         }
     }
 }

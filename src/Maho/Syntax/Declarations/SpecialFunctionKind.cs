@@ -5,8 +5,6 @@ public enum SpecialFunctionKind : byte
 {
     /// <summary>Ordinary named function or method.</summary>
     None,
-    /// <summary>Constructor: TypeName(...) { ... }</summary>
-    Constructor,
     /// <summary>Literal function: literal suffix(kind param) ...</summary>
     Literal
 }

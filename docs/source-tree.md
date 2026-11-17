@@ -4,7 +4,7 @@ The repository is organized into focused projects:
 
 ## Core Projects (`src/`)
 
-- [`compiler-library.md`](compiler-library.md) (`src/Maho`): the reusable compiler library containing source text modeling, lexer, parser, AST, diagnostics engine, phase timers, macro expansion, and multi-pass semantic resolver (`SymbolDiscoveryPass` and `DeclarationResolutionPass`).
+- [`compiler-library.md`](compiler-library.md) (`src/Maho`): the reusable compiler library containing source text modeling, lexer, parser, AST, diagnostics engine, phase timers, macro expansion, and multi-pass semantic resolver (6 orchestrated passes: `MacroExpansionPass`, `SymbolDiscoveryPass`, `IntrinsicDiscoveryPass`, `DeclarationResolutionPass`, `ExpressionResolutionPass`, `ControlFlowAndReturnInferencePass`).
 - `src/MahoServer`: shared compiler-server protocol, package discovery, client transport, and session management.
 - `src/MahoServerHost`: generic background compiler daemon (`mahoc-server`) communicating over named pipes / domain sockets for sub-millisecond compilation caching.
 - `src/MahoCompilerHost`: package-local launcher (`maho-comp-host`) dynamically executing compiler assemblies for versioned packages.
@@ -13,7 +13,7 @@ The repository is organized into focused projects:
 
 ## Tests (`tests/`)
 
-- `tests/Maho.Tests`: complete xUnit test suite (450 automated tests) covering lexer, parser, diagnostics engine, resolution passes, macro expansion, CLI argument parsing, Miryo project loading, and terminal rendering.
+- `tests/Maho.Tests`: complete xUnit test suite (787 automated tests) organized into topical folders (`Syntax/`, `Semantics/`, `Types/`, `Intrinsics/`, `Macros/`, `Diagnostics/`, `Tooling/`).
 
 ## Distribution & Build (`bin/` & Root Scripts)
 

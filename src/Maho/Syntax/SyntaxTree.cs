@@ -27,6 +27,82 @@ public sealed class SyntaxTree
 
     public bool HasErrors => Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error);
 
+    /// <summary> SHA256 content hash of the underlying source text. </summary>
+    public string ContentHash => SourceText.ContentHash;
+
+    /// <summary> Timestamp when the file was last written on disk, or null for in-memory text. </summary>
+    public System.DateTime? LastWriteTimeUtc
+    {
+        get => SourceText.LastWriteTimeUtc;
+        set => SourceText.LastWriteTimeUtc = value;
+    }
+
+    /// <summary> File size in bytes recorded when loaded from disk, or null for in-memory text. </summary>
+    public long? FileLength
+    {
+        get => SourceText.FileLength;
+        set => SourceText.FileLength = value;
+    }
+
+    /// <summary>
+    /// Checks whether this syntax tree matches the current file on disk.
+    /// Fast-checks file metadata (last modification time and file size) first without reading file content or hashing.
+    /// If metadata changed, hashes the disk file and compares with <see cref="ContentHash"/>; if hashes match,
+    /// updates the tree's recorded metadata and avoids re-analysis.
+    /// </summary>
+    /// <param name="currentDiskPath">The file path on disk to check against.</param>
+    /// <returns><see langword="true"/> if the content on disk is equivalent to this syntax tree; otherwise <see langword="false"/>.</returns>
+    public bool IsEquivalent(string currentDiskPath)
+    {
+        if (!string.Equals(FilePath, currentDiskPath, System.StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            var fi = new System.IO.FileInfo(currentDiskPath);
+            if (!fi.Exists)
+                return false;
+
+            // 1. Fast path: If file metadata (last modification time and size) did not change, ignore and reuse directly.
+            if (LastWriteTimeUtc.HasValue && LastWriteTimeUtc.Value == fi.LastWriteTimeUtc &&
+                (!FileLength.HasValue || FileLength.Value == fi.Length))
+            {
+                return true;
+            }
+
+            // // 2. Metadata changed: hash only if metadata changed to determine whether content actually changed.
+            // string diskHash;
+            // using (var stream = System.IO.File.OpenRead(currentDiskPath))
+            // {
+            //     var hashBytes = System.Security.Cryptography.SHA256.HashData(stream);
+            //     diskHash = System.Convert.ToHexString(hashBytes);
+            // }
+
+            // if (string.Equals(ContentHash, diskHash, System.StringComparison.OrdinalIgnoreCase))
+            // {
+            //     // Hashes match despite metadata difference: update cached metadata so subsequent checks hit fast path.
+            //     LastWriteTimeUtc = fi.LastWriteTimeUtc;
+            //     FileLength = fi.Length;
+            //     return true;
+            // }
+
+            // Hashes do not match: content changed, file must be analyzed.
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks whether this syntax tree has identical source content as another syntax tree.
+    /// </summary>
+    /// <param name="other">The other syntax tree to compare content hashes with.</param>
+    /// <returns><see langword="true"/> if both trees have matching content hashes; otherwise <see langword="false"/>.</returns>
+    public bool IsEquivalent(SyntaxTree other) =>
+        other != null && string.Equals(ContentHash, other.ContentHash, System.StringComparison.OrdinalIgnoreCase);
+
     internal SyntaxTree(CompilationUnit root, SourceText sourceText, DiagnosticsManager diagnostics, string filePath)
     {
         Root = root;

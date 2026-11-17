@@ -15,7 +15,7 @@ namespace Maho.Resolution;
 /// <item><description><see cref="IntrinsicDiscoveryPass"/>: Validates compiler intrinsic attributes, types, and operator interfaces.</description></item>
 /// <item><description><see cref="DeclarationResolutionPass"/>: Resolves member signatures, field/param types, and base types.</description></item>
 /// <item><description><see cref="ExpressionResolutionPass"/>: Performs expression typing, operator overload resolution, and eager retroactive literal collapsing.</description></item>
-/// <item><description><see cref="ControlFlowAndReturnInferencePass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and infers function return types.</description></item>
+/// <item><description><see cref="ControlFlowAnalysisPass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and collapses unconstrained scalar literals in globals/fields.</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -28,7 +28,7 @@ internal sealed class Resolver
         new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass(),
         new ExpressionResolutionPass(),
-        new ControlFlowAndReturnInferencePass()
+        new ControlFlowAnalysisPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();
@@ -49,54 +49,36 @@ internal sealed class Resolver
         DiagnosticsManager? diagnostics = null,
         CompilationOptions? options = null)
     {
-        var resolved = baseContext?.ResolvedTree ?? resolvedTree;
-        var globalNamespace = baseContext?.GlobalNamespace ?? new NamespaceTrieNode();
-        SymbolStore symbolStore;
-        List<Scope> scopes;
-
-        if (baseContext is not null)
-        {
-            symbolStore = new SymbolStore(
-                baseContext.AttributeSymbols,
-                baseContext.NestedAttributeSymbols,
-                baseContext.TypeSymbols,
-                baseContext.NestedTypeSymbols,
-                baseContext.FunctionSymbols,
-                baseContext.MethodSymbols,
-                baseContext.GlobalVariableSymbols,
-                baseContext.FieldSymbols,
-                baseContext.ParameterSymbols,
-                baseContext.PropertySymbols,
-                baseContext.GenericParameterSymbols,
-                baseContext.LabelSymbols,
-                baseContext.AliasSymbols,
-                baseContext.MacroSymbols
-            );
-            scopes = baseContext.Scopes;
-        }
-        else
-        {
-            symbolStore = SymbolStore.CreateEmpty();
-            scopes = [new Scope(null)];
-        }
-
         var context = new ResolutionContext(
             syntaxTrees,
-            resolved,
-            globalNamespace,
-            symbolStore,
-            scopes,
-            referencedProjects ?? baseContext?.ReferencedProjects,
-            baseContext?.ImportedProjectSymbols,
-            diagnostics ?? baseContext?.Diagnostics,
-            options ?? baseContext?.Options,
-            baseContext?.DiscoveredIntrinsics.Clone(),
-            baseContext?.DiscoveredOperators.Clone());
+            resolvedTree: baseContext?.ResolvedTree ?? resolvedTree,
+            globalNamespace: baseContext?.GlobalNamespace,
+            scopes: baseContext?.Scopes,
+            referencedProjects: referencedProjects ?? baseContext?.ReferencedProjects,
+            diagnostics: diagnostics ?? baseContext?.Diagnostics,
+            options: options ?? baseContext?.Options,
+            discoveredIntrinsics: baseContext?.DiscoveredIntrinsics,
+            discoveredOperators: baseContext?.DiscoveredOperators,
+            baseContext: baseContext);
 
         foreach (var pass in passes)
             pass.Resolve(context);
 
         return context;
+    }
+
+    /// <summary>
+    /// Executes incremental resolution reusing prior symbols and bindings when possible.
+    /// </summary>
+    public ResolutionContext ResolveIncremental(
+        IReadOnlyList<SyntaxTree> syntaxTrees,
+        HashSet<string> changedPaths,
+        IReadOnlyList<ResolutionContext>? referencedProjects = null,
+        Compilation? cachedCompilation = null,
+        DiagnosticsManager? diagnostics = null,
+        CompilationOptions? options = null)
+    {
+        return Resolve(syntaxTrees, referencedProjects, diagnostics: diagnostics, options: options);
     }
 
     public ResolutionContext Resolve(

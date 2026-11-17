@@ -11,15 +11,15 @@ internal sealed class VariableDeclaration : SyntaxNode
     public IReadOnlyList<Token> Modifiers { get; }
     /// <summary> The type of the variable. </summary>
     public TypeSyntax Type { get; }
-    /// <summary> Declared variable name. </summary>
-    public SeparatedSyntaxList<VariableDeclarator> Declarators { get; }
+    /// <summary> Declared variable declarator. </summary>
+    public VariableDeclarator Declarator { get; }
 
     /// <summary> Creates one variable declaration. </summary>
-    public VariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, SeparatedSyntaxList<VariableDeclarator> declarators)
+    public VariableDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers, TypeSyntax type, VariableDeclarator declarator)
     {
         Attributes = attributes;
         Modifiers = modifiers;
         Type = type;
-        Declarators = declarators;
+        Declarator = declarator;
     }
 }

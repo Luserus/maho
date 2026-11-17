@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -54,12 +55,18 @@ internal static class SyntaxSpan
         return null;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, PropertyInfo[]> CachedProperties = new();
+
     /// <summary> Reflects over public properties to discover syntax children in source/declaration order. </summary>
     internal static List<(string Name, SyntaxNode Node)> GetChildren(SyntaxNode node)
     {
         List<(string Name, SyntaxNode Node)> children = [];
+        var properties = CachedProperties.GetOrAdd(node.GetType(), static t =>
+            t.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+             .OrderBy(static property => property.MetadataToken)
+             .ToArray());
 
-        foreach (PropertyInfo property in node.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public).OrderBy(static property => property.MetadataToken))
+        foreach (PropertyInfo property in properties)
         {
             if (property.Name == nameof(SyntaxNode.ExpansionOrigin))
                 continue;

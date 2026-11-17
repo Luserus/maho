@@ -35,16 +35,29 @@ internal static class KnownIntrinsics
     public const string Bool = "Bool";
     public const string Char = "Char";
     public const string Str = "Str";
-    public const string Void = "Void";
+    public const string Unit = "Unit";
+    public const string Never = "Never";
+
+    // Value types and Callables
+    public const string ValueType = "ValueType";
+    public const string Struct = "Struct";
+    public const string Enum = "Enum";
+    public const string Function = "Function";
+    public const string Delegate = "Delegate";
+    public const string Tuple = "Tuple";
 
     // Pointer and Reference
     public const string Pointer = "Pointer";
+    public const string MutablePointer = "MutablePointer";
     public const string Reference = "Reference";
+    public const string MutableReference = "MutableReference";
+    public const string Metadata = "Metadata";
 
     // Arrays and Spans
     public const string FixedArray = "FixedArray";
     public const string Array = "Array";
     public const string Span = "Span";
+    public const string Optional = "Optional";
 
     // Operator Full Names
     public const string OpAddition = "Addition";
@@ -106,24 +119,71 @@ internal static class KnownIntrinsics
     public const string OpCopy = "Copy";
     public const string OpMove = "Move";
     public const string OpCallable = "Callable";
+    public const string OpUnwrap = "Unwrap";
+    public const string OpTry = "Try";
+
+    // Standard Intrinsic Function Contract Literals
+    public const string FnFunctionInvoke = "Function.Invoke(TParams...)";
+    public const string FnDelegateInvoke = "Delegate.Invoke(TParams...)";
+    public const string FnReferenceDeref = "Reference.Deref()";
+    public const string FnMutableReferenceDeref = "MutableReference.Deref()";
+    public const string FnPointerDeref = "Pointer.Deref()";
+    public const string FnMutablePointerDeref = "MutablePointer.Deref()";
+    public const string FnValueTypeAssign = "ValueType.Assign()";
+    public const string FnStructAssign = "Struct.Assign()";
+    public const string FnInt32Add = "Int32.Add(Int32, Int32)";
+    public const string FnInt32Sub = "Int32.Subtract(Int32, Int32)";
+    public const string FnInt32Mul = "Int32.Multiply(Int32, Int32)";
+    public const string FnInt32Div = "Int32.Divide(Int32, Int32)";
+    public const string FnInt32Rem = "Int32.Remainder(Int32, Int32)";
+    public const string FnInt32Equality = "Int32.Equality(Int32, Int32)";
+    public const string FnInt32Inequality = "Int32.Inequality(Int32, Int32)";
+    public const string FnInt32LessThan = "Int32.LessThan(Int32, Int32)";
+    public const string FnInt32LessThanOrEqual = "Int32.LessThanOrEqual(Int32, Int32)";
+    public const string FnInt32GreaterThan = "Int32.GreaterThan(Int32, Int32)";
+    public const string FnInt32GreaterThanOrEqual = "Int32.GreaterThanOrEqual(Int32, Int32)";
+    public const string FnInt32BitwiseAnd = "Int32.BitwiseAnd(Int32, Int32)";
+    public const string FnInt32BitwiseOr = "Int32.BitwiseOr(Int32, Int32)";
+    public const string FnInt32BitwiseXor = "Int32.BitwiseXor(Int32, Int32)";
+    public const string FnInt32LeftShift = "Int32.LeftShift(Int32, Int32)";
+    public const string FnInt32RightShift = "Int32.RightShift(Int32, Int32)";
+    public const string FnInt32UnaryNegation = "Int32.UnaryNegation(Int32)";
+    public const string FnInt32UnaryPositive = "Int32.UnaryPositive(Int32)";
+    public const string FnInt32BitwiseNot = "Int32.BitwiseNot(Int32)";
 
     public static readonly HashSet<string> AllKnownTypes =
     [
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Str, Void,
-        Pointer, Reference,
-        FixedArray, Array, Span
+        Bool, Char, Str, Unit, Never,
+        ValueType, Struct, Enum, Function, Delegate, Tuple,
+        Pointer, MutablePointer, Reference, MutableReference, Metadata,
+        FixedArray, Array, Span, Optional
     ];
+
+    public static readonly HashSet<string> IntegerTypes =
+    [
+        Int8, Int16, Int32, Int64, Int128, NInt,
+        UInt8, UInt16, UInt32, UInt64, UInt128, NUInt
+    ];
+
+    public static readonly HashSet<string> FloatTypes =
+    [
+        Float16, Float32, Float64, Float128
+    ];
+
+    public static bool IsIntegerType(string name) => IntegerTypes.Contains(name);
+    public static bool IsFloatType(string name) => FloatTypes.Contains(name);
 
     public static readonly HashSet<string> ZeroInstanceFieldPrimitives =
     [
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Void,
-        FixedArray
+        Bool, Char, Unit, Never,
+        ValueType, Struct, Enum, Tuple,
+        FixedArray, Metadata
     ];
 
     public static readonly HashSet<string> AllOperatorNames =
@@ -144,7 +204,8 @@ internal static class KnownIntrinsics
         OpLeftShiftAssignment, OpRightShiftAssignment,
         OpRotateLeftAssignment, OpRotateRightAssignment,
         OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast,
-        OpNew, OpPut, OpCopy, OpMove, OpCallable
+        OpNew, OpPut, OpCopy, OpMove, OpCallable,
+        OpUnwrap, OpTry
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -206,6 +267,8 @@ internal static class KnownIntrinsics
             case OpCopy: kind = OperatorKind.Copy; return true;
             case OpMove: kind = OperatorKind.Move; return true;
             case OpCallable: kind = OperatorKind.Callable; return true;
+            case OpUnwrap: kind = OperatorKind.Unwrap; return true;
+            case OpTry: kind = OperatorKind.Try; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -269,6 +332,8 @@ internal static class KnownIntrinsics
         OperatorKind.Copy => OpCopy,
         OperatorKind.Move => OpMove,
         OperatorKind.Callable => OpCallable,
+        OperatorKind.Unwrap => OpUnwrap,
+        OperatorKind.Try => OpTry,
         _ => string.Empty
     };
 }

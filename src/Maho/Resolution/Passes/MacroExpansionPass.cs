@@ -336,15 +336,13 @@ internal sealed class MacroExpansionPass : ResolutionPass
 
         if (local is LocalVariableDeclarationStatement varDecl)
         {
-            foreach (var declarator in varDecl.Declaration.Declarators)
+            var declarator = varDecl.Declaration.Declarator;
+            if (declarator.Initializer is { } init)
             {
-                if (declarator.Initializer is { } init)
-                {
-                    var newExpr = ExpandExpression(init.Initializer, expander, literalMacroTable, currentDepth, sourceText, ref changed);
+                var newExpr = ExpandExpression(init.Initializer, expander, literalMacroTable, currentDepth, sourceText, ref changed);
 
-                    if (!ReferenceEquals(newExpr, init.Initializer))
-                        init.Initializer = newExpr;
-                }
+                if (!ReferenceEquals(newExpr, init.Initializer))
+                    init.Initializer = newExpr;
             }
         }
         else if (local is LocalReturnStatement retStmt && retStmt.Statement.Expression is not null)

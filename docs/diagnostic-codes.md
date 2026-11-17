@@ -42,6 +42,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0103` | `EmptyCharacterLiteral` | Character literal `''` without payload. |
 | `MH0104` | `UnterminatedMultiLineComment` | Multi-line comment reaching EOF without closing `*/`. |
 | `MH0105` | `InvalidEscapeSequence` | Unrecognized escape sequence in string or character literal. |
+| `MH0110` | `InconsistentInheritanceOrder` | Inconsistent or cyclic C3 linearization order detected across multiple base types. |
 
 ### 2.2 Parser & Grammar Recovery (`MH0120` - `MH0159`)
 | Code | Name | Description |
@@ -51,7 +52,7 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0122` | `ExpectedIdentifier` | Declaration, parameter, or reference expected an identifier token. |
 | `MH0123` | `ExpectedType` | Declaration, type argument, or cast expected a type syntax node. |
 | `MH0124` | `ExpectedBody` | Type, function, or property expected a block body or expression body. |
-| `MH0125` | `ExpectedParameter` | Parameter list expected parameter declaration. |
+| `MH0125` | `UninitializedAliasVariable` | Alias variable (`&T` or `*T`) must be initialized at its declaration site. |
 | `MH0126` | `ExpectedGenericParameter` | Generic parameter list expected generic parameter identifier. |
 | `MH0127` | `UnexpectedToken` | Token violates language grammar in current context. |
 | `MH0128` | `MissingToken` | Synthesized missing token inserted during error recovery. |
@@ -72,13 +73,19 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0203` | `InvalidMacroEscape` | Malformed or mispositioned macro parameter reference `@name`. |
 | `MH0230` | `InvalidTokenConcatenation` | Invalid token pasting with `##` operator in macro template. |
 
-### 2.5 Semantic Syntax & ABI Requirements (`MH0240` - `MH0249`)
+### 2.5 Semantic Syntax & ABI Requirements (`MH0240` - `MH0299`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0240` | `MissingIntrinsicForSyntax` | Syntax requires an intrinsic type that was not declared or failed verification. |
 | `MH0242` | `InvalidOperatorFunctionSignature` | Invalid signature for operator function declaration. |
 | `MH0243` | `DestructorNandCopy` | Type cannot implement both `Destructor` and `Copy`; types with destructors must use move semantics. |
 | `MH0244` | `CopyNandMove` | Type cannot implement both `Copy` and `Move`; a type must be exclusively Copy or exclusively Move. |
+| `MH0250` | `BaseConstructorRequiresExplicitInit` | Base type has no default constructor; derived constructor must explicitly initialize it. |
+| `MH0251` | `InvalidBaseInitializerOnOrdinaryFunction` | Base initializer clause `: Base(...)` can only be placed on a constructor. |
+| `MH0252` | `TypeIsNotBaseOf` | Type specified in base initializer clause is not an inherited base of the enclosing type. |
+| `MH0253` | `DuplicateBaseInitializer` | Base type is initialized more than once in a constructor base initializer list. |
+| `MH0320` | `NonContiguousBaseConversion` | Cannot convert derived reference to non-contiguous/split base; use `dyn Base&` instead. |
+| `MH0410` | `AmbiguousMemberAccess` | Ambiguous member access across multiple sibling base types; disambiguate via `(expr as Base).Member`. |
 
 ---
 
@@ -92,8 +99,6 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0502` | `UnresolvedIdentifier` | Variable, parameter, or member identifier not found in scope. |
 | `MH0503` | `AmbiguousIdentifier` | Identifier matches multiple visible symbols in scope. |
 | `MH0504` | `UnresolvedNamespace` | Namespace in `using` directive or qualified access not found. |
-| `MH0520` | `ConstructorOutsideType` | Constructor must be declared inside a type body. |
-| `MH0525` | `ConstructorNameMismatch` | Constructor name does not match enclosing type name. |
 
 ### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0539`)
 | Code | Name | Description |
@@ -116,6 +121,11 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0542` | `UnknownIntrinsicType` | Unknown intrinsic type literal specified in `[IntrinsicType("...")]`. |
 | `MH0543` | `DuplicateIntrinsicType` | Intrinsic type declared more than once across compilation and referenced libraries. |
 | `MH0544` | `IntrinsicAbiMismatch` | Type fails to satisfy the required memory layout or field ABI contract for its intrinsic type. |
+
+### 3.4 Interface Conformance (`MH0550` - `MH0559`)
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH0550` | `UnimplementedInterfaceMember` | Concrete type does not implement a required abstract interface method or property. |
 
 ### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |
@@ -147,17 +157,24 @@ These diagnostics are emitted by Pass 5 (`ExpressionResolutionPass`) and Pass 6 
 | :--- | :--- | :--- |
 | `MH2001` | `BinaryOperatorTypeMismatch` | Binary operator cannot be applied to left and right operand types (no matching operator interface). |
 | `MH2002` | `UnaryOperatorTypeMismatch` | Unary operator cannot be applied to operand type. |
-| `MH2003` | `CannotAssignToNonLValue` | Left-hand side of assignment does not evaluate to a writable L-value. |
-| `MH2004` | `AssignmentTypeMismatch` | Right-hand side type cannot be assigned to target type (no implicit conversion). |
-| `MH2005` | `ReturnTypeMismatch` | Value returned by return statement does not match declared function return type. |
-| `MH2006` | `ConditionTypeMismatch` | Condition expression in `if` or `while` does not evaluate to canonical boolean. |
-| `MH2007` | `CannotInferType` | Type of inferred variable (`var x`) cannot be determined without an initializer. |
-| `MH2008` | `MemberNotFound` | Member name not found on receiver type. |
-| `MH2010` | `ArgumentCountMismatch` | Invocation provides fewer or more arguments than expected by parameter signature. |
+| `MH2003` | `AssignmentTypeMismatch` | Expression type cannot be assigned to target variable type (no implicit conversion). |
+| `MH2004` | `ArgumentTypeMismatch` | Argument type cannot be converted to parameter type. |
+| `MH2005` | `ArgumentCountMismatch` | Invocation provides fewer or more arguments than expected by parameter signature. |
+| `MH2006` | `ReturnTypeMismatch` | Value returned by return statement does not match declared function return type. |
+| `MH2007` | `ConditionTypeMismatch` | Condition expression in `if` or `while` does not evaluate to canonical boolean. |
+| `MH2008` | `CannotInferVariableType` | Type of inferred variable (`var x`) cannot be determined from initializer. |
+| `MH2009` | `CannotAssignToNonLValue` | Left-hand side of assignment must be a variable, field, property or indexer. |
+| `MH2010` | `TupleDestructuringError` | Tuple destructuring count or element type mismatch. |
 | `MH2011` | `AmbiguousConditionalBranches` | Conditional `if-else` branches evaluate to conflicting types (exact matching required; no implicit widening). |
-| `MH2012` | `ConflictingReturnType / DeadCode` | Conflicting inferred return types across branches or unreachable dead code detected in control flow graph. |
+| `MH2012` | `ConflictingReturnType` | Return statement returns a type that conflicts with a previous return type in the same function. |
 | `MH2013` | `AmbiguousLiteralConversion` | Multiple custom literal conversion methods match the literal; explicit suffix is required. |
-| `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse. |
+| `MH2014` | `MemberNotFoundOnType` | Target type does not contain a definition for member during retroactive literal collapse or member lookup. |
+| `MH2015` | `CannotInferLambdaParameterType` | Cannot infer type for lambda parameter; explicit type annotation is required. |
+| `MH2016` | `LambdaBlockBodyRequiresReturn` | Lambda block body must end with an explicit return statement; trailing expressions are not permitted. |
+| `MH2017` | `MissingReturn` | Not all reachable code paths return a value in a non-Unit returning function. |
+| `MH2018` | `FunctionMustReturnNever` | Function diverges on all code paths and must be declared with return type `Never`. |
+| `MH2019` | `CannotAccessInstanceMemberOnType` | Non-static field, method, or property cannot be accessed through a type name without an instance reference. |
+| `MH2020` | `CannotAccessStaticMemberOnInstance` | Static member cannot be accessed via an instance reference; qualify it with the type name instead. |
 
 ---
 

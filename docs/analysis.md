@@ -23,25 +23,15 @@ This folder matters because it defines what leaves the compiler:
 
 ## `MahoCompiler` function guide
 
-### `AnalyzeFile(string filePath)`
+### `CompileSource(string source, string filePath = "source.mh", CompilationOptions? options = null, Compilation? cachedCompilation = null)`
 
-Loads source from disk, validates the input path argument, and forwards to `AnalyzeCore(...)`.
+Compiles an in-memory source string and returns an immutable `Compilation`. It is the primary API for in-memory analysis, unit tests, and editor integrations, accepting an optional `cachedCompilation` for incremental tree and symbol reuse.
 
-Important details:
-- owns path normalization,
-- text loading happens through `SourceText` and `SourceFile`, not ad hoc file reads,
-- executes the resolution pipeline through `DeclarationResolutionPass`.
+### `AnalyzeFiles(IEnumerable<string> filePaths, string? rootPath = null, CompilationOptions? options = null, ...)`
 
-### `AnalyzeText(string text, string filePath = "source.mh")`
-
-The in-memory companion to `AnalyzeFile(...)`. It is the primary API for unit tests, editor integrations, or any caller with source text in memory. It accepts a `sourcePath` string so downstream diagnostics and spans have a stable virtual identity.
-
-### `AnalyzeFiles(IReadOnlyList<string> filePaths, string rootDirectory = "", CompilationOptions? options = null)`
-
-The batch companion to `AnalyzeFile(...)`. It coordinates file-level parallel parsing and front-end work across multiple source files:
+Coordinates file-level parallel parsing and front-end resolution across multiple source files:
 - input paths are normalized up front,
-- parallel syntax phase parses compilation units under `Parallel.For`,
-- parsed units are united under a single `SyntaxTree`,
+- parallel syntax phase parses compilation units under `Parallel.For`, reusing unchanged syntax trees when `cachedCompilation` is provided,
 - runs the multi-pass `Resolver` across all compilation units,
 - measures and records execution duration in `CompilationPhaseTimers`,
 - returns an immutable `Compilation` object keeping file trees in input order.
@@ -98,7 +88,7 @@ Fields & Query Methods:
 
 ### `Compilation`
 
-Top-level immutable compilation object returned by all compiler APIs (`CompileFiles(...)`, `AnalyzeFiles(...)`, `CompileSource(...)`, `AnalyzeText(...)`, `CreateCompilation(...)`).
+Top-level immutable compilation object returned by all compiler APIs (`CompileFiles(...)`, `AnalyzeFiles(...)`, `CompileSource(...)`, `CreateCompilation(...)`).
 
 Fields & Query Methods:
 

@@ -76,9 +76,7 @@ All diagnostic codes and error templates are centralized in `DiagnosticsManager`
 - `ReportDuplicateVariableDeclaration` (`MH0535`): duplicate variable declaration.
 - `ReportDuplicatePropertyDeclaration` (`MH0536`): duplicate property declaration.
 - `ReportCyclicTypeHierarchy` (`MH0538`): base type inheritance cycle detected.
-### Special Functions (`MH0520`, `MH0525`)
-- `ReportConstructorOutsideType` (`MH0520`): constructor must be declared inside a type body.
-- `ReportConstructorNameMismatch` (`MH0525`): constructor name does not match enclosing type name.
+
 ### Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 - `ReportMacroRecursionLimitExceeded` (`MH0600`): macro recursion limit exceeded.
 - `ReportNoMatchingMacroArm` (`MH0601`): no matching pattern arm.

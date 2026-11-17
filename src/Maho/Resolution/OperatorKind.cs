@@ -133,7 +133,11 @@ internal enum OperatorKind
     /// <summary>Move lifecycle operator (<c>Move</c> interface).</summary>
     Move,
     /// <summary>Callable invocation operator (<c>Callable</c> interface invoked by <c>x(args...)</c>).</summary>
-    Callable
+    Callable,
+    /// <summary>Postfix unwrap operator (<c>x!</c> via <c>Unwrap&lt;TReturn&gt;</c> interface).</summary>
+    Unwrap,
+    /// <summary>Postfix try propagation operator (<c>x?</c> via <c>Try&lt;TReturn, TFail&gt;</c> interface).</summary>
+    Try
 }
 
 
