@@ -26,32 +26,48 @@ public sealed class ExplicitThisAndArrowTests
         public interface Arrow<T>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(ref this) -> ref T;
+            public func Arrow(&this) -> &T;
+        }
+
+        public interface Deref<T>
+        {
+            [OperatorFunction("Dereference")]
+            public func Deref(&this) -> &T;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<T>
+        public struct Reference<T> : Arrow<T>, Deref<T>
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Arrow.Arrow(ref this) -> ref T;
+            public func Deref.Deref(&this) -> &T;
 
-            public func Address(ref this) -> nuint
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *this;
+            }
+
+            public func Address(&this) -> nuint
             {
                 return this.raw;
             }
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T>
+        public struct Pointer<T> : Arrow<T>, Deref<T>
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Arrow.Arrow(ref this) -> ref T;
+            public func Deref.Deref(&this) -> &T;
+
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *this;
+            }
         }
 
         [IntrinsicType("Str")]
@@ -100,23 +116,23 @@ public sealed class ExplicitThisAndArrowTests
                 return this.x;
             }
 
-            public func SumUnqualified(ref this) -> Int32
+            public func SumUnqualified(&this) -> Int32
             {
                 return x;
             }
 
-            public func GetX(ref this) -> Int32
+            public func GetX(&this) -> Int32
             {
                 return this.x;
             }
 
-            public func SetX(mut ref this, Int32 val) -> Int32
+            public func SetX(mut &this, Int32 val) -> Int32
             {
                 this.x = val;
                 return val;
             }
 
-            public func SetXWithShadowing(mut ref this, Int32 x) -> Int32
+            public func SetXWithShadowing(mut &this, Int32 x) -> Int32
             {
                 this.x = x;
                 return x;
@@ -262,7 +278,7 @@ public sealed class ExplicitThisAndArrowTests
             {
                 T value;
 
-                public func Arrow.Arrow(ref this) -> ref T
+                public func Arrow.Arrow(&this) -> &T
                 {
                     return this.value;
                 }
@@ -285,14 +301,14 @@ public sealed class ExplicitThisAndArrowTests
             public interface ArrowRef<T>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow(ref this) -> T&;
+                public func Arrow(&this) -> T&;
             }
 
             public struct RefWrapper<T> : ArrowRef<T>
             {
                 T& target;
 
-                public func ArrowRef.Arrow(ref this) -> T&
+                public func ArrowRef.Arrow(&this) -> T&
                 {
                     return this.target;
                 }
@@ -320,14 +336,14 @@ public sealed class ExplicitThisAndArrowTests
             public interface ArrowRef<T>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow(ref this) -> T&;
+                public func Arrow(&this) -> T&;
             }
 
             public struct RefWrapper<T> : ArrowRef<T>
             {
                 T& target;
 
-                public func ArrowRef.Arrow(ref this) -> T&
+                public func ArrowRef.Arrow(&this) -> T&
                 {
                     return this.target;
                 }
@@ -350,7 +366,7 @@ public sealed class ExplicitThisAndArrowTests
         var source = Prelude + """
             public struct TestStruct
             {
-                public func Bad(Int32 a, ref this) -> Int32
+                public func Bad(Int32 a, &this) -> Int32
                 {
                     return a;
                 }

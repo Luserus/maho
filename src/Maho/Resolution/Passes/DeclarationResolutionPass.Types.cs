@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Maho.Syntax;
@@ -95,9 +96,6 @@ internal sealed partial class DeclarationResolutionPass
 
     private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false)
     {
-        if (syntax is NeverTypeSyntax)
-            return TypeRef.Never;
-
         if (syntax is FunctionTypeSyntax fnSyntax)
         {
             TypeRef ret;
@@ -218,8 +216,9 @@ internal sealed partial class DeclarationResolutionPass
 
             return modified.Modifier switch
             {
-                PointerTypeModifier => ResolvePointerModifier(modified, innerType, reportDiagnostics),
-                ReferenceTypeModifier => ResolveReferenceModifier(modified, innerType, reportDiagnostics),
+                PointerTypeModifier ptrMod => ResolvePointerModifier(modified, innerType, ptrMod.IsMutable, reportDiagnostics),
+                ReferenceTypeModifier refMod => ResolveReferenceModifier(modified, innerType, refMod.IsMutable, reportDiagnostics),
+                SpanTypeModifier => ResolveSpanModifier(modified, innerType, reportDiagnostics),
                 OptionalTypeModifier => ResolveOptionalModifier(modified, innerType, reportDiagnostics),
                 ArrayTypeModifier => ResolveArrayModifier(modified, innerType, reportDiagnostics),
                 FixedArrayTypeModifier fixedArray => ResolveFixedArrayModifier(modified, fixedArray, innerType, scope, reportDiagnostics),
@@ -229,10 +228,16 @@ internal sealed partial class DeclarationResolutionPass
 
         if (syntax is PrefixModifiedType prefixModified)
         {
-            if (prefixModified.Modifier is RefTypeModifier refMod)
+            if (prefixModified.Modifier is SafeAliasTypeModifier safeMod)
             {
                 var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
-                return TypeRef.Alias(inner, isMutable: refMod.IsMutable);
+                return TypeRef.Alias(inner, isMutable: safeMod.IsMutable, isUnsafe: false);
+            }
+
+            if (prefixModified.Modifier is UnsafeAliasTypeModifier unsafeMod)
+            {
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+                return TypeRef.Alias(inner, isMutable: unsafeMod.IsMutable, isUnsafe: true);
             }
 
             if (prefixModified.Modifier is UntaggedTypeModifier)
@@ -247,13 +252,7 @@ internal sealed partial class DeclarationResolutionPass
                 return TypeRef.Dyn(inner);
             }
 
-            var innerType = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
-
-            return prefixModified.Modifier switch
-            {
-                SpanTypeModifier => ResolveSpanModifier(prefixModified, innerType, reportDiagnostics),
-                _ => TypeRef.Error
-            };
+            return TypeRef.Error;
         }
 
         if (syntax is GenericType generic)
@@ -462,46 +461,93 @@ internal sealed partial class DeclarationResolutionPass
         return handle;
     }
 
-    private TypeRef ResolvePointerModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    private bool IsInsideIntrinsicDeclaration(string intrinsicName)
     {
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer))
+        if (currentTypeSymbol is null)
+            return false;
+
+        if (context.DiscoveredIntrinsics.TryGet(intrinsicName, out var handle) &&
+            ResolutionContext.GetHandle(currentTypeSymbol) == handle)
+            return true;
+
+        IReadOnlyList<AttributeListSyntax>? attrLists = currentTypeSymbol switch
         {
-            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "pointer type syntax", KnownIntrinsics.Pointer, modified.GetSource());
+            TypeSymbol ts => ts.Syntax?.Attributes,
+            NestedTypeSymbol nts => nts.Syntax?.Attributes,
+            _ => null
+        };
+
+        if (attrLists is not null)
+        {
+            foreach (var list in attrLists)
+            {
+                foreach (var app in list.Attributes)
+                {
+                    if (app.Arguments.Count == 1 &&
+                        app.Arguments[0] is LiteralExpression lit &&
+                        lit.Literal.Kind is TokenKind.String or TokenKind.SuffixedString)
+                    {
+                        var val = lit.Literal.Value.Trim('"');
+                        if (string.Equals(val, intrinsicName, StringComparison.Ordinal))
+                            return true;
+                    }
+                }
+            }
         }
 
-        return TypeRef.Pointer(innerType);
+        return false;
+    }
+
+    private TypeRef ResolvePointerModifier(ModifiedType modified, TypeRef innerType, bool isMutable, bool reportDiagnostics)
+    {
+        string requiredIntrinsic = isMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer;
+        bool isDeclared = context.DiscoveredIntrinsics.Contains(requiredIntrinsic) || IsInsideIntrinsicDeclaration(requiredIntrinsic);
+        if (reportDiagnostics && !isDeclared)
+        {
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, isMutable ? "mutable pointer type syntax" : "pointer type syntax", requiredIntrinsic, modified.GetSource());
+        }
+
+        return TypeRef.Pointer(innerType, isMutable);
     }
 
     private TypeRef ResolveOptionalModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
     {
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Optional))
+        bool isDeclared = context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Optional) || IsInsideIntrinsicDeclaration(KnownIntrinsics.Optional);
+        if (reportDiagnostics && !isDeclared)
         {
             var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
             context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "optional type syntax", KnownIntrinsics.Optional, modified.GetSource());
         }
 
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optionalHandle);
-        return TypeRef.Optional(innerType, optionalHandle != default ? optionalHandle : null);
+        SymbolHandle? optionalHandle = null;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var h))
+            optionalHandle = h;
+        else if (currentTypeSymbol is not null && IsInsideIntrinsicDeclaration(KnownIntrinsics.Optional))
+            optionalHandle = ResolutionContext.GetHandle(currentTypeSymbol);
+
+        return TypeRef.Optional(innerType, optionalHandle);
     }
 
-    private TypeRef ResolveReferenceModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    private TypeRef ResolveReferenceModifier(ModifiedType modified, TypeRef innerType, bool isMutable, bool reportDiagnostics)
     {
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference))
+        string requiredIntrinsic = isMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference;
+        bool isDeclared = context.DiscoveredIntrinsics.Contains(requiredIntrinsic) || IsInsideIntrinsicDeclaration(requiredIntrinsic);
+        if (reportDiagnostics && !isDeclared)
         {
             var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "reference type syntax", KnownIntrinsics.Reference, modified.GetSource());
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, isMutable ? "mutable reference type syntax" : "reference type syntax", requiredIntrinsic, modified.GetSource());
         }
 
-        return TypeRef.Reference(innerType);
+        return TypeRef.Reference(innerType, isMutable);
     }
 
-    private TypeRef ResolveSpanModifier(PrefixModifiedType prefixModified, TypeRef innerType, bool reportDiagnostics)
+    private TypeRef ResolveSpanModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
     {
         if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span))
         {
-            var span = prefixModified.Modifier.GetSpan() ?? prefixModified.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "span type syntax", KnownIntrinsics.Span, prefixModified.GetSource());
+            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "span type syntax", KnownIntrinsics.Span, modified.GetSource());
         }
 
         return TypeRef.Span(innerType);

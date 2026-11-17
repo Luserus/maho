@@ -36,6 +36,7 @@ internal static class KnownIntrinsics
     public const string Char = "Char";
     public const string Str = "Str";
     public const string Unit = "Unit";
+    public const string Never = "Never";
 
     // Value types and Callables
     public const string ValueType = "ValueType";
@@ -47,7 +48,9 @@ internal static class KnownIntrinsics
 
     // Pointer and Reference
     public const string Pointer = "Pointer";
+    public const string MutablePointer = "MutablePointer";
     public const string Reference = "Reference";
+    public const string MutableReference = "MutableReference";
     public const string Metadata = "Metadata";
 
     // Arrays and Spans
@@ -119,32 +122,42 @@ internal static class KnownIntrinsics
     public const string OpUnwrap = "Unwrap";
     public const string OpTry = "Try";
 
+    // Standard Intrinsic Function Contract Literals
+    public const string FnFunctionInvoke = "Function.Invoke(TParams...)";
+    public const string FnDelegateInvoke = "Delegate.Invoke(TParams...)";
+    public const string FnReferenceDeref = "Reference.Deref()";
+    public const string FnMutableReferenceDeref = "MutableReference.Deref()";
+    public const string FnPointerDeref = "Pointer.Deref()";
+    public const string FnMutablePointerDeref = "MutablePointer.Deref()";
+    public const string FnValueTypeAssign = "ValueType.Assign()";
+    public const string FnStructAssign = "Struct.Assign()";
+    public const string FnInt32Add = "Int32.Add(Int32, Int32)";
+    public const string FnInt32Sub = "Int32.Sub(Int32, Int32)";
+    public const string FnInt32Mul = "Int32.Mul(Int32, Int32)";
+    public const string FnInt32Div = "Int32.Div(Int32, Int32)";
+    public const string FnInt32Rem = "Int32.Rem(Int32, Int32)";
+
     public static readonly HashSet<string> AllKnownTypes =
     [
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Str, Unit,
+        Bool, Char, Str, Unit, Never,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
-        Pointer, Reference, Metadata,
+        Pointer, MutablePointer, Reference, MutableReference, Metadata,
         FixedArray, Array, Span, Optional
     ];
 
-    public static readonly HashSet<string> IntegerTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
+    public static readonly HashSet<string> IntegerTypes =
+    [
         Int8, Int16, Int32, Int64, Int128, NInt,
-        UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
-        "int", "int32", "int64", "int8", "int16", "int128",
-        "uint8", "uint16", "uint32", "uint64", "uint128", "nuint", "nint",
-        "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128"
-    };
+        UInt8, UInt16, UInt32, UInt64, UInt128, NUInt
+    ];
 
-    public static readonly HashSet<string> FloatTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        Float16, Float32, Float64, Float128,
-        "float", "float16", "float32", "float64", "float128",
-        "f16", "f32", "f64", "f128", "double"
-    };
+    public static readonly HashSet<string> FloatTypes =
+    [
+        Float16, Float32, Float64, Float128
+    ];
 
     public static bool IsIntegerType(string name) => IntegerTypes.Contains(name);
     public static bool IsFloatType(string name) => FloatTypes.Contains(name);
@@ -154,7 +167,7 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Unit,
+        Bool, Char, Unit, Never,
         ValueType, Struct, Enum, Tuple,
         FixedArray, Metadata
     ];

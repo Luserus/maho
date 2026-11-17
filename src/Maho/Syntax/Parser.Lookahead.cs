@@ -495,9 +495,25 @@ internal sealed partial class Parser
         List<PrefixTypeModifier> prefixModifiers = [];
         while (true)
         {
-            if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+            if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Ampersand)
             {
-                prefixModifiers.Add(new SpanTypeModifier(LookaheadConsume()));
+                var mut = LookaheadConsume();
+                var amp = LookaheadConsume();
+                prefixModifiers.Add(new SafeAliasTypeModifier(amp, mut));
+            }
+            else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Asterisk)
+            {
+                var mut = LookaheadConsume();
+                var star = LookaheadConsume();
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(star, mut));
+            }
+            else if (LookaheadCurrentToken.Kind is TokenKind.Ampersand)
+            {
+                prefixModifiers.Add(new SafeAliasTypeModifier(LookaheadConsume()));
+            }
+            else if (LookaheadCurrentToken.Kind is TokenKind.Asterisk)
+            {
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(LookaheadConsume()));
             }
             else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
             {
@@ -524,6 +540,7 @@ internal sealed partial class Parser
         }
 
         if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+            (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && (LookaheadPeek().Kind is TokenKind.Ampersand || LookaheadPeek().Kind is TokenKind.Asterisk)) ||
             (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
             (type, success) = LookaheadParseModifiedType(type);
 
@@ -544,9 +561,6 @@ internal sealed partial class Parser
     {
         if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
             return LookaheadParseTupleType();
-
-        if (LookaheadCurrentToken.Kind is TokenKind.ExclamationMark)
-            return (new NeverTypeSyntax(LookaheadConsume()), true);
 
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
@@ -769,6 +783,7 @@ internal sealed partial class Parser
         TypeSyntax type = baseType;
 
         while (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+               (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && (LookaheadPeek().Kind is TokenKind.Ampersand || LookaheadPeek().Kind is TokenKind.Asterisk)) ||
                (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
         {
             var (modifier, success) = LookaheadCurrentToken.Kind switch
@@ -778,6 +793,8 @@ internal sealed partial class Parser
                 TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParsePointerTypeModifier(),
                 TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseReferenceTypeModifier(),
                 TokenKind.Dot => LookaheadParseVariadicTypeModifier(),
+                _ when LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseMutReferenceTypeModifier(),
+                _ when LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && LookaheadPeek().Kind is TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParseMutPointerTypeModifier(),
                 _ => throw new System.InvalidOperationException(),
             };
 
@@ -790,10 +807,24 @@ internal sealed partial class Parser
         return (type, true);
     }
 
+    private (ReferenceTypeModifier Modifier, bool Success) LookaheadParseMutReferenceTypeModifier()
+    {
+        var mutToken = LookaheadConsume();
+        var ampersand = LookaheadConsume();
+        return (new ReferenceTypeModifier(ampersand, mutToken), true);
+    }
+
     /// <summary> Speculatively parses an array or fixed-size array type modifier. </summary>
     private (PostfixTypeModifier Type, bool Success) LookaheadParseArrayOrFixedArrayTypeModifier()
     {
         var openBracket = LookaheadConsume();
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand && LookaheadPeek().Kind is TokenKind.RightBracket)
+        {
+            var ampersand = LookaheadConsume();
+            var closeBracket = LookaheadConsume();
+            return (new SpanTypeModifier(openBracket, ampersand, closeBracket), true);
+        }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
         {
@@ -828,6 +859,14 @@ internal sealed partial class Parser
     {
         var asterisk = LookaheadConsume();
         return (new PointerTypeModifier(asterisk), true);
+    }
+
+    /// <summary> Speculatively parses a mutable pointer type modifier. </summary>
+    private (PointerTypeModifier Type, bool Success) LookaheadParseMutPointerTypeModifier()
+    {
+        var mutToken = LookaheadConsume();
+        var asterisk = LookaheadConsume();
+        return (new PointerTypeModifier(asterisk, mutToken), true);
     }
 
     /// <summary> Speculatively parses an optional type modifier. </summary>
@@ -870,6 +909,7 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Static:
                 case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
+                case MatchingKeywordKind.Mut:
                     list.Add(LookaheadConsume());
                     break;
 

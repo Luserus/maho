@@ -481,11 +481,25 @@ internal sealed partial class IntrinsicDiscoveryPass
                 if (baseHandle == ptrHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
                     return true;
             }
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrHandle))
+            {
+                var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, 1);
+                var targetSym = context.GetSymbol(mutPtrHandle);
+                if (baseHandle == mutPtrHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
+                    return true;
+            }
             if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle))
             {
                 var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, 1);
                 var targetSym = context.GetSymbol(refHandle);
                 if (baseHandle == refHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
+                    return true;
+            }
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefHandle))
+            {
+                var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, 1);
+                var targetSym = context.GetSymbol(mutRefHandle);
+                if (baseHandle == mutRefHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
                     return true;
             }
         }
@@ -507,7 +521,7 @@ internal sealed partial class IntrinsicDiscoveryPass
             return innerHandle == expectedTargetHandle;
         }
 
-        // Case 2: Reference<T> syntax (GenericType)
+        // Case 2: Reference<T> or MutableReference<T> syntax (GenericType)
         if (syntax is GenericType gen && gen.GenericArguments.Count == 1)
         {
             if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle))
@@ -516,6 +530,23 @@ internal sealed partial class IntrinsicDiscoveryPass
                 var targetSym = context.GetSymbol(refHandle);
 
                 if (baseHandle == refHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
+                {
+                    var argName = GetGenericArgumentName(gen.GenericArguments[0]);
+
+                    if (genericParam is not null && argName == genericParam.Name.Text)
+                        return true;
+
+                    var innerHandle = ResolveGenericOrTypeSymbol(gen.GenericArguments[0], scope);
+                    return innerHandle == expectedTargetHandle;
+                }
+            }
+
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefHandle))
+            {
+                var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, gen.GenericArguments.Count);
+                var targetSym = context.GetSymbol(mutRefHandle);
+
+                if (baseHandle == mutRefHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
                 {
                     var argName = GetGenericArgumentName(gen.GenericArguments[0]);
 
@@ -555,6 +586,23 @@ internal sealed partial class IntrinsicDiscoveryPass
                 var targetSym = context.GetSymbol(pointerHandle);
 
                 if (baseHandle == pointerHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
+                {
+                    var argName = GetGenericArgumentName(gen.GenericArguments[0]);
+
+                    if (genericParam is not null && argName == genericParam.Name.Text)
+                        return true;
+
+                    var innerHandle = ResolveGenericOrTypeSymbol(gen.GenericArguments[0], scope);
+                    return innerHandle == expectedTargetHandle;
+                }
+            }
+
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrHandle))
+            {
+                var baseHandle = ResolveTypeSymbolByName(gen.Name.Value, scope, gen.GenericArguments.Count);
+                var targetSym = context.GetSymbol(mutPtrHandle);
+
+                if (baseHandle == mutPtrHandle || (targetSym is not null && gen.Name.Value == targetSym.Name.Text))
                 {
                     var argName = GetGenericArgumentName(gen.GenericArguments[0]);
 

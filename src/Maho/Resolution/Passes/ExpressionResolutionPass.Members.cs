@@ -330,14 +330,16 @@ internal sealed partial class ExpressionResolutionPass
         var handle = type.Handle;
         if (handle is null)
         {
-            if (type.SpecialType is ReferenceSemanticType)
+            if (type.SpecialType is ReferenceSemanticType rSem)
             {
-                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH))
+                string req = rSem.IsMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var refH))
                     handle = refH;
             }
-            else if (type.SpecialType is PointerSemanticType)
+            else if (type.SpecialType is PointerSemanticType pSem)
             {
-                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH))
+                string req = pSem.IsMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var ptrH))
                     handle = ptrH;
             }
         }

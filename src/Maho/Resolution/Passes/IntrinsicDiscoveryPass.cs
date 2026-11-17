@@ -359,7 +359,9 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
 
         // Group 2: Pointer and Reference (requires NUInt)
         ValidatePointerLike(KnownIntrinsics.Pointer, typesByIntrinsic);
+        ValidatePointerLike(KnownIntrinsics.MutablePointer, typesByIntrinsic);
         ValidatePointerLike(KnownIntrinsics.Reference, typesByIntrinsic);
+        ValidatePointerLike(KnownIntrinsics.MutableReference, typesByIntrinsic);
 
         // Group 3: Str (requires Int8, Reference, NUInt)
         ValidateStr(typesByIntrinsic);

@@ -229,7 +229,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     else
                     {
                         var exprType = context.GetExpressionType(exprStmt.Expression);
-                        if (exprType is { IsNever: true })
+                        if (exprType is not null && exprType.Value.IsNever(context))
                         {
                             block.Terminator = BlockTerminator.Unreachable();
                             block = newBlock();
@@ -422,7 +422,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         // 1. If Exit block is NOT reachable, all reachable paths in the function diverge
         if (!exitReachable)
         {
-            if (!returnType.IsNever)
+            if (!returnType.IsNever(context))
             {
                 context.Diagnostics.ReportFunctionMustReturnNever(
                     span,
@@ -434,7 +434,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         }
 
         // 2. If the function's declared return type IS Never (!), but Exit IS reachable
-        if (returnType.IsNever)
+        if (returnType.IsNever(context))
         {
             var unitQualified = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var uH))
                 ? ResolutionContext.GetQualifiedSymbolName(uH, context)
@@ -485,10 +485,6 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             var unwrapped = context.UnwrapAlias(h);
             if (hVoid is not null && unwrapped == hVoid.Value) return true;
             if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
-                return true;
-
-            var sym = context.GetSymbol(unwrapped);
-            if (sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Unit, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("void", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
         return false;

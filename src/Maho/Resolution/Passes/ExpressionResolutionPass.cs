@@ -184,59 +184,6 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             hVoid = v;
             voidType = TypeRef.Resolved(v);
         }
-
-        // Fallback for mock primitives in unit tests without explicit intrinsic registrations
-        hInt8 ??= FindFallbackTypeHandle("int8");
-        hInt16 ??= FindFallbackTypeHandle("int16");
-        hInt32 ??= FindFallbackTypeHandle("int32");
-        hInt64 ??= FindFallbackTypeHandle("int64");
-        hInt128 ??= FindFallbackTypeHandle("int128");
-        hNInt ??= FindFallbackTypeHandle("nint");
-
-        hUInt8 ??= FindFallbackTypeHandle("uint8");
-        hUInt16 ??= FindFallbackTypeHandle("uint16");
-        hUInt32 ??= FindFallbackTypeHandle("uint32");
-        hUInt64 ??= FindFallbackTypeHandle("uint64");
-        hUInt128 ??= FindFallbackTypeHandle("uint128");
-        hNUInt ??= FindFallbackTypeHandle("nuint");
-
-        hFloat16 ??= FindFallbackTypeHandle("float16");
-        hFloat32 ??= FindFallbackTypeHandle("float32");
-        hFloat64 ??= FindFallbackTypeHandle("float64");
-        hFloat128 ??= FindFallbackTypeHandle("float128");
-
-        if (hBool is null && FindFallbackTypeHandle("bool") is { } fb)
-        {
-            hBool = fb;
-            boolType = TypeRef.Resolved(fb);
-        }
-
-        hChar ??= FindFallbackTypeHandle("char");
-        hStr ??= FindFallbackTypeHandle("str") ?? FindFallbackTypeHandle("string");
-
-        if (hVoid is null && FindFallbackTypeHandle("void") is { } fv)
-        {
-            hVoid = fv;
-            voidType = TypeRef.Resolved(fv);
-        }
-    }
-
-    /// <summary>
-    /// Looks up a type symbol handle by name in top-level or nested types as a fallback for testing.
-    /// </summary>
-    private SymbolHandle? FindFallbackTypeHandle(string name)
-    {
-        foreach (var sym in context.TypeSymbols)
-        {
-            if (sym.Name.Text.Equals(name, StringComparison.OrdinalIgnoreCase))
-                return ResolutionContext.GetHandle(sym);
-        }
-        foreach (var sym in context.NestedTypeSymbols)
-        {
-            if (sym.Name.Text.Equals(name, StringComparison.OrdinalIgnoreCase))
-                return ResolutionContext.GetHandle(sym);
-        }
-        return null;
     }
 
     /// <summary>Checks whether a type reference corresponds to a signed integer primitive.</summary>
@@ -269,10 +216,6 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             if (hVoid is not null && unwrapped == hVoid.Value)
                 return true;
             if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
-                return true;
-
-            var sym = context.GetSymbol(unwrapped);
-            if (sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Unit, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("void", StringComparison.OrdinalIgnoreCase)))
                 return true;
         }
         return false;
@@ -435,7 +378,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             if (lambdaReturnTypes.Count > 0)
                 lambdaReturnTypes.Peek().Add(returnedType);
 
-            if (expectedReturnType.IsNever)
+            if (expectedReturnType.IsNever(context))
             {
                 context.Diagnostics.ReportReturnTypeMismatch(
                     span,
@@ -502,7 +445,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 ? ResolutionContext.GetLabelSymbolName(uH, context, scope)
                 : KnownIntrinsics.Unit;
 
-            if (expectedReturnType.IsNever)
+            if (expectedReturnType.IsNever(context))
             {
                 context.Diagnostics.ReportReturnTypeMismatch(
                     span,

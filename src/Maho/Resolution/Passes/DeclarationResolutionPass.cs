@@ -24,6 +24,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private record struct FunctionSignatureInfo(Symbol Symbol, FunctionFlags Flags, FunctionDeclaration? Syntax, IReadOnlyList<SymbolHandle> GenericParameters, List<SymbolHandle> Parameters, TypeRef ReturnType);
 
     private ResolutionContext context = null!;
+    private Symbol? currentTypeSymbol;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
     private readonly Dictionary<(TypeSyntax, Scope, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
@@ -290,6 +291,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         if (syntax is null)
             return;
 
+        currentTypeSymbol = symbol;
+
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
         symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
@@ -345,6 +348,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private void ApplyImplicitStructBasesCore(SymbolHandle handle, string typeName, IReadOnlyList<TypeRef> existingBases, TypeDeclaration? syntax, Action<List<TypeRef>> setBaseTypes)
     {
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
+        bool isNever = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverH) && handle == neverH;
         bool isStruct = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH) && handle == structH;
         bool isArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayH) && handle == arrayH;
         bool isFixedArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrH) && handle == fixedArrH;
@@ -354,28 +358,13 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
         bool isUnit = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitH) && handle == unitH;
         bool isTuple = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleH) && handle == tupleH;
+        bool isPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH) && handle == ptrH;
+        bool isMutPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrH) && handle == mutPtrH;
+        bool isReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) && handle == refH;
+        bool isMutReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefH) && handle == mutRefH;
 
-        if (isValueType)
+        if (isValueType || isNever || isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isUnit || isTuple || isPointer || isMutPointer || isReference || isMutReference)
             return;
-
-        if (isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isUnit || isTuple)
-        {
-            if (valTypeH != default)
-            {
-                var valTypeRef = TypeRef.Resolved(valTypeH);
-                if (!existingBases.Any(b => b.Handle == valTypeH))
-                {
-                    var updated = new List<TypeRef>(existingBases) { valTypeRef };
-                    setBaseTypes(updated);
-                }
-            }
-            else
-            {
-                var span = syntax?.Name.GetSpan() ?? default;
-                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, $"{typeName} intrinsic declaration", KnownIntrinsics.ValueType, syntax?.GetSource());
-            }
-            return;
-        }
 
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
         if (structH != default)
@@ -514,6 +503,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     {
         if (syntax is null)
             return;
+
+        currentTypeSymbol = symbol;
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);

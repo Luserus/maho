@@ -323,9 +323,11 @@ internal sealed class DiagnosticsManager
     public void ReportExpectedBody(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0124", expected, found, span, context, source, unexpectedSpan);
 
-    /// <summary> Reports a parser recovery site where parameter syntax was required. </summary>
-    public void ReportExpectedParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
-        ReportExpected("MH0125", "a parameter", found, span, context, source, unexpectedSpan);
+    /// <summary> Reports that an alias variable was declared without an initializer. </summary>
+    public void ReportAliasMustBeInitialized(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0125", $"alias variable '{name}' must be initialized in its declaration", span, source)
+            .WithPrimaryLabel(span, "alias declaration requires an initializer", source)
+            .Report();
 
     /// <summary> Reports a parser recovery site where generic parameter syntax was required. </summary>
     public void ReportExpectedGenericParameter(TextSpan span, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>

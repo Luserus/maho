@@ -64,6 +64,5 @@ internal enum MatchingKeywordKind : byte
     This,
     Func,
     Delegate,
-    Ref,
     Mut
 }

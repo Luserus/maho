@@ -24,30 +24,46 @@ public sealed class MultipleSharedBaseTests
         [IntrinsicType("Metadata")]
         public struct Metadata<T>;
 
+        public interface Deref<T>
+        {
+            [OperatorFunction("Dereference")]
+            public func Deref(&this) -> &T;
+        }
+
         public interface Arrow<T>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow() -> ref T;
+            public func Arrow(&this) -> &T;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<T>
+        public struct Reference<T> : Arrow<T>, Deref<T>
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Arrow.Arrow() -> ref T;
+            public func Deref.Deref(&this) -> &T;
+
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *this;
+            }
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T>
+        public struct Pointer<T> : Arrow<T>, Deref<T>
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Arrow.Arrow() -> ref T;
+            public func Deref.Deref(&this) -> &T;
+
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *this;
+            }
         }
 
         [IntrinsicType("Str")]

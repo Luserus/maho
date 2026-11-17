@@ -23,6 +23,8 @@ public sealed class NeverTypeTests
         public struct nuint;
         [IntrinsicType("Unit")]
         public struct Unit;
+        [IntrinsicType("Never")]
+        public struct Never;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -79,19 +81,20 @@ public sealed class NeverTypeTests
     public void NeverType_Syntax_ParsesCorrectly()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            func Panic() -> !;
+            func Panic() -> Never;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
         var fn = Assert.IsType<TopLevelFunctionDeclaration>(Assert.Single(root.Members));
-        Assert.IsType<NeverTypeSyntax>(fn.Function.Signature.ReturnType);
+        var simple = Assert.IsType<SimpleType>(fn.Function.Signature.ReturnType);
+        Assert.Equal("Never", simple.Name.Value);
     }
 
     [Fact]
     public void NeverType_DivergingFunction_CompilesCleanly()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Panic() -> !
+            public func Panic() -> Never
             {
                 while (true)
                 {
@@ -106,7 +109,7 @@ public sealed class NeverTypeTests
     public void NeverType_AssignableToAnyTargetType()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Panic() -> !
+            public func Panic() -> Never
             {
                 while (true) {}
             }
@@ -141,7 +144,7 @@ public sealed class NeverTypeTests
     public void NeverType_FunctionReturningNever_CannotReturn_ReportsMH2006()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func BadPanic() -> !
+            public func BadPanic() -> Never
             {
                 return;
             }
@@ -155,7 +158,7 @@ public sealed class NeverTypeTests
     public void NeverType_CallMarksSubsequentCodeUnreachable()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Panic() -> !
+            public func Panic() -> Never
             {
                 while (true) {}
             }
@@ -167,8 +170,8 @@ public sealed class NeverTypeTests
             }
             """);
 
-        // Since Panic() returns !, the block terminates as Unreachable and doesn't fall through to exit.
-        // And since all paths diverge (calling Panic()), the function Test() must return !
+        // Since Panic() returns Never, the block terminates as Unreachable and doesn't fall through to exit.
+        // And since all paths diverge (calling Panic()), the function Test() must return Never
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2018");
     }
@@ -177,17 +180,30 @@ public sealed class NeverTypeTests
     public void NeverType_TestDeclaredNever_CallingPanic_CompilesCleanly()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Panic() -> !
+            public func Panic() -> Never
             {
                 while (true) {}
             }
 
-            public func Test() -> !
+            public func Test() -> Never
             {
                 Panic();
             }
             """);
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Fact]
+    public void NeverType_CannotAssignToNever_ReportsError()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public func Test(Never n)
+            {
+                n = 42;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
     }
 }

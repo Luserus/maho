@@ -32,7 +32,7 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
             [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void;
+            [IntrinsicType("Unit")] public struct void : ValType;
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -78,7 +78,7 @@ public sealed class ImplicitStructDerivingTests
             public struct Struct : ValType;
 
             [IntrinsicType("Unit")]
-            public struct void;
+            public struct void : ValType;
             """);
 
         Assert.False(compilation.HasErrors);

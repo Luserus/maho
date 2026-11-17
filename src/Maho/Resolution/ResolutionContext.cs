@@ -1419,10 +1419,6 @@ internal sealed class ResolutionContext
                 parts.Add(new SymbolPart(named.Expression.Identifier));
                 break;
 
-            case NeverTypeSyntax never:
-                parts.Add(new SymbolPart(never.ExclamationMark));
-                break;
-
             default:
                 throw new ArgumentOutOfRangeException(nameof(type), $"Unhandled type syntax: {type.GetType().FullName}");
         }

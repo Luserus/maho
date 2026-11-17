@@ -17,6 +17,8 @@ internal sealed partial class DeclarationResolutionPass
         if (symbol.Syntax is null)
             return;
 
+        currentTypeSymbol = null;
+
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
 
@@ -92,6 +94,8 @@ internal sealed partial class DeclarationResolutionPass
     {
         if (symbol.Syntax is null)
             return;
+
+        currentTypeSymbol = symbol.Parent is { } ph ? context.GetSymbol(ph) : null;
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
@@ -230,11 +234,14 @@ internal sealed partial class DeclarationResolutionPass
                 symbol.Type = symbol.Syntax.Declarator.ReceiverKind switch
                 {
                     ReceiverKind.Value => baseType,
-                    ReceiverKind.Alias => TypeRef.Alias(baseType, isMutable: false),
-                    ReceiverKind.MutAlias => TypeRef.Alias(baseType, isMutable: true),
-                    ReceiverKind.Reference => TypeRef.Reference(baseType),
-                    ReceiverKind.MutReference => TypeRef.Reference(baseType),
-                    ReceiverKind.Pointer => TypeRef.Pointer(baseType),
+                    ReceiverKind.Alias => TypeRef.Alias(baseType, isMutable: false, isUnsafe: false),
+                    ReceiverKind.MutAlias => TypeRef.Alias(baseType, isMutable: true, isUnsafe: false),
+                    ReceiverKind.UnsafeAlias => TypeRef.Alias(baseType, isMutable: false, isUnsafe: true),
+                    ReceiverKind.MutUnsafeAlias => TypeRef.Alias(baseType, isMutable: true, isUnsafe: true),
+                    ReceiverKind.Reference => TypeRef.Reference(baseType, isMutable: false),
+                    ReceiverKind.MutReference => TypeRef.Reference(baseType, isMutable: true),
+                    ReceiverKind.Pointer => TypeRef.Pointer(baseType, isMutable: false),
+                    ReceiverKind.MutPointer => TypeRef.Pointer(baseType, isMutable: true),
                     _ => baseType
                 };
                 return;
@@ -262,6 +269,8 @@ internal sealed partial class DeclarationResolutionPass
     {
         if (syntax is null)
             return;
+
+        currentTypeSymbol = (symbol as FieldSymbol)?.Parent is { } ph ? context.GetSymbol(ph) : null;
 
         if (!resolvedVariableAttributes.TryGetValue((syntax, symbol.EnclosingScope), out var attributeHandles))
         {
@@ -293,6 +302,21 @@ internal sealed partial class DeclarationResolutionPass
         bool isInferred = actualType.IsInferred;
 
         var declarator = syntax.Declarator;
+        if (actualType.SpecialType is AliasSemanticType aliasSym)
+        {
+            if (syntax.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Mut))
+            {
+                actualType = TypeRef.Alias(aliasSym.TargetType, isMutable: true, isUnsafe: aliasSym.IsUnsafe);
+                setType(actualType);
+            }
+
+            if (declarator.Initializer?.Initializer is null)
+            {
+                var nameText = declarator.Identifier is SimpleName sn ? sn.Name.Value : symbol.Name.Text;
+                context.Diagnostics.ReportAliasMustBeInitialized(declarator.Identifier.GetSpan() ?? default, nameText, syntax.GetSource());
+            }
+        }
+
         if (declarator.Identifier is TupleName dTupleName)
         {
             if (dTupleName.Elements.Any(e => context.GetScopedSymbolName(e).Last == symbol.Name))
@@ -314,6 +338,8 @@ internal sealed partial class DeclarationResolutionPass
     {
         if (symbol.Syntax is null)
             return;
+
+        currentTypeSymbol = symbol.Parent is { } ph ? context.GetSymbol(ph) : null;
 
         symbol.Attributes = ResolveAttributes(symbol.Syntax.Attributes, symbol.EnclosingScope);
         symbol.Type = ResolveType(symbol.Syntax.Type, symbol.EnclosingScope);
@@ -376,6 +402,15 @@ internal sealed partial class DeclarationResolutionPass
         }
 
         var declarator = syntax.Declarator;
+        if (resolvedType.SpecialType is AliasSemanticType aliasSym)
+        {
+            if (declarator.Initializer?.Initializer is null)
+            {
+                var nameText = declarator.Identifier is SimpleName sn ? sn.Name.Value : declarator.Identifier.ToString() ?? "";
+                context.Diagnostics.ReportAliasMustBeInitialized(declarator.Identifier.GetSpan() ?? default, nameText, syntax.GetSource());
+            }
+        }
+
         if (declarator.Initializer?.Initializer is { } initExpr && resolvedDeclarators.Add(declarator))
         {
             CheckInferredInitializer(initExpr, isInferred);

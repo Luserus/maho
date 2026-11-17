@@ -574,10 +574,10 @@ internal sealed partial class IntrinsicDiscoveryPass
 
     private bool IsReferenceType(TypeSyntax type, Scope scope)
     {
-        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier)
+        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier or SpanTypeModifier)
             return true;
 
-        if (type is PrefixModifiedType prefix && prefix.Modifier is SpanTypeModifier)
+        if (type is PrefixModifiedType prefix && prefix.Modifier is SafeAliasTypeModifier or UnsafeAliasTypeModifier)
             return true;
 
         if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle))
@@ -587,7 +587,14 @@ internal sealed partial class IntrinsicDiscoveryPass
                 return true;
         }
 
-        if (type is GenericType gen && gen.Name.Value.AsSpan().SequenceEqual(KnownIntrinsics.Reference.AsSpan()))
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefHandle))
+        {
+            var resolved = ResolveTypeSymbol(type, scope);
+            if (resolved == mutRefHandle)
+                return true;
+        }
+
+        if (type is GenericType gen && (gen.Name.Value.AsSpan().SequenceEqual(KnownIntrinsics.Reference.AsSpan()) || gen.Name.Value.AsSpan().SequenceEqual(KnownIntrinsics.MutableReference.AsSpan())))
             return true;
 
         return false;

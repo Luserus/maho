@@ -703,8 +703,8 @@ internal sealed partial class Parser
 
             // Check for explicit receiver parameter 'this'
             if (CurrentToken.MatchingKind is MatchingKeywordKind.This ||
-                (CurrentToken.MatchingKind is MatchingKeywordKind.Ref && Peek().MatchingKind is MatchingKeywordKind.This) ||
-                (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && (Peek().MatchingKind is MatchingKeywordKind.This || (Peek(1).MatchingKind is MatchingKeywordKind.Ref && Peek(2).MatchingKind is MatchingKeywordKind.This))))
+                (CurrentToken.Kind is TokenKind.Ampersand && Peek().MatchingKind is MatchingKeywordKind.This) ||
+                (CurrentToken.Kind is TokenKind.Asterisk && Peek().MatchingKind is MatchingKeywordKind.This))
             {
                 if (paramIndex > 0)
                 {
@@ -712,52 +712,60 @@ internal sealed partial class Parser
                 }
 
                 var paramModifiers = new List<Token>(modifiers);
-                bool isMut = false;
-                bool isRef = false;
-
-                if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut)
+                bool hasMutModifier = false;
+                for (int m = 0; m < paramModifiers.Count; m++)
                 {
-                    isMut = true;
-                    paramModifiers.Add(Consume());
-                }
-
-                if (CurrentToken.MatchingKind is MatchingKeywordKind.Ref)
-                {
-                    isRef = true;
-                    paramModifiers.Add(Consume());
-                }
-
-                Token thisToken = ExpectToken(TokenKind.Identifier, "'this'", "for receiver parameter");
-
-                bool isAmpersand = false;
-                bool isAsterisk = false;
-                if (CurrentToken.Kind is TokenKind.Ampersand)
-                {
-                    isAmpersand = true;
-                    paramModifiers.Add(Consume());
-                }
-                else if (CurrentToken.Kind is TokenKind.Asterisk)
-                {
-                    isAsterisk = true;
-                    paramModifiers.Add(Consume());
+                    if (paramModifiers[m].MatchingKind is MatchingKeywordKind.Mut)
+                    {
+                        hasMutModifier = true;
+                        break;
+                    }
                 }
 
                 ReceiverKind receiverKind;
-                if (isRef)
+                Token thisToken;
+
+                if (CurrentToken.Kind is TokenKind.Ampersand)
                 {
-                    receiverKind = isMut ? ReceiverKind.MutAlias : ReceiverKind.Alias;
+                    var ampToken = Consume();
+                    thisToken = ExpectToken(TokenKind.Identifier, "'this'", "for receiver parameter");
+                    receiverKind = hasMutModifier ? ReceiverKind.MutAlias : ReceiverKind.Alias;
                 }
-                else if (isAmpersand)
+                else if (CurrentToken.Kind is TokenKind.Asterisk)
                 {
-                    receiverKind = isMut ? ReceiverKind.MutReference : ReceiverKind.Reference;
-                }
-                else if (isAsterisk)
-                {
-                    receiverKind = ReceiverKind.Pointer;
+                    var starToken = Consume();
+                    thisToken = ExpectToken(TokenKind.Identifier, "'this'", "for receiver parameter");
+                    receiverKind = hasMutModifier ? ReceiverKind.MutUnsafeAlias : ReceiverKind.UnsafeAlias;
                 }
                 else
                 {
-                    receiverKind = ReceiverKind.Value;
+                    thisToken = ExpectToken(TokenKind.Identifier, "'this'", "for receiver parameter");
+                    if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Ampersand)
+                    {
+                        var mutToken = Consume();
+                        var ampToken = Consume();
+                        receiverKind = ReceiverKind.MutReference;
+                    }
+                    else if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Asterisk)
+                    {
+                        var mutToken = Consume();
+                        var starToken = Consume();
+                        receiverKind = ReceiverKind.MutPointer;
+                    }
+                    else if (CurrentToken.Kind is TokenKind.Ampersand)
+                    {
+                        var ampToken = Consume();
+                        receiverKind = ReceiverKind.Reference;
+                    }
+                    else if (CurrentToken.Kind is TokenKind.Asterisk)
+                    {
+                        var starToken = Consume();
+                        receiverKind = ReceiverKind.Pointer;
+                    }
+                    else
+                    {
+                        receiverKind = ReceiverKind.Value;
+                    }
                 }
 
                 var syntheticType = new SimpleType(new Token(text, thisToken.Span, TokenKind.Identifier, [], [], MatchingKeywordKind.This, "this"));
@@ -1023,9 +1031,25 @@ internal sealed partial class Parser
         List<PrefixTypeModifier> prefixModifiers = [];
         while (true)
         {
-            if (CurrentToken.Kind is TokenKind.Ampersand)
+            if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Ampersand)
             {
-                prefixModifiers.Add(new SpanTypeModifier(Consume()));
+                var mut = Consume();
+                var amp = Consume();
+                prefixModifiers.Add(new SafeAliasTypeModifier(amp, mut));
+            }
+            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Asterisk)
+            {
+                var mut = Consume();
+                var star = Consume();
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(star, mut));
+            }
+            else if (CurrentToken.Kind is TokenKind.Ampersand)
+            {
+                prefixModifiers.Add(new SafeAliasTypeModifier(Consume()));
+            }
+            else if (CurrentToken.Kind is TokenKind.Asterisk)
+            {
+                prefixModifiers.Add(new UnsafeAliasTypeModifier(Consume()));
             }
             else if (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged)
             {
@@ -1034,16 +1058,6 @@ internal sealed partial class Parser
             else if (CurrentToken.MatchingKind is MatchingKeywordKind.Dyn)
             {
                 prefixModifiers.Add(new DynTypeModifier(Consume()));
-            }
-            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().MatchingKind is MatchingKeywordKind.Ref)
-            {
-                var mutToken = Consume();
-                var refToken = Consume();
-                prefixModifiers.Add(new RefTypeModifier(mutToken, refToken));
-            }
-            else if (CurrentToken.MatchingKind is MatchingKeywordKind.Ref)
-            {
-                prefixModifiers.Add(new RefTypeModifier(null, Consume()));
             }
             else
             {
@@ -1059,6 +1073,7 @@ internal sealed partial class Parser
         }
 
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && (Peek().Kind is TokenKind.Ampersand || Peek().Kind is TokenKind.Asterisk)) ||
             (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
             type = ParseModifiedType(type);
 
@@ -1072,9 +1087,6 @@ internal sealed partial class Parser
     {
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseParenthesizedType();
-
-        if (CurrentToken.Kind is TokenKind.ExclamationMark)
-            return new NeverTypeSyntax(Consume());
 
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
@@ -1245,6 +1257,7 @@ internal sealed partial class Parser
         TypeSyntax type = baseType;
 
         while (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
+               (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && (Peek().Kind is TokenKind.Ampersand || Peek().Kind is TokenKind.Asterisk)) ||
                (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
         {
             PostfixTypeModifier modifier = CurrentToken.Kind switch
@@ -1254,6 +1267,8 @@ internal sealed partial class Parser
                 TokenKind.Asterisk => ParsePointerTypeModifier(),
                 TokenKind.Ampersand => ParseReferenceTypeModifier(),
                 TokenKind.Dot => ParseVariadicTypeModifier(),
+                _ when CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Ampersand => ParseMutReferenceTypeModifier(),
+                _ when CurrentToken.MatchingKind is MatchingKeywordKind.Mut && Peek().Kind is TokenKind.Asterisk => ParseMutPointerTypeModifier(),
                 _ => throw new InvalidOperationException()
             };
 
@@ -1275,6 +1290,13 @@ internal sealed partial class Parser
     {
         var openBracket = Consume();
 
+        if (CurrentToken.Kind is TokenKind.Ampersand && Peek().Kind is TokenKind.RightBracket)
+        {
+            var ampersand = Consume();
+            var closeBracket = Consume();
+            return new SpanTypeModifier(openBracket, ampersand, closeBracket);
+        }
+
         if (CurrentToken.Kind is not TokenKind.RightBracket)
         {
             var size = ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious);
@@ -1292,6 +1314,13 @@ internal sealed partial class Parser
         return new PointerTypeModifier(asterisk);
     }
 
+    private PointerTypeModifier ParseMutPointerTypeModifier()
+    {
+        var mutToken = Consume();
+        var asterisk = Consume();
+        return new PointerTypeModifier(asterisk, mutToken);
+    }
+
     private OptionalTypeModifier ParseOptionalTypeModifier()
     {
         var questionMark = Consume();
@@ -1302,6 +1331,13 @@ internal sealed partial class Parser
     {
         var ampersand = Consume();
         return new ReferenceTypeModifier(ampersand);
+    }
+
+    private ReferenceTypeModifier ParseMutReferenceTypeModifier()
+    {
+        var mutToken = Consume();
+        var ampersand = Consume();
+        return new ReferenceTypeModifier(ampersand, mutToken);
     }
 
     /// <summary> Parses a list of modifiers. </summary>

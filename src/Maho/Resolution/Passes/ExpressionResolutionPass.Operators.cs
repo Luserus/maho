@@ -290,12 +290,23 @@ internal sealed partial class ExpressionResolutionPass
         if (opKind == OperatorKind.None)
             return TypeRef.Error;
 
+        if (operand.SpecialType is AliasSemanticType operandAlias)
+            operand = operandAlias.TargetType;
+
         // 1. Built-in language pointer/reference operations
         if (opKind == OperatorKind.AddressOf)
+        {
+            if (TryResolveUnaryOverload(OperatorKind.AddressOf, operand, unary, out var addrResult))
+                return addrResult;
+
             return TypeRef.Reference(operand);
+        }
 
         if (opKind == OperatorKind.Dereference)
         {
+            if (TryResolveUnaryOverload(OperatorKind.Dereference, operand, unary, out var derefResult))
+                return derefResult;
+
             if (operand.SpecialType is ReferenceSemanticType refType)
                 return refType.ElementType;
             if (operand.SpecialType is PointerSemanticType ptrType)
@@ -403,7 +414,19 @@ internal sealed partial class ExpressionResolutionPass
         var opHandle = operand.Handle;
         if (opHandle is null)
         {
-            if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
+            if (operand.SpecialType is ReferenceSemanticType refSem)
+            {
+                string req = refSem.IsMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var refH))
+                    opHandle = refH;
+            }
+            else if (operand.SpecialType is PointerSemanticType ptrSem)
+            {
+                string req = ptrSem.IsMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var ptrH))
+                    opHandle = ptrH;
+            }
+            else if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
                 opHandle = hOpt;
             else if (operand.Kind == TypeRefKind.FixedArray && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
                 opHandle = hFix;
@@ -422,11 +445,22 @@ internal sealed partial class ExpressionResolutionPass
         if (operandTypeSym is null)
             return false;
 
-        // Build generic parameter mapping if operand is generic (e.g. Optional<T>)
+        // Build generic parameter mapping if operand is generic (e.g. Optional<T>, Reference<T>, Pointer<T>)
         Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
-        if (operand.SpecialType is OptionalSemanticType optSem && operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
+        if (operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
         {
-            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
+            if (operand.SpecialType is OptionalSemanticType optSem)
+                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
+            else if (operand.SpecialType is ReferenceSemanticType refSem)
+                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = refSem.ElementType };
+            else if (operand.SpecialType is PointerSemanticType ptrSem)
+                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = ptrSem.ElementType };
+        }
+        else if (operand.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef>();
+            for (int i = 0; i < tsGen.GenericParameters.Count; i++)
+                typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
         }
 
         var scope = GetOwnedScope(operandTypeSym);
@@ -475,24 +509,54 @@ internal sealed partial class ExpressionResolutionPass
     private TypeRef ResolveAssignment(AssignmentExpression assignment, Scope scope, SymbolHandle containingFunction)
     {
         var lhs = ResolveExpression(assignment.LhsExpression, scope, containingFunction);
-        if (!lhs.IsInferred && !lhs.IsUnresolved && !lhs.IsError && !lhs.IsLiteral)
-            expectedExpressionTypes[assignment.RhsExpression] = lhs;
+        var targetType = lhs;
+        if (lhs.SpecialType is AliasSemanticType lhsAlias)
+        {
+            if (!lhsAlias.IsMutable)
+            {
+                context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
+                return TypeRef.Error;
+            }
+            targetType = lhsAlias.TargetType;
+        }
+
+        if (!targetType.IsInferred && !targetType.IsUnresolved && !targetType.IsError && !targetType.IsLiteral)
+            expectedExpressionTypes[assignment.RhsExpression] = targetType;
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
         // 1. Verify that the LHS expression denotes a valid writable L-value
-        if (!IsLValue(assignment.LhsExpression))
+        if (!IsLValue(assignment.LhsExpression, lhs))
         {
             context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
             return TypeRef.Error;
+        }
+
+        // Cannot assign to Never
+        if (targetType.IsNever(context))
+        {
+            context.Diagnostics.ReportAssignmentTypeMismatch(
+                assignment.EqualsOperator.Span,
+                rhs.ToQualifiedString(context),
+                targetType.ToQualifiedString(context),
+                rhsLabel: rhs.ToLabelString(context, scope),
+                lhsLabel: targetType.ToLabelString(context, scope),
+                source: assignment.GetSource());
+            return TypeRef.Error;
+        }
+
+        // Bottom type semantics: if rhs is Never, it is unconditionally assignable to any target
+        if (rhs.IsNever(context))
+        {
+            return targetType;
         }
 
         var opToken = assignment.EqualsOperator.Kind;
         if (opToken == TokenKind.Equals)
         {
             // 2a. If LHS is an unconstrained literal (e.g. var x = 100; x = Some();), collapse LHS to RHS type if compatible
-            if (lhs.IsLiteral && !rhs.IsLiteral && !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred)
+            if (targetType.IsLiteral && !rhs.IsLiteral && !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred)
             {
-                if (IsLiteralCompatibleWith(lhs, rhs))
+                if (IsLiteralCompatibleWith(targetType, rhs))
                 {
                     var collapsed = CollapseExpression(assignment.LhsExpression, rhs, scope, containingFunction);
                     return collapsed.IsError ? TypeRef.Error : rhs;
@@ -500,20 +564,20 @@ internal sealed partial class ExpressionResolutionPass
             }
 
             // 2b. If RHS is an unconstrained literal, eagerly collapse it to the target LHS type
-            if (rhs.IsLiteral && !lhs.IsLiteral && !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred)
+            if (rhs.IsLiteral && !targetType.IsLiteral && !targetType.IsError && !targetType.IsUnresolved && !targetType.IsInferred)
             {
-                var collapsed = CollapseExpression(assignment.RhsExpression, lhs, scope, containingFunction);
-                return collapsed.IsError ? TypeRef.Error : lhs;
+                var collapsed = CollapseExpression(assignment.RhsExpression, targetType, scope, containingFunction);
+                return collapsed.IsError ? TypeRef.Error : targetType;
             }
 
             // 3. Verify type compatibility: assignability or registered implicit conversion operator
-            if (!lhs.IsAssignableFrom(rhs, context) &&
-                !TryResolveImplicitCast(rhs, lhs, out _) &&
-                !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred &&
+            if (!targetType.IsAssignableFrom(rhs, context) &&
+                !TryResolveImplicitCast(rhs, targetType, out _) &&
+                !targetType.IsError && !targetType.IsUnresolved && !targetType.IsInferred &&
                 !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred &&
                 assignment.RhsExpression is not CollectionExpression)
             {
-                if (TypeRef.IsNonContiguousSplitBase(lhs, rhs, context, out var splitBaseName))
+                if (TypeRef.IsNonContiguousSplitBase(targetType, rhs, context, out var splitBaseName))
                 {
                     context.Diagnostics.ReportNonContiguousBaseConversion(
                         assignment.RhsExpression.GetSpan() ?? assignment.EqualsOperator.Span,
@@ -525,14 +589,14 @@ internal sealed partial class ExpressionResolutionPass
                     context.Diagnostics.ReportAssignmentTypeMismatch(
                         assignment.EqualsOperator.Span,
                         rhs.ToQualifiedString(context),
-                        lhs.ToQualifiedString(context),
+                        targetType.ToQualifiedString(context),
                         rhsLabel: rhs.ToLabelString(context, scope),
-                        lhsLabel: lhs.ToLabelString(context, scope),
+                        lhsLabel: targetType.ToLabelString(context, scope),
                         source: assignment.GetSource());
                 }
             }
 
-            return lhs;
+            return targetType;
         }
 
         // Compound assignments (+=, -=, etc.) return LHS type
@@ -550,17 +614,21 @@ internal sealed partial class ExpressionResolutionPass
 
     /// <summary>
     /// Determines whether the given expression denotes a valid L-value (assignable storage location).
-    /// In Maho, valid L-values are named expressions, index expressions, member accesses, and pointer dereferences.
+    /// In Maho, any expression returning a mutable alias (<c>mut &amp;T</c> or <c>mut *T</c>) is a valid L-value,
+    /// as well as syntactic named expressions, index expressions, member accesses, and pointer dereferences.
     /// </summary>
     /// <param name="expr">The AST expression node to inspect.</param>
+    /// <param name="resolvedType">The resolved semantic type of the expression.</param>
     /// <returns><see langword="true"/> if the expression is an L-value; otherwise <see langword="false"/>.</returns>
-    private static bool IsLValue(Expression expr) => expr switch
-    {
-        NamedExpression => true,
-        IndexExpression => true,
-        MemberAccessExpression => true,
-        UnaryExpression u when u.OperatorToken.Kind == TokenKind.Asterisk => true,
-        _ => false
-    };
+    private static bool IsLValue(Expression expr, TypeRef resolvedType) =>
+        (resolvedType.SpecialType is AliasSemanticType { IsMutable: true }) ||
+        expr switch
+        {
+            NamedExpression => true,
+            IndexExpression => true,
+            MemberAccessExpression => true,
+            UnaryExpression u when u.OperatorToken.Kind == TokenKind.Asterisk => true,
+            _ => false
+        };
 
 }

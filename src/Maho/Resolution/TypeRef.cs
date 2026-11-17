@@ -39,7 +39,20 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public bool IsInferred => Kind == TypeRefKind.Inferred;
 
-    public bool IsNever => Kind == TypeRefKind.Never;
+    public bool IsNever(ResolutionContext? context = null)
+    {
+        if (Kind == TypeRefKind.Never)
+            return true;
+
+        if (context is not null && Handle is { } h)
+        {
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverHandle) &&
+                context.UnwrapAlias(h) == neverHandle)
+                return true;
+        }
+
+        return false;
+    }
 
     public bool IsLiteral => Kind == TypeRefKind.Literal;
     public CompileTimeLiteralType? AsLiteral => SpecialType as CompileTimeLiteralType;
@@ -70,14 +83,14 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Literal(CompileTimeLiteralKind kind, string rawText) =>
         Literal(new CompileTimeLiteralType(kind, rawText));
 
-    public static TypeRef Pointer(TypeRef element) =>
-        new TypeRef(TypeRefKind.Pointer, null, new PointerSemanticType(element));
+    public static TypeRef Pointer(TypeRef element, bool isMutable = false) =>
+        new TypeRef(TypeRefKind.Pointer, null, new PointerSemanticType(element, isMutable));
 
-    public static TypeRef Reference(TypeRef element) =>
-        new TypeRef(TypeRefKind.Reference, null, new ReferenceSemanticType(element));
+    public static TypeRef Reference(TypeRef element, bool isMutable = false) =>
+        new TypeRef(TypeRefKind.Reference, null, new ReferenceSemanticType(element, isMutable));
 
-    public static TypeRef Alias(TypeRef element, bool isMutable = false) =>
-        new TypeRef(TypeRefKind.Alias, null, new AliasSemanticType(element, isMutable));
+    public static TypeRef Alias(TypeRef element, bool isMutable = false, bool isUnsafe = false) =>
+        new TypeRef(TypeRefKind.Alias, null, new AliasSemanticType(element, isMutable, isUnsafe));
 
     public static TypeRef Array(TypeRef element) =>
         new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element));
@@ -196,11 +209,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (Equals(source))
             return true;
 
-        if (source.IsNever)
+        if (source.IsNever(context))
             return true;
 
-        if (IsNever)
-            return source.IsNever;
+        if (IsNever(context))
+            return source.IsNever(context);
 
         if (SpecialType is UnionSemanticType targetUnion)
         {
@@ -480,41 +493,25 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     private static bool IsIntegerTypeSymbol(SymbolHandle handle, ResolutionContext context)
     {
         handle = context.UnwrapAlias(handle);
-        if (context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName))
-            return KnownIntrinsics.IsIntegerType(intrinsicName);
-
-        var sym = context.GetSymbol(handle);
-        return sym is not null && KnownIntrinsics.IsIntegerType(sym.Name.Text);
+        return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && KnownIntrinsics.IsIntegerType(intrinsicName);
     }
 
     private static bool IsFloatTypeSymbol(SymbolHandle handle, ResolutionContext context)
     {
         handle = context.UnwrapAlias(handle);
-        if (context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName))
-            return KnownIntrinsics.IsFloatType(intrinsicName);
-
-        var sym = context.GetSymbol(handle);
-        return sym is not null && KnownIntrinsics.IsFloatType(sym.Name.Text);
+        return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && KnownIntrinsics.IsFloatType(intrinsicName);
     }
 
     private static bool IsStringTypeSymbol(SymbolHandle handle, ResolutionContext context)
     {
         handle = context.UnwrapAlias(handle);
-        if (context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName))
-            return intrinsicName == KnownIntrinsics.Str;
-
-        var sym = context.GetSymbol(handle);
-        return sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Str, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("string", StringComparison.OrdinalIgnoreCase));
+        return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && intrinsicName == KnownIntrinsics.Str;
     }
 
     private static bool IsCharTypeSymbol(SymbolHandle handle, ResolutionContext context)
     {
         handle = context.UnwrapAlias(handle);
-        if (context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName))
-            return intrinsicName == KnownIntrinsics.Char;
-
-        var sym = context.GetSymbol(handle);
-        return sym is not null && (sym.Name.Text.Equals(KnownIntrinsics.Char, StringComparison.OrdinalIgnoreCase) || sym.Name.Text.Equals("char", StringComparison.OrdinalIgnoreCase));
+        return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && intrinsicName == KnownIntrinsics.Char;
     }
 
     internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
@@ -606,13 +603,13 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return Union([.. u.Variants.Select(v => v.Substitute(typeArgs))], u.IsUntagged);
 
         if (SpecialType is PointerSemanticType p)
-            return Pointer(p.ElementType.Substitute(typeArgs));
+            return Pointer(p.ElementType.Substitute(typeArgs), p.IsMutable);
 
         if (SpecialType is ReferenceSemanticType r)
-            return Reference(r.ElementType.Substitute(typeArgs));
+            return Reference(r.ElementType.Substitute(typeArgs), r.IsMutable);
 
         if (SpecialType is AliasSemanticType al)
-            return Alias(al.TargetType.Substitute(typeArgs), al.IsMutable);
+            return Alias(al.TargetType.Substitute(typeArgs), al.IsMutable, al.IsUnsafe);
 
         if (SpecialType is ArraySemanticType a)
             return Array(a.ElementType.Substitute(typeArgs));

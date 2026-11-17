@@ -162,7 +162,7 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                                    MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged;
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged or MatchingKeywordKind.Mut;
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
@@ -182,7 +182,7 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Null and not MatchingKeywordKind.This
         and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
         and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
-        and not MatchingKeywordKind.Ref and not MatchingKeywordKind.Mut;
+        and not MatchingKeywordKind.Mut;
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
