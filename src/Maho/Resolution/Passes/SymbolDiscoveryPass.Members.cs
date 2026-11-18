@@ -20,8 +20,15 @@ internal sealed partial class SymbolDiscoveryPass
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
         bool hasReceiver = declaration.Signature.Parameters.Count > 0 && declaration.Signature.Parameters[0].Declarator.IsReceiver;
-        if (hasReceiver)
+        bool isLegacyImplicitCallable = IsLegacyImplicitCallable(declaration, containingType, symbol.Flags.HasFlag(FunctionFlags.Static));
+        if (hasReceiver || isLegacyImplicitCallable)
             symbol.Flags &= ~FunctionFlags.Static;
+        else
+            // A member without an explicit first `this` parameter cannot bind instance storage.
+            // It is static by semantic shape; the `static` modifier remains accepted but optional.
+            // Callable is retained as a temporary compatibility exception because its existing
+            // operator contract uses an implicit receiver spelling across the standard library.
+            symbol.Flags |= FunctionFlags.Static;
 
         if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
@@ -38,6 +45,26 @@ internal sealed partial class SymbolDiscoveryPass
 
         symbol.Parameters = DiscoverParameters(declaration.Signature, functionScope, handle);
         ResolveFunctionBody(declaration.Body, functionScope, handle, handle);
+    }
+
+    /// <summary>
+    /// Identifies the pre-receiver-syntax spelling of the Callable operator, whose omitted receiver
+    /// still means instance dispatch until the standard library is migrated to explicit <c>&amp;this</c>.
+    /// </summary>
+    /// <remarks>
+    /// This narrow compatibility bridge is intentionally syntax-local. All ordinary receiverless
+    /// members, including static lifecycle operators such as Move, are inferred static.
+    /// </remarks>
+    private bool IsLegacyImplicitCallable(FunctionDeclaration declaration, SymbolHandle containingType, bool explicitlyStatic)
+    {
+        // The Callable interface itself predates explicit receiver spelling.
+        if (context.GetSymbol(containingType)?.Name.Text == "Callable")
+            return true;
+
+        // Existing explicit-interface instance implementations omit `this` as well. Preserve that
+        // contract only when the implementation did not explicitly request static dispatch.
+        return !explicitlyStatic && declaration.Signature.Identifier is QualifiedName qualified &&
+               qualified.Parts.Count >= 2 && ResolutionContext.GetSymbolName(qualified.Parts[0]).Last.Text == "Callable";
     }
 
     private LocalFunctionSymbol ResolveLocalFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, SymbolHandle? containingMethod)

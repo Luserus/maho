@@ -80,13 +80,13 @@ public sealed class OptionalAndPostfixOperatorTests
         public interface Unwrap<TReturn>
         {
             [OperatorFunction("Unwrap")]
-            public func Unwrap() -> TReturn;
+            public func Unwrap(&this) -> TReturn;
         }
 
         public interface Try<TReturn, TFail>
         {
             [OperatorFunction("Try")]
-            public func Try() -> (TReturn | TFail);
+            public func Try(&this) -> (TReturn | TFail);
         }
 
         public interface Implicit<TFrom, TTo>
@@ -102,10 +102,10 @@ public sealed class OptionalAndPostfixOperatorTests
             None,
 
             [IntrinsicFunction("Optional.Unwrap")]
-            public func Unwrap.Unwrap() -> T;
+            public func Unwrap.Unwrap(&this) -> T;
 
             [IntrinsicFunction("Optional.Try")]
-            public func Try.Try() -> (T | Optional<T>);
+            public func Try.Try(&this) -> (T | Optional<T>);
 
             [IntrinsicFunction("Optional.Implicit")]
             public static func Implicit.Implicit(T from) -> Optional<T>;

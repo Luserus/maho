@@ -28,7 +28,8 @@ internal sealed class Resolver
         new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass(),
         new ExpressionResolutionPass(),
-        new ControlFlowAnalysisPass()
+        new ControlFlowAnalysisPass(),
+        new LifetimeAnalysisPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();

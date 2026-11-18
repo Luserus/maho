@@ -114,7 +114,7 @@ public sealed partial class ExpressionResolutionTests
             {
                 public literal int() { Concrete res; return res; }
                 public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
-                public func Abs() -> Concrete { return this; }
+                public func Abs(&this) -> Concrete { return this; }
             }
 
             public class Host
@@ -370,14 +370,14 @@ public sealed partial class ExpressionResolutionTests
             public interface Callable
             {
                 [OperatorFunction("Callable")]
-                public func Call(int32 x, int32 y) -> int32;
+                public func Call(&this, int32 x, int32 y) -> int32;
             }
 
             public struct Multiplier : Callable
             {
                 public int32 Factor;
 
-                public func Callable.Call(int32 x, int32 y) -> int32
+                public func Callable.Call(&this, int32 x, int32 y) -> int32
                 {
                     return x;
                 }

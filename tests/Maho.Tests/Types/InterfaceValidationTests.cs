@@ -194,7 +194,7 @@ public sealed class InterfaceValidationTests
 
             public struct InstanceStruct : IFoo
             {
-                public func Bar()
+                public func Bar(&this)
                 {
                 }
             }

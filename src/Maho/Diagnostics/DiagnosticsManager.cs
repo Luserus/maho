@@ -202,6 +202,52 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, $"variable '{name}' requires an explicit type or a typed initializer", source)
             .Report();
 
+    /// <summary> Reports a use after an implicit move consumed a value. </summary>
+    public void ReportUseAfterMove(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0400", $"use of moved value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' was moved and is no longer initialized", source)
+            .WithHelp("assign a new value before using it, or use a Copy type")
+            .Report();
+
+    /// <summary> Reports a read, move, or borrow that is not definitely initialized on all paths. </summary>
+    public void ReportUseOfPossiblyUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0401", $"use of possibly uninitialized value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' is not initialized on every control-flow path", source)
+            .Report();
+
+    /// <summary> Reports an operation that conflicts with a live safe borrow. </summary>
+    public void ReportBorrowConflict(
+        TextSpan useSpan,
+        string operation,
+        string name,
+        TextSpan borrowSpan,
+        SourceText? useSource = null,
+        SourceText? borrowSource = null) =>
+        BuildError("MH0402", $"cannot {operation} '{name}' because it is borrowed", useSpan, useSource)
+            .WithPrimaryLabel(useSpan, $"cannot {operation} while borrowed", useSource)
+            .WithSecondaryLabel(borrowSpan, "borrowed here", borrowSource)
+            .Report();
+
+    /// <summary>Reports a safe borrow that would outlive the local storage it references.</summary>
+    public void ReportBorrowEscapesLocal(
+        TextSpan returnSpan,
+        string name,
+        TextSpan localSpan,
+        SourceText? returnSource = null,
+        SourceText? localSource = null) =>
+        BuildError("MH0403", $"cannot return a reference to local value '{name}'", returnSpan, returnSource)
+            .WithPrimaryLabel(returnSpan, "borrow escapes this function", returnSource)
+            .WithSecondaryLabel(localSpan, $"'{name}' is local to this function", localSource)
+            .WithHelp("return a borrow of a parameter or static/global storage instead")
+            .Report();
+
+    /// <summary>Reports an attempted implicit copy of a move-only referent through a safe alias/reference.</summary>
+    public void ReportCannotCopyMoveOnlyAlias(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0404", $"cannot copy move-only value '{name}' through a safe alias or reference", span, source)
+            .WithPrimaryLabel(span, "this assignment requires Copy semantics", source)
+            .WithHelp("use a Copy type, or redesign the API to transfer ownership from an owned value")
+            .Report();
+
     /// <summary> Reports assignment to a non-lvalue expression. </summary>
     public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
         BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Maho.Diagnostics;
+using Maho.Resolution.Ownership;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -122,6 +123,7 @@ internal sealed class ResolutionContext
     private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
     private readonly Dictionary<Expression, TypeRef> expressionTypes = [];
     private readonly Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> controlFlowGraphs = [];
+    private readonly Dictionary<SymbolHandle, OwnershipFacts> ownershipFacts = [];
     private readonly Dictionary<string, Dictionary<SyntaxNode, SymbolHandle>> treeNodeSymbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<Expression, TypeRef>> treeExpressionTypes = new(StringComparer.OrdinalIgnoreCase);
 
@@ -152,6 +154,14 @@ internal sealed class ResolutionContext
         controlFlowGraphs.TryGetValue(handle, out cfg);
 
     public IReadOnlyDictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs => controlFlowGraphs;
+
+    /// <summary> Gets lowered ownership bodies and their fixed-point initialization facts. </summary>
+    public IReadOnlyDictionary<SymbolHandle, OwnershipFacts> OwnershipFacts => ownershipFacts;
+
+    public void SetOwnershipFacts(SymbolHandle handle, OwnershipFacts facts) => ownershipFacts[handle] = facts;
+
+    public bool TryGetOwnershipFacts(SymbolHandle handle, out OwnershipFacts? facts) =>
+        ownershipFacts.TryGetValue(handle, out facts);
 
     public void RegisterHygiene(SyntaxNode node, HygieneId hygiene) => nodeHygiene[node] = hygiene;
 

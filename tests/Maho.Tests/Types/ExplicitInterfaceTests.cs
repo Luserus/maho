@@ -121,13 +121,13 @@ public class ExplicitInterfaceTests
             public interface Ctor<T>
             {
                 [OperatorFunction("Constructor")]
-                public func Construct() -> Unit;
+                public func Construct(&this) -> Unit;
             }
 
             public interface Dtor<T>
             {
                 [OperatorFunction("Destructor")]
-                public func Destruct() -> Unit;
+                public func Destruct(&this) -> Unit;
             }
             """);
 
@@ -182,7 +182,7 @@ public class ExplicitInterfaceTests
             public interface Deref<TTarget>
             {
                 [OperatorFunction("Dereference")]
-                public func Deref() -> MyRef<TTarget>;
+                public func Deref(&this) -> MyRef<TTarget>;
             }
             """);
 
@@ -426,19 +426,19 @@ public class ExplicitInterfaceTests
             public interface Mut<T>
             {
                 [OperatorFunction("PrefixIncrement")]
-                public func Inc() -> int32;
+                public func Inc(&this) -> int32;
 
                 [OperatorFunction("AdditionAssignment")]
-                public func AddAssign(int32 rhs) -> void;
+                public func AddAssign(&this, int32 rhs) -> void;
             }
 
             public interface Idx<T, TIdx>
             {
                 [OperatorFunction("IndexerGetter")]
-                public func Get(int32 index) -> int32;
+                public func Get(&this, int32 index) -> int32;
 
                 [OperatorFunction("IndexerSetter")]
-                public func Set(int32 val, int32 index) -> void;
+                public func Set(&this, int32 val, int32 index) -> void;
             }
 
             public interface Cast<TFrom, TTo>

@@ -96,7 +96,7 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> CustomTarget;
+                public func Invoke(&this) -> CustomTarget;
             }
 
             public struct CustomTarget : ValType, MyCallable
@@ -107,7 +107,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke() -> CustomTarget
+                public func MyCallable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }
@@ -130,7 +130,7 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> CustomTarget;
+                public func Invoke(&this) -> CustomTarget;
             }
 
             public struct CustomTarget : ValType, MyCallable
@@ -147,7 +147,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke() -> CustomTarget
+                public func MyCallable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }

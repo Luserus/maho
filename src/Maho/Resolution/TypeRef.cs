@@ -270,6 +270,13 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             }
         }
 
+        // A safe reference is an access path to its element. When the destination is an owned
+        // value (rather than another reference/pointer, handled above), assignment materializes
+        // that element under Copy semantics. Ownership lowering diagnoses a move-only element
+        // reached through this boundary instead of silently moving it.
+        if (source.SpecialType is ReferenceSemanticType sourceReference)
+            return IsAssignableFrom(sourceReference.ElementType, context);
+
         if (SpecialType is DelegateSemanticType targetDel)
         {
             if (source.SpecialType is FunctionSemanticType srcFn)

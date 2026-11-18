@@ -38,6 +38,8 @@ The root [`README.md`](../README.md) is still the right place for build, run, an
   [`syntax-statements.md`](syntax-statements.md)
 - You want the current semantic model and resolution pipeline:
   [`compiler-library.md`](compiler-library.md)
+- You want the ownership IR, implicit move model, or staged borrow analysis:
+  [`lifetime-analysis.md`](lifetime-analysis.md)
 
 ## Current pipeline
 

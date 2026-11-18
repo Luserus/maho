@@ -272,31 +272,31 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Ctor<TArgs...>
             {
                 [OperatorFunction("Constructor")]
-                public func Construct(TArgs... args) -> void;
+                public func Construct(&this, TArgs... args) -> void;
             }
 
             public interface Dtor
             {
                 [OperatorFunction("Destructor")]
-                public func Destroy() -> void;
+                public func Destroy(&this) -> void;
             }
 
             public interface Index<TIndex, TResult>
             {
                 [OperatorFunction("IndexerGetter")]
-                public func Get(TIndex index) -> TResult;
+                public func Get(&this, TIndex index) -> TResult;
             }
 
             public interface Deref<TResult>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow() -> TResult&;
+                public func Arrow(&this) -> TResult&;
             }
 
             public interface Assign<TRhs>
             {
                 [OperatorFunction("Assignment")]
-                public func Assign(TRhs value) -> void;
+                public func Assign(&this, TRhs value) -> void;
             }
             """);
 
@@ -343,7 +343,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadDeref
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow() -> void;
+                public func Arrow(&this) -> void;
             }
             """);
 
@@ -379,7 +379,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadIndex<TResult>
             {
                 [OperatorFunction("IndexerGetter")]
-                public func Get() -> TResult;
+                public func Get(&this) -> TResult;
             }
             """);
 
@@ -542,7 +542,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadNew<TTarget, TReturn>
             {
                 [OperatorFunction("New")]
-                public func New() -> TReturn;
+                public func New(&this) -> TReturn;
             }
             """);
         Assert.True(nonStatic.HasErrors);
@@ -650,7 +650,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Callable<TReturn, TArg>
             {
                 [OperatorFunction("Callable")]
-                public func Call(TArg arg) -> TReturn;
+                public func Call(&this, TArg arg) -> TReturn;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -670,7 +670,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Destructor
             {
                 [OperatorFunction("Destructor")]
-                public func Drop() -> void;
+                public func Drop(&this) -> void;
             }
 
             public interface Copy<T>
@@ -681,7 +681,7 @@ public sealed partial class IntrinsicDiscoveryTests
 
             public struct Resource : Destructor, Copy<Resource>
             {
-                public func Drop() -> void {}
+                public func Drop(&this) -> void {}
                 public static func Copy(Resource& dest, Resource& src) -> void {}
             }
             """);

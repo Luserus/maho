@@ -34,10 +34,19 @@ internal static class CompilerTestBed
         [IntrinsicType("Bool")]
         public struct bool;
 
+        public interface Deref<TReturn>
+        {
+            [OperatorFunction("Dereference")]
+            public func Deref(&this) -> TReturn;
+        }
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> : Deref<T&>
         {
             nuint raw;
+
+            [IntrinsicFunction("Reference.Deref()")]
+            public func Deref.Deref(&this) -> T&;
         }
 
         [IntrinsicType("Str")]
@@ -48,9 +57,12 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> : Deref<T&>
         {
             nuint addr;
+
+            [IntrinsicFunction("Pointer.Deref()")]
+            public func Deref.Deref(&this) -> T&;
         }
 
         [IntrinsicType("ValueType")]

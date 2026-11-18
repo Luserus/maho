@@ -161,12 +161,12 @@ public sealed class CollectionExpressionTests
             public interface ArrayCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> int32;
+                public func Invoke(&this) -> int32;
             }
 
             public struct CustomFixedArray : ValType, ArrayCallable
             {
-                public func ArrayCallable.Invoke() -> int32
+                public func ArrayCallable.Invoke(&this) -> int32
                 {
                     return 42;
                 }

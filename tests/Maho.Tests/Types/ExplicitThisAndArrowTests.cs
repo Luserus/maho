@@ -148,7 +148,8 @@ public sealed class ExplicitThisAndArrowTests
                 return this->y;
             }
 
-            public static func Create(Int32 xVal, Int32 yVal) -> Point
+            // No receiver means this is implicitly static; `static` is optional syntax.
+            public func Create(Int32 xVal, Int32 yVal) -> Point
             {
                 Point pt;
                 pt.x = xVal;
@@ -257,7 +258,7 @@ public sealed class ExplicitThisAndArrowTests
     }
 
     [Fact]
-    public void Static_Function_Without_This_Called_Via_Type_Succeeds()
+    public void Receiverless_Function_IsImplicitlyStatic_AndCalledViaType_Succeeds()
     {
         var source = Prelude + """
             public func Test() -> Point
