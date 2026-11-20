@@ -35,7 +35,7 @@ public sealed class InterfaceValidationTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -43,7 +43,7 @@ public sealed class InterfaceValidationTests
         {
             NUInt codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -52,7 +52,7 @@ public sealed class InterfaceValidationTests
             NUInt codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -189,7 +189,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public static func Bar();
+                public func Bar();
             }
 
             public struct InstanceStruct : IFoo
@@ -201,7 +201,7 @@ public sealed class InterfaceValidationTests
 
             public struct StaticStruct : IFoo
             {
-                public static func Bar()
+                public func Bar()
                 {
                 }
             }

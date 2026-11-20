@@ -55,7 +55,10 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0125` | `UninitializedAliasVariable` | Alias variable (`&T` or `*T`) must be initialized at its declaration site. |
 | `MH0126` | `ExpectedGenericParameter` | Generic parameter list expected generic parameter identifier. |
 | `MH0127` | `UnexpectedToken` | Token violates language grammar in current context. |
-| `MH0128` | `MissingToken` | Synthesized missing token inserted during error recovery. |
+| `MH0128` | `InvalidModifier` | Modifier is invalid for declaration item, or missing required modifier (e.g., globals require `static`, functions disallow `static`). |
+| `MH0129` | `ModifierOutOfOrder` | Modifier is out of canonical order on declaration item. |
+| `MH0130` | `DuplicateModifier` | Duplicate modifier specified on declaration. |
+| `MH0131` | `ConflictingModifiers` | Conflicting modifiers specified on declaration. |
 
 ### 2.3 Directive & File Structure (`MH0160` - `MH0189`)
 | Code | Name | Description |
@@ -99,6 +102,10 @@ These diagnostics represent system-level issues outside the program's source tex
 | `MH0502` | `UnresolvedIdentifier` | Variable, parameter, or member identifier not found in scope. |
 | `MH0503` | `AmbiguousIdentifier` | Identifier matches multiple visible symbols in scope. |
 | `MH0504` | `UnresolvedNamespace` | Namespace in `using` directive or qualified access not found. |
+| `MH0520` | `PrivateMemberInaccessible` | Private member cannot be accessed outside its declaring type. |
+| `MH0521` | `ProtectedMemberInaccessible` | Protected member cannot be accessed outside declaring or derived types. |
+| `MH0522` | `InternalMemberInaccessible` | Internal member cannot be accessed from an external project. |
+| `MH0523` | `TypeInaccessible` | Type cannot be accessed due to its protection level. |
 
 ### 3.2 Declarations & Scope Conflicts (`MH0530` - `MH0539`)
 | Code | Name | Description |
@@ -180,11 +187,21 @@ These diagnostics are emitted by Pass 5 (`ExpressionResolutionPass`) and Pass 6 
 
 ## 5. Sequential Extensions (`MH1000` - `MH1999`)
 
-Reserved for future borrow checking, lifetime analysis, and advanced semantic verification passes.
+Reserved for borrow checking, lifetime analysis, and advanced semantic verification passes.
 
 ---
 
-## 5. Pipeline & Driver Codes (`MH9000` - `MH9001`)
+## 6. Compiler Warnings (`MH3000` - `MH3999`)
+
+Non-fatal compile-time diagnostic warnings:
+
+| Code | Name | Description |
+| :--- | :--- | :--- |
+| `MH3001` | `LiteralIntegerOverflowWarning` | Literal integer constant value overflows the range of its destination type. |
+
+---
+
+## 7. Pipeline & Driver Codes (`MH9000` - `MH9001`)
 
 | Code | Name | Description |
 | :--- | :--- | :--- |

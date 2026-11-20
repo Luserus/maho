@@ -57,7 +57,7 @@ public class ExplicitInterfaceTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -65,7 +65,7 @@ public class ExplicitInterfaceTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -74,7 +74,7 @@ public class ExplicitInterfaceTests
             nuint codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -201,15 +201,15 @@ public class ExplicitInterfaceTests
             public interface Add<T>
             {
                 [OperatorFunction("Addition")]
-                public static func Add(int32 left, int32 right) -> int32;
+                public func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add<Int32>
             {
-                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -242,15 +242,15 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static func Add(int32 left, int32 right) -> int32;
+                public func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -283,15 +283,15 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static func Add(int32 left, int32 right) -> int32;
+                public func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -326,19 +326,19 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static func Add(int32 left, int32 right) -> int32;
+                public func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
                 // Explicit interface implementation (priority 1)
-                public static func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
 
                 // Ordinary method with same name (priority 2)
-                public static func Add(int32 left, int32 right) -> int32 { return right; }
+                public func Add(int32 left, int32 right) -> int32 { return right; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -373,16 +373,16 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public static func Add(int32 left, int32 right) -> int32;
+                public func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
                 // Ordinary method only (no explicit Add.Add)
-                public static func Add(int32 left, int32 right) -> int32 { return left; }
+                public func Add(int32 left, int32 right) -> int32 { return left; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -417,10 +417,10 @@ public class ExplicitInterfaceTests
             public interface Rot<T>
             {
                 [OperatorFunction("RotateLeft")]
-                public static func RotL(int32 val, int32 count) -> int32;
+                public func RotL(int32 val, int32 count) -> int32;
 
                 [OperatorFunction("RotateRight")]
-                public static func RotR(int32 val, int32 count) -> int32;
+                public func RotR(int32 val, int32 count) -> int32;
             }
 
             public interface Mut<T>
@@ -444,7 +444,7 @@ public class ExplicitInterfaceTests
             public interface Cast<TFrom, TTo>
             {
                 [OperatorFunction("ImplicitCast")]
-                public static func ToInt64(int32 val) -> int64;
+                public func ToInt64(int32 val) -> int64;
             }
             """);
 
@@ -485,16 +485,16 @@ public class ExplicitInterfaceTests
                 public interface Add
                 {
                     [OperatorFunction("Addition")]
-                    public static func Add(int32 a, int32 b) -> int32;
+                    public func Add(int32 a, int32 b) -> int32;
                 }
             }
 
             public struct Int32 : Ops.Add
             {
-                public static func Ops.Add.Add(int32 a, int32 b) -> int32 { return a; }
+                public func Ops.Add.Add(int32 a, int32 b) -> int32 { return a; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {

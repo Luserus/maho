@@ -119,6 +119,16 @@ internal sealed partial class ExpressionResolutionPass
 
                 if (declaredMethod is not null)
                 {
+                    if (declaredMethod.Flags.HasFlag(FunctionFlags.Static))
+                    {
+                        context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
+                            access.Identifier.Span,
+                            memberName,
+                            (sumType as Symbol)?.Name.Text ?? receiverType.ToDisplayString(context),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+
                     // MH0608: Calling ordinary instance method on untagged sum type without @untagged flag
                     if (isUntagged && !declaredMethod.Flags.HasFlag(FunctionFlags.Untagged))
                     {

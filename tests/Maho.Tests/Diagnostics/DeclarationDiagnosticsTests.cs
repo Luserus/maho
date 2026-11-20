@@ -10,8 +10,8 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateType_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
-            public class Foo;
-            public class Foo;
+            public struct Foo;
+            public struct Foo;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -42,10 +42,10 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateType_Nested_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
-            public class Outer
+            public struct Outer
             {
-                public class Inner;
-                public class Inner;
+                public struct Inner;
+                public struct Inner;
             }
             """);
 
@@ -58,8 +58,8 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateType_MixedPartialAndNonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
-            public partial class Bar;
-            public class Bar;
+            public partial struct Bar;
+            public struct Bar;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -89,9 +89,9 @@ public sealed class DeclarationDiagnosticsTests
     {
         var compilation = Compilation.FromSource($$"""
             {{CompilerTestBed.FullPrelude}}
-            public partial class Entity;
-            public partial class Entity;
-            public partial class Entity;
+            public partial struct Entity;
+            public partial struct Entity;
+            public partial struct Entity;
 
             public struct User
             {
@@ -112,8 +112,8 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialType_ConflictingKinds_EmitsMH0531()
     {
         var compilation = Compilation.FromSource("""
-            public partial class Conflict;
             public partial struct Conflict;
+            public partial enum Conflict;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -185,7 +185,7 @@ public sealed class DeclarationDiagnosticsTests
         var compilation = Compilation.FromSource("""
             public struct void;
 
-            public partial class Service
+            public partial struct Service
             {
                 public partial func Process() -> void;
 
@@ -267,7 +267,7 @@ public sealed class DeclarationDiagnosticsTests
     public void CyclicTypeHierarchy_DirectSelfInheritance_EmitsMH0538()
     {
         var compilation = Compilation.FromSource("""
-            public class Loop : Loop;
+            public struct Loop : Loop;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -279,8 +279,8 @@ public sealed class DeclarationDiagnosticsTests
     public void CyclicTypeHierarchy_MutualCycle_EmitsMH0538()
     {
         var compilation = Compilation.FromSource("""
-            public class First : Second;
-            public class Second : First;
+            public struct First : Second;
+            public struct Second : First;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -321,7 +321,7 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateProperty_EmitsMH0536()
     {
         var compilation = Compilation.FromSource("""
-            public class Widget
+            public struct Widget
             {
                 public int Size { get; }
                 public int Size { get; }
@@ -363,8 +363,8 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialType_MultiFile_SucceedsWithoutErrors()
     {
-        var (_, _, _, root1) = CompilerTestBed.Parse("public partial class MultiFile;");
-        var (_, _, _, root2) = CompilerTestBed.Parse("public partial class MultiFile;");
+        var (_, _, _, root1) = CompilerTestBed.Parse("public partial struct MultiFile;");
+        var (_, _, _, root2) = CompilerTestBed.Parse("public partial struct MultiFile;");
         var context = new Resolver().Resolve([
             SyntaxTree.CreateSingleRoot(root1, "first.mh"),
             SyntaxTree.CreateSingleRoot(root2, "second.mh")
@@ -376,8 +376,8 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void DuplicateType_MultiFile_NonPartial_EmitsMH0530()
     {
-        var (_, _, _, root1) = CompilerTestBed.Parse("public class DupeMulti;");
-        var (_, _, _, root2) = CompilerTestBed.Parse("public class DupeMulti;");
+        var (_, _, _, root1) = CompilerTestBed.Parse("public struct DupeMulti;");
+        var (_, _, _, root2) = CompilerTestBed.Parse("public struct DupeMulti;");
         var context = new Resolver().Resolve([
             SyntaxTree.CreateSingleRoot(root1, "first.mh"),
             SyntaxTree.CreateSingleRoot(root2, "second.mh")
@@ -407,8 +407,8 @@ public sealed class DeclarationDiagnosticsTests
     public void Types_DifferentGenericArity_AllowedInSameScope()
     {
         var compilation = Compilation.FromSource("""
-            public class Bag<T>;
-            public class Bag<T, U>;
+            public struct Bag<T>;
+            public struct Bag<T, U>;
             """);
 
         Assert.False(compilation.HasErrors);
@@ -419,8 +419,8 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateType_SameGenericArity_NonPartial_EmitsMH0530()
     {
         var compilation = Compilation.FromSource("""
-            public class Holder<T>;
-            public class Holder<T>;
+            public struct Holder<T>;
+            public struct Holder<T>;
             """);
 
         Assert.True(compilation.HasErrors);

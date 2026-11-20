@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -20,15 +21,17 @@ internal sealed partial class SymbolDiscoveryPass
 
         symbol.Flags = ResolveFunctionFlags(declaration.Signature.Modifiers);
         bool hasReceiver = declaration.Signature.Parameters.Count > 0 && declaration.Signature.Parameters[0].Declarator.IsReceiver;
-        bool isLegacyImplicitCallable = IsLegacyImplicitCallable(declaration, containingType, symbol.Flags.HasFlag(FunctionFlags.Static));
-        if (hasReceiver || isLegacyImplicitCallable)
+        if (hasReceiver)
             symbol.Flags &= ~FunctionFlags.Static;
         else
             // A member without an explicit first `this` parameter cannot bind instance storage.
             // It is static by semantic shape; the `static` modifier remains accepted but optional.
-            // Callable is retained as a temporary compatibility exception because its existing
-            // operator contract uses an implicit receiver spelling across the standard library.
             symbol.Flags |= FunctionFlags.Static;
+
+        if (hasReceiver && declaration.Signature.Parameters[0].Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged))
+        {
+            symbol.Flags |= FunctionFlags.Untagged;
+        }
 
         if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
@@ -45,26 +48,6 @@ internal sealed partial class SymbolDiscoveryPass
 
         symbol.Parameters = DiscoverParameters(declaration.Signature, functionScope, handle);
         ResolveFunctionBody(declaration.Body, functionScope, handle, handle);
-    }
-
-    /// <summary>
-    /// Identifies the pre-receiver-syntax spelling of the Callable operator, whose omitted receiver
-    /// still means instance dispatch until the standard library is migrated to explicit <c>&amp;this</c>.
-    /// </summary>
-    /// <remarks>
-    /// This narrow compatibility bridge is intentionally syntax-local. All ordinary receiverless
-    /// members, including static lifecycle operators such as Move, are inferred static.
-    /// </remarks>
-    private bool IsLegacyImplicitCallable(FunctionDeclaration declaration, SymbolHandle containingType, bool explicitlyStatic)
-    {
-        // The Callable interface itself predates explicit receiver spelling.
-        if (context.GetSymbol(containingType)?.Name.Text == "Callable")
-            return true;
-
-        // Existing explicit-interface instance implementations omit `this` as well. Preserve that
-        // contract only when the implementation did not explicitly request static dispatch.
-        return !explicitlyStatic && declaration.Signature.Identifier is QualifiedName qualified &&
-               qualified.Parts.Count >= 2 && ResolutionContext.GetSymbolName(qualified.Parts[0]).Last.Text == "Callable";
     }
 
     private LocalFunctionSymbol ResolveLocalFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, SymbolHandle? containingMethod)
@@ -104,6 +87,9 @@ internal sealed partial class SymbolDiscoveryPass
         }
 
         var symbol = context.CreatePropertySymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Identifier).Last, containingType, hasBacking, declaration);
+        symbol.Flags = ResolveFunctionFlags(declaration.Modifiers);
+        symbol.GetterFlags = symbol.Flags;
+        symbol.SetterFlags = symbol.Flags;
 
         if (declaration.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
@@ -116,6 +102,12 @@ internal sealed partial class SymbolDiscoveryPass
 
         foreach (var accessor in declaration.Body.Accessors)
         {
+            var accFlags = accessor.Modifiers.Count > 0 ? ResolveFunctionFlags(accessor.Modifiers) : symbol.Flags;
+            if (accessor.Kind == PropertyAccessorKind.Get)
+                symbol.GetterFlags = accFlags;
+            else if (accessor.Kind == PropertyAccessorKind.Set)
+                symbol.SetterFlags = accFlags;
+
             Scope accessorScope = context.CreateScope(enclosingScope);
             if (symbol.Name.Text == "_" || enclosingScope.IsSink)
                 accessorScope.IsSink = true;
@@ -408,7 +400,7 @@ internal sealed partial class SymbolDiscoveryPass
         foreach (var genericParameter in genericName.GenericParameters)
         {
             var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic);
-            genericParameters.Add((symbol.Kind, symbol.ID));
+            genericParameters.Add(ResolutionContext.GetHandle(symbol));
         }
 
         return genericParameters;
@@ -483,6 +475,8 @@ internal sealed partial class SymbolDiscoveryPass
             {
                 MatchingKeywordKind.Public => TypeFlags.Public,
                 MatchingKeywordKind.Internal => TypeFlags.Internal,
+                MatchingKeywordKind.Private => TypeFlags.Private,
+                MatchingKeywordKind.Protected => TypeFlags.Protected,
                 MatchingKeywordKind.Unsafe => TypeFlags.Unsafe,
                 MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
@@ -523,10 +517,10 @@ internal sealed partial class SymbolDiscoveryPass
             {
                 MatchingKeywordKind.Public => VariableFlags.Public,
                 MatchingKeywordKind.Internal => VariableFlags.Internal,
+                MatchingKeywordKind.Private => VariableFlags.Private,
                 MatchingKeywordKind.Static => VariableFlags.Static,
                 MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
-                MatchingKeywordKind.Untagged => VariableFlags.Untagged,
                 _ => VariableFlags.None
             };
         }
@@ -550,7 +544,6 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
-                MatchingKeywordKind.Untagged => FunctionFlags.Untagged,
                 _ => FunctionFlags.None
             };
         }

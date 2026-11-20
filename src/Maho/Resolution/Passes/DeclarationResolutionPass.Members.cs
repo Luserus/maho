@@ -231,6 +231,12 @@ internal sealed partial class DeclarationResolutionPass
                     baseType = TypeRef.Generic(parentHandle.Value, parentSym?.Name.Text ?? "", genParams.Select(TypeRef.Resolved).ToList());
                 }
 
+                bool isUntaggedReceiver = symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged);
+                if (isUntaggedReceiver)
+                {
+                    baseType = TypeRef.Untagged(baseType);
+                }
+
                 symbol.Type = symbol.Syntax.Declarator.ReceiverKind switch
                 {
                     ReceiverKind.Value => baseType,

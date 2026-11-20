@@ -50,7 +50,7 @@ public sealed class CrossProjectDynTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -58,7 +58,7 @@ public sealed class CrossProjectDynTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -67,7 +67,7 @@ public sealed class CrossProjectDynTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Base

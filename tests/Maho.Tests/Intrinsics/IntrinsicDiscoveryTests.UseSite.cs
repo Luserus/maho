@@ -8,7 +8,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_InferredCollection_WithoutArray_EmitsMH0240()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -26,7 +26,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_TypedCollection_DoesNotRequireArray()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public struct CustomList;
                 public func Test() -> void
@@ -43,7 +43,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_UnsuffixedIntegerLiteral_WithoutInt32_EmitsMH0240()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -61,7 +61,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_SuffixedIntegerLiteral_DoesNotRequireInt32()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -77,7 +77,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_UnsuffixedFloatLiteral_WithoutFloat64_EmitsMH0240()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -98,7 +98,7 @@ public sealed partial class IntrinsicDiscoveryTests
         var preludeWithoutStr = string.Join("\n", lines.Where(l => !l.Contains("\"Str\"") && !l.Contains("struct Str") && !l.Contains("Int8& data") && !l.Contains("Int64 length")));
 
         var compilation = Compilation.FromSource(preludeWithoutStr + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -115,7 +115,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_UnsuffixedCharLiteral_WithoutChar_EmitsMH0240()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -138,7 +138,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct Int32
             {
                 public static Int32 Zero;
-                public static func Create() -> Int32 { return Zero; }
+                public func Create() -> Int32 { return Zero; }
                 public func Abs() -> Int32 { return Zero; }
             }
             """);
@@ -194,8 +194,7 @@ public sealed partial class IntrinsicDiscoveryTests
     [Fact]
     public void ReferencedProject_DeclaresIntrinsics_ConsumerUsesThem_Succeeds()
     {
-        var libCompilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            [IntrinsicType("Unit")] public struct void;
+        var libCompilation = Compilation.FromSource(UseSitePrelude + """
             [IntrinsicType("Int32")] public struct Int32;
             [IntrinsicType("Array")] public struct Array<T> { T* data; NUInt len; }
             [IntrinsicType("Span")] public struct Span<T> { T& data; NUInt len; }
@@ -214,7 +213,7 @@ public sealed partial class IntrinsicDiscoveryTests
                 public Int32[5] fa;
             }
 
-            public class Host
+            public struct Host
             {
                 public func Run() -> void
                 {
@@ -266,7 +265,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Add<TLhs, TRhs, TResult>
             {
                 [OperatorFunction("Addition")]
-                public static func Add(TLhs left, TRhs right) -> TResult;
+                public func Add(TLhs left, TRhs right) -> TResult;
             }
 
             public interface Ctor<TArgs...>
@@ -324,7 +323,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadAdd<TLhs, TRhs, TResult>
             {
                 [OperatorFunction("Addition")]
-                public static func Add(TLhs left, TRhs right, TRhs extra) -> TResult;
+                public func Add(TLhs left, TRhs right, TRhs extra) -> TResult;
             }
             """);
 
@@ -362,7 +361,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadCtor
             {
                 [OperatorFunction("Constructor")]
-                public static func Construct() -> void;
+                public func Construct() -> void;
             }
             """);
 
@@ -396,7 +395,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct MyStruct
             {
                 [OperatorFunction("Addition")]
-                public static func Add(MyStruct a, MyStruct b) -> MyStruct => a;
+                public func Add(MyStruct a, MyStruct b) -> MyStruct => a;
             }
             """);
 
@@ -431,7 +430,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct Int32
             {
                 [IntrinsicFunction("Int32.Add(Int32, Int32)")]
-                public static func Add(Int32 a, Int32 b) -> Int32;
+                public func Add(Int32 a, Int32 b) -> Int32;
             }
             """);
 
@@ -453,7 +452,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct UserType
             {
                 [IntrinsicFunction("foo")]
-                public static func Foo() -> void;
+                public func Foo() -> void;
             }
             """);
 
@@ -494,7 +493,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct Int32
             {
                 [IntrinsicFunction]
-                public static func Add(Int32 a, Int32 b) -> Int32;
+                public func Add(Int32 a, Int32 b) -> Int32;
             }
             """);
 
@@ -512,7 +511,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public struct Int32
             {
                 [IntrinsicFunction(42)]
-                public static func Add(Int32 a, Int32 b) -> Int32;
+                public func Add(Int32 a, Int32 b) -> Int32;
             }
             """);
 
@@ -529,7 +528,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface New<TTarget, TReturn>
             {
                 [OperatorFunction("New")]
-                public static func New() -> TReturn;
+                public func New() -> TReturn;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -556,7 +555,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadNew<TTarget>
             {
                 [OperatorFunction("New")]
-                public static func New() -> void;
+                public func New() -> void;
             }
             """);
         Assert.True(voidReturn.HasErrors);
@@ -575,7 +574,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Put<TTarget>
             {
                 [OperatorFunction("Put")]
-                public static func Put(TTarget& destination) -> void;
+                public func Put(TTarget& destination) -> void;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -591,7 +590,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadPut<TTarget>
             {
                 [OperatorFunction("Put")]
-                public static func Put(TTarget& destination) -> Int64;
+                public func Put(TTarget& destination) -> Int64;
             }
             """);
         Assert.True(nonVoid.HasErrors);
@@ -610,13 +609,13 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static func Copy(T& dest, T& src) -> void;
+                public func Copy(T& dest, T& src) -> void;
             }
 
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public static func Move(T& dest, T& src) -> void;
+                public func Move(T& dest, T& src) -> void;
             }
             """);
         Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => d.Message)));
@@ -634,7 +633,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface BadCopy<T>
             {
                 [OperatorFunction("Copy")]
-                public static func Copy(T& dest) -> void;
+                public func Copy(T& dest) -> void;
             }
             """);
         Assert.True(badParamCount.HasErrors);
@@ -676,13 +675,13 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static func Copy(T& dest, T& src) -> void;
+                public func Copy(T& dest, T& src) -> void;
             }
 
             public struct Resource : Destructor, Copy<Resource>
             {
                 public func Drop(&this) -> void {}
-                public static func Copy(Resource& dest, Resource& src) -> void {}
+                public func Copy(Resource& dest, Resource& src) -> void {}
             }
             """);
 
@@ -702,19 +701,19 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Copy<T>
             {
                 [OperatorFunction("Copy")]
-                public static func Copy(T& dest, T& src) -> void;
+                public func Copy(T& dest, T& src) -> void;
             }
 
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public static func Move(T& dest, T& src) -> void;
+                public func Move(T& dest, T& src) -> void;
             }
 
             public struct Conflicted : Copy<Conflicted>, Move<Conflicted>
             {
-                public static func Copy(Conflicted& dest, Conflicted& src) -> void {}
-                public static func Move(Conflicted& dest, Conflicted& src) -> void {}
+                public func Copy(Conflicted& dest, Conflicted& src) -> void {}
+                public func Move(Conflicted& dest, Conflicted& src) -> void {}
             }
             """);
 
@@ -735,7 +734,7 @@ public sealed partial class IntrinsicDiscoveryTests
             public interface Callable<TReturn, TParams...>
             {
                 [OperatorFunction("Callable")]
-                public func Invoke(TParams args) -> TReturn;
+                public func Invoke(&this, TParams args) -> TReturn;
             }
 
             [IntrinsicType("Delegate")]
@@ -744,7 +743,7 @@ public sealed partial class IntrinsicDiscoveryTests
                 NUInt codeAddress;
                 ValType& env;
                 [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-                public func Callable.Invoke(TParams args) -> TReturn;
+                public func Callable.Invoke(&this, TParams args) -> TReturn;
             }
             """);
 

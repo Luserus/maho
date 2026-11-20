@@ -724,7 +724,7 @@ public sealed partial class DeclarationResolutionTests
 
 
 
-    private static void AssertReference(ResolutionContext context, SyntaxNode syntax, (SymbolKind Kind, SymbolID ID) expected)
+    private static void AssertReference(ResolutionContext context, SyntaxNode syntax, SymbolHandle expected)
     {
         Assert.True(context.ResolvedTree.TryGetReference(syntax, out var actual));
         Assert.Equal(expected, actual);

@@ -189,7 +189,7 @@ struct Tuple : ValType;
 interface Callable<TReturn, TArgs...>
 {
     [OperatorFunction("Callable")]
-    func Invoke(TArgs... args) -> TReturn;
+    func Invoke(&this, TArgs... args) -> TReturn;
 }
 
 [IntrinsicType("Function")]
@@ -198,7 +198,7 @@ struct Function<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
     NUInt address;
 
     [IntrinsicFunction("Function.Invoke(TParams...)")]
-    func Callable.Invoke(TArgs... args) -> TReturn;
+    func Callable.Invoke(&this, TArgs... args) -> TReturn;
 
     func GetAddress() -> NUInt
     {
@@ -213,7 +213,7 @@ struct Delegate<TReturn, TArgs...> : ValType, Callable<TReturn, TArgs...>
     ValType* context;
 
     [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-    func Callable.Invoke(TArgs... args) -> TReturn;
+    func Callable.Invoke(&this, TArgs... args) -> TReturn;
 }
 
 [IntrinsicType("Optional")]
@@ -416,12 +416,12 @@ struct Int32 : Addition<Int32, Int32, Int32>,
     [IntrinsicFunction("Int32.BitwiseNot(Int32)")]
     static func BitwiseNot.BitwiseNot(Int32 op) -> Int32;
 
-    func Callable.Invoke(Int32 i) -> Int32
+    func Callable.Invoke(&this, Int32 i) -> Int32
     {
         return i;
     }
 
-    func Abs() -> Int32
+    func Abs(&this) -> Int32
     {
         return 0;
     }

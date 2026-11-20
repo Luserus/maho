@@ -446,7 +446,7 @@ public sealed class CommandLineTests
             string typesFile = Path.Combine(tempDir, "Types.mh");
             string entryFile = Path.Combine(tempDir, "Entry.mh");
 
-            File.WriteAllText(typesFile, "public class Point { public int X; }");
+            File.WriteAllText(typesFile, "public struct Point { public int X; }");
             File.WriteAllText(entryFile, "call();");
 
             using var sw = new StringWriter();

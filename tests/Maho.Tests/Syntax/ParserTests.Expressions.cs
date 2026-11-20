@@ -89,7 +89,7 @@ public sealed partial class ParserTests
     public void Parse_TypeDeclaration_WithBaseClauseAndConstraints()
     {
         TypeDeclaration type = ParseSingleTopLevelType("""
-            public class Box<T> : Base<T>, Outer.Inner
+            public struct Box<T> : Base<T>, Outer.Inner
                 where T: FirstConstraint, Second.Constraint;
             """);
 
@@ -176,7 +176,7 @@ public sealed partial class ParserTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             [First, Second,]
-            public class Box<T, N: int,> : Base<T,>, Other,
+            public struct Box<T, N: int,> : Base<T,>, Other,
                 where T : Constraint, OtherConstraint,
             {
                 public func Function(Int32 a, Int32 b,) -> void
@@ -332,7 +332,7 @@ public sealed partial class ParserTests
     public void Parse_TypeDeclaration_AllowsTrailingCommaBeforeConstraintClause()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public class Box<T> : Base<T>,
+            public struct Box<T> : Base<T>,
                 where T: Constraint
             {
                 public int Value;
@@ -371,7 +371,7 @@ public sealed partial class ParserTests
 
             namespace Extra
             {
-                public class Nested;
+                public struct Nested;
             }
 
             public struct Box<T> : BaseBox<T>, Extra.Nested where T: Extra.Nested, Constraint<T>
@@ -379,13 +379,13 @@ public sealed partial class ParserTests
                 using Extra;
                 using MemberAlias = Extra.Nested;
                 public T Value;
-                public class Nested;
+                public struct Nested;
 
                 public static func Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, int[&] spanParam, &int aliasParam, *int unsafeAliasParam, untagged int untaggedParam, Extra.Nested nested, TInput input) -> int where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
-                    public class LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
+                    public struct LocalBox<TLocal> : Scoped where TLocal: Extra.Nested;
                     public static func LocalFunc<TLocal>(TLocal input) -> int where TLocal: Extra.Nested
                     {
                         return 0;
@@ -611,7 +611,7 @@ public sealed partial class ParserTests
     private static Member ParseSingleMember(string source, Type expectedType)
     {
         TopLevelTypeDeclaration wrapper = Assert.IsType<TopLevelTypeDeclaration>(ParseSingleTopLevel($$"""
-            public class Host
+            public struct Host
             {
                 {{source}}
             }

@@ -43,7 +43,7 @@ internal static class CompilerTestBed
         [IntrinsicType("Reference")]
         public struct Reference<T> : Deref<T&>
         {
-            nuint raw;
+            public nuint raw;
 
             [IntrinsicFunction("Reference.Deref()")]
             public func Deref.Deref(&this) -> T&;
@@ -52,14 +52,14 @@ internal static class CompilerTestBed
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            public int8& buffer;
+            public nuint length;
         }
 
         [IntrinsicType("Pointer")]
         public struct Pointer<T> : Deref<T&>
         {
-            nuint addr;
+            public nuint addr;
 
             [IntrinsicFunction("Pointer.Deref()")]
             public func Deref.Deref(&this) -> T&;
@@ -80,24 +80,24 @@ internal static class CompilerTestBed
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
+            public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
         public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
-            Pointer<ValType> env;
+            public nuint codeAddress;
+            public Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 

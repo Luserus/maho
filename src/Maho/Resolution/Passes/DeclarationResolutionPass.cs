@@ -205,6 +205,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckDuplicateVariables();
         CheckDuplicateProperties();
         ValidateInterfaceImplementations();
+        ValidateModifiers();
     }
 
     private void ResolveTopLevelStatements(CompilationUnit root)

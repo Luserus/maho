@@ -243,6 +243,24 @@ internal sealed partial class DeclarationResolutionPass
             if (prefixModified.Modifier is UntaggedTypeModifier)
             {
                 var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext: true);
+                if (reportDiagnostics && !inner.IsError)
+                {
+                    bool isSumType = inner.Kind == TypeRefKind.Union || inner.SpecialType is UnionSemanticType;
+                    if (!isSumType && inner.Handle is { } h)
+                    {
+                        var sym = context.GetTypeSymbol(h);
+                        isSumType = sym is ISumTypeSymbol;
+                    }
+                    if (!isSumType)
+                    {
+                        context.Diagnostics.ReportInvalidModifier(
+                            prefixModified.Modifier.GetSpan() ?? default,
+                            "untagged",
+                            "type",
+                            inner.ToDisplayString(context),
+                            prefixModified.Modifier.GetSource());
+                    }
+                }
                 return TypeRef.Untagged(inner);
             }
 

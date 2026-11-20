@@ -13,7 +13,7 @@ public sealed class ScopeDirectiveTests
             global
             {
                 public struct TopStruct;
-                public TopStruct globalVar;
+                public static TopStruct globalVar;
             }
             """);
 

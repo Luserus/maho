@@ -1,5 +1,3 @@
-global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -153,6 +151,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
 
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
+    public static implicit operator TypeRef((SymbolKind Kind, SymbolID ID) tuple) => Resolved(new SymbolHandle(tuple.Kind, tuple.ID));
 
     public bool Equals(TypeRef other)
     {

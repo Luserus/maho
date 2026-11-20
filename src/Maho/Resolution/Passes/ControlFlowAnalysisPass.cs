@@ -49,7 +49,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                 var handle = ResolutionContext.GetHandle(function);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
-                AnalyzeReachability(cfg);
+                AnalyzeReachability(cfg, context);
                 VerifyReturnsAndDivergence(function.Name.Text, function.ReturnType, cfg, fnDecl.Signature.Identifier.GetSpan() ?? default, fnDecl.GetSource());
             }
         }
@@ -67,7 +67,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                 var handle = ResolutionContext.GetHandle(method);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
-                AnalyzeReachability(cfg);
+                AnalyzeReachability(cfg, context);
                 VerifyReturnsAndDivergence(method.Name.Text, method.ReturnType, cfg, methodDecl.Signature.Identifier.GetSpan() ?? default, methodDecl.GetSource());
             }
         }
@@ -83,7 +83,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                         var handle = ResolutionContext.GetHandle(prop);
                         var cfg = BuildCFG(body, handle);
                         context.SetControlFlowGraph(handle, cfg);
-                        AnalyzeReachability(cfg);
+                        AnalyzeReachability(cfg, context);
                     }
                 }
             }
@@ -496,7 +496,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
     /// Note: this analysis is purely for dead-code and return diagnostics; no optimizations or AST mutation occur.
     /// </summary>
     /// <param name="cfg">The control-flow graph to analyze.</param>
-    private static void AnalyzeReachability(ControlFlowGraph cfg)
+    private static void AnalyzeReachability(ControlFlowGraph cfg, ResolutionContext context)
     {
         var reachable = new HashSet<int>();
         var queue = new Queue<BasicBlock>();
@@ -512,7 +512,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             if (block.Terminator.Kind == BlockTerminatorKind.ConditionalBranch &&
                 block.Terminator.Condition is { } cond)
             {
-                bool? constBool = TryEvaluateConstantBool(cond);
+                bool? constBool = TryEvaluateConstantBool(cond, context);
                 if (constBool == true)
                 {
                     if (block.Terminator.Target is { } t && reachable.Add(t.Id))
@@ -544,10 +544,14 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
     /// <summary>
     /// Evaluates whether an expression is a static literal boolean <c>true</c> or <c>false</c>.
-    /// Uses <see cref="MatchingKeywordKind"/> enum checks with zero string comparisons.
+    /// Uses <see cref="ConstantFoldingPass"/> pre-calculated facts when available, falling back to keyword tokens.
     /// </summary>
-    private static bool? TryEvaluateConstantBool(Expression cond)
+    private static bool? TryEvaluateConstantBool(Expression cond, ResolutionContext context)
     {
+        var cv = ConstantFoldingPass.Evaluate(cond, context);
+        if (cv.Kind == ConstantValueKind.Bool)
+            return cv.AsBool;
+
         if (cond is NamedExpression named)
         {
             if (named.Identifier.MatchingKind is MatchingKeywordKind.True) return true;

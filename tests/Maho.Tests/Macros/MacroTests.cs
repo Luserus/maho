@@ -24,9 +24,9 @@ public sealed partial class MacroTests
         public struct int32 : Add<int32>, Mul<int32>
         {
             [IntrinsicFunction("Int32.Add(Int32, Int32)")]
-            public static func Add.Add(int32 left, int32 right) -> int32;
+            public func Add.Add(int32 left, int32 right) -> int32;
             [IntrinsicFunction("Int32.Mul(Int32, Int32)")]
-            public static func Mul.Mul(int32 left, int32 right) -> int32;
+            public func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
         [IntrinsicType("Reference")]
@@ -60,7 +60,7 @@ public sealed partial class MacroTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -68,7 +68,7 @@ public sealed partial class MacroTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -77,19 +77,19 @@ public sealed partial class MacroTests
             nuint codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public interface Add<T>
         {
             [OperatorFunction("Addition")]
-            public static func Add(int32 left, int32 right) -> int32;
+            public func Add(int32 left, int32 right) -> int32;
         }
 
         public interface Mul<T>
         {
             [OperatorFunction("Multiplication")]
-            public static func Mul(int32 left, int32 right) -> int32;
+            public func Mul(int32 left, int32 right) -> int32;
         }
         """;
 
@@ -103,7 +103,7 @@ public sealed partial class MacroTests
                 (@a: expr, @b: expr) => @a + @b;
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -134,7 +134,7 @@ public sealed partial class MacroTests
                 (1) => $nest(0);
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -167,7 +167,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -212,7 +212,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -250,7 +250,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -286,7 +286,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -353,7 +353,7 @@ public sealed partial class MacroTests
                 (@items: expr...) => [@items...];
             }
 
-            public class Host
+            public struct Host
             {
                 public struct List;
 
@@ -387,7 +387,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -421,7 +421,7 @@ public sealed partial class MacroTests
                 () => $loop();
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -443,7 +443,7 @@ public sealed partial class MacroTests
                 (1) => 10;
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -461,7 +461,7 @@ public sealed partial class MacroTests
     public void Diagnostic_UnresolvedMacro_EmitsMH0602()
     {
         var compilation = Compilation.FromSource("""
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -485,7 +485,7 @@ public sealed partial class MacroTests
                 () => { 42 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -513,7 +513,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -535,7 +535,7 @@ public sealed partial class MacroTests
 
             public macro $here => 42;
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {

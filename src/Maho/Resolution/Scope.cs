@@ -151,8 +151,8 @@ internal sealed class Scope
         for (int i = 0; i < name.Count - 1; i++)
         {
             var symbol = start[0];
-
-            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var child = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (child is null)
                 return [];
@@ -290,8 +290,8 @@ internal sealed class Scope
         for (int i = 0; i < name.Count - 1; i++)
         {
             var symbol = start[0];
-
-            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var child = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (child is null)
                 return [];
@@ -347,7 +347,8 @@ internal sealed class Scope
 
             // More components follow (e.g. Type.NestedType)
             var symbol = symbols[0];
-            var childScope = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var childScope = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (childScope is null)
                 return [];
@@ -362,7 +363,8 @@ internal sealed class Scope
             for (int i = index; i < name.Count - 1; i++)
             {
                 var nextSymbol = nextSymbols[0];
-                var nextChild = scope.GetChildScope((nextSymbol.Kind, nextSymbol.ID)) ?? nextSymbol.EnclosingScope?.GetChildScope((nextSymbol.Kind, nextSymbol.ID));
+                var nextHandle = ResolutionContext.GetHandle(nextSymbol);
+                var nextChild = scope.GetChildScope(nextHandle) ?? nextSymbol.EnclosingScope?.GetChildScope(nextHandle);
 
                 if (nextChild is null)
                     return [];

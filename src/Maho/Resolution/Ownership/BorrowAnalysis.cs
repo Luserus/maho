@@ -233,7 +233,7 @@ internal sealed class BorrowAnalysis
 
     private static bool SetEquals(ISet<Loan> left, ISet<Loan> right) => left.SetEquals(right);
 
-    private static bool SetEquals(ISet<Symbol> left, ISet<Symbol> right) => left.SetEquals(right);
+    private static bool SetEquals(HashSet<Symbol> left, ISet<Symbol> right) => left.SetEquals(right);
 
     private sealed record Loan(Place Referent, BorrowKind Kind, Symbol Owner, TextSpan Origin, SourceText? Source);
 }

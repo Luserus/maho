@@ -16,7 +16,7 @@
 
 ## 2. Semantic Resolution Architecture (`Resolution/`)
 
-Semantic resolution operates after parsing has transformed all compilation units into a single `SyntaxTree`. It executes through an orchestrated pipeline of 6 sequential resolution passes managed by `Resolver`:
+Semantic resolution operates after parsing has transformed all compilation units into a single `SyntaxTree`. It executes through an orchestrated pipeline of 9 sequential resolution passes managed by `Resolver`:
 
 ```
 1. MacroExpansionPass
@@ -34,7 +34,16 @@ Semantic resolution operates after parsing has transformed all compilation units
 5. ExpressionResolutionPass
        │
        ▼
-6. ControlFlowAndReturnInferencePass
+6. ConstantFoldingPass
+       │
+       ▼
+7. ControlFlowAnalysisPass
+       │
+       ▼
+8. LifetimeAnalysisPass
+       │
+       ▼
+9. VisibilityAnalysisPass
 ```
 
 ---
@@ -100,6 +109,11 @@ The declaration resolution pass validates and binds declarations across the disc
 - **Duplicate Variables, Fields & Properties (`MH0535`, `MH0536`)**: Detects collisions in enclosing scopes.
 - **Cyclic Type Hierarchies (`MH0538`)**: Detects cyclic inheritance graphs via depth-first search.
 - **Ambiguous Type References (`MH0501`)**: Identifies collisions when unqualified type names match multiple imported namespaces.
+- **Modifier Validation & Canonical Ordering (`MH0128`, `MH0129`, `MH0130`, `MH0131`)**:
+  - Enforces permitted modifiers and canonical ordering per declaration item (`[visibility] [storage/lifetime] [virtual/unsealed] [safety] [partial] [untagged]`).
+  - `static` is strictly a lifetime/storage modifier for global variables and type-bound static fields; it is **disallowed on functions and methods** (`MH0128`), where staticness is inferred purely from the absence of a `this` receiver parameter.
+  - Global variables declared at file scope **require** the `static` modifier (`MH0128`).
+  - Reports out-of-order modifiers (`MH0129`), duplicates (`MH0130`), and conflicts (`MH0131`).
 - **Copy / Move / Destructor Semantics**:
   - `MH0243`: A type cannot implement both `Destructor` and `Copy` (types with destructors must use move semantics).
   - `MH0244`: A type cannot implement both `Copy` and `Move` (a type must be exclusively Copy or exclusively Move).
@@ -135,6 +149,8 @@ The expression resolution pass types AST expressions and enforces Maho's operato
   - Target constructor resolution matches `Construct` method on the type implementing the `Constructor` operator interface.
 - **Callable Operator (`Callable`)**:
   - Non-function instances can be invoked if the type implements `Callable<TReturn, ...>`, reporting `MH0611` if not callable.
+- **Literal Range Overflow Warning (`MH3001`)**:
+  - Emits compile-time warning `MH3001` when an integer literal exceeds the range of its explicit target type (e.g. `int8 x = 128;`) without failing expression resolution.
 - **Strict Exact Branch Matching (`MH2011`)**:
   - Conditional `if-else` expressions require exact matching between branches. Implicit widening to a common base type or `Object` is rejected with `MH2011`.
 - **Sum Types & Pattern Matching**:
@@ -145,17 +161,44 @@ The expression resolution pass types AST expressions and enforces Maho's operato
 
 ---
 
-### 2.6 Control Flow & Return Inference Pass (`ControlFlowAndReturnInferencePass`)
-The control flow and return inference pass constructs control flow graphs, checks reachability, and infers function return types:
+### 2.6 Constant Folding Pass (`ConstantFoldingPass`)
+The constant folding pass executes prior to CFG construction:
+- **Compile-Time Expression Evaluation**: Recursively evaluates pure operations on literal scalars, booleans, characters, and string constants using arbitrary-precision `BigInteger` for integers and `double` for floats.
+- **Short-Circuit Evaluation**: Safely evaluates short-circuiting boolean operations (`&&`, `||`) without raising runtime exceptions (e.g., `false && (1 / 0 == 0)` folds to `false`).
+- **Const Variable Propagation**: Propagates compile-time values of `const` local variables, fields, and globals into downstream expressions.
+- **CFG Pruning Preparation**: Records folded constants in `ResolutionContext.ConstantValues` for query during CFG branch pruning.
+
+---
+
+### 2.7 Control Flow Analysis Pass (`ControlFlowAnalysisPass`)
+The control flow analysis pass constructs control flow graphs, checks reachability, and infers function return types:
 - **Basic Blocks & Graph Construction**: Decomposes function bodies into `BasicBlock` sequences connected via `BlockTerminator` edges (`Branch`, `ConditionalBranch`, `Return`, `Unreachable`).
-- **Dead Code & Reachability Analysis (`MH2012`)**:
-  - Traverses the CFG from the entry block using depth-first search to mark reachable blocks.
-  - Reports unreachable blocks containing user statements as dead code (`MH2012`).
-  - Analysis is purely diagnostic; no AST dead-code elimination or optimization is performed in the frontend.
-- **Return Statement Inference & Conflict Verification**:
-  - For functions declared with `auto` or inferred return types, collects return expressions across all branches and infers a consistent return type.
-  - Emits `MH2012` if conflicting return types are returned across different branches.
-  - Verifies that non-void functions have an exhaustive return path reaching exit.
+- **Constant Branch Pruning**: Queries pre-evaluated constants from `ConstantFoldingPass` to prune unreachable branch edges (e.g., `if (10 - 10 == 0)` folds to unconditionally true).
+- **Dead Code & Reachability Analysis (`MH2017`, `MH2018`)**:
+  - Traverses the CFG from the entry block to determine reachable blocks and divergence.
+  - Enforces that non-Unit functions return on all reachable paths (`MH2017`).
+  - Infers infinite loop divergence and ensures diverging functions declare `Never` return type (`MH2018`).
+- **Unconstrained Literal Collapsing**: Collapses remaining unconstrained scalar literals in global variables and fields into default types (`Int32`, `Float64`).
+
+---
+
+### 2.8 Lifetime Analysis Pass (`LifetimeAnalysisPass`)
+The lifetime analysis pass enforces move semantics, borrow checking, and ownership tracking:
+- **Place & Storage Modeling**: Maps locals, fields, and temporary storage into fine-grained `Place` allocations.
+- **Borrow & Move Verification**: Enforces single-writer/multiple-reader aliasing invariants; verifies move validity and detects use-after-move or simultaneous conflicting borrows.
+
+---
+
+### 2.9 Visibility Analysis Pass (`VisibilityAnalysisPass`)
+The visibility analysis pass executes after all other semantic passes have completed to enforce access boundaries:
+- **Declaration Source of Truth**: Source code declarations are the sole source of truth; intrinsic types follow declaration access rules, interface members inherit the interface's accessibility, and top-level items are restricted to `public` and `internal` (`MH0128`).
+- **Access Boundary Enforcement**:
+  - `private` (`MH0520`): Accessible only from within the declaring type.
+  - `protected` (`MH0521`): Accessible only within the declaring type and its derived types.
+  - `internal` (`MH0522`): Accessible across compilation units in the same project, but forbidden across project boundaries.
+  - `public`: Universally accessible across projects and modules.
+- **Property Accessor Restrictiveness**: Ensures property getters and setters are verified individually against their accessor visibility.
+- **Type Accessibility (`MH0523`)**: Verifies that references to nested types adhere to enclosing type visibility rules.
 
 ---
 
@@ -181,9 +224,12 @@ Source Files (.mh)
    └── Resolver (shared DiagnosticsManager)
         ├── SymbolDiscoveryPass (scopes, trie, symbols, flags, global aliases)
         ├── IntrinsicDiscoveryPass (intrinsic types, ABI layouts, operator catalog)
-        ├── DeclarationResolutionPass (type binding, partial merging, duplicate checks, cycles)
+        ├── DeclarationResolutionPass (type binding, partial merging, duplicate checks, modifier rules)
         ├── ExpressionResolutionPass (operator overloads, retroactive literal collapsing, sum types)
-        └── ControlFlowAndReturnInferencePass (CFG, dead code analysis, return type inference)
+        ├── ConstantFoldingPass (compile-time expression folding, const propagation)
+        ├── ControlFlowAnalysisPass (CFG, constant branch pruning, return/divergence verification)
+        ├── LifetimeAnalysisPass (ownership, move semantics, borrow checking)
+        └── VisibilityAnalysisPass (access control enforcement across project/type boundaries)
        │
        ▼
  [Lowering & Codegen Phase] (measured by CompilationPhaseTimers.Lowering)
