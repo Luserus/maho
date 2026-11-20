@@ -8,14 +8,17 @@ namespace Maho.Resolution;
 /// <summary>
 /// Orchestrates the semantic analysis and resolution pipeline of the Maho compiler.
 /// <para>
-/// Executes the 6 resolution passes in strict dependency order:
+/// Executes the resolution passes in strict dependency order:
 /// <list type="number">
 /// <item><description><see cref="MacroExpansionPass"/>: Expands syntactic macros with hygiene tracking.</description></item>
 /// <item><description><see cref="SymbolDiscoveryPass"/>: Discovers declarations and builds the lexical scope tree.</description></item>
 /// <item><description><see cref="IntrinsicDiscoveryPass"/>: Validates compiler intrinsic attributes, types, and operator interfaces.</description></item>
-/// <item><description><see cref="DeclarationResolutionPass"/>: Resolves member signatures, field/param types, and base types.</description></item>
+/// <item><description><see cref="DeclarationResolutionPass"/>: Resolves member signatures, field/param types, base types, and validates modifiers.</description></item>
 /// <item><description><see cref="ExpressionResolutionPass"/>: Performs expression typing, operator overload resolution, and eager retroactive literal collapsing.</description></item>
+/// <item><description><see cref="ConstantFoldingPass"/>: Evaluates pure compile-time expressions and records constants for branch analysis.</description></item>
 /// <item><description><see cref="ControlFlowAnalysisPass"/>: Constructs control flow graphs (CFGs), checks reachability/dead code, and collapses unconstrained scalar literals in globals/fields.</description></item>
+/// <item><description><see cref="LifetimeAnalysisPass"/>: Performs ownership, move, borrow, and drop analysis.</description></item>
+/// <item><description><see cref="VisibilityAnalysisPass"/>: Verifies access boundaries (private, protected, internal, public) across member accesses, calls, and type references.</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -28,7 +31,10 @@ internal sealed class Resolver
         new IntrinsicDiscoveryPass(),
         new DeclarationResolutionPass(),
         new ExpressionResolutionPass(),
-        new ControlFlowAnalysisPass()
+        new ConstantFoldingPass(),
+        new ControlFlowAnalysisPass(),
+        new LifetimeAnalysisPass(),
+        new VisibilityAnalysisPass()
     ];
 
     private readonly ResolvedTree resolvedTree = new ResolvedTree();

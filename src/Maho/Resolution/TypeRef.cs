@@ -1,5 +1,3 @@
-global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -153,6 +151,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
 
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
+    public static implicit operator TypeRef((SymbolKind Kind, SymbolID ID) tuple) => Resolved(new SymbolHandle(tuple.Kind, tuple.ID));
 
     public bool Equals(TypeRef other)
     {
@@ -269,6 +268,13 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                 return targetPtr.ElementType.IsAssignableFrom(sourcePtr.ElementType, context);
             }
         }
+
+        // A safe reference is an access path to its element. When the destination is an owned
+        // value (rather than another reference/pointer, handled above), assignment materializes
+        // that element under Copy semantics. Ownership lowering diagnoses a move-only element
+        // reached through this boundary instead of silently moving it.
+        if (source.SpecialType is ReferenceSemanticType sourceReference)
+            return IsAssignableFrom(sourceReference.ElementType, context);
 
         if (SpecialType is DelegateSemanticType targetDel)
         {

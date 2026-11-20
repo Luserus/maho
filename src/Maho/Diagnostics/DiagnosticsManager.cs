@@ -202,6 +202,52 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, $"variable '{name}' requires an explicit type or a typed initializer", source)
             .Report();
 
+    /// <summary> Reports a use after an implicit move consumed a value. </summary>
+    public void ReportUseAfterMove(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0400", $"use of moved value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' was moved and is no longer initialized", source)
+            .WithHelp("assign a new value before using it, or use a Copy type")
+            .Report();
+
+    /// <summary> Reports a read, move, or borrow that is not definitely initialized on all paths. </summary>
+    public void ReportUseOfPossiblyUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0401", $"use of possibly uninitialized value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' is not initialized on every control-flow path", source)
+            .Report();
+
+    /// <summary> Reports an operation that conflicts with a live safe borrow. </summary>
+    public void ReportBorrowConflict(
+        TextSpan useSpan,
+        string operation,
+        string name,
+        TextSpan borrowSpan,
+        SourceText? useSource = null,
+        SourceText? borrowSource = null) =>
+        BuildError("MH0402", $"cannot {operation} '{name}' because it is borrowed", useSpan, useSource)
+            .WithPrimaryLabel(useSpan, $"cannot {operation} while borrowed", useSource)
+            .WithSecondaryLabel(borrowSpan, "borrowed here", borrowSource)
+            .Report();
+
+    /// <summary>Reports a safe borrow that would outlive the local storage it references.</summary>
+    public void ReportBorrowEscapesLocal(
+        TextSpan returnSpan,
+        string name,
+        TextSpan localSpan,
+        SourceText? returnSource = null,
+        SourceText? localSource = null) =>
+        BuildError("MH0403", $"cannot return a reference to local value '{name}'", returnSpan, returnSource)
+            .WithPrimaryLabel(returnSpan, "borrow escapes this function", returnSource)
+            .WithSecondaryLabel(localSpan, $"'{name}' is local to this function", localSource)
+            .WithHelp("return a borrow of a parameter or static/global storage instead")
+            .Report();
+
+    /// <summary>Reports an attempted implicit copy of a move-only referent through a safe alias/reference.</summary>
+    public void ReportCannotCopyMoveOnlyAlias(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0404", $"cannot copy move-only value '{name}' through a safe alias or reference", span, source)
+            .WithPrimaryLabel(span, "this assignment requires Copy semantics", source)
+            .WithHelp("use a Copy type, or redesign the API to transfer ownership from an owned value")
+            .Report();
+
     /// <summary> Reports assignment to a non-lvalue expression. </summary>
     public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
         BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)
@@ -871,5 +917,69 @@ internal sealed class DiagnosticsManager
         BuildError("MH2020", $"static member '{memberName}' cannot be accessed with an instance reference on type '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"static member '{memberName}' cannot be accessed via instance", source)
             .WithHelp($"qualify it with the type name instead: '{typeName}.{memberName}'")
+            .Report();
+
+    /// <summary> Reports an invalid modifier for a declaration kind. </summary>
+    public void ReportInvalidModifier(TextSpan span, string modifier, string itemKind, string name, SourceText? source = null) =>
+        BuildError("MH0128", $"modifier '{modifier}' is not valid for {itemKind} declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"modifier '{modifier}' not allowed on {itemKind}", source)
+            .Report();
+
+    /// <summary> Reports that a global variable declaration is missing the required static modifier. </summary>
+    public void ReportGlobalMissingStatic(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0128", $"global variable '{name}' must be declared with 'static' modifier", span, source)
+            .WithPrimaryLabel(span, "missing 'static' modifier", source)
+            .WithHelp("add the 'static' modifier: e.g. 'static ...'")
+            .Report();
+
+    /// <summary> Reports that a modifier is out of canonical order. </summary>
+    public void ReportModifierOutOfOrder(TextSpan span, string modifier, string name, string canonicalOrder, SourceText? source = null) =>
+        BuildError("MH0129", $"modifier '{modifier}' is out of order on declaration '{name}'; expected order: {canonicalOrder}", span, source)
+            .WithPrimaryLabel(span, $"out of order modifier '{modifier}'", source)
+            .WithHelp($"reorder modifiers to follow canonical order: {canonicalOrder}")
+            .Report();
+
+    /// <summary> Reports a duplicate modifier on a declaration. </summary>
+    public void ReportDuplicateModifier(TextSpan span, string modifier, string name, SourceText? source = null) =>
+        BuildError("MH0130", $"duplicate modifier '{modifier}' on declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"duplicate modifier '{modifier}'", source)
+            .Report();
+
+    /// <summary> Reports conflicting modifiers on a declaration. </summary>
+    public void ReportConflictingModifiers(TextSpan span, string modifier1, string modifier2, string name, SourceText? source = null) =>
+        BuildError("MH0131", $"conflicting modifiers '{modifier1}' and '{modifier2}' on declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"cannot combine '{modifier1}' with '{modifier2}'", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a private member from outside its declaring type. </summary>
+    public void ReportCannotAccessPrivateMember(TextSpan span, string memberName, string declaringTypeName, SourceText? source = null) =>
+        BuildError("MH0520", $"cannot access private member '{memberName}' of type '{declaringTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is private to '{declaringTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a protected member from an unrelated type. </summary>
+    public void ReportCannotAccessProtectedMember(TextSpan span, string memberName, string declaringTypeName, string currentTypeName, SourceText? source = null) =>
+        BuildError("MH0521", $"cannot access protected member '{memberName}' of type '{declaringTypeName}' from type '{currentTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is protected in '{declaringTypeName}'", source)
+            .WithHelp($"type '{currentTypeName}' must inherit from '{declaringTypeName}' to access protected member '{memberName}'")
+            .Report();
+
+    /// <summary> Reports an attempt to access an internal member from an external project. </summary>
+    public void ReportCannotAccessInternalMember(TextSpan span, string memberName, string declaringTypeName, SourceText? source = null) =>
+        BuildError("MH0522", $"cannot access internal member '{memberName}' of type '{declaringTypeName}' from external project", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is internal to its project", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a type that is not accessible due to its protection level. </summary>
+    public void ReportCannotAccessInaccessibleType(TextSpan span, string typeName, string accessibility, SourceText? source = null) =>
+        BuildError("MH0523", $"cannot access {accessibility} type '{typeName}' due to its protection level", span, source)
+            .WithPrimaryLabel(span, $"type '{typeName}' is {accessibility}", source)
+            .Report();
+
+    /// <summary> Reports a compile-time numeric literal overflow warning. </summary>
+    public void ReportLiteralOverflowWarning(TextSpan span, string literalValue, string targetTypeName, string min, string max, SourceText? source = null) =>
+        BuildWarning("MH3001", $"literal value '{literalValue}' overflows type '{targetTypeName}' (valid range is [{min}, {max}])", span, source)
+            .WithPrimaryLabel(span, $"literal overflows '{targetTypeName}' at runtime", source)
+            .WithHelp($"ensure the literal value fits within the range [{min}, {max}] to avoid unexpected runtime overflow")
             .Report();
 }

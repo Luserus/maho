@@ -15,4 +15,6 @@ internal enum TypeFlags : ulong
     Intrinsic   = 1UL << 6,
     Partial     = 1UL << 7,
     Untagged    = 1UL << 8,
+    Private     = 1UL << 9,
+    Protected   = 1UL << 10,
 }

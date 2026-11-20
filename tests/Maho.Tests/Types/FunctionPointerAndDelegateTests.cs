@@ -55,24 +55,24 @@ public sealed class FunctionPointerAndDelegateTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
+            public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
         public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
-            ValType* env;
+            public nuint codeAddress;
+            public ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -106,7 +106,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func(int32, int32) -> int32 fnVar;
                 public delegate(int32) -> void delVar;
@@ -177,7 +177,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(func(int32, int32) -> int32 f, int32 a, int32 b) -> int32
                 {
@@ -195,7 +195,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(delegate(int32) -> void d, int32 a) -> void
                 {
@@ -213,7 +213,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(func(int32, int32) -> int32 f) -> nuint
                 {
@@ -289,7 +289,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -334,7 +334,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {
@@ -360,7 +360,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {
@@ -383,7 +383,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {

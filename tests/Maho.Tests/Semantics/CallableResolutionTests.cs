@@ -54,7 +54,7 @@ public sealed class CallableResolutionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -62,7 +62,7 @@ public sealed class CallableResolutionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -71,7 +71,7 @@ public sealed class CallableResolutionTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -96,7 +96,7 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> CustomTarget;
+                public func Invoke(&this) -> CustomTarget;
             }
 
             public struct CustomTarget : ValType, MyCallable
@@ -107,7 +107,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke() -> CustomTarget
+                public func MyCallable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }
@@ -130,7 +130,7 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> CustomTarget;
+                public func Invoke(&this) -> CustomTarget;
             }
 
             public struct CustomTarget : ValType, MyCallable
@@ -147,7 +147,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke() -> CustomTarget
+                public func MyCallable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }

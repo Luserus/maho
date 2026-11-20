@@ -6,6 +6,7 @@ internal abstract class Symbol
     public SymbolPart Name { get; }
     public SymbolKind Kind { get; init; }
     public Scope EnclosingScope { get; }
+    public int ProjectId { get; set; }
 
     /// <summary> Gets the hygiene context of this symbol. </summary>
     public HygieneId Hygiene => Name.Hygiene;

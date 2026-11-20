@@ -57,7 +57,7 @@ public sealed class CollectionExpressionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -65,7 +65,7 @@ public sealed class CollectionExpressionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -74,7 +74,7 @@ public sealed class CollectionExpressionTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -161,12 +161,12 @@ public sealed class CollectionExpressionTests
             public interface ArrayCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke() -> int32;
+                public func Invoke(&this) -> int32;
             }
 
             public struct CustomFixedArray : ValType, ArrayCallable
             {
-                public func ArrayCallable.Invoke() -> int32
+                public func ArrayCallable.Invoke(&this) -> int32
                 {
                     return 42;
                 }

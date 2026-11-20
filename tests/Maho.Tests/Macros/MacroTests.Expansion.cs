@@ -12,7 +12,7 @@ public sealed partial class MacroTests
 
             public macro $`macro` => 100;
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -43,7 +43,7 @@ public sealed partial class MacroTests
                     (@x: expr) => @x * @x;
                 }
 
-                public class Calculator
+                public struct Calculator
                 {
                     public func Calc() -> int32
                     {
@@ -80,7 +80,7 @@ public sealed partial class MacroTests
                 (5) => $step(4);
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -112,7 +112,7 @@ public sealed partial class MacroTests
         var compilation = Compilation.FromSource($$"""
             {{MacroPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -149,7 +149,7 @@ public sealed partial class MacroTests
                 };
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -184,7 +184,7 @@ public sealed partial class MacroTests
                 };
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {
@@ -332,7 +332,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 $MakeMethod(Try, Parse);
             }
@@ -373,7 +373,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 $NaiveHashes(Bar);
             }
@@ -393,7 +393,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public struct void;
                 $BadPaste(12, @);
@@ -416,7 +416,7 @@ public sealed partial class MacroTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -459,7 +459,7 @@ public sealed partial class MacroTests
         var compilation = Compilation.FromSource($$"""
             {{MacroPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -562,7 +562,7 @@ public sealed partial class MacroTests
                 () => 42;
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> int32
                 {

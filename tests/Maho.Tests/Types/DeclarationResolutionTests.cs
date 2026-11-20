@@ -73,8 +73,8 @@ public sealed partial class DeclarationResolutionTests
                 public struct Constraint;
                 public struct Int32 : Constraint;
                 public struct Plain;
-                public class Type<T, U>;
-                public class Generic<T> where T : Constraint;
+                public struct Type<T, U>;
+                public struct Generic<T> where T : Constraint;
             }
 
             using Direct = Namespace.Plain;
@@ -141,8 +141,8 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value;
-            public static func Identity(Value value) -> Value { return value; }
-            public static func Loop(Value parameter) -> Value
+            public func Identity(Value value) -> Value { return value; }
+            public func Loop(Value parameter) -> Value
             {
             again:
                 Value local = Identity(parameter);
@@ -327,7 +327,7 @@ public sealed partial class DeclarationResolutionTests
                     return local;
                 }
             }
-            public class Generic<T> where T : UnknownConstraint;
+            public struct Generic<T> where T : UnknownConstraint;
             using BrokenAlias = UnknownTarget;
             """);
 

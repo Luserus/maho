@@ -149,7 +149,7 @@ public sealed class AliasAndReferenceCombinationsTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -157,7 +157,7 @@ public sealed class AliasAndReferenceCombinationsTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -166,7 +166,7 @@ public sealed class AliasAndReferenceCombinationsTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Point : Addr<Point>
@@ -614,25 +614,25 @@ public sealed class AliasAndReferenceCombinationsTests
             public interface LessThanOrEqual<TResult, TLeft, TRight>
             {
                 [OperatorFunction("LessThanOrEqual")]
-                public static func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+                public func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
             }
 
             public interface GreaterThanOrEqual<TResult, TLeft, TRight>
             {
                 [OperatorFunction("GreaterThanOrEqual")]
-                public static func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+                public func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
             }
 
             public struct Number : LessThanOrEqual<Bool, Number, Number>,
                                   GreaterThanOrEqual<Bool, Number, Number>
             {
-                public static func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
+                public func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
                     Bool b;
                     return b;
                 }
 
-                public static func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
+                public func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
                     Bool b;
                     return b;

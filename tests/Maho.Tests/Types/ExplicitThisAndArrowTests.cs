@@ -86,7 +86,7 @@ public sealed class ExplicitThisAndArrowTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -94,7 +94,7 @@ public sealed class ExplicitThisAndArrowTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -103,7 +103,7 @@ public sealed class ExplicitThisAndArrowTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Point
@@ -148,7 +148,8 @@ public sealed class ExplicitThisAndArrowTests
                 return this->y;
             }
 
-            public static func Create(Int32 xVal, Int32 yVal) -> Point
+            // No receiver means this is implicitly static; `static` is optional syntax.
+            public func Create(Int32 xVal, Int32 yVal) -> Point
             {
                 Point pt;
                 pt.x = xVal;
@@ -257,7 +258,7 @@ public sealed class ExplicitThisAndArrowTests
     }
 
     [Fact]
-    public void Static_Function_Without_This_Called_Via_Type_Succeeds()
+    public void Receiverless_Function_IsImplicitlyStatic_AndCalledViaType_Succeeds()
     {
         var source = Prelude + """
             public func Test() -> Point

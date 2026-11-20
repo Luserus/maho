@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Maho.Diagnostics;
+using Maho.Resolution.Ownership;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -122,8 +123,14 @@ internal sealed class ResolutionContext
     private readonly Dictionary<SyntaxNode, HygieneId> nodeHygiene = [];
     private readonly Dictionary<Expression, TypeRef> expressionTypes = [];
     private readonly Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> controlFlowGraphs = [];
+    private readonly Dictionary<SymbolHandle, OwnershipFacts> ownershipFacts = [];
     private readonly Dictionary<string, Dictionary<SyntaxNode, SymbolHandle>> treeNodeSymbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<Expression, TypeRef>> treeExpressionTypes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Expression, ConstantValue> constantValues = [];
+
+    public void SetConstantValue(Expression expr, ConstantValue value) => constantValues[expr] = value;
+    public bool TryGetConstantValue(Expression expr, out ConstantValue value) => constantValues.TryGetValue(expr, out value);
+    public IReadOnlyDictionary<Expression, ConstantValue> ConstantValues => constantValues;
 
     public void SetExpressionType(Expression expr, TypeRef type)
     {
@@ -153,6 +160,14 @@ internal sealed class ResolutionContext
 
     public IReadOnlyDictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs => controlFlowGraphs;
 
+    /// <summary> Gets lowered ownership bodies and their fixed-point initialization facts. </summary>
+    public IReadOnlyDictionary<SymbolHandle, OwnershipFacts> OwnershipFacts => ownershipFacts;
+
+    public void SetOwnershipFacts(SymbolHandle handle, OwnershipFacts facts) => ownershipFacts[handle] = facts;
+
+    public bool TryGetOwnershipFacts(SymbolHandle handle, out OwnershipFacts? facts) =>
+        ownershipFacts.TryGetValue(handle, out facts);
+
     public void RegisterHygiene(SyntaxNode node, HygieneId hygiene) => nodeHygiene[node] = hygiene;
 
     public HygieneId GetHygiene(SyntaxNode? node)
@@ -177,6 +192,42 @@ internal sealed class ResolutionContext
 
     /// <summary> Compilation options governing recursion limits and diagnostics. </summary>
     public CompilationOptions Options { get; }
+
+    private static int nextProjectId = 1;
+    public int ProjectId { get; }
+
+    private readonly Dictionary<int, ResolutionContext> referencedContextsByProjectId = [];
+
+    public bool TryGetReferencedContext(int projectId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ResolutionContext? context)
+    {
+        if (referencedContextsByProjectId.TryGetValue(projectId, out context))
+            return true;
+
+        foreach (var refProj in ReferencedProjects)
+        {
+            if (refProj.ProjectId == projectId)
+            {
+                context = refProj;
+                referencedContextsByProjectId[projectId] = refProj;
+                return true;
+            }
+
+            if (refProj.TryGetReferencedContext(projectId, out context))
+            {
+                referencedContextsByProjectId[projectId] = context;
+                return true;
+            }
+        }
+
+        context = null;
+        return false;
+    }
+
+    private T TrackSymbol<T>(T symbol) where T : Symbol
+    {
+        symbol.ProjectId = ProjectId;
+        return symbol;
+    }
 
     private int attributeID;
     private int nestedAttributeID;
@@ -236,6 +287,7 @@ internal sealed class ResolutionContext
         }
 
         ReferencedProjects = referencedProjects ?? baseContext?.ReferencedProjects ?? [];
+        ProjectId = baseContext?.ProjectId ?? System.Threading.Interlocked.Increment(ref nextProjectId);
 
         attributeID = AttributeSymbols.Count;
         nestedAttributeID = NestedAttributeSymbols.Count;
@@ -317,6 +369,7 @@ internal sealed class ResolutionContext
         else
             symbol = new SumTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
 
+        TrackSymbol(symbol);
         if (isSink)
         {
             SinkSymbols.TypeSymbols.Add(symbol);
@@ -340,6 +393,7 @@ internal sealed class ResolutionContext
         else
             symbol = new MemberSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
+        TrackSymbol(symbol);
         if (isSink)
         {
             SinkSymbols.NestedTypeSymbols.Add(symbol);
@@ -363,6 +417,7 @@ internal sealed class ResolutionContext
         else
             symbol = new LocalSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
 
+        TrackSymbol(symbol);
         if (isSink)
         {
             SinkSymbols.NestedTypeSymbols.Add(symbol);
@@ -379,7 +434,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : attributeID++;
-        var symbol = new AttributeSymbol(id, name, enclosingScope, containingNamespace, syntax);
+        var symbol = TrackSymbol(new AttributeSymbol(id, name, enclosingScope, containingNamespace, syntax));
 
         if (isSink)
         {
@@ -397,7 +452,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : nestedAttributeID++;
-        var symbol = new MemberAttributeSymbol(id, name, enclosingScope, parent, syntax);
+        var symbol = TrackSymbol(new MemberAttributeSymbol(id, name, enclosingScope, parent, syntax));
 
         if (isSink)
         {
@@ -415,7 +470,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : nestedAttributeID++;
-        var symbol = new LocalAttributeSymbol(id, name, enclosingScope, parent, syntax);
+        var symbol = TrackSymbol(new LocalAttributeSymbol(id, name, enclosingScope, parent, syntax));
 
         if (isSink)
         {
@@ -433,7 +488,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : functionID++;
-        var symbol = new FunctionSymbol(id, enclosingScope, name, containingNamespace, syntax);
+        var symbol = TrackSymbol(new FunctionSymbol(id, enclosingScope, name, containingNamespace, syntax));
 
         if (isSink)
         {
@@ -451,7 +506,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : methodID++;
-        var symbol = new MemberMethodSymbol(id, enclosingScope, name, parent, syntax);
+        var symbol = TrackSymbol(new MemberMethodSymbol(id, enclosingScope, name, parent, syntax));
 
         if (isSink)
         {
@@ -469,7 +524,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : methodID++;
-        var symbol = new LocalFunctionSymbol(id, name, enclosingScope, parent, syntax);
+        var symbol = TrackSymbol(new LocalFunctionSymbol(id, name, enclosingScope, parent, syntax));
 
         if (isSink)
         {
@@ -487,7 +542,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : globalVariableID++;
-        var symbol = new GlobalVariableSymbol(id, enclosingScope, name, containingNamespace, syntax);
+        var symbol = TrackSymbol(new GlobalVariableSymbol(id, enclosingScope, name, containingNamespace, syntax));
 
         if (isSink)
         {
@@ -505,7 +560,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : fieldID++;
-        var symbol = new FieldSymbol(id, enclosingScope, name, parent, syntax);
+        var symbol = TrackSymbol(new FieldSymbol(id, enclosingScope, name, parent, syntax));
 
         if (isSink)
         {
@@ -525,7 +580,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : parameterID++;
-        var symbol = new ParameterSymbol(id, enclosingScope, name, containingSymbol, syntax);
+        var symbol = TrackSymbol(new ParameterSymbol(id, enclosingScope, name, containingSymbol, syntax));
 
         if (isSink)
         {
@@ -544,54 +599,51 @@ internal sealed class ResolutionContext
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         if (isSink)
         {
-            var symbol = new LocalVariableSymbol(new SymbolID(sinkID--), enclosingScope, name, parent, syntax);
-            sinkLocalVariables.Add(symbol);
-            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+            var sinkSym = TrackSymbol(new LocalVariableSymbol(new SymbolID(sinkID--), enclosingScope, name, parent, syntax));
+            sinkLocalVariables.Add(sinkSym);
+            sinkSymbolsByHandle[GetHandle(sinkSym)] = sinkSym;
 
             if (name.Text != "_")
             {
                 if (parent is { Kind: SymbolKind.Function })
                 {
                     var func = GetFunctionSymbol(parent.Value);
-                    func?.LocalVariables.Add(symbol);
+                    func?.LocalVariables.Add(sinkSym);
                 }
                 else if (parent is { Kind: SymbolKind.Method })
                 {
                     var method = GetMethodSymbol(parent.Value);
-                    method?.LocalVariables.Add(symbol);
+                    method?.LocalVariables.Add(sinkSym);
                 }
             }
 
-            Register(enclosingScope, symbol);
-            return symbol;
+            Register(enclosingScope, sinkSym);
+            return sinkSym;
         }
 
         SymbolID id = 0;
         if (parent is { Kind: SymbolKind.Function, ID: var funcId } && (int)funcId >= 0 && (int)funcId < FunctionSymbols.Count)
         {
             var func = FunctionSymbols[funcId];
-            id = func.LocalVariables.Count;
-            var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
+            id = new SymbolID(func.LocalVariables.Count);
+            var symbol = TrackSymbol(new LocalVariableSymbol(id, enclosingScope, name, parent, syntax));
             func.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
-
             return symbol;
         }
         else if (parent is { Kind: SymbolKind.Method, ID: var methodId } && (int)methodId >= 0 && (int)methodId < MethodSymbols.Count)
         {
             var method = MethodSymbols[methodId];
-            id = method.LocalVariables.Count;
-            var symbol = new LocalVariableSymbol(id, enclosingScope, name, parent, syntax);
+            id = new SymbolID(method.LocalVariables.Count);
+            var symbol = TrackSymbol(new LocalVariableSymbol(id, enclosingScope, name, parent, syntax));
             method.LocalVariables.Add(symbol);
             Register(enclosingScope, symbol);
-
             return symbol;
         }
         else
         {
-            var symbol = new LocalVariableSymbol(0, enclosingScope, name, parent, syntax);
+            var symbol = TrackSymbol(new LocalVariableSymbol(id, enclosingScope, name, parent, syntax));
             Register(enclosingScope, symbol);
-
             return symbol;
         }
     }
@@ -600,7 +652,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : propertyID++;
-        var symbol = new PropertySymbol(id, enclosingScope, name, parent, hasBacking, syntax);
+        var symbol = TrackSymbol(new PropertySymbol(id, enclosingScope, name, parent, hasBacking, syntax));
 
         if (isSink)
         {
@@ -618,7 +670,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : genericParameterID++;
-        var symbol = new GenericParameterSymbol(id, enclosingScope, name, genericSymbol, parameterKind, isVariadic);
+        var symbol = TrackSymbol(new GenericParameterSymbol(id, enclosingScope, name, genericSymbol, parameterKind, isVariadic));
 
         if (isSink)
         {
@@ -636,7 +688,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : labelID++;
-        var symbol = new LabelSymbol(id, enclosingScope, name, containingFunction, syntax);
+        var symbol = TrackSymbol(new LabelSymbol(id, enclosingScope, name, containingFunction, syntax));
 
         if (isSink)
         {
@@ -654,7 +706,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : aliasID++;
-        var symbol = new AliasSymbol(id, enclosingScope, name, containingSymbol, syntax);
+        var symbol = TrackSymbol(new AliasSymbol(id, enclosingScope, name, containingSymbol, syntax));
 
         if (isSink)
         {
@@ -672,7 +724,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : aliasID++;
-        var symbol = new AliasSymbol(id, enclosingScope, name, containingNamespace, syntax);
+        var symbol = TrackSymbol(new AliasSymbol(id, enclosingScope, name, containingNamespace, syntax));
 
         if (isSink)
         {
@@ -690,7 +742,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : macroID++;
-        var symbol = new MacroSymbol(id, enclosingScope, name, containingSymbol, syntax);
+        var symbol = TrackSymbol(new MacroSymbol(id, enclosingScope, name, containingSymbol, syntax));
 
         if (isSink)
         {
@@ -708,7 +760,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : macroID++;
-        var symbol = new MacroSymbol(id, enclosingScope, name, containingNamespace, syntax);
+        var symbol = TrackSymbol(new MacroSymbol(id, enclosingScope, name, containingNamespace, syntax));
 
         if (isSink)
         {
@@ -732,7 +784,7 @@ internal sealed class ResolutionContext
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : enumVariantID++;
-        var symbol = new EnumVariantSymbol(id, enclosingScope, name, variantKind, containingType, syntax, explicitValue);
+        var symbol = TrackSymbol(new EnumVariantSymbol(id, enclosingScope, name, variantKind, containingType, syntax, explicitValue));
 
         if (isSink)
         {
@@ -749,10 +801,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Function)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetFunctionSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < FunctionSymbols.Count)
             return FunctionSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FunctionSymbol func)
             return func;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetFunctionSymbol(handle) is { } refFn)
+                    return refFn;
+            }
+        }
 
         return null;
     }
@@ -761,15 +829,25 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Method)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetMethodSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < MethodSymbols.Count)
             return MethodSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is MethodSymbol method)
             return method;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetMethodSymbol(handle) is { } refMethod)
-                return refMethod;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetMethodSymbol(handle) is { } refMethod)
+                    return refMethod;
+            }
         }
 
         return null;
@@ -779,15 +857,25 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Type)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetTypeSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < TypeSymbols.Count)
             return TypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is TypeSymbol t)
             return t;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetTypeSymbol(handle) is { } refType)
-                return refType;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetTypeSymbol(handle) is { } refType)
+                    return refType;
+            }
         }
 
         return null;
@@ -797,15 +885,25 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.NestedType)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetNestedTypeSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < NestedTypeSymbols.Count)
             return NestedTypeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedTypeSymbol t)
             return t;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetNestedTypeSymbol(handle) is { } refType)
-                return refType;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetNestedTypeSymbol(handle) is { } refType)
+                    return refType;
+            }
         }
 
         return null;
@@ -815,10 +913,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Alias)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetAliasSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < AliasSymbols.Count)
             return AliasSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is AliasSymbol a)
             return a;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetAliasSymbol(handle) is { } refAlias)
+                    return refAlias;
+            }
+        }
 
         return null;
     }
@@ -827,10 +941,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.GenericParameter)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetGenericParameterSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < GenericParameterSymbols.Count)
             return GenericParameterSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is GenericParameterSymbol gp)
             return gp;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetGenericParameterSymbol(handle) is { } refGp)
+                    return refGp;
+            }
+        }
 
         return null;
     }
@@ -839,10 +969,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Parameter)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetParameterSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < ParameterSymbols.Count)
             return ParameterSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is ParameterSymbol p)
             return p;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetParameterSymbol(handle) is { } refP)
+                    return refP;
+            }
+        }
 
         return null;
     }
@@ -851,10 +997,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Attribute)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetAttributeSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < AttributeSymbols.Count)
             return AttributeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is AttributeSymbol a)
             return a;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetAttributeSymbol(handle) is { } refAttr)
+                    return refAttr;
+            }
+        }
 
         return null;
     }
@@ -863,10 +1025,26 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.NestedAttribute)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetNestedAttributeSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < NestedAttributeSymbols.Count)
             return NestedAttributeSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is NestedAttributeSymbol a)
             return a;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetNestedAttributeSymbol(handle) is { } refAttr)
+                    return refAttr;
+            }
+        }
 
         return null;
     }
@@ -875,15 +1053,25 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Field)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetFieldSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < FieldSymbols.Count)
             return FieldSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is FieldSymbol f)
             return f;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetFieldSymbol(handle) is { } refField)
-                return refField;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetFieldSymbol(handle) is { } refField)
+                    return refField;
+            }
         }
 
         return null;
@@ -893,15 +1081,25 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.Property)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetPropertySymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < PropertySymbols.Count)
             return PropertySymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is PropertySymbol p)
             return p;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetPropertySymbol(handle) is { } refProp)
-                return refProp;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetPropertySymbol(handle) is { } refProp)
+                    return refProp;
+            }
         }
 
         return null;
@@ -911,15 +1109,53 @@ internal sealed class ResolutionContext
     {
         if (handle.Kind != SymbolKind.EnumVariant)
             return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetEnumVariantSymbol(handle);
+            return null;
+        }
+
         if (handle.ID.Value >= 0 && handle.ID.Value < EnumVariantSymbols.Count)
             return EnumVariantSymbols[handle.ID];
         if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is EnumVariantSymbol v)
             return v;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetEnumVariantSymbol(handle) is { } refEnum)
-                return refEnum;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetEnumVariantSymbol(handle) is { } refEnum)
+                    return refEnum;
+            }
+        }
+
+        return null;
+    }
+
+    public GlobalVariableSymbol? GetGlobalVariableSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.GlobalVariable)
+            return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetGlobalVariableSymbol(handle);
+            return null;
+        }
+
+        if (handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count)
+            return GlobalVariableSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is GlobalVariableSymbol g)
+            return g;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetGlobalVariableSymbol(handle) is { } refGlob)
+                    return refGlob;
+            }
         }
 
         return null;
@@ -927,13 +1163,21 @@ internal sealed class ResolutionContext
 
     public Symbol? GetSymbol(SymbolHandle handle)
     {
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetSymbol(handle);
+
+            return null;
+        }
+
         var sym = handle.Kind switch
         {
             SymbolKind.Type => GetTypeSymbol(handle),
             SymbolKind.NestedType => GetNestedTypeSymbol(handle),
             SymbolKind.Function => GetFunctionSymbol(handle),
             SymbolKind.Method => GetMethodSymbol(handle),
-            SymbolKind.GlobalVariable => handle.ID.Value >= 0 && handle.ID.Value < GlobalVariableSymbols.Count ? GlobalVariableSymbols[handle.ID] : null,
+            SymbolKind.GlobalVariable => GetGlobalVariableSymbol(handle),
             SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
             SymbolKind.Field => GetFieldSymbol(handle),
             SymbolKind.Property => GetPropertySymbol(handle),
@@ -949,16 +1193,23 @@ internal sealed class ResolutionContext
         if (sym is not null)
             return sym;
 
-        foreach (var refProj in ReferencedProjects)
+        if (handle.ProjectId == 0)
         {
-            if (refProj.GetSymbol(handle) is { } refSym)
-                return refSym;
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetSymbol(handle) is { } refSym)
+                    return refSym;
+            }
         }
 
         return null;
     }
 
-    public static SymbolHandle GetHandle(Symbol symbol) => (symbol.Kind, symbol.ID);
+    /// <summary> Tests whether a symbol was declared in the current compilation context rather than imported from a referenced project. </summary>
+    public bool IsDeclaredInCurrentProject(SymbolHandle handle) =>
+        handle.ProjectId == 0 || handle.ProjectId == ProjectId;
+
+    public static SymbolHandle GetHandle(Symbol symbol) => new(symbol.Kind, symbol.ID, symbol.ProjectId);
 
     public static void BindChildScope(Scope parent, Symbol owner, Scope child) => parent.ChildScopes[GetHandle(owner)] = child;
 

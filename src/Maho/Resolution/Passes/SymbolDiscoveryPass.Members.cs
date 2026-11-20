@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -22,6 +23,15 @@ internal sealed partial class SymbolDiscoveryPass
         bool hasReceiver = declaration.Signature.Parameters.Count > 0 && declaration.Signature.Parameters[0].Declarator.IsReceiver;
         if (hasReceiver)
             symbol.Flags &= ~FunctionFlags.Static;
+        else
+            // A member without an explicit first `this` parameter cannot bind instance storage.
+            // It is static by semantic shape; the `static` modifier remains accepted but optional.
+            symbol.Flags |= FunctionFlags.Static;
+
+        if (hasReceiver && declaration.Signature.Parameters[0].Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged))
+        {
+            symbol.Flags |= FunctionFlags.Untagged;
+        }
 
         if (declaration.Signature.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
@@ -77,6 +87,9 @@ internal sealed partial class SymbolDiscoveryPass
         }
 
         var symbol = context.CreatePropertySymbol(enclosingScope, ResolutionContext.GetSymbolName(declaration.Identifier).Last, containingType, hasBacking, declaration);
+        symbol.Flags = ResolveFunctionFlags(declaration.Modifiers);
+        symbol.GetterFlags = symbol.Flags;
+        symbol.SetterFlags = symbol.Flags;
 
         if (declaration.Identifier is QualifiedName qual && qual.Parts.Count >= 2)
         {
@@ -89,6 +102,12 @@ internal sealed partial class SymbolDiscoveryPass
 
         foreach (var accessor in declaration.Body.Accessors)
         {
+            var accFlags = accessor.Modifiers.Count > 0 ? ResolveFunctionFlags(accessor.Modifiers) : symbol.Flags;
+            if (accessor.Kind == PropertyAccessorKind.Get)
+                symbol.GetterFlags = accFlags;
+            else if (accessor.Kind == PropertyAccessorKind.Set)
+                symbol.SetterFlags = accFlags;
+
             Scope accessorScope = context.CreateScope(enclosingScope);
             if (symbol.Name.Text == "_" || enclosingScope.IsSink)
                 accessorScope.IsSink = true;
@@ -381,7 +400,7 @@ internal sealed partial class SymbolDiscoveryPass
         foreach (var genericParameter in genericName.GenericParameters)
         {
             var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic);
-            genericParameters.Add((symbol.Kind, symbol.ID));
+            genericParameters.Add(ResolutionContext.GetHandle(symbol));
         }
 
         return genericParameters;
@@ -456,6 +475,8 @@ internal sealed partial class SymbolDiscoveryPass
             {
                 MatchingKeywordKind.Public => TypeFlags.Public,
                 MatchingKeywordKind.Internal => TypeFlags.Internal,
+                MatchingKeywordKind.Private => TypeFlags.Private,
+                MatchingKeywordKind.Protected => TypeFlags.Protected,
                 MatchingKeywordKind.Unsafe => TypeFlags.Unsafe,
                 MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
@@ -496,10 +517,10 @@ internal sealed partial class SymbolDiscoveryPass
             {
                 MatchingKeywordKind.Public => VariableFlags.Public,
                 MatchingKeywordKind.Internal => VariableFlags.Internal,
+                MatchingKeywordKind.Private => VariableFlags.Private,
                 MatchingKeywordKind.Static => VariableFlags.Static,
                 MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
-                MatchingKeywordKind.Untagged => VariableFlags.Untagged,
                 _ => VariableFlags.None
             };
         }
@@ -523,7 +544,6 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
-                MatchingKeywordKind.Untagged => FunctionFlags.Untagged,
                 _ => FunctionFlags.None
             };
         }
