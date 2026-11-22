@@ -202,6 +202,73 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, $"variable '{name}' requires an explicit type or a typed initializer", source)
             .Report();
 
+    /// <summary> Reports a use after an implicit move consumed a value. </summary>
+    public void ReportUseAfterMove(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1001", $"use of moved value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' was moved and is no longer initialized", source)
+            .WithHelp("assign a new value before using it, or use a Copy type")
+            .Report();
+
+    /// <summary> Reports a read, move, or borrow that is not definitely initialized on all paths. </summary>
+    public void ReportUseOfPossiblyUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1002", $"use of possibly uninitialized value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' is not initialized on every control-flow path", source)
+            .Report();
+
+    /// <summary> Reports an operation that conflicts with a live safe borrow. </summary>
+    public void ReportBorrowConflict(
+        TextSpan useSpan,
+        string operation,
+        string name,
+        TextSpan borrowSpan,
+        SourceText? useSource = null,
+        SourceText? borrowSource = null) =>
+        BuildError("MH1003", $"cannot {operation} '{name}' because it is borrowed", useSpan, useSource)
+            .WithPrimaryLabel(useSpan, $"cannot {operation} while borrowed", useSource)
+            .WithSecondaryLabel(borrowSpan, "borrowed here", borrowSource)
+            .Report();
+
+    /// <summary>Reports a safe borrow that would outlive the local storage it references.</summary>
+    public void ReportBorrowEscapesLocal(
+        TextSpan returnSpan,
+        string name,
+        TextSpan localSpan,
+        SourceText? returnSource = null,
+        SourceText? localSource = null) =>
+        BuildError("MH1004", $"cannot return a reference to local value '{name}'", returnSpan, returnSource)
+            .WithPrimaryLabel(returnSpan, "borrow escapes this function", returnSource)
+            .WithSecondaryLabel(localSpan, $"'{name}' is local to this function", localSource)
+            .WithHelp("return a borrow of a parameter or static/global storage instead")
+            .Report();
+
+    /// <summary>Reports an attempted implicit copy of a move-only referent through a safe alias/reference.</summary>
+    public void ReportCannotCopyMoveOnlyAlias(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1005", $"cannot copy move-only value '{name}' through a safe alias or reference", span, source)
+            .WithPrimaryLabel(span, "this assignment requires Copy semantics", source)
+            .WithHelp("use a Copy type, or redesign the API to transfer ownership from an owned value")
+            .Report();
+
+    /// <summary>Reports an attempted move of a field from a type implementing custom Move or Destructor.</summary>
+    public void ReportPartialMoveDisallowed(TextSpan span, string fieldName, string typeName, SourceText? source = null) =>
+        BuildError("MH1006", $"cannot move field '{fieldName}' out of type '{typeName}' because it implements explicit 'Move' or 'Destructor'", span, source)
+            .WithPrimaryLabel(span, "partial move not permitted for types with custom lifecycle", source)
+            .WithHelp("move the entire struct instead, or borrow the field by reference")
+            .Report();
+
+    /// <summary>Reports an attempted move of a struct that has partially moved fields.</summary>
+    public void ReportCannotMovePartiallyMoved(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1007", $"cannot move partially moved value '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' cannot be moved because one or more fields were moved out", source)
+            .WithHelp("reassign all moved fields before moving the entire value")
+            .Report();
+
+    /// <summary>Reports a safe borrow of a temporary value that would escape its statement.</summary>
+    public void ReportBorrowEscapesTemporary(TextSpan span, string targetDescription, SourceText? source = null) =>
+        BuildError("MH1008", $"cannot borrow temporary value which does not outlive {targetDescription}", span, source)
+            .WithPrimaryLabel(span, "temporary value does not live long enough", source)
+            .WithHelp("bind the value to a named local variable before taking its reference")
+            .Report();
+
     /// <summary> Reports assignment to a non-lvalue expression. </summary>
     public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
         BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)
@@ -495,49 +562,49 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports an inconsistent or cyclic inheritance order. </summary>
     public void ReportInconsistentInheritanceOrder(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0110", $"inconsistent or cyclic inheritance order detected for type '{typeName}'", span, source)
+        BuildError("MH0539", $"inconsistent or cyclic inheritance order detected for type '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"cannot compute a consistent C3 linearization for '{typeName}'", source)
             .WithHelp("reorder or simplify base types to resolve conflicting inheritance orders")
             .Report();
 
     /// <summary> Reports that a base constructor requires explicit initialization in the most-derived constructor. </summary>
     public void ReportBaseConstructorRequiresExplicitInit(TextSpan span, string baseName, SourceText? source = null) =>
-        BuildError("MH0250", $"base '{baseName}' has no default constructor; derived type must explicitly initialize it", span, source)
+        BuildError("MH0551", $"base '{baseName}' has no default constructor; derived type must explicitly initialize it", span, source)
             .WithPrimaryLabel(span, $"base '{baseName}' must be initialized here", source)
             .WithHelp($"add ':{baseName}(...)' to the constructor's base initializer list")
             .Report();
 
     /// <summary> Reports that a base initializer clause was placed on an ordinary (non-constructor) function. </summary>
     public void ReportInvalidBaseInitializerOnOrdinaryFunction(TextSpan span, SourceText? source = null) =>
-        BuildError("MH0251", "base initializer clause can only be specified on a constructor function", span, source)
+        BuildError("MH0552", "base initializer clause can only be specified on a constructor function", span, source)
             .WithPrimaryLabel(span, "base initializer clause is not allowed on ordinary functions", source)
             .WithHelp("remove the ': Base(...)' clause or declare this function as a constructor 'func Ctor.Construct'")
             .Report();
 
     /// <summary> Reports that a base initializer specifies a type that is not an inherited base of the enclosing type. </summary>
     public void ReportTypeIsNotBaseOf(TextSpan span, string targetName, string typeName, SourceText? source = null) =>
-        BuildError("MH0252", $"type '{targetName}' is not a base type of '{typeName}'", span, source)
+        BuildError("MH0553", $"type '{targetName}' is not a base type of '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"'{targetName}' is not inherited by '{typeName}'", source)
             .WithHelp($"remove '{targetName}' from the base initializer list or add it to the inheritance list of '{typeName}'")
             .Report();
 
     /// <summary> Reports that a base type is initialized more than once in a constructor base initializer list. </summary>
     public void ReportDuplicateBaseInitializer(TextSpan span, string baseName, SourceText? source = null) =>
-        BuildError("MH0253", $"base '{baseName}' is already initialized in this base initializer list", span, source)
+        BuildError("MH0554", $"base '{baseName}' is already initialized in this base initializer list", span, source)
             .WithPrimaryLabel(span, $"duplicate initialization of base '{baseName}'", source)
             .WithHelp($"remove the redundant ':{baseName}(...)' initializer")
             .Report();
 
     /// <summary> Reports an attempt to take a thin reference to a non-contiguous / split base. </summary>
     public void ReportNonContiguousBaseConversion(TextSpan span, string baseName, SourceText? source = null) =>
-        BuildError("MH0320", $"cannot convert derived reference to non-contiguous base '{baseName}'; use 'dyn {baseName}&' instead", span, source)
+        BuildError("MH0555", $"cannot convert derived reference to non-contiguous base '{baseName}'; use 'dyn {baseName}&' instead", span, source)
             .WithPrimaryLabel(span, $"sub-object '{baseName}' is non-contiguous in memory", source)
             .WithHelp($"convert to dynamic existential reference 'dyn {baseName}&' instead")
             .Report();
 
     /// <summary> Reports an ambiguous member access across sibling base types. </summary>
     public void ReportAmbiguousMemberAccess(TextSpan span, string memberName, string typeName, SourceText? source = null) =>
-        BuildError("MH0410", $"ambiguous member '{memberName}' in type '{typeName}'; disambiguate by casting with 'as'", span, source)
+        BuildError("MH0556", $"ambiguous member '{memberName}' in type '{typeName}'; disambiguate by casting with 'as'", span, source)
             .WithPrimaryLabel(span, $"'{memberName}' is declared in multiple base types", source)
             .WithHelp($"disambiguate by casting the receiver: '(expr as Base).{memberName}'")
             .Report();
@@ -672,9 +739,27 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports an invalid signature for an operator function declaration. </summary>
     public void ReportInvalidOperatorFunctionSignature(TextSpan span, string operatorName, string reason, SourceText? source = null) =>
-        BuildError("MH0242", $"invalid signature for operator function '{operatorName}': {reason}", span, source)
+        BuildError("MH0560", $"invalid signature for operator function '{operatorName}': {reason}", span, source)
             .WithPrimaryLabel(span, reason, source)
             .Report();
+
+    /// <summary> Reports a duplicate operator function declaration. </summary>
+    public void ReportDuplicateOperatorFunction(
+        string operatorName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError("MH0563", $"duplicate operator function declaration for operator '{operatorName}'; only one interface operator function is allowed per operator", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"duplicate declaration of operator function '{operatorName}' here", redeclSource);
+
+        if (firstDeclSpan is { } firstSpan)
+            builder.WithSecondaryLabel(firstSpan, $"previous declaration of operator function '{operatorName}' here", firstSource);
+
+        builder.WithHelp($"only one interface can declare an [OperatorFunction(\"{operatorName}\")] contract")
+            .Report();
+    }
 
     /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
     public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
@@ -702,13 +787,13 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that an intrinsic type does not satisfy its required ABI contract. </summary>
     public void ReportIntrinsicAbiMismatch(TextSpan span, string typeName, string intrinsicName, string reason, SourceText? source = null) =>
-        BuildError("MH0544", $"type '{typeName}' does not satisfy the ABI contract for intrinsic '{intrinsicName}': {reason}", span, source)
+        BuildError("MH0020", $"type '{typeName}' does not satisfy the ABI contract for intrinsic '{intrinsicName}': {reason}", span, source)
             .WithPrimaryLabel(span, reason, source)
             .Report();
 
     /// <summary> Reports that syntax requires an intrinsic type that was not declared or failed verification. </summary>
     public void ReportMissingIntrinsicForSyntax(TextSpan span, string syntaxDescription, string requiredIntrinsic, SourceText? source = null) =>
-        BuildError("MH0240", $"{syntaxDescription} requires intrinsic type '{requiredIntrinsic}' to be declared", span, source)
+        BuildError("MH0021", $"{syntaxDescription} requires intrinsic type '{requiredIntrinsic}' to be declared", span, source)
             .WithPrimaryLabel(span, $"requires intrinsic '{requiredIntrinsic}'", source)
             .WithHelp($"declare a type with [IntrinsicType(\"{requiredIntrinsic}\")] or reference a library that defines it")
             .Report();
@@ -722,13 +807,13 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that a type implements both Destructor and Copy. </summary>
     public void ReportDestructorNandCopy(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0243", $"type '{typeName}' cannot implement both 'Destructor' and 'Copy'; types with destructors must use move semantics", span, source)
+        BuildError("MH0561", $"type '{typeName}' cannot implement both 'Destructor' and 'Copy'; types with destructors must use move semantics", span, source)
             .WithPrimaryLabel(span, "cannot implement both 'Destructor' and 'Copy'", source)
             .Report();
 
     /// <summary> Reports that a type implements both Copy and Move. </summary>
     public void ReportCopyNandMove(TextSpan span, string typeName, SourceText? source = null) =>
-        BuildError("MH0244", $"type '{typeName}' cannot implement both 'Copy' and 'Move'; a type must be exclusively Copy or exclusively Move", span, source)
+        BuildError("MH0562", $"type '{typeName}' cannot implement both 'Copy' and 'Move'; a type must be exclusively Copy or exclusively Move", span, source)
             .WithPrimaryLabel(span, "cannot implement both 'Copy' and 'Move'", source)
             .Report();
 
@@ -847,16 +932,16 @@ internal sealed class DiagnosticsManager
 
     /// <summary> Reports that not all reachable code paths return a value in a non-Unit function. </summary>
     public void ReportMissingReturn(TextSpan span, string functionName, SourceText? source = null) =>
-        BuildError("MH2017", $"not all code paths return a value in function '{functionName}'", span, source)
+        BuildError("MH1010", $"not all code paths return a value in function '{functionName}'", span, source)
             .WithPrimaryLabel(span, $"missing return statement on at least one reachable code path in '{functionName}'", source)
-            .WithHelp("ensure all reachable code paths end with a 'return' statement or return type '!'")
+            .WithHelp("ensure all reachable code paths end with a 'return' statement or return type 'Never'")
             .Report();
 
-    /// <summary> Reports that all code paths in a function diverge, so it must be declared with return type '!'. </summary>
+    /// <summary> Reports that all code paths in a function diverge, so it must be declared with return type 'Never'. </summary>
     public void ReportFunctionMustReturnNever(TextSpan span, string functionName, string declaredReturnType, SourceText? source = null) =>
-        BuildError("MH2018", $"function '{functionName}' never returns and must be declared with return type '!'", span, source)
+        BuildError("MH1011", $"function '{functionName}' never returns and must be declared with return type 'Never'", span, source)
             .WithPrimaryLabel(span, $"function declared with return type '{declaredReturnType}', but never returns", source)
-            .WithHelp($"all execution paths diverge; declare the return type as '!' (e.g. func {functionName}(...) -> !)")
+            .WithHelp($"all execution paths diverge; declare the return type as 'Never' (e.g. func {functionName}(...) -> Never)")
             .Report();
 
     /// <summary> Reports an attempt to access an instance member on a type without an instance reference. </summary>
@@ -871,5 +956,134 @@ internal sealed class DiagnosticsManager
         BuildError("MH2020", $"static member '{memberName}' cannot be accessed with an instance reference on type '{typeName}'", span, source)
             .WithPrimaryLabel(span, $"static member '{memberName}' cannot be accessed via instance", source)
             .WithHelp($"qualify it with the type name instead: '{typeName}.{memberName}'")
+            .Report();
+
+    /// <summary> Reports an invalid modifier for a declaration kind. </summary>
+    public void ReportInvalidModifier(TextSpan span, string modifier, string itemKind, string name, SourceText? source = null) =>
+        BuildError("MH0128", $"modifier '{modifier}' is not valid for {itemKind} declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"modifier '{modifier}' not allowed on {itemKind}", source)
+            .Report();
+
+    /// <summary> Reports that a global variable declaration is missing the required static modifier. </summary>
+    public void ReportGlobalMissingStatic(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH0128", $"global variable '{name}' must be declared with 'static' modifier", span, source)
+            .WithPrimaryLabel(span, "missing 'static' modifier", source)
+            .WithHelp("add the 'static' modifier: e.g. 'static ...'")
+            .Report();
+
+    /// <summary> Reports that a modifier is out of canonical order. </summary>
+    public void ReportModifierOutOfOrder(TextSpan span, string modifier, string name, string canonicalOrder, SourceText? source = null) =>
+        BuildError("MH0129", $"modifier '{modifier}' is out of order on declaration '{name}'; expected order: {canonicalOrder}", span, source)
+            .WithPrimaryLabel(span, $"out of order modifier '{modifier}'", source)
+            .WithHelp($"reorder modifiers to follow canonical order: {canonicalOrder}")
+            .Report();
+
+    /// <summary> Reports a duplicate modifier on a declaration. </summary>
+    public void ReportDuplicateModifier(TextSpan span, string modifier, string name, SourceText? source = null) =>
+        BuildError("MH0130", $"duplicate modifier '{modifier}' on declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"duplicate modifier '{modifier}'", source)
+            .Report();
+
+    /// <summary> Reports conflicting modifiers on a declaration. </summary>
+    public void ReportConflictingModifiers(TextSpan span, string modifier1, string modifier2, string name, SourceText? source = null) =>
+        BuildError("MH0131", $"conflicting modifiers '{modifier1}' and '{modifier2}' on declaration '{name}'", span, source)
+            .WithPrimaryLabel(span, $"cannot combine '{modifier1}' with '{modifier2}'", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a private member from outside its declaring type. </summary>
+    public void ReportCannotAccessPrivateMember(TextSpan span, string memberName, string declaringTypeName, SourceText? source = null) =>
+        BuildError("MH0520", $"cannot access private member '{memberName}' of type '{declaringTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is private to '{declaringTypeName}'", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a protected member from an unrelated type. </summary>
+    public void ReportCannotAccessProtectedMember(TextSpan span, string memberName, string declaringTypeName, string currentTypeName, SourceText? source = null) =>
+        BuildError("MH0521", $"cannot access protected member '{memberName}' of type '{declaringTypeName}' from type '{currentTypeName}'", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is protected in '{declaringTypeName}'", source)
+            .WithHelp($"type '{currentTypeName}' must inherit from '{declaringTypeName}' to access protected member '{memberName}'")
+            .Report();
+
+    /// <summary> Reports an attempt to access an internal member from an external project. </summary>
+    public void ReportCannotAccessInternalMember(TextSpan span, string memberName, string declaringTypeName, SourceText? source = null) =>
+        BuildError("MH0522", $"cannot access internal member '{memberName}' of type '{declaringTypeName}' from external project", span, source)
+            .WithPrimaryLabel(span, $"'{memberName}' is internal to its project", source)
+            .Report();
+
+    /// <summary> Reports an attempt to access a type that is not accessible due to its protection level. </summary>
+    public void ReportCannotAccessInaccessibleType(TextSpan span, string typeName, string accessibility, SourceText? source = null) =>
+        BuildError("MH0523", $"cannot access {accessibility} type '{typeName}' due to its protection level", span, source)
+            .WithPrimaryLabel(span, $"type '{typeName}' is {accessibility}", source)
+            .Report();
+
+    /// <summary> Reports a compile-time numeric literal overflow warning. </summary>
+    public void ReportLiteralOverflowWarning(TextSpan span, string literalValue, string targetTypeName, string min, string max, SourceText? source = null) =>
+        BuildWarning("MH3001", $"literal value '{literalValue}' overflows type '{targetTypeName}' (valid range is [{min}, {max}])", span, source)
+            .WithPrimaryLabel(span, $"literal overflows '{targetTypeName}' at runtime", source)
+            .WithHelp($"ensure the literal value fits within the range [{min}, {max}] to avoid unexpected runtime overflow")
+            .Report();
+
+    /// <summary> Reports an attempted division or remainder by zero in a constant expression or const declaration. </summary>
+    public void ReportConstDivisionByZero(TextSpan span, SourceText? source = null) =>
+        BuildError("MH1500", "attempted to divide by zero in a constant expression", span, source)
+            .WithPrimaryLabel(span, "division by zero in constant", source)
+            .WithHelp("constant expressions must evaluate to valid non-zero values at compile time")
+            .Report();
+
+    /// <summary> Reports that an expression in a const declaration cannot be evaluated at compile time. </summary>
+    public void ReportInvalidConstExpression(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH1501", $"expression cannot be evaluated at compile time: {message}", span, source)
+            .WithPrimaryLabel(span, "not a compile-time constant", source)
+            .Report();
+
+    /// <summary> Reports an attempt to invoke a method or operator expecting &amp;this on an r-value. </summary>
+    public void ReportInvalidReceiverForByRefThis(TextSpan span, string calleeDesc, string receiverKind, SourceText? source = null) =>
+        BuildError("MH2027", $"receiver expression for '{calleeDesc}' must be an addressable l-value when receiver is passed by reference ('{receiverKind}')", span, source)
+            .WithPrimaryLabel(span, $"cannot pass r-value or temporary to '{receiverKind}' receiver", source)
+            .WithHelp("assign the expression to a local variable or use a value receiver 'this'")
+            .Report();
+
+    /// <summary> Reports a warning when division by zero is detected in a runtime expression. </summary>
+    public void ReportDivisionByZeroWarning(TextSpan span, SourceText? source = null) =>
+        BuildWarning("MH3002", "division by zero detected; evaluation deferred to runtime", span, source)
+            .WithPrimaryLabel(span, "division by zero will cause a runtime panic", source)
+            .Report();
+
+    /// <summary> Reports inconsistent term counts across elements in a collection expression. </summary>
+    public void ReportInconsistentCollectionTermCount(TextSpan span, int actual, int expected, SourceText? source = null) =>
+        BuildError("MH0568", $"inconsistent term count in collection expression: element has {actual} terms, expected {expected}", span, source)
+            .WithPrimaryLabel(span, $"element has {actual} terms, expected {expected}", source)
+            .Report();
+
+    /// <summary> Reports that a collection type does not support with(...) trailer initialization. </summary>
+    public void ReportCollectionMissingWithContract(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0569", $"collection type '{typeName}' does not support 'with' initialization; missing 'CollectionWith' contract", span, source)
+            .WithPrimaryLabel(span, "missing 'CollectionWith' operator implementation", source)
+            .WithHelp($"implement the 'CollectionWith<TArgs...>' operator contract on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports that a target type does not implement the Collection contract for the given term count. </summary>
+    public void ReportCollectionMissingContract(TextSpan span, string typeName, int termCount, SourceText? source = null) =>
+        BuildError("MH0570", $"type '{typeName}' does not implement 'Collection' contract with {termCount} terms", span, source)
+            .WithPrimaryLabel(span, $"does not implement Collection with {termCount} terms", source)
+            .Report();
+
+    /// <summary> Reports that an expression in a for-in loop is not iterable. </summary>
+    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0571", $"type '{typeName}' is not iterable; missing 'Iterable' contract", span, source)
+            .WithPrimaryLabel(span, $"type '{typeName}' is not iterable", source)
+            .WithHelp($"implement the 'Iterable<TItem, TIterator>' operator contract on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports that yield was used outside a generator function returning an Iterator or Iterable. </summary>
+    public void ReportInvalidYieldUsage(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0572", "'yield' can only be used in a function returning an Iterator or Iterable type", span, source)
+            .WithPrimaryLabel(span, "invalid 'yield' usage", source)
+            .WithHelp("ensure the enclosing function returns a type implementing 'Iterator<T>' or 'Iterable<T, ...>'")
+            .Report();
+
+    /// <summary> Reports a mismatch between yielded expression type and generator iterator item type. </summary>
+    public void ReportYieldTypeMismatch(TextSpan span, string yieldType, string itemType, SourceText? source = null) =>
+        BuildError("MH0573", $"yield expression of type '{yieldType}' cannot be assigned to iterator item type '{itemType}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{itemType}', found '{yieldType}'", source)
             .Report();
 }

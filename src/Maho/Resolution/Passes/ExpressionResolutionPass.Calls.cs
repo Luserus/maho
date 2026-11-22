@@ -109,6 +109,7 @@ internal sealed partial class ExpressionResolutionPass
                 context.Diagnostics.ReportMissingIntrinsicForSyntax(call.Callee.GetSpan() ?? default, "delegate call", KnownIntrinsics.Delegate, call.GetSource());
                 return TypeRef.Error;
             }
+
             return TypeCheckFunctionTypeCall(call, delType.ParameterTypes, delType.ReturnType, argTypes, scope, containingFunction);
         }
 
@@ -129,6 +130,12 @@ internal sealed partial class ExpressionResolutionPass
     /// <summary>
     /// Attempts to resolve an invocation on an instance whose type implements the <see cref="OperatorKind.Callable"/> operator.
     /// </summary>
+    /// <remarks>
+    /// The call target supplies an explicit first receiver parameter when the Callable contract
+    /// declares one. Only the remaining parameters are matched against the arguments inside
+    /// <c>callee(...)</c>; treating the receiver as a user argument would make an explicit
+    /// <c>Callable.Invoke(&amp;this, TArgs...)</c> impossible to call.
+    /// </remarks>
     /// <param name="call">The call expression syntax node.</param>
     /// <param name="calleeType">The semantic type of the receiver/callee object.</param>
     /// <param name="argTypes">The evaluated argument types.</param>
@@ -207,12 +214,23 @@ internal sealed partial class ExpressionResolutionPass
 
                     if (isCandidate)
                     {
-                        if (method.Parameters.Count == argTypes.Count)
+                        // The first receiver is supplied by the call target (`callee(...)`), rather
+                        // than by the parenthesized user arguments. This keeps Callable aligned
+                        // with ordinary instance methods after receiver spelling became explicit.
+                        int argumentStart = 0;
+                        if (method.Parameters.Count > 0 &&
+                            context.GetParameterSymbol(method.Parameters[0]) is { } firstParameter &&
+                            firstParameter.Syntax?.Declarator.IsReceiver == true)
+                        {
+                            argumentStart = 1;
+                        }
+
+                        if (method.Parameters.Count - argumentStart == argTypes.Count)
                         {
                             bool matches = true;
                             for (int i = 0; i < argTypes.Count; i++)
                             {
-                                if (context.GetParameterSymbol(method.Parameters[i]) is { } param)
+                                if (context.GetParameterSymbol(method.Parameters[i + argumentStart]) is { } param)
                                 {
                                     var effParam = typeArgs is not null ? SubstituteTypeRef(param.Type, typeArgs) : param.Type;
                                     if (!effParam.IsAssignableFrom(argTypes[i], context))

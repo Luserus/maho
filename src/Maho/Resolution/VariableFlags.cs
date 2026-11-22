@@ -12,5 +12,6 @@ internal enum VariableFlags : ulong
     Readonly    = 1UL << 4,
     Const       = 1UL << 5,
     Immut       = 1UL << 6,
-    Untagged    = 1UL << 7
+    Untagged    = 1UL << 7,
+    Private     = 1UL << 8
 }

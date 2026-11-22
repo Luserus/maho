@@ -50,7 +50,7 @@ public sealed class CrossProjectDynTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -58,7 +58,7 @@ public sealed class CrossProjectDynTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -67,7 +67,7 @@ public sealed class CrossProjectDynTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Base
@@ -138,7 +138,7 @@ public sealed class CrossProjectDynTests
     }
 
     [Fact]
-    public void ExternalProject_ThinReferenceToSplitBase_EmitsMH0320()
+    public void ExternalProject_ThinReferenceToSplitBase_EmitsMH0555()
     {
         var libCompilation = Compilation.FromSource(LibPrelude, "Lib.mh");
         Assert.False(libCompilation.HasErrors);
@@ -164,6 +164,6 @@ public sealed class CrossProjectDynTests
             referencedCompilations: [libCompilation]);
 
         Assert.True(appCompilation.HasErrors);
-        Assert.Contains(appCompilation.Diagnostics, d => d.Code == "MH0320" && d.Message.Contains("MiddleB"));
+        Assert.Contains(appCompilation.Diagnostics, d => d.Code == "MH0555" && d.Message.Contains("MiddleB"));
     }
 }

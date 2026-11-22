@@ -36,7 +36,7 @@ internal sealed class DiscoveredOperators
     /// <summary>The symbol handle of the <c>[IntrinsicFunction]</c> attribute.</summary>
     public AttributeSymbol? IntrinsicFunctionAttribute { get; internal set; }
 
-    private readonly Dictionary<OperatorKind, List<DiscoveredOperatorMethod>> operatorsByKind = new();
+    private readonly Dictionary<OperatorKind, List<DiscoveredOperatorMethod>> operatorsByKind = [];
 
     /// <summary>
     /// Registers a discovered operator method by its classified <see cref="OperatorKind"/>.

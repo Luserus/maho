@@ -8,7 +8,7 @@ public sealed class AnalysisSessionTests
         var code = """
             namespace Sample;
 
-            public class Service
+            public struct Service
             {
                 public struct int;
                 public int Count;
@@ -27,7 +27,7 @@ public sealed class AnalysisSessionTests
         var code = """
             namespace Sample;
 
-            public class Broken
+            public struct Broken
             {
                 §;
             }
@@ -46,7 +46,7 @@ public sealed class AnalysisSessionTests
         var session = new AnalysisSession();
 
         // Prompt 1: Declare a type
-        var snippet1 = session.AnalyzeSnippet("public class Counter { public int Value; }");
+        var snippet1 = session.AnalyzeSnippet("public struct Counter { public int Value; }");
         Assert.True(snippet1.Success);
         Assert.True(session.CommitSnippet(snippet1));
         Assert.Equal(1, session.SnippetCount);

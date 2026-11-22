@@ -10,10 +10,10 @@ public sealed partial class ParserTests
 {
     [Theory]
     [InlineData("namespace Demo;", typeof(NamespaceDeclaration), typeof(NamespaceEmptyBody))]
-    [InlineData("namespace Demo { public class Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
-    [InlineData("public class Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("namespace Demo { public struct Inner; }", typeof(NamespaceDeclaration), typeof(NamespaceBlockBody))]
+    [InlineData("public struct Box;", typeof(TopLevelTypeDeclaration), typeof(TypeEmptyBody))]
     [InlineData("public attribute Marker;", typeof(TopLevelAttributeDeclaration), null)]
-    [InlineData("public class Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
+    [InlineData("public struct Box { public int Value; }", typeof(TopLevelTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static func Main() -> int;", typeof(TopLevelFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static func Main() -> int { return 0; }", typeof(TopLevelFunctionDeclaration), typeof(FunctionBlockBody))]
     [InlineData("public int value;", typeof(TopLevelVariableDeclaration), null)]
@@ -60,8 +60,8 @@ public sealed partial class ParserTests
     }
 
     [Theory]
-    [InlineData("public class LocalBox;", typeof(LocalTypeDeclaration), typeof(TypeEmptyBody))]
-    [InlineData("public class LocalBox { public int Value; }", typeof(LocalTypeDeclaration), typeof(TypeBlockBody))]
+    [InlineData("public struct LocalBox;", typeof(LocalTypeDeclaration), typeof(TypeEmptyBody))]
+    [InlineData("public struct LocalBox { public int Value; }", typeof(LocalTypeDeclaration), typeof(TypeBlockBody))]
     [InlineData("public static func Local() -> int;", typeof(LocalFunctionDeclaration), typeof(FunctionEmptyBody))]
     [InlineData("public static func Local() -> int { return 0; }", typeof(LocalFunctionDeclaration), typeof(FunctionBlockBody))]
     public void Parse_LocalDeclarationKinds(string source, Type expectedType, Type? expectedBodyType)
@@ -231,7 +231,7 @@ public sealed partial class ParserTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             using Std
-            class MyClass;
+            struct MyClass;
             """);
 
         Assert.NotEmpty(diagnostics.Diagnostics);
@@ -272,7 +272,7 @@ public sealed partial class ParserTests
     public void Parse_TypeBlock_SupportsUsingDirective_And_AliasDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public class MyClass
+            public struct MyClass
             {
                 using Std.Math;
                 using Num = Std.Int32;
@@ -587,7 +587,7 @@ public sealed partial class ParserTests
             global
             {
                 int globalValue = 1;
-                class GlobalType;
+                struct GlobalType;
             }
             """);
 

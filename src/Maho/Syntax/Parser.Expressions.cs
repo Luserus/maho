@@ -47,10 +47,10 @@ internal sealed partial class Parser
             else if (CurrentToken.Kind is TokenKind.LeftBracket)
             {
                 var leftBracket = Consume();
-                var index = ParseExpectedExpression("for the index expression", MissingTokenAnchor.AfterPrevious);
+                var indices = ParseExpressionList(TokenKind.RightBracket);
                 var rightBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the index expression");
 
-                left = new IndexExpression(left, leftBracket, index, rightBracket);
+                left = new IndexExpression(left, leftBracket, indices, rightBracket);
                 continue;
             }
             else if (CurrentToken.Kind is TokenKind.Dot)
@@ -279,6 +279,7 @@ internal sealed partial class Parser
                 MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
                 MatchingKeywordKind.If => ParseIfExpression(),
                 MatchingKeywordKind.While => ParseWhileExpression(),
+                MatchingKeywordKind.For => ParseForExpression(),
                 MatchingKeywordKind.Match => ParseMatchExpression(),
                 MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
                 MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
@@ -434,6 +435,41 @@ internal sealed partial class Parser
         return new WhileExpression(whileKeyword, openParen, declaration, semicolon, condition, closeParen, body);
     }
 
+    private ForExpression ParseForExpression()
+    {
+        var forKeyword = Consume();
+        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'for'");
+
+        VariableDeclaration? declaration = null;
+        Expression? variableExpr = null;
+
+        if (LooksLikeForVariableDeclaration())
+        {
+            declaration = ParseVariableDeclaration();
+        }
+        else
+        {
+            variableExpr = ParseExpectedExpression("for loop variable", MissingTokenAnchor.AfterPrevious);
+        }
+
+        Token inKeyword;
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.In)
+        {
+            inKeyword = Consume();
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'in'", GetTokenDisplay(CurrentToken));
+            inKeyword = CreateMissingToken();
+        }
+
+        var collection = ParseExpectedExpression("for loop collection", MissingTokenAnchor.AfterPrevious);
+        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the 'for' loop header");
+        var body = ParseExpectedExpression("for the 'for' loop body", MissingTokenAnchor.AfterPrevious);
+
+        return new ForExpression(forKeyword, openParen, declaration, variableExpr, inKeyword, collection, closeParen, body);
+    }
+
     private (Token OpenBrace, IReadOnlyList<Local> Locals, Expression? FinalExpression, Token CloseBrace) ParseBlock(bool allowFinalExpression)
     {
         var openBrace = Consume();
@@ -501,7 +537,20 @@ internal sealed partial class Parser
             if (CurrentToken.Kind is TokenKind.Semicolon)
                 break;
 
-            nodesAndSeparators.Add(ParseExpectedExpression("after ',' in the expression list", MissingTokenAnchor.AfterPrevious));
+            var firstExpr = ParseExpectedExpression("after ',' in the expression list", MissingTokenAnchor.AfterPrevious);
+            Expression elemExpr = firstExpr;
+            if (delimiter == TokenKind.RightBracket && CurrentToken.Kind is TokenKind.Colon)
+            {
+                List<SyntaxNode> termNodes = [firstExpr];
+                while (CurrentToken.Kind is TokenKind.Colon)
+                {
+                    termNodes.Add(Consume());
+                    termNodes.Add(ParseExpectedExpression("after ':' in collection element"));
+                }
+                elemExpr = new MultiTermExpression(new SeparatedSyntaxList<Expression>(termNodes));
+            }
+
+            nodesAndSeparators.Add(elemExpr);
 
             if (CurrentToken.Kind is TokenKind.Comma)
             {

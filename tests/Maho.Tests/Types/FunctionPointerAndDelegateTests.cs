@@ -55,24 +55,24 @@ public sealed class FunctionPointerAndDelegateTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
+            public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
         public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
-            ValType* env;
+            public nuint codeAddress;
+            public ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -106,7 +106,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func(int32, int32) -> int32 fnVar;
                 public delegate(int32) -> void delVar;
@@ -132,7 +132,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0240()
+    public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -148,11 +148,11 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Function"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Function"));
     }
 
     [Fact]
-    public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0240()
+    public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -168,7 +168,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Delegate"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Delegate"));
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(func(int32, int32) -> int32 f, int32 a, int32 b) -> int32
                 {
@@ -195,7 +195,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(delegate(int32) -> void d, int32 a) -> void
                 {
@@ -213,7 +213,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(func(int32, int32) -> int32 f) -> nuint
                 {
@@ -226,7 +226,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Function_WithoutCallableImplementation_ReportsMH0544()
+    public void Function_WithoutCallableImplementation_ReportsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -246,7 +246,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("Callable"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("Callable"));
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Call_WithoutCallableInPrelude_ReportsMH0240()
+    public void Call_WithoutCallableInPrelude_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -289,7 +289,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -303,7 +303,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Callable"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Callable"));
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {
@@ -360,7 +360,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {
@@ -383,7 +383,7 @@ public sealed class FunctionPointerAndDelegateTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> func() -> func() -> int32
                 {

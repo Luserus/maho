@@ -27,9 +27,9 @@ public sealed class MahoCompilerTests
         Compilation result = MahoCompiler.CompileSource(CompilerTestBed.FullPrelude + """
             namespace Basic;
 
-            public class Result;
+            public struct Result;
 
-            public static func Main() -> Result
+            public func Main() -> Result
             {
                 return new Result();
             }
@@ -43,7 +43,7 @@ public sealed class MahoCompilerTests
     public void CompileSource_InvalidInput_ReturnsStructuredDiagnostics()
     {
         Compilation result = MahoCompiler.CompileSource("""
-            public static func Main() -> int
+            public func Main() -> int
             {
                 §;
                 string text = "unterminated
@@ -69,15 +69,15 @@ public sealed class MahoCompilerTests
             string invalidPath = Path.Combine(tempDirectory, "Invalid.mh");
 
             File.WriteAllText(validPath, CompilerTestBed.FullPrelude + """
-                public class Result;
+                public struct Result;
 
-                public static func Main() -> Result
+                public func Main() -> Result
                 {
                     return new Result();
                 }
                 """);
             File.WriteAllText(invalidPath, """
-                public static func Broken() -> dyn
+                public func Broken() -> dyn
                 {
                     $;
                 }
@@ -258,7 +258,7 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ImplicitTopLevel_SelectsSingleFileUsingTopLevelWhenNoEntryFile()
+    public void AnalyzeProjectFile_ImplicitTopLevel_RequiresEntryFileOrPragmaDirective()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -270,13 +270,13 @@ public sealed class MahoCompilerTests
             string secondPath = Path.Combine(tempDirectory, "Entry.mh");
 
             File.WriteAllText(projectPath, "ImplicitTopLevel : true;");
-            File.WriteAllText(firstPath, "public class Point { public struct int; public int X; }");
+            File.WriteAllText(firstPath, "public struct Point { public struct int; public int X; }");
             File.WriteAllText(secondPath, "run();");
 
             Compilation result = AnalyzeProject(projectPath);
 
-            Assert.False(result.HasErrors);
-            Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
+            Assert.True(result.HasErrors);
+            Assert.Contains(result.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -285,7 +285,7 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ImplicitTopLevel_RejectsMultipleFilesUsingTopLevel()
+    public void AnalyzeProjectFile_ImplicitTopLevel_RejectsMultipleFilesUsingTopLevelWhenNoEntryFile()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -303,7 +303,7 @@ public sealed class MahoCompilerTests
             Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
+            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0160"));
         }
         finally
         {

@@ -111,29 +111,29 @@ public sealed class SymbolDiscoveryTests
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             namespace Example
             {
-                public class Outer<T>
+                public struct Outer<T>
                 {
                     public int field;
                     public int Property { get; set; }
 
-                    public static func Method<U>(int parameter) -> int
+                    public func Method<U>(int parameter) -> int
                     {
-                        public class LocalType<W>;
-                        public static func Nested<V>() -> int { return 0; }
+                        public struct LocalType<W>;
+                        public func Nested<V>() -> int { return 0; }
                         int local = 0;
                         return local;
                     }
 
-                    { public class MemberType<X>; }
+                    { public struct MemberType<X>; }
                 }
             }
 
-            public int g2;
+            public static int g2;
 
             {
-                public int global;
-                public static func Function<Y>() -> int { return 0; }
-                public class TopLevelType<Z>;
+                public static int global;
+                public func Function<Y>() -> int { return 0; }
+                public struct TopLevelType<Z>;
             }
 
             using ExampleAlias = Example.Outer<int>;
@@ -170,7 +170,7 @@ public sealed class SymbolDiscoveryTests
                 using NsAlias = Target;
                 using GenericNsAlias<T> = Target;
 
-                public class Container<C>
+                public struct Container<C>
                 {
                     using MemberAlias = Target;
                     using GenericMemberAlias<M> = Target;
@@ -179,7 +179,7 @@ public sealed class SymbolDiscoveryTests
                         using MemberBlockAlias = Target;
                     }
 
-                    public static func Method<U>() -> void
+                    public func Method<U>() -> void
                     {
                         using LocalAlias = Target;
                         using GenericLocalAlias<L> = Target;

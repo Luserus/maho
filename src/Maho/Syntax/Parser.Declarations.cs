@@ -25,6 +25,8 @@ internal sealed partial class Parser
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
             return new TopLevelFunctionDeclaration(ParseFunction(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace)
+            return ParseTopLevelConstantDeclaration(attributes, modifiers);
         else
             return ParseTopLevelVariableDeclaration(attributes, modifiers);
     }
@@ -482,6 +484,67 @@ internal sealed partial class Parser
         return new TopLevelVariableDeclaration(declaration, semicolon);
     }
 
+    private ConstantDeclaration ParseConstantDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var constKeyword = Consume();
+        Token? conflictingMut = null;
+        for (int i = 0; i < modifiers.Count; i++)
+        {
+            if (modifiers[i].MatchingKind == MatchingKeywordKind.Mut)
+            {
+                conflictingMut = modifiers[i];
+                break;
+            }
+        }
+        if (conflictingMut is null && CurrentToken.MatchingKind == MatchingKeywordKind.Mut)
+        {
+            conflictingMut = Consume();
+        }
+
+        TypeSyntax? type = null;
+        NamedSyntax identifier;
+
+        if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Equals or TokenKind.Semicolon)
+        {
+            identifier = ParseNamedSyntax(allowQualified: false);
+        }
+        else
+        {
+            type = ParseTypeSyntax();
+            identifier = ParseNamedSyntax(allowQualified: false);
+        }
+
+        if (conflictingMut is not null)
+        {
+            diagnostics.ReportConflictingModifiers(conflictingMut.Span, "const", "mut", identifier.ToString() ?? "", text);
+        }
+
+        var equals = ExpectToken(TokenKind.Equals, "'='", "after the constant identifier");
+        var value = ParseExpectedExpression("for the constant value");
+        return new ConstantDeclaration(attributes, modifiers, constKeyword, type, identifier, equals, value);
+    }
+
+    private TopLevelConstantDeclaration ParseTopLevelConstantDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var decl = ParseConstantDeclaration(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the constant declaration", MissingTokenAnchor.AfterPrevious);
+        return new TopLevelConstantDeclaration(decl, semicolon);
+    }
+
+    private MemberConstantDeclaration ParseMemberConstantDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var decl = ParseConstantDeclaration(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the constant declaration", MissingTokenAnchor.AfterPrevious);
+        return new MemberConstantDeclaration(decl, semicolon);
+    }
+
+    private LocalConstantDeclaration ParseLocalConstantDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var decl = ParseConstantDeclaration(attributes, modifiers);
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the constant declaration", MissingTokenAnchor.AfterPrevious);
+        return new LocalConstantDeclaration(decl, semicolon);
+    }
+
     private MemberAttributeDeclaration ParseMemberAttributeDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
     {
         var attribute = ParseAttributeSignature(attributes, modifiers);
@@ -592,6 +655,8 @@ internal sealed partial class Parser
             return ParseLocalTypeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
             return new LocalFunctionDeclaration(ParseFunction(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace)
+            return ParseLocalConstantDeclaration(attributes, modifiers);
         else
             return ParseLocalVariableDeclarationStatement(attributes, modifiers);
     }
@@ -1102,7 +1167,7 @@ internal sealed partial class Parser
         else
             baseType = new SimpleType(identifier);
 
-        if (CurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType().Success)
+        if (identifier.MatchingKind is not MatchingKeywordKind.Var && CurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType().Success)
             return ParseUniformTupleType(baseType);
 
         return baseType;
@@ -1297,11 +1362,30 @@ internal sealed partial class Parser
             return new SpanTypeModifier(openBracket, ampersand, closeBracket);
         }
 
+        if (CurrentToken.Kind is TokenKind.Comma)
+        {
+            int dimension = 1;
+            while (CurrentToken.Kind is TokenKind.Comma)
+            {
+                Consume();
+                dimension++;
+            }
+            var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the multidimensional array type modifier");
+            return new ArrayTypeModifier(openBracket, closeBracket, dimension);
+        }
+
         if (CurrentToken.Kind is not TokenKind.RightBracket)
         {
+            var nodes = new List<SyntaxNode>();
             var size = ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious);
+            nodes.Add(size);
+            while (CurrentToken.Kind is TokenKind.Comma)
+            {
+                nodes.Add(Consume());
+                nodes.Add(ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious));
+            }
             var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the array type modifier");
-            return new FixedArrayTypeModifier(openBracket, size, closeBracket);
+            return new FixedArrayTypeModifier(openBracket, new SeparatedSyntaxList<Expression>(nodes), closeBracket);
         }
 
         var rightBracket = Consume();

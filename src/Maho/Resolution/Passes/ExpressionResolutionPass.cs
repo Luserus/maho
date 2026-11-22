@@ -75,6 +75,13 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         // 1. Resolve top-level statements / main scope locals
         ResolveTopLevelStatements();
 
+        // 1.5. Resolve constants
+        foreach (var constant in context.ConstantSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
+            ResolveConstant(constant);
+        }
+
         // 2. Resolve global variable initializers
         foreach (var global in context.GlobalVariableSymbols)
         {
@@ -353,6 +360,14 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 ResolveVariableDeclaration(varStmt.Declaration, scope, containingFunction);
                 break;
 
+            case LocalConstantDeclaration constStmt:
+                ResolveConstantDeclaration(constStmt.Declaration, scope, containingFunction);
+                break;
+
+            case LocalYieldStatement yieldStmt:
+                ResolveYieldStatement(yieldStmt, scope, containingFunction);
+                break;
+
             case LocalGotoStatement:
                 break;
         }
@@ -520,9 +535,12 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             if (declarator.Initializer?.Initializer is { } initExpr)
             {
                 var initType = ResolveExpression(initExpr, scope, containingFunction);
-                if (initType.SpecialType is TupleSemanticType tupleSemantic)
+                if (TryResolveDeconstructTuple(initType, out var tupleSemantic, out var deconstructMethod))
                 {
-                    if (tupleName.Elements.Count != tupleSemantic.Elements.Count)
+                    if (deconstructMethod != default)
+                        context.ResolvedTree.AddReference(declaration, deconstructMethod);
+
+                    if (tupleName.Elements.Count != tupleSemantic!.Elements.Count)
                     {
                         context.Diagnostics.ReportTupleDestructureMismatch(
                             tupleName.GetSpan() ?? default,
@@ -578,11 +596,16 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                         SetVariableSymbolType(sym, initType);
                     }
                 }
-                else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError &&
-                         !initType.IsInferred && !initType.IsUnresolved && !initType.IsError &&
-                         initExpr is not CollectionExpression)
+                else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError)
                 {
-                    // Explicitly typed variable:
+                    if (initExpr is CollectionExpression colExpr)
+                    {
+                        TypeCheckCollectionExpression(colExpr, st, scope, containingFunction, declarator);
+                        SetVariableSymbolType(sym, st);
+                    }
+                    else if (!initType.IsInferred && !initType.IsUnresolved && !initType.IsError)
+                    {
+                        // Explicitly typed variable:
                     // If initialized from unconstrained literal, immediately collapse literal to target type
                     if (initType.IsLiteral)
                     {
@@ -624,6 +647,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                         }
                     }
                 }
+            }
             }
             else if (sym is not null && symType?.IsInferred == true)
             {
@@ -675,5 +699,64 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         GlobalVariableSymbol global => global.Type,
         _ => null
     };
+
+    private void ResolveConstant(ConstantSymbol constant)
+    {
+        if (constant.Syntax is not { } syntax)
+            return;
+
+        var valType = ResolveExpression(syntax.Value, constant.EnclosingScope, default);
+
+        if (syntax.Type is null)
+        {
+            constant.Type = valType;
+        }
+        else
+        {
+            if (valType.IsLiteral && constant.Type.IsResolved)
+            {
+                CollapseExpression(syntax.Value, constant.Type, constant.EnclosingScope, default);
+            }
+            else if (constant.Type.IsResolved && !constant.Type.IsAssignableFrom(valType, context))
+            {
+                context.Diagnostics.ReportAssignmentTypeMismatch(
+                    syntax.Value.GetSpan() ?? default,
+                    valType.ToQualifiedString(context),
+                    constant.Type.ToQualifiedString(context),
+                    source: syntax.Value.GetSource());
+            }
+        }
+    }
+
+    private void ResolveConstantDeclaration(ConstantDeclaration declaration, Scope scope, SymbolHandle containingFunction)
+    {
+        var valType = ResolveExpression(declaration.Value, scope, containingFunction);
+        var name = ResolutionContext.GetSymbolName(declaration.Identifier).Last;
+        var syms = scope[new SymbolName(name)];
+        ConstantSymbol? constant = syms.OfType<ConstantSymbol>().FirstOrDefault();
+
+        if (constant is not null)
+        {
+            if (declaration.Type is null)
+            {
+                constant.Type = valType;
+            }
+            else
+            {
+                if (valType.IsLiteral && constant.Type.IsResolved)
+                {
+                    CollapseExpression(declaration.Value, constant.Type, scope, containingFunction);
+                }
+                else if (constant.Type.IsResolved && !constant.Type.IsAssignableFrom(valType, context))
+                {
+                    context.Diagnostics.ReportAssignmentTypeMismatch(
+                        declaration.Value.GetSpan() ?? default,
+                        valType.ToQualifiedString(context),
+                        constant.Type.ToQualifiedString(context),
+                        source: declaration.Value.GetSource());
+                }
+            }
+        }
+    }
 
 }

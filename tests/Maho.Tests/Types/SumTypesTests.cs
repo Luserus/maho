@@ -128,7 +128,7 @@ public sealed class SumTypesTests
             {
                 Circle { int32 radius; }
             }
-            public class Test
+            public struct Test
             {
                 public func Run() -> void
                 {
@@ -171,7 +171,7 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A;
             public struct B;
-            public class Test
+            public struct Test
             {
                 public (A | B) field;
             }
@@ -258,7 +258,7 @@ public sealed class SumTypesTests
                 B(int32 x),
                 C { int32 x; }
             }
-            public class Test
+            public struct Test
             {
                 public func Check(E e) -> void
                 {
@@ -285,7 +285,7 @@ public sealed class SumTypesTests
                 B,
                 C
             }
-            public class Test
+            public struct Test
             {
                 public func Check(E e) -> void
                 {
@@ -311,7 +311,7 @@ public sealed class SumTypesTests
                 B,
                 C
             }
-            public class Test
+            public struct Test
             {
                 public func Check(E e) -> void
                 {
@@ -337,7 +337,7 @@ public sealed class SumTypesTests
                 A,
                 B
             }
-            public class Test
+            public struct Test
             {
                 public func Check(E e) -> void
                 {
@@ -362,7 +362,7 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A;
             public struct B;
-            public class Test
+            public struct Test
             {
                 public func Check((A | B) u) -> void
                 {
@@ -384,7 +384,7 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A;
             public struct B;
-            public class Test
+            public struct Test
             {
                 public func Check((A | B) u) -> void
                 {
@@ -414,7 +414,7 @@ public sealed class SumTypesTests
                 A,
                 B
             }
-            public class Test
+            public struct Test
             {
                 public RawTag field;
             }
@@ -434,7 +434,7 @@ public sealed class SumTypesTests
                 A,
                 B
             }
-            public class Test
+            public struct Test
             {
                 public untagged RawTag field;
             }
@@ -452,7 +452,7 @@ public sealed class SumTypesTests
                 A,
                 B
             }
-            public class Test
+            public struct Test
             {
                 public func Check(untagged E e) -> void
                 {
@@ -476,7 +476,7 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A;
             public struct B;
-            public class Test
+            public struct Test
             {
                 public func Check(untagged (A | B) u) -> void
                 {
@@ -505,10 +505,10 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod() -> void { }
-                public untagged func UntaggedMethod() -> void { }
+                public func NormalMethod(&this) -> void { }
+                public func UntaggedMethod(untagged &this) -> void { }
             }
-            public class Test
+            public struct Test
             {
                 public func Run(E e) -> void
                 {
@@ -529,10 +529,10 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod() -> void { }
-                public untagged func UntaggedMethod() -> void { }
+                public func NormalMethod(&this) -> void { }
+                public func UntaggedMethod(untagged &this) -> void { }
             }
-            public class Test
+            public struct Test
             {
                 public func Run(untagged E e) -> void
                 {
@@ -554,14 +554,60 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod() -> void { }
-                public untagged func UntaggedMethod() -> void { }
+                public func NormalMethod(&this) -> void { }
+                public func UntaggedMethod(untagged &this) -> void { }
             }
-            public class Test
+            public struct Test
             {
                 public func Run(untagged E e) -> void
                 {
                     e.UntaggedMethod();
+                }
+            }
+            """);
+
+        Assert.Empty(compilation.Diagnostics);
+    }
+
+    [Fact]
+    public void SumType_CallingReceiverlessMethodOnInstance_EmitsMH2020()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public enum E
+            {
+                A,
+                B;
+                public func StaticHelper() -> void { }
+            }
+            public struct Test
+            {
+                public func Run(E e) -> void
+                {
+                    e.StaticHelper();
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH2020");
+        Assert.Contains("static member 'StaticHelper' cannot be accessed with an instance reference", diag.Message);
+    }
+
+    [Fact]
+    public void SumType_CallingReceiverlessMethodOnTypeName_Succeeds()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public enum E
+            {
+                A,
+                B;
+                public func StaticHelper() -> void { }
+            }
+            public struct Test
+            {
+                public func Run() -> void
+                {
+                    E.StaticHelper();
                 }
             }
             """);
@@ -575,10 +621,10 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public func MethodOnA() -> void { }
+                public func MethodOnA(&this) -> void { }
             }
             public struct B;
-            public class Test
+            public struct Test
             {
                 public func Run((A | B) u) -> void
                 {
@@ -598,9 +644,9 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public func MethodOnA() -> void { }
+                public func MethodOnA(&this) -> void { }
             }
-            public class Test
+            public struct Test
             {
                 public func Run((A | A) u) -> void
                 {

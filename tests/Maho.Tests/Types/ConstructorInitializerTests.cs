@@ -48,7 +48,7 @@ public sealed class ConstructorInitializerTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -56,7 +56,7 @@ public sealed class ConstructorInitializerTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -65,12 +65,12 @@ public sealed class ConstructorInitializerTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
     [Fact]
-    public void BaseInitializer_OnOrdinaryFunction_EmitsMH0251()
+    public void BaseInitializer_OnOrdinaryFunction_EmitsMH0552()
     {
         var source = Prelude + """
             public struct Base;
@@ -82,11 +82,11 @@ public sealed class ConstructorInitializerTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0251");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0552");
     }
 
     [Fact]
-    public void BaseInitializer_OnOrdinaryMethod_EmitsMH0251()
+    public void BaseInitializer_OnOrdinaryMethod_EmitsMH0552()
     {
         var source = Prelude + """
             public struct Base;
@@ -101,7 +101,7 @@ public sealed class ConstructorInitializerTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0251");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0552");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class ConstructorInitializerTests
     }
 
     [Fact]
-    public void BaseInitializer_NonBaseType_EmitsMH0252()
+    public void BaseInitializer_NonBaseType_EmitsMH0553()
     {
         var source = Prelude + """
             public struct Other;
@@ -145,11 +145,11 @@ public sealed class ConstructorInitializerTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0252");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0553");
     }
 
     [Fact]
-    public void BaseInitializer_DuplicateBase_EmitsMH0253()
+    public void BaseInitializer_DuplicateBase_EmitsMH0554()
     {
         var source = Prelude + """
             public struct Base;
@@ -164,11 +164,11 @@ public sealed class ConstructorInitializerTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0253");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0554");
     }
 
     [Fact]
-    public void SharedBase_WithoutDefaultConstructor_RequiresExplicitInit_MH0250()
+    public void SharedBase_WithoutDefaultConstructor_RequiresExplicitInit_MH0551()
     {
         var source = Prelude + """
             public struct Root
@@ -193,7 +193,7 @@ public sealed class ConstructorInitializerTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0250" && d.Message.Contains("Root"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0551" && d.Message.Contains("Root"));
     }
 
     [Fact]

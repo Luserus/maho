@@ -26,7 +26,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private ResolutionContext context = null!;
     private Symbol? currentTypeSymbol;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
-    private readonly Dictionary<(TypeSyntax, Scope, bool), TypeRef> resolvedTypes = [];
+    private readonly Dictionary<(TypeSyntax, Scope, bool, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
@@ -96,6 +96,12 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(global));
             ResolveVariable(global, global.Syntax);
+        }
+
+        foreach (var constant in context.ConstantSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
+            ResolveConstant(constant);
         }
 
         foreach (var field in context.FieldSymbols)
@@ -171,6 +177,12 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             ResolveVariable(global, global.Syntax);
         }
 
+        foreach (var constant in context.SinkSymbols.ConstantSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
+            ResolveConstant(constant);
+        }
+
         foreach (var field in context.SinkSymbols.FieldSymbols)
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
@@ -205,6 +217,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckDuplicateVariables();
         CheckDuplicateProperties();
         ValidateInterfaceImplementations();
+        ValidateModifiers();
     }
 
     private void ResolveTopLevelStatements(CompilationUnit root)
@@ -295,7 +308,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope, isTraitBoundContext: true);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
@@ -508,7 +521,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope);
+        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope, isTraitBoundContext: true);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());

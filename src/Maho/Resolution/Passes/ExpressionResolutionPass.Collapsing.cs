@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -117,6 +118,7 @@ internal sealed partial class ExpressionResolutionPass
                 {
                     context.ResolvedTree.AddReference(lit, ResolutionContext.GetHandle(literalOverloads[0]));
                     context.SetExpressionType(lit, targetType);
+                    CheckLiteralRangeOverflow(lit, targetType);
                     return targetType;
                 }
 
@@ -125,6 +127,7 @@ internal sealed partial class ExpressionResolutionPass
                     return TypeRef.Error;
                 }
                 context.SetExpressionType(lit, targetType);
+                CheckLiteralRangeOverflow(lit, targetType);
                 return targetType;
 
             case BinaryExpression binary:
@@ -164,6 +167,7 @@ internal sealed partial class ExpressionResolutionPass
                     CollapseExpression(unary.Operand, opParamType, scope, containingFunction);
                     context.ResolvedTree.AddReference(unary, ResolutionContext.GetHandle(uOpMethod));
                     context.SetExpressionType(unary, uOpMethod.ReturnType);
+                    CheckLiteralRangeOverflow(unary, targetType);
                     return uOpMethod.ReturnType;
                 }
                 else
@@ -189,6 +193,25 @@ internal sealed partial class ExpressionResolutionPass
                     var memberSym = LookupMemberOnType(targetType, access.Identifier.Value);
                     if (memberSym is MethodSymbol m)
                     {
+                        if (m.Parameters.Count > 0 &&
+                            context.GetParameterSymbol(m.Parameters[0]) is { } firstP &&
+                            firstP.Syntax?.Declarator.IsReceiver == true)
+                        {
+                            var rk = firstP.Syntax.Declarator.ReceiverKind;
+                            if (rk is not ReceiverKind.Value && rk is not ReceiverKind.None)
+                            {
+                                if (!IsExpressionLValue(access.Expression, targetType))
+                                {
+                                    context.Diagnostics.ReportInvalidReceiverForByRefThis(
+                                        access.Expression.GetSpan() ?? default,
+                                        m.Name.Text,
+                                        rk.ToString(),
+                                        access.Expression.GetSource());
+                                    context.SetExpressionType(call, TypeRef.Error);
+                                    return TypeRef.Error;
+                                }
+                            }
+                        }
                         context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(m));
                         context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(m));
                         context.SetExpressionType(call, m.ReturnType);
@@ -418,10 +441,10 @@ internal sealed partial class ExpressionResolutionPass
 
         var operandHandles = new List<SymbolHandle>();
         if (from.Handle is { } fh) operandHandles.Add(fh);
-        else if (from.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optFromH)) operandHandles.Add(optFromH);
+        else if (from.Kind is TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optFromH)) operandHandles.Add(optFromH);
 
         if (to.Handle is { } th && !operandHandles.Contains(th)) operandHandles.Add(th);
-        else if (to.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optToH) && !operandHandles.Contains(optToH)) operandHandles.Add(optToH);
+        else if (to.Kind is TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optToH) && !operandHandles.Contains(optToH)) operandHandles.Add(optToH);
 
         foreach (var candidate in candidates)
         {
@@ -557,10 +580,10 @@ internal sealed partial class ExpressionResolutionPass
 
         if (litType.SpecialType is CompileTimeLiteralType lit)
         {
-            if (lit.LiteralKind == CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
-            if (lit.LiteralKind == CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
-            if (lit.LiteralKind == CompileTimeLiteralKind.Str && hStr is { } hs && targetType.Handle == hs) return true;
-            if (lit.LiteralKind == CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Str && hStr is { } hs && targetType.Handle == hs) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
         }
 
         if (targetType.Handle is { } th)
@@ -592,5 +615,89 @@ internal sealed partial class ExpressionResolutionPass
             if (sym is MethodSymbol m) return m.ReturnType;
         }
         return null;
+    }
+
+    private void CheckLiteralRangeOverflow(Expression expr, TypeRef targetType)
+    {
+        if (targetType.Handle is not { } th)
+            return;
+
+        var unwrapped = context.UnwrapAlias(th);
+        if (!context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName))
+            return;
+
+        System.Numerics.BigInteger? val = null;
+        string? text = null;
+        TextSpan span = expr.GetSpan() ?? default;
+
+        if (expr is LiteralExpression lit && lit.Literal.Kind is TokenKind.Integer or TokenKind.SuffixedInteger)
+        {
+            text = lit.Literal.ValueWithoutSuffix;
+            if (System.Numerics.BigInteger.TryParse(text, out var bi))
+                val = bi;
+        }
+        else if (expr is UnaryExpression u && u.OperatorToken.Kind is TokenKind.Minus &&
+                 u.Operand is LiteralExpression uLit && uLit.Literal.Kind is TokenKind.Integer or TokenKind.SuffixedInteger)
+        {
+            text = "-" + uLit.Literal.ValueWithoutSuffix;
+            if (System.Numerics.BigInteger.TryParse(uLit.Literal.ValueWithoutSuffix, out var bi))
+                val = -bi;
+        }
+
+        if (val is { } bigInt && text is not null)
+        {
+            if (!FitsInIntegerType(bigInt, intrinsicName, out var min, out var max))
+            {
+                context.Diagnostics.ReportLiteralOverflowWarning(
+                    span,
+                    text,
+                    intrinsicName,
+                    min,
+                    max,
+                    expr.GetSource());
+            }
+        }
+    }
+
+    private static bool FitsInIntegerType(System.Numerics.BigInteger val, string intrinsicName, out string min, out string max)
+    {
+        switch (intrinsicName)
+        {
+            case KnownIntrinsics.Int8:
+                min = "-128"; max = "127";
+                return val >= -128 && val <= 127;
+            case KnownIntrinsics.UInt8:
+                min = "0"; max = "255";
+                return val >= 0 && val <= 255;
+            case KnownIntrinsics.Int16:
+                min = "-32768"; max = "32767";
+                return val >= -32768 && val <= 32767;
+            case KnownIntrinsics.UInt16:
+                min = "0"; max = "65535";
+                return val >= 0 && val <= 65535;
+            case KnownIntrinsics.Int32:
+                min = "-2147483648"; max = "2147483647";
+                return val >= int.MinValue && val <= int.MaxValue;
+            case KnownIntrinsics.UInt32:
+                min = "0"; max = "4294967295";
+                return val >= 0 && val <= uint.MaxValue;
+            case KnownIntrinsics.Int64:
+            case KnownIntrinsics.NInt:
+                min = "-9223372036854775808"; max = "9223372036854775807";
+                return val >= long.MinValue && val <= long.MaxValue;
+            case KnownIntrinsics.UInt64:
+            case KnownIntrinsics.NUInt:
+                min = "0"; max = "18446744073709551615";
+                return val >= 0 && val <= ulong.MaxValue;
+            case KnownIntrinsics.Int128:
+                min = System.Int128.MinValue.ToString(); max = System.Int128.MaxValue.ToString();
+                return val >= (System.Numerics.BigInteger)System.Int128.MinValue && val <= (System.Numerics.BigInteger)System.Int128.MaxValue;
+            case KnownIntrinsics.UInt128:
+                min = "0"; max = System.UInt128.MaxValue.ToString();
+                return val >= 0 && val <= (System.Numerics.BigInteger)System.UInt128.MaxValue;
+            default:
+                min = ""; max = "";
+                return true;
+        }
     }
 }

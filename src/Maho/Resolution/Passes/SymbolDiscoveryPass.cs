@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Diagnostics;
 using Maho.Syntax;
 using Maho.Text;
@@ -16,6 +17,7 @@ namespace Maho.Resolution;
 internal sealed partial class SymbolDiscoveryPass : ResolutionPass
 {
     private ResolutionContext context = null!;
+    private SyntaxTree? currentTree;
 
     /// <summary>
     /// Executes symbol discovery across all syntax trees in the compilation.
@@ -31,11 +33,40 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
             RegisterGlobalAliases(globalAliases);
         }
 
+        List<SyntaxTree> topLevelTrees = [];
         foreach (var tree in context.SyntaxTrees)
         {
-            context.CurrentTreeFilePath = tree.FilePath;
-            ResolveCompilationUnit(tree.Root);
+            if (tree.Root is CompilationUnit unit && unit.EnablesTopLevelStatements)
+                topLevelTrees.Add(tree);
         }
+
+        if (topLevelTrees.Count > 1)
+        {
+            foreach (var tree in topLevelTrees)
+            {
+                var unit = (CompilationUnit)tree.Root;
+                TextSpan? span = null;
+                foreach (var pragma in unit.Pragmas)
+                {
+                    if (pragma.Name.Value == "toplevel" && pragma.Value.Value == "enable")
+                    {
+                        span = pragma.HashToken.Span;
+                        break;
+                    }
+                }
+                span ??= unit.EndToken.Span;
+
+                tree.DiagnosticsManager.ReportMultipleTopLevelSources(span.Value, tree.SourceText);
+            }
+        }
+
+        foreach (var tree in context.SyntaxTrees)
+        {
+            currentTree = tree;
+            context.CurrentTreeFilePath = tree.FilePath;
+            ResolveCompilationUnit(tree.Root, topLevelTrees.Count == 1);
+        }
+        currentTree = null;
         context.CurrentTreeFilePath = null;
     }
 
@@ -67,7 +98,7 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
-    private void ResolveCompilationUnit(CompilationUnit unit)
+    private void ResolveCompilationUnit(CompilationUnit unit, bool allowTopLevelMain)
     {
         var fileScope = context.CreateScope(context.GlobalScope);
         context.RegisterSyntaxScope(unit, fileScope);
@@ -78,7 +109,7 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         FunctionSymbol? topLevelMain = null;
         var topLevelMainScope = fileScope;
 
-        if (unit.EnablesTopLevelStatements)
+        if (unit.EnablesTopLevelStatements && allowTopLevelMain)
         {
             topLevelMainScope = context.CreateScope(fileScope);
             topLevelMain = context.CreateFunctionSymbol(fileScope, new SymbolPart("Main"), context.GlobalNamespace, syntax: null);
@@ -133,11 +164,23 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
             case TopLevelFunctionDeclaration declaration:
                 ResolveTopLevelFunctionDeclaration(declaration.Function, scope, containingNamespace);
                 return containingNamespace;
+            case TopLevelConstantDeclaration declaration:
+                ResolveTopLevelConstantDeclaration(declaration.Declaration, scope, containingNamespace);
+                return containingNamespace;
             case TopLevelVariableDeclaration declaration:
                 ResolveTopLevelVariableDeclaration(declaration.Declaration, scope, containingNamespace, topLevelMain, topLevelMainScope);
                 return containingNamespace;
-            case TopLevelStatement statement when topLevelMain is not null:
-                DiscoverTopLevelLabels(statement, topLevelMainScope, ResolutionContext.GetHandle(topLevelMain));
+            case TopLevelStatement statement:
+                if (topLevelMain is not null)
+                {
+                    DiscoverTopLevelLabels(statement, topLevelMainScope, ResolutionContext.GetHandle(topLevelMain));
+                }
+                else if (currentTree is not null)
+                {
+                    var span = statement.GetSpan() ?? default;
+                    if (!currentTree.DiagnosticsManager.Diagnostics.Any(d => d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length))
+                        currentTree.DiagnosticsManager.ReportTopLevelPragmaRequired(span, currentTree.SourceText);
+                }
                 return containingNamespace;
             default:
                 return containingNamespace;
@@ -473,6 +516,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
             case MemberFunctionDeclaration declaration:
                 ResolveMemberFunctionDeclaration(declaration.Function, scope, containingType);
                 break;
+            case MemberConstantDeclaration declaration:
+                ResolveMemberConstantDeclaration(declaration.Declaration, scope, containingType);
+                break;
             case MemberFieldDeclaration declaration:
                 ResolveFieldDeclaration(declaration.Declaration, scope, containingType);
                 break;
@@ -480,6 +526,22 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 ResolvePropertyDeclaration(declaration, scope, containingType);
                 break;
         }
+    }
+
+    private void ResolveTopLevelConstantDeclaration(ConstantDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
+        var namePart = context.GetScopedSymbolName(declaration.Identifier).Last;
+        var symbol = context.CreateConstantSymbol(ownerScope, namePart, containingNamespace, declaration);
+        symbol.Flags = ResolveVariableFlags(declaration.Modifiers) | VariableFlags.Const;
+    }
+
+    private void ResolveMemberConstantDeclaration(ConstantDeclaration declaration, Scope scope, SymbolHandle containingType)
+    {
+        var namePart = context.GetScopedSymbolName(declaration.Identifier).Last;
+        var symbol = context.CreateConstantSymbol(scope, namePart, containingNamespace: null, declaration);
+        symbol.Parent = containingType;
+        symbol.Flags = ResolveVariableFlags(declaration.Modifiers) | VariableFlags.Const;
     }
 
     private void ResolveTopLevelFunctionDeclaration(FunctionDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)

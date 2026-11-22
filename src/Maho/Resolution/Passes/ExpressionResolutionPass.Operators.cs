@@ -315,11 +315,23 @@ internal sealed partial class ExpressionResolutionPass
             return TypeRef.Error;
         }
 
-        // 2. Canonical bool negation
+        // 2. Increment and decrement operators require an assignable L-value operand
+        if (opKind is OperatorKind.PrefixIncrement or OperatorKind.PostfixIncrement or OperatorKind.PrefixDecrement or OperatorKind.PostfixDecrement)
+        {
+            if (!IsExpressionLValue(unary.Operand, operand))
+            {
+                context.Diagnostics.ReportCannotAssignToNonLValue(
+                    unary.Operand.GetSpan() ?? default,
+                    unary.Operand.GetSource());
+                return TypeRef.Error;
+            }
+        }
+
+        // 3. Canonical bool negation
         if (opKind == OperatorKind.LogicalNot && IsBool(operand))
             return boolType;
 
-        // 3. Uncollapsed literal unary (e.g. -10 maintains uncollapsed Int literal)
+        // 4. Uncollapsed literal unary (e.g. -10 maintains uncollapsed Int literal)
         if (operand.IsLiteral)
             return operand;
 
@@ -584,7 +596,7 @@ internal sealed partial class ExpressionResolutionPass
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
         // 1. Verify that the LHS expression denotes a valid writable L-value
-        if (!IsLValue(assignment.LhsExpression, lhs))
+        if (!IsExpressionLValue(assignment.LhsExpression, lhs))
         {
             context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
             return TypeRef.Error;
@@ -627,6 +639,65 @@ internal sealed partial class ExpressionResolutionPass
             {
                 var collapsed = CollapseExpression(assignment.RhsExpression, targetType, scope, containingFunction);
                 return collapsed.IsError ? TypeRef.Error : targetType;
+            }
+
+            // 2c. Target-typed collection expression
+            if (assignment.RhsExpression is CollectionExpression colExpr)
+            {
+                TypeCheckCollectionExpression(colExpr, targetType, scope, containingFunction, assignment);
+                return targetType;
+            }
+
+            // 2d. Tuple destructuring assignment: (a, b) = pt;
+            if (assignment.LhsExpression is TupleExpression tupleLhs)
+            {
+                if (TryResolveDeconstructTuple(rhs, out var rhsTuple, out var deconstructMethod))
+                {
+                    if (deconstructMethod != default)
+                        context.ResolvedTree.AddReference(assignment, deconstructMethod);
+
+                    if (tupleLhs.Arguments.Count != rhsTuple!.Elements.Count)
+                    {
+                        context.Diagnostics.ReportTupleDestructureMismatch(
+                            tupleLhs.GetSpan() ?? default,
+                            $"expected {tupleLhs.Arguments.Count} elements, but right-hand side provides {rhsTuple.Elements.Count}",
+                            assignment.GetSource());
+                    }
+                    else
+                    {
+                        for (int i = 0; i < tupleLhs.Arguments.Count; i++)
+                        {
+                            var lhsElemExpr = tupleLhs.Arguments[i];
+                            var lhsElemType = context.GetExpressionType(lhsElemExpr) ?? TypeRef.Unresolved;
+                            var rhsElemType = rhsTuple.Elements[i].Type;
+
+                            if (rhsElemType.IsLiteral && !lhsElemType.IsLiteral && !lhsElemType.IsError && !lhsElemType.IsUnresolved && !lhsElemType.IsInferred)
+                            {
+                                CollapseExpression(lhsElemExpr, rhsElemType, scope, containingFunction);
+                            }
+                            else if (!lhsElemType.IsAssignableFrom(rhsElemType, context) &&
+                                     !TryResolveImplicitCast(rhsElemType, lhsElemType, out _))
+                            {
+                                context.Diagnostics.ReportAssignmentTypeMismatch(
+                                    lhsElemExpr.GetSpan() ?? default,
+                                    rhsElemType.ToQualifiedString(context),
+                                    lhsElemType.ToQualifiedString(context),
+                                    rhsLabel: rhsElemType.ToLabelString(context, scope),
+                                    lhsLabel: lhsElemType.ToLabelString(context, scope),
+                                    source: assignment.GetSource());
+                            }
+                        }
+                    }
+                    return targetType;
+                }
+                else if (!rhs.IsError && !rhs.IsInferred && !rhs.IsUnresolved)
+                {
+                    context.Diagnostics.ReportTupleDestructureMismatch(
+                        assignment.RhsExpression.GetSpan() ?? default,
+                        $"cannot destructure non-tuple expression of type '{rhs.ToDisplayString(context)}'",
+                        assignment.GetSource());
+                    return TypeRef.Error;
+                }
             }
 
             // 3. Verify type compatibility: assignability or registered implicit conversion operator
@@ -672,22 +743,60 @@ internal sealed partial class ExpressionResolutionPass
     }
 
     /// <summary>
-    /// Determines whether the given expression denotes a valid L-value (assignable storage location).
-    /// In Maho, any expression returning a mutable alias (<c>mut &amp;T</c> or <c>mut *T</c>) is a valid L-value,
-    /// as well as syntactic named expressions, index expressions, member accesses, and pointer dereferences.
+    /// Determines whether the given expression denotes a valid L-value (assignable and addressable storage location).
+    /// In Maho, any expression returning a mutable alias (<c>mut &amp;T</c> or <c>mut *T</c>) or reference is a valid L-value,
+    /// as well as variables, parameters, fields, index expressions, pointer dereferences, and member access on L-values.
     /// </summary>
     /// <param name="expr">The AST expression node to inspect.</param>
     /// <param name="resolvedType">The resolved semantic type of the expression.</param>
     /// <returns><see langword="true"/> if the expression is an L-value; otherwise <see langword="false"/>.</returns>
-    private static bool IsLValue(Expression expr, TypeRef resolvedType) =>
-        (resolvedType.SpecialType is AliasSemanticType { IsMutable: true }) ||
-        expr switch
-        {
-            NamedExpression => true,
-            IndexExpression => true,
-            MemberAccessExpression => true,
-            UnaryExpression u when u.OperatorToken.Kind == TokenKind.Asterisk => true,
-            _ => false
-        };
+    internal bool IsExpressionLValue(Expression expr, TypeRef resolvedType)
+    {
+        while (expr is ParenthesizedExpression p)
+            expr = p.Expression;
 
+        if (resolvedType.SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType)
+            return true;
+
+        if (expr is TupleExpression tupleExpr)
+            return tupleExpr.Arguments.All(arg => IsExpressionLValue(arg, context.GetExpressionType(arg) ?? TypeRef.Unresolved));
+
+        if (expr is UnaryExpression u && u.OperatorToken.Kind == TokenKind.Asterisk)
+            return true;
+
+        if (expr is IndexExpression)
+            return true;
+
+        if (expr is MemberAccessExpression member)
+        {
+            if (member.Dot.Kind == TokenKind.MinusGreaterThan)
+                return true;
+            var recvType = context.GetExpressionType(member.Expression) ?? TypeRef.Unresolved;
+            return IsExpressionLValue(member.Expression, recvType);
+        }
+
+        if (expr is NamedExpression named)
+        {
+            if (named.Identifier.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
+                return false;
+
+            if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
+                return true;
+
+            if (context.ResolvedTree.TryGetReference(named, out var h))
+            {
+                if (h.Kind is SymbolKind.Variable or SymbolKind.Parameter or SymbolKind.Field or SymbolKind.GlobalVariable)
+                    return true;
+
+                if (h.Kind == SymbolKind.Property && context.GetPropertySymbol(h) is { } prop && !prop.Flags.HasFlag(FunctionFlags.Static))
+                    return true;
+
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
 }

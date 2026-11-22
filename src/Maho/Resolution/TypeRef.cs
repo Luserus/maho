@@ -1,5 +1,3 @@
-global using SymbolHandle = (Maho.Resolution.SymbolKind Kind, Maho.Resolution.SymbolID ID);
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -92,8 +90,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Alias(TypeRef element, bool isMutable = false, bool isUnsafe = false) =>
         new TypeRef(TypeRefKind.Alias, null, new AliasSemanticType(element, isMutable, isUnsafe));
 
-    public static TypeRef Array(TypeRef element) =>
-        new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element));
+    public static TypeRef Array(TypeRef element, int dimension = 1, SymbolHandle? arrayHandle = null) =>
+        new TypeRef(TypeRefKind.Array, arrayHandle, new ArraySemanticType(element, dimension));
+
+    public static TypeRef FixedArray(TypeRef element, IReadOnlyList<Expression> sizes, SymbolHandle? fixedArrayHandle = null) =>
+        new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, sizes));
 
     public static TypeRef FixedArray(TypeRef element, Expression size, SymbolHandle? fixedArrayHandle = null) =>
         new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, size));
@@ -153,6 +154,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
 
     public static implicit operator TypeRef(SymbolHandle handle) => Resolved(handle);
+    public static implicit operator TypeRef((SymbolKind Kind, SymbolID ID) tuple) => Resolved(new SymbolHandle(tuple.Kind, tuple.ID));
 
     public bool Equals(TypeRef other)
     {
@@ -270,6 +272,13 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             }
         }
 
+        // A safe reference is an access path to its element. When the destination is an owned
+        // value (rather than another reference/pointer, handled above), assignment materializes
+        // that element under Copy semantics. Ownership lowering diagnoses a move-only element
+        // reached through this boundary instead of silently moving it.
+        if (source.SpecialType is ReferenceSemanticType sourceReference)
+            return IsAssignableFrom(sourceReference.ElementType, context);
+
         if (SpecialType is DelegateSemanticType targetDel)
         {
             if (source.SpecialType is FunctionSemanticType srcFn)
@@ -370,7 +379,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                     return true;
                 }
 
-                if (IsSubtypeOf(unwrappedSrcH2, unwrappedTargetH, context)) return true;
+                if (IsSubtypeOf(unwrappedSrcH2, unwrappedTargetH, context, superGen: SpecialType as GenericSemanticType)) return true;
             }
         }
 
@@ -514,7 +523,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && intrinsicName == KnownIntrinsics.Char;
     }
 
-    internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
+    internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null, GenericSemanticType? superGen = null)
     {
         subHandle = context.UnwrapAlias(subHandle);
         superHandle = context.UnwrapAlias(superHandle);
@@ -539,7 +548,30 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             {
                 if (b.Handle is { } bHandle)
                 {
-                    if (IsSubtypeOf(bHandle, superHandle, context, visited))
+                    var unwrappedBHandle = context.UnwrapAlias(bHandle);
+                    if (unwrappedBHandle == superHandle)
+                    {
+                        if (superGen is not null && b.SpecialType is GenericSemanticType baseGen)
+                        {
+                            if (superGen.TypeArguments.Count == baseGen.TypeArguments.Count)
+                            {
+                                bool match = true;
+                                for (int i = 0; i < superGen.TypeArguments.Count; i++)
+                                {
+                                    if (!superGen.TypeArguments[i].IsAssignableFrom(baseGen.TypeArguments[i], context))
+                                    {
+                                        match = false;
+                                        break;
+                                    }
+                                }
+                                if (match) return true;
+                            }
+                            continue;
+                        }
+                        return true;
+                    }
+
+                    if (IsSubtypeOf(bHandle, superHandle, context, visited, superGen))
                         return true;
                 }
             }
@@ -618,10 +650,28 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return Span(s.ElementType.Substitute(typeArgs));
 
         if (SpecialType is FixedArraySemanticType f)
-            return FixedArray(f.ElementType.Substitute(typeArgs), f.Size, Handle);
+            return FixedArray(f.ElementType.Substitute(typeArgs), f.Sizes, Handle);
 
         if (SpecialType is DynSemanticType dyn)
             return Dyn(dyn.TargetType.Substitute(typeArgs));
+
+        if (SpecialType is TupleSemanticType t)
+        {
+            var newElements = new List<TupleElement>();
+            foreach (var elem in t.Elements)
+            {
+                var sub = elem.Type.Substitute(typeArgs);
+                if (sub.SpecialType is TupleSemanticType subTuple && elem.Type.Handle is { } eh && typeArgs.ContainsKey(eh))
+                {
+                    newElements.AddRange(subTuple.Elements);
+                }
+                else
+                {
+                    newElements.Add(new TupleElement(sub, elem.Name));
+                }
+            }
+            return Tuple(newElements, Handle);
+        }
 
         if (SpecialType is UntaggedSemanticType untagged)
             return Untagged(untagged.InnerType.Substitute(typeArgs));
@@ -639,7 +689,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
         TypeRefKind.Inferred => "var",
-        TypeRefKind.Never => "!",
+        TypeRefKind.Never => "Never",
         TypeRefKind.Error => "<error>",
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
@@ -651,7 +701,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToDisplayString(ResolutionContext? context = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+            return "Never";
 
         if (context is not null && Kind == TypeRefKind.Resolved && Handle is { } handle)
         {
@@ -672,7 +722,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToQualifiedString(ResolutionContext? context = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+        {
+            if (context is not null && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverH))
+                return ResolutionContext.GetQualifiedSymbolName(neverH, context);
+            return "Std.Never";
+        }
 
         if (Kind == TypeRefKind.Error)
             return "<error>";
@@ -780,7 +834,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToLabelString(ResolutionContext? context = null, Scope? scope = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+            return "Never";
 
         if (Kind == TypeRefKind.Error)
             return "<error>";

@@ -24,9 +24,9 @@ internal struct ScopeID : IEquatable<ScopeID>
 
     public static bool operator !=(ScopeID id, ScopeID other) => !id.Equals(other);
 
-    public override bool Equals(object? obj) => obj is ScopeID id && Equals(id);
+    public override readonly bool Equals(object? obj) => obj is ScopeID id && Equals(id);
 
-    public override int GetHashCode() => Value;
+    public override readonly int GetHashCode() => Value;
 
     public override readonly string ToString() => Value.ToString();
 

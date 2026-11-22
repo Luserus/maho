@@ -76,6 +76,8 @@ internal sealed partial class Parser
                     return ParseLocalReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
                     return ParseLocalGotoStatement();
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Yield)
+                    return ParseLocalYieldStatement();
                 else if (Peek().Kind is TokenKind.Colon)
                     return ParseLocalLabelStatement();
                 else if (LooksLikeVariableDeclaration() is (var success, var context))
@@ -193,8 +195,30 @@ internal sealed partial class Parser
         }
         if (expr is WhileExpression whileExpr)
             return EndsWithBlock(whileExpr.Body);
+        if (expr is ForExpression forExpr)
+            return EndsWithBlock(forExpr.Body);
 
         return false;
+    }
+
+    private LocalYieldStatement ParseLocalYieldStatement()
+    {
+        var keyword = Consume();
+        bool isBreak = false;
+        Expression? expr = null;
+
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Break)
+        {
+            isBreak = true;
+            Consume();
+        }
+        else if (CurrentToken.Kind is not TokenKind.Semicolon)
+        {
+            expr = ParseExpression();
+        }
+
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after 'yield' statement", MissingTokenAnchor.AfterPrevious);
+        return new LocalYieldStatement(keyword, isBreak, expr, semicolon);
     }
 
 

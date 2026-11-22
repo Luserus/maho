@@ -1,1 +1,4 @@
 ImplicitTopLevel : true;
+Sources : {
+    SourceFiles : [ "Std.Core.mh", "Test.mh" ]
+};

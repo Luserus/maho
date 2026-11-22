@@ -161,8 +161,9 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Untagged or MatchingKeywordKind.Mut;
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Mut ||
+                                                   (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged && IsUntaggedDeclarationModifierAt(current));
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
     /// <summary> Indicates whether the current token is one of the declaration modifiers recognized by the grammar. </summary>
@@ -183,6 +184,48 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
         and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
         and not MatchingKeywordKind.Mut;
+
+    /// <summary> Tests whether <c>untagged</c> at a given token index is acting as a declaration modifier rather than a type modifier. </summary>
+    private bool IsUntaggedDeclarationModifierAt(int tokenIndex)
+    {
+        if (tokenIndex < 0 || tokenIndex >= tokens.Count || tokens[tokenIndex].MatchingKind is not MatchingKeywordKind.Untagged)
+            return false;
+
+        int probe = tokenIndex + 1;
+
+        while (probe < tokens.Count)
+        {
+            var tok = tokens[probe];
+            MatchingKeywordKind kind = tok.MatchingKind;
+
+            // Declaration starts that untagged could modify
+            if (kind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface or
+                MatchingKeywordKind.Func or MatchingKeywordKind.Attribute or MatchingKeywordKind.Macro or MatchingKeywordKind.Literal)
+                return true;
+
+            // Receiver parameter starts: this, &this, *this, mut &this, mut *this
+            if (kind is MatchingKeywordKind.This)
+                return true;
+            if (tok.Kind is TokenKind.Ampersand or TokenKind.Asterisk && probe + 1 < tokens.Count && tokens[probe + 1].MatchingKind is MatchingKeywordKind.This)
+                return true;
+            if (kind is MatchingKeywordKind.Mut && probe + 2 < tokens.Count &&
+                (tokens[probe + 1].Kind is TokenKind.Ampersand or TokenKind.Asterisk) &&
+                tokens[probe + 2].MatchingKind is MatchingKeywordKind.This)
+                return true;
+
+            // Other modifiers that might follow untagged in a modifier list
+            if (kind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or MatchingKeywordKind.Unsafe or
+                MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or MatchingKeywordKind.Mut)
+            {
+                probe++;
+                continue;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
 
     /// <summary> Tests whether <c>intrinsic</c> at a given token index is acting as an attribute-only modifier. </summary>
     private bool IsIntrinsicAttributeModifierAt(int tokenIndex)
@@ -437,7 +480,7 @@ internal sealed partial class Parser
         }
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock(null, topLevelStatementsEnabled);
-        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
+        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) || (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
@@ -499,6 +542,8 @@ internal sealed partial class Parser
             return ParseMemberTypeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
             return new MemberFunctionDeclaration(ParseFunction(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace)
+            return ParseMemberConstantDeclaration(attributes, modifiers);
         else
             return ParseMemberFieldOrPropertyDeclaration(attributes, modifiers);
     }
@@ -523,7 +568,8 @@ internal sealed partial class Parser
             return ParseLocalStatement(parseMode);
 
         if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier ||
-            (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) ||
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseLocalDeclaration(parseMode);
 
         return ParseLocalStatement(parseMode);

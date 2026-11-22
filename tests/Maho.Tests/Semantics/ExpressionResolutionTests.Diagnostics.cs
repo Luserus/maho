@@ -11,14 +11,17 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
+            [IntrinsicType("Enum")]
+            public struct Enum : ValType;
+
             public enum E
             {
                 A,
                 B;
-                public func NormalMethod() -> void { }
+                public func NormalMethod(&this) -> void { }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test(untagged E e) -> void
                 {
@@ -42,7 +45,7 @@ public sealed partial class ExpressionResolutionTests
                 Circle { public func Draw() -> void {} }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test(Shape s) -> void
                 {
@@ -72,7 +75,7 @@ public sealed partial class ExpressionResolutionTests
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> Meters
                 {
@@ -104,20 +107,14 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface ConcreteAdd
-            {
-                [OperatorFunction("Addition")]
-                public static func Add(Concrete l, Concrete r) -> Concrete;
-            }
-
-            public struct Concrete : ConcreteAdd
+            public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
-                public func Abs() -> Concrete { return this; }
+                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                public func Abs(this) -> Concrete { return this; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -132,24 +129,43 @@ public sealed partial class ExpressionResolutionTests
     }
 
     [Fact]
+    public void LiteralMethodInvocation_WithByRefReceiver_ReportsMH2027()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct Concrete
+            {
+                public literal int() { Concrete res; return res; }
+                public func Abs(&this) -> Concrete { return this; }
+            }
+
+            public struct Host
+            {
+                public func Test() -> void
+                {
+                    Concrete c = 10.Abs();
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2027");
+    }
+
+    [Fact]
     public void RetroactiveResolution_ReportsMH2014_WhenTargetLacksMember()
     {
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface ConcreteAdd
-            {
-                [OperatorFunction("Addition")]
-                public static func Add(Concrete l, Concrete r) -> Concrete;
-            }
-
-            public struct Concrete : ConcreteAdd
+            public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public static func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -170,7 +186,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func FromInt32(int32 x) -> void {}
                 public func FromInt64(int64 x) -> void {}
@@ -194,7 +210,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -214,7 +230,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -241,7 +257,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -269,11 +285,11 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Animal { }
-            public class Dog : Animal { }
-            public class Cat : Animal { }
+            public struct Animal { }
+            public struct Dog : Animal { }
+            public struct Cat : Animal { }
 
-            public class Host
+            public struct Host
             {
                 public func Test(bool cond, Dog d, Cat c) -> void
                 {
@@ -292,7 +308,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(bool cond, int32 a, int32 b) -> int32
                 {
@@ -315,13 +331,13 @@ public sealed partial class ExpressionResolutionTests
             public interface New
             {
                 [OperatorFunction("New")]
-                public static func New(Arena pool) -> Point;
+                public func New(Arena pool) -> Point;
             }
 
             public interface Put
             {
                 [OperatorFunction("Put")]
-                public static func Put(int32 offset) -> void;
+                public func Put(int32 offset) -> void;
             }
 
             public struct Point : New, Put
@@ -329,7 +345,7 @@ public sealed partial class ExpressionResolutionTests
                 public int32 X;
                 public int32 Y;
 
-                public static func Construct(int32 x, int32 y) -> Point
+                public func Construct(int32 x, int32 y) -> Point
                 {
                     Point p;
                     p.X = x;
@@ -337,18 +353,18 @@ public sealed partial class ExpressionResolutionTests
                     return p;
                 }
 
-                public static func New.New(Arena pool) -> Point
+                public func New.New(Arena pool) -> Point
                 {
                     Point p;
                     return p;
                 }
 
-                public static func Put.Put(int32 offset) -> void
+                public func Put.Put(int32 offset) -> void
                 {
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test(Arena pool) -> void
                 {
@@ -367,23 +383,17 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Callable
-            {
-                [OperatorFunction("Callable")]
-                public func Call(int32 x, int32 y) -> int32;
-            }
-
-            public struct Multiplier : Callable
+            public struct Multiplier : Callable<int32, int32, int32>
             {
                 public int32 Factor;
 
-                public func Callable.Call(int32 x, int32 y) -> int32
+                public func Callable.Invoke(&this, int32 x, int32 y) -> int32
                 {
                     return x;
                 }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test(Multiplier m) -> int32
                 {
@@ -403,7 +413,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct NonCallable;
 
-            public class Host
+            public struct Host
             {
                 public func Test(NonCallable n) -> void
                 {
@@ -428,7 +438,7 @@ public sealed partial class ExpressionResolutionTests
                 public literal lit2(int32 v) { Overloaded res; return res; }
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -447,7 +457,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func ExpectInt64(int64 val) -> void { }
 
@@ -480,23 +490,17 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface AddMixed<TLhs, TRhs, TReturn>
-            {
-                [OperatorFunction("Addition")]
-                public static func Add(TLhs l, TRhs r) -> TReturn;
-            }
-
             [IntrinsicType("UInt64")]
-            public struct uint64 : AddMixed<uint64, int32, uint64>
+            public struct uint64 : Add<uint64, int32, uint64>
             {
                 [IntrinsicFunction("UInt64.Add(UInt64, Int32)")]
-                public static func AddMixed.Add(uint64 l, int32 r) -> uint64;
+                public func Add.Add(uint64 l, int32 r) -> uint64;
 
                 [IntrinsicFunction("UInt64.<u64>")]
                 public literal u64(int32 v);
             }
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> uint64
                 {
@@ -535,7 +539,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Some() -> int32
                 {
@@ -572,7 +576,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Main() -> int32
                 {
@@ -592,7 +596,7 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Main() -> void
                 {

@@ -415,7 +415,8 @@ public sealed class Compilation
                          string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
 
                     bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
-                    bool allowImplicit = options.ImplicitTopLevel || (isSingleFileScript && (options.EntryFile == null || isEntryFile));
+                    bool allowImplicit = (isSingleFileScript && (options.EntryFile == null || isEntryFile)) ||
+                                         (options.ImplicitTopLevel && isEntryFile);
 
                     var dm = new DiagnosticsManager(text);
                     fileDms[i] = dm;
@@ -452,78 +453,56 @@ public sealed class Compilation
             }
         }
 
-        // Validate top-level statements and resolve the entry file candidate
+        // Determine which files have top-level statements enabled.
+        // Top-level status is determined strictly by explicit configuration (options.EntryFile matching
+        // this file AND options.ImplicitTopLevel is true, or single-file script) or explicit directive (#pragma toplevel enable).
         string? effectiveEntryFile = options.EntryFile;
-        List<(int Index, CompilationUnit Root, DiagnosticsManager Dm)> filesWithTopLevel = [];
+        List<int> explicitTopLevelIndices = [];
 
         for (int i = 0; i < validRoots.Count; i++)
         {
             var unit = validRoots[i];
             bool? pragmaState = PragmaDirective.GetTopLevelPragmaState(unit.Pragmas);
-            bool hasStatements = ContainsTopLevelStatement(unit.Members);
             bool isExplicitEntry = options.EntryFile != null &&
                 (string.Equals(validPaths[i], options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(Path.GetFileName(validPaths[i]), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+            bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
 
             if (pragmaState == false)
+            {
                 unit.EnablesTopLevelStatements = false;
+            }
             else if (pragmaState == true)
             {
                 unit.EnablesTopLevelStatements = true;
-
-                if (hasStatements)
-                    filesWithTopLevel.Add((i, unit, validFileDms[i]));
+                explicitTopLevelIndices.Add(i);
             }
             else
             {
-                if (options.ImplicitTopLevel)
+                if ((options.ImplicitTopLevel && isExplicitEntry) || (isSingleFileScript && (options.EntryFile == null || isExplicitEntry)))
                 {
-                    if (options.EntryFile != null)
-                    {
-                        if (isExplicitEntry)
-                        {
-                            unit.EnablesTopLevelStatements = true;
-                            if (hasStatements)
-                                filesWithTopLevel.Add((i, unit, validFileDms[i]));
-                        }
-                        else
-                        {
-                            unit.EnablesTopLevelStatements = false;
-                            if (hasStatements)
-                                filesWithTopLevel.Add((i, unit, validFileDms[i]));
-                        }
-                    }
-                    else
-                    {
-                        if (hasStatements)
-                            filesWithTopLevel.Add((i, unit, validFileDms[i]));
-
-                        unit.EnablesTopLevelStatements = false;
-                    }
+                    unit.EnablesTopLevelStatements = true;
+                    explicitTopLevelIndices.Add(i);
                 }
                 else
+                {
                     unit.EnablesTopLevelStatements = false;
+                }
             }
         }
 
-        if (effectiveEntryFile == null && filesWithTopLevel.Count == 1)
+        if (effectiveEntryFile == null)
         {
-            int winnerIdx = filesWithTopLevel[0].Index;
-            validRoots[winnerIdx].EnablesTopLevelStatements = true;
-            effectiveEntryFile = validPaths[winnerIdx];
-        }
-        else if (pathsList.Count == 1 && options.RootDirectory == null && effectiveEntryFile == null)
-        {
-            effectiveEntryFile = pathsList[0];
-
-            if (validRoots.Count > 0 && PragmaDirective.GetTopLevelPragmaState(validRoots[0].Pragmas) != false)
-                validRoots[0].EnablesTopLevelStatements = true;
+            if (pathsList.Count == 1 && options.RootDirectory == null)
+                effectiveEntryFile = pathsList[0];
+            else if (explicitTopLevelIndices.Count == 1)
+                effectiveEntryFile = validPaths[explicitTopLevelIndices[0]];
         }
 
-        if (filesWithTopLevel.Count > 1)
+        if (explicitTopLevelIndices.Count > 1)
         {
-            foreach (var (_, candRoot, candDm) in filesWithTopLevel)
-                candDm.ReportMultipleTopLevelSources(GetTopLevelPragmaSpan(candRoot));
+            foreach (int idx in explicitTopLevelIndices)
+                validFileDms[idx].ReportMultipleTopLevelSources(GetTopLevelPragmaSpan(validRoots[idx]));
         }
 
         var effectiveOptions = options with

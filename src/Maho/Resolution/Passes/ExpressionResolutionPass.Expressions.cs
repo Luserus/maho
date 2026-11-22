@@ -83,6 +83,10 @@ internal sealed partial class ExpressionResolutionPass
                 result = ResolveWhile(loop, scope, containingFunction);
                 break;
 
+            case ForExpression forExpr:
+                result = ResolveFor(forExpr, scope, containingFunction);
+                break;
+
             case BlockExpression block:
                 result = ResolveBlock(block, scope, containingFunction);
                 break;
@@ -111,6 +115,17 @@ internal sealed partial class ExpressionResolutionPass
 
             case CollectionExpression collection:
                 result = ResolveCollection(collection, scope, containingFunction);
+                break;
+
+            case MultiTermExpression multiTerm:
+                var termElements = new List<TupleElement>(multiTerm.Terms.Count);
+                foreach (var term in multiTerm.Terms)
+                {
+                    var tType = ResolveExpression(term, scope, containingFunction);
+                    termElements.Add(new TupleElement(tType, null));
+                }
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var mtTupleHandle);
+                result = TypeRef.Tuple(termElements, mtTupleHandle != default ? mtTupleHandle : null);
                 break;
 
             case VariantCreationExpression variantCreation:
@@ -310,7 +325,10 @@ internal sealed partial class ExpressionResolutionPass
             }
 
             context.ResolvedTree.AddReference(named, ResolutionContext.GetHandle(sym));
-            return GetTypeFromSymbol(sym);
+            var resType = GetTypeFromSymbol(sym);
+            if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
+                context.SetConstantValue(named, c.Value);
+            return resType;
         }
 
         // 4. Fallback check for previously recorded resolution tree references
@@ -343,6 +361,7 @@ internal sealed partial class ExpressionResolutionPass
         FieldSymbol field => field.Type,
         ParameterSymbol param => param.Type,
         GlobalVariableSymbol global => global.Type,
+        ConstantSymbol constant => constant.Type,
         TypeSymbol typeSymbol => TypeRef.Resolved(ResolutionContext.GetHandle(typeSymbol)),
         MethodSymbol method => method.Type != default && method.Type.Kind != TypeRefKind.Unresolved ? method.Type : (method.Flags.HasFlag(FunctionFlags.Static) ? TypeRef.Function(method.ReturnType, Array.Empty<TypeRef>()) : TypeRef.Delegate(method.ReturnType, Array.Empty<TypeRef>())),
         FunctionSymbol fn => fn.Type != default && fn.Type.Kind != TypeRefKind.Unresolved ? fn.Type : TypeRef.Function(fn.ReturnType, Array.Empty<TypeRef>()),

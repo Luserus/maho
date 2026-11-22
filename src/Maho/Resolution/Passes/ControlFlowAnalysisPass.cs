@@ -49,7 +49,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                 var handle = ResolutionContext.GetHandle(function);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
-                AnalyzeReachability(cfg);
+                AnalyzeReachability(cfg, context);
                 VerifyReturnsAndDivergence(function.Name.Text, function.ReturnType, cfg, fnDecl.Signature.Identifier.GetSpan() ?? default, fnDecl.GetSource());
             }
         }
@@ -67,7 +67,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                 var handle = ResolutionContext.GetHandle(method);
                 var cfg = BuildCFG(body, handle);
                 context.SetControlFlowGraph(handle, cfg);
-                AnalyzeReachability(cfg);
+                AnalyzeReachability(cfg, context);
                 VerifyReturnsAndDivergence(method.Name.Text, method.ReturnType, cfg, methodDecl.Signature.Identifier.GetSpan() ?? default, methodDecl.GetSource());
             }
         }
@@ -83,7 +83,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                         var handle = ResolutionContext.GetHandle(prop);
                         var cfg = BuildCFG(body, handle);
                         context.SetControlFlowGraph(handle, cfg);
-                        AnalyzeReachability(cfg);
+                        AnalyzeReachability(cfg, context);
                     }
                 }
             }
@@ -226,6 +226,10 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     {
                         block = ProcessWhile(whileExpr, block, exit, newBlock);
                     }
+                    else if (exprStmt.Expression is ForExpression forExpr)
+                    {
+                        block = ProcessFor(forExpr, block, exit, newBlock);
+                    }
                     else
                     {
                         var exprType = context.GetExpressionType(exprStmt.Expression);
@@ -252,6 +256,17 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     block.AddSuccessor(exit);
                     // Code following a return begins in a new block (potentially unreachable)
                     block = newBlock();
+                    break;
+
+                case LocalYieldStatement yieldStmt:
+                    if (yieldStmt.Expression is not null)
+                        block.Instructions.Add(yieldStmt.Expression);
+                    if (yieldStmt.IsBreak)
+                    {
+                        block.Terminator = BlockTerminator.Return();
+                        block.AddSuccessor(exit);
+                        block = newBlock();
+                    }
                     break;
 
                 case LocalVariableDeclarationStatement varStmt:
@@ -361,6 +376,49 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         // Body executes statements then unconditionally loops back to header
         bodyBlock.Instructions.Add(whileExpr.Body);
         if (whileExpr.Body is BlockExpression blockBody)
+        {
+            var endBody = ProcessLocals(blockBody.Locals, bodyBlock, exit, newBlock);
+            if (endBody.Terminator.Kind == BlockTerminatorKind.Unreachable && endBody.Successors.Count == 0)
+            {
+                endBody.Terminator = BlockTerminator.Branch(headerBlock);
+                endBody.AddSuccessor(headerBlock);
+            }
+        }
+        else
+        {
+            bodyBlock.Terminator = BlockTerminator.Branch(headerBlock);
+            bodyBlock.AddSuccessor(headerBlock);
+        }
+
+        return exitBlock;
+    }
+
+    /// <summary>
+    /// Lowers a <see cref="ForExpression"/> loop into header, body, and exit basic blocks with a backedge.
+    /// </summary>
+    private BasicBlock ProcessFor(
+        ForExpression forExpr,
+        BasicBlock current,
+        BasicBlock exit,
+        Func<BasicBlock> newBlock)
+    {
+        var headerBlock = newBlock();
+        var bodyBlock = newBlock();
+        var exitBlock = newBlock();
+
+        // Jump into loop header
+        current.Terminator = BlockTerminator.Branch(headerBlock);
+        current.AddSuccessor(headerBlock);
+
+        // Header tests collection/next
+        headerBlock.Instructions.Add(forExpr.Collection);
+        headerBlock.Terminator = BlockTerminator.Conditional(forExpr.Collection, bodyBlock, exitBlock);
+        headerBlock.AddSuccessor(bodyBlock);
+        headerBlock.AddSuccessor(exitBlock);
+
+        // Body executes statements then unconditionally loops back to header
+        bodyBlock.Instructions.Add(forExpr.Body);
+        if (forExpr.Body is BlockExpression blockBody)
         {
             var endBody = ProcessLocals(blockBody.Locals, bodyBlock, exit, newBlock);
             if (endBody.Terminator.Kind == BlockTerminatorKind.Unreachable && endBody.Successors.Count == 0)
@@ -496,7 +554,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
     /// Note: this analysis is purely for dead-code and return diagnostics; no optimizations or AST mutation occur.
     /// </summary>
     /// <param name="cfg">The control-flow graph to analyze.</param>
-    private static void AnalyzeReachability(ControlFlowGraph cfg)
+    private static void AnalyzeReachability(ControlFlowGraph cfg, ResolutionContext context)
     {
         var reachable = new HashSet<int>();
         var queue = new Queue<BasicBlock>();
@@ -512,7 +570,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             if (block.Terminator.Kind == BlockTerminatorKind.ConditionalBranch &&
                 block.Terminator.Condition is { } cond)
             {
-                bool? constBool = TryEvaluateConstantBool(cond);
+                bool? constBool = TryEvaluateConstantBool(cond, context);
                 if (constBool == true)
                 {
                     if (block.Terminator.Target is { } t && reachable.Add(t.Id))
@@ -544,10 +602,14 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
     /// <summary>
     /// Evaluates whether an expression is a static literal boolean <c>true</c> or <c>false</c>.
-    /// Uses <see cref="MatchingKeywordKind"/> enum checks with zero string comparisons.
+    /// Uses <see cref="ConstantFoldingPass"/> pre-calculated facts when available, falling back to keyword tokens.
     /// </summary>
-    private static bool? TryEvaluateConstantBool(Expression cond)
+    private static bool? TryEvaluateConstantBool(Expression cond, ResolutionContext context)
     {
+        var cv = ConstantFoldingPass.Evaluate(cond, context);
+        if (cv.Kind == ConstantValueKind.Bool)
+            return cv.AsBool;
+
         if (cond is NamedExpression named)
         {
             if (named.Identifier.MatchingKind is MatchingKeywordKind.True) return true;

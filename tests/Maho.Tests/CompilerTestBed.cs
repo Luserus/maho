@@ -34,23 +34,35 @@ internal static class CompilerTestBed
         [IntrinsicType("Bool")]
         public struct bool;
 
-        [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public interface Deref<TReturn>
         {
-            nuint raw;
+            [OperatorFunction("Dereference")]
+            public func Deref(&this) -> TReturn;
+        }
+
+        [IntrinsicType("Reference")]
+        public struct Reference<T> : Deref<T&>
+        {
+            public nuint raw;
+
+            [IntrinsicFunction("Reference.Deref()")]
+            public func Deref.Deref(&this) -> T&;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            public int8& buffer;
+            public nuint length;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> : Deref<T&>
         {
-            nuint addr;
+            public nuint addr;
+
+            [IntrinsicFunction("Pointer.Deref()")]
+            public func Deref.Deref(&this) -> T&;
         }
 
         [IntrinsicType("ValueType")]
@@ -62,30 +74,71 @@ internal static class CompilerTestBed
         [IntrinsicType("Enum")]
         public struct Enum : ValType;
 
+        public interface Deconstruct<T...>
+        {
+            [OperatorFunction("Deconstruct")]
+            public func Deconstruct(&this) -> (T...);
+        }
+
+        public interface DeconstructMut<T...>
+        {
+            [OperatorFunction("DeconstructMut")]
+            public func Deconstruct(mut &this) -> (mut &T...);
+        }
+
         [IntrinsicType("Tuple")]
-        public struct Tuple<T...> : ValType;
+        public struct Tuple<T...> : ValType, Deconstruct<T...>, DeconstructMut<T...>
+        {
+            [IntrinsicFunction("Tuple.Deconstruct()")]
+            public func Deconstruct.Deconstruct(&this) -> (T...);
+
+            [IntrinsicFunction("Tuple.DeconstructMut()")]
+            public func DeconstructMut.Deconstruct(mut &this) -> (mut &T...);
+        }
+
+        public interface Iterator<TItem>
+        {
+            [OperatorFunction("Iterator")]
+            public func Next(mut &this) -> TItem;
+        }
+
+        public interface Iterable<TItem, TIterator>
+        {
+            [OperatorFunction("Iterable")]
+            public func Iterate(&this) -> TIterator;
+        }
+
+        [IntrinsicType("FixedArray")]
+        public struct FixedArray<T, N : int32> : ValType, Iterator<T>;
+
+        [IntrinsicType("Array")]
+        public struct Array<T> : ValType, Iterator<T>
+        {
+            Pointer<T> data;
+            nuint length;
+        }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
         public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
+            public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
         public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
         {
-            nuint codeAddress;
-            Pointer<ValType> env;
+            public nuint codeAddress;
+            public Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 

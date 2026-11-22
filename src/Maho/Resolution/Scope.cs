@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Maho.Syntax;
 
 namespace Maho.Resolution;
 
@@ -58,7 +59,36 @@ internal sealed class Scope
         return null;
     }
 
-    public IReadOnlyList<Symbol> GetLocalSymbols(SymbolPart name) => SymbolsByName.TryGetValue(name, out var symbols) ? symbols : [];
+    public IReadOnlyList<Symbol> GetLocalSymbols(SymbolPart name)
+    {
+        if (SymbolsByName.TryGetValue(name, out var symbols))
+            return symbols;
+
+        if (name.Arity > 0)
+        {
+            foreach (var (key, list) in SymbolsByName)
+            {
+                if (key.Text == name.Text && key.Arity != name.Arity)
+                {
+                    foreach (var sym in list)
+                    {
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
+                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        {
+                            return list;
+                        }
+                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp &&
+                            ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
+                        {
+                            return list;
+                        }
+                    }
+                }
+            }
+        }
+
+        return [];
+    }
 
     private static bool IsTypeSymbol(Symbol s) =>
         s is TypeSymbol or NestedTypeSymbol or GenericParameterSymbol or AliasSymbol;
@@ -151,8 +181,8 @@ internal sealed class Scope
         for (int i = 0; i < name.Count - 1; i++)
         {
             var symbol = start[0];
-
-            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var child = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (child is null)
                 return [];
@@ -290,8 +320,8 @@ internal sealed class Scope
         for (int i = 0; i < name.Count - 1; i++)
         {
             var symbol = start[0];
-
-            var child = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var child = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (child is null)
                 return [];
@@ -347,7 +377,8 @@ internal sealed class Scope
 
             // More components follow (e.g. Type.NestedType)
             var symbol = symbols[0];
-            var childScope = scope.GetChildScope((symbol.Kind, symbol.ID)) ?? symbol.EnclosingScope?.GetChildScope((symbol.Kind, symbol.ID));
+            var handle = ResolutionContext.GetHandle(symbol);
+            var childScope = scope.GetChildScope(handle) ?? symbol.EnclosingScope?.GetChildScope(handle);
 
             if (childScope is null)
                 return [];
@@ -362,7 +393,8 @@ internal sealed class Scope
             for (int i = index; i < name.Count - 1; i++)
             {
                 var nextSymbol = nextSymbols[0];
-                var nextChild = scope.GetChildScope((nextSymbol.Kind, nextSymbol.ID)) ?? nextSymbol.EnclosingScope?.GetChildScope((nextSymbol.Kind, nextSymbol.ID));
+                var nextHandle = ResolutionContext.GetHandle(nextSymbol);
+                var nextChild = scope.GetChildScope(nextHandle) ?? nextSymbol.EnclosingScope?.GetChildScope(nextHandle);
 
                 if (nextChild is null)
                     return [];

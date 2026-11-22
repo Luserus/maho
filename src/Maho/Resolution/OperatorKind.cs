@@ -137,7 +137,21 @@ internal enum OperatorKind
     /// <summary>Postfix unwrap operator (<c>x!</c> via <c>Unwrap&lt;TReturn&gt;</c> interface).</summary>
     Unwrap,
     /// <summary>Postfix try propagation operator (<c>x?</c> via <c>Try&lt;TReturn, TFail&gt;</c> interface).</summary>
-    Try
+    Try,
+    /// <summary>Collection element insertion operator (<c>Collection&lt;T...&gt;</c> interface).</summary>
+    CollectionAdd,
+    /// <summary>Collection with-initializer operator (<c>CollectionWith&lt;TArgs...&gt;</c> interface).</summary>
+    CollectionWith,
+    /// <summary>Deconstruction operator (<c>Deconstruct&lt;T...&gt;</c> interface).</summary>
+    Deconstruct,
+    /// <summary>Mutable deconstruction operator (<c>DeconstructMut&lt;T...&gt;</c> interface).</summary>
+    DeconstructMut,
+    /// <summary>Iterable iterator factory operator (<c>Iterable&lt;TItem, TIterator&gt;</c> interface).</summary>
+    Iterable,
+    /// <summary>Iterator next element advance operator (<c>Iterator&lt;TItem&gt;</c> interface).</summary>
+    Iterator,
+    /// <summary>Owning dereference operator (<c>OwningDeref&lt;TReturn&gt;</c> interface).</summary>
+    OwningDeref
 }
 
 

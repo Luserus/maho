@@ -25,6 +25,7 @@ internal enum SymbolKind : byte
     /// <summary> Future label symbol category for statement-level control flow. </summary>
     Field,
     GlobalVariable,
+    Constant,
     Label,
     Macro,
     EnumVariant

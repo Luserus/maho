@@ -48,7 +48,7 @@ public sealed class LambdaExpressionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(TParams args) -> TReturn;
+            public func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -56,7 +56,7 @@ public sealed class LambdaExpressionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -65,7 +65,7 @@ public sealed class LambdaExpressionTests
             nuint codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(TParams args) -> TReturn;
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -110,7 +110,7 @@ public sealed class LambdaExpressionTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -128,7 +128,7 @@ public sealed class LambdaExpressionTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test(int32 captured) -> void
                 {
@@ -146,7 +146,7 @@ public sealed class LambdaExpressionTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {
@@ -167,7 +167,7 @@ public sealed class LambdaExpressionTests
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
-            public class Host
+            public struct Host
             {
                 public func Test() -> void
                 {

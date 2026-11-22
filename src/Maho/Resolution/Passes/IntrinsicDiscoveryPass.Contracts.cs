@@ -174,10 +174,11 @@ internal sealed partial class IntrinsicDiscoveryPass
             return;
         }
 
-        if (GetGenericParameterCount(symbol) != 1)
+        int gpCount = GetGenericParameterCount(symbol);
+        if (gpCount is not (1 or 2))
         {
             var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Array, "must have exactly 1 generic parameter", syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Array, "must have 1 or 2 generic parameters", syntax?.GetSource());
             return;
         }
 
@@ -881,5 +882,33 @@ internal sealed partial class IntrinsicDiscoveryPass
 
         if (targetHandle is { } h)
             alias.Target = TypeRef.Resolved(h);
+    }
+
+    private void ValidateFixedArray(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
+    {
+        if (!typesByIntrinsic.TryGetValue(KnownIntrinsics.FixedArray, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+            return;
+
+        var entry = list[0];
+        var symbol = entry.Symbol;
+        var syntax = GetSyntax(symbol);
+
+        var instanceFields = GetInstanceFields(symbol);
+        if (instanceFields.Count > 0)
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.FixedArray, "must have zero instance fields", syntax?.GetSource());
+            return;
+        }
+
+        int gpCount = GetGenericParameterCount(symbol);
+        if (gpCount is not (2 or 3))
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.FixedArray, "must have 2 or 3 generic parameters (<T, N> or <T, N, D>)", syntax?.GetSource());
+            return;
+        }
+
+        context.DiscoveredIntrinsics.Register(KnownIntrinsics.FixedArray, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
     }
 }
