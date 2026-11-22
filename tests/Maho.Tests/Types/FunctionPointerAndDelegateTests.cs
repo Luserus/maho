@@ -132,7 +132,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0240()
+    public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -148,11 +148,11 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Function"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Function"));
     }
 
     [Fact]
-    public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0240()
+    public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -168,7 +168,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Delegate"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Delegate"));
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Function_WithoutCallableImplementation_ReportsMH0544()
+    public void Function_WithoutCallableImplementation_ReportsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -246,7 +246,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("Callable"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("Callable"));
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Call_WithoutCallableInPrelude_ReportsMH0240()
+    public void Call_WithoutCallableInPrelude_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -303,7 +303,7 @@ public sealed class FunctionPointerAndDelegateTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Callable"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Callable"));
     }
 
     [Fact]

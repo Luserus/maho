@@ -64,6 +64,31 @@ internal sealed class OwnershipTypeClassifier
     }
 
     /// <summary>
+    /// Checks whether a type implements an explicit lifecycle contract (Move or Destructor).
+    /// Types with explicit lifecycle contracts have monolithic ownership and forbid partial moves.
+    /// </summary>
+    public bool HasExplicitLifecycle(TypeRef type)
+    {
+        if (type.Handle is not { } handle)
+            return false;
+
+        handle = context.UnwrapAlias(handle);
+        return HasLifecycleOperator(handle, OperatorKind.Destructor) || HasLifecycleOperator(handle, OperatorKind.Move);
+    }
+
+    /// <summary>
+    /// Checks whether a type implements an explicit Destructor contract.
+    /// </summary>
+    public bool HasExplicitDestructor(TypeRef type)
+    {
+        if (type.Handle is not { } handle)
+            return false;
+
+        handle = context.UnwrapAlias(handle);
+        return HasLifecycleOperator(handle, OperatorKind.Destructor);
+    }
+
+    /// <summary>
     /// Computes destructor requirement after recursion/cache checks have been performed by
     /// <see cref="RequiresDrop"/>.
     /// </summary>

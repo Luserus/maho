@@ -297,6 +297,16 @@ internal sealed partial class ExpressionResolutionPass
         // 1. Built-in language pointer/reference operations
         if (opKind == OperatorKind.AddressOf)
         {
+            if (!IsExpressionLValue(unary.Operand, operand))
+            {
+                context.Diagnostics.ReportInvalidReceiverForByRefThis(
+                    unary.Operand.GetSpan() ?? default,
+                    "&",
+                    "AddressOf",
+                    unary.Operand.GetSource());
+                return TypeRef.Error;
+            }
+
             if (TryResolveUnaryOverload(OperatorKind.AddressOf, operand, unary, out var addrResult))
                 return addrResult;
 
@@ -315,11 +325,23 @@ internal sealed partial class ExpressionResolutionPass
             return TypeRef.Error;
         }
 
-        // 2. Canonical bool negation
+        // 2. Increment and decrement operators require an assignable L-value operand
+        if (opKind is OperatorKind.PrefixIncrement or OperatorKind.PostfixIncrement or OperatorKind.PrefixDecrement or OperatorKind.PostfixDecrement)
+        {
+            if (!IsExpressionLValue(unary.Operand, operand))
+            {
+                context.Diagnostics.ReportCannotAssignToNonLValue(
+                    unary.Operand.GetSpan() ?? default,
+                    unary.Operand.GetSource());
+                return TypeRef.Error;
+            }
+        }
+
+        // 3. Canonical bool negation
         if (opKind == OperatorKind.LogicalNot && IsBool(operand))
             return boolType;
 
-        // 3. Uncollapsed literal unary (e.g. -10 maintains uncollapsed Int literal)
+        // 4. Uncollapsed literal unary (e.g. -10 maintains uncollapsed Int literal)
         if (operand.IsLiteral)
             return operand;
 
@@ -584,7 +606,7 @@ internal sealed partial class ExpressionResolutionPass
         var rhs = ResolveExpression(assignment.RhsExpression, scope, containingFunction);
 
         // 1. Verify that the LHS expression denotes a valid writable L-value
-        if (!IsLValue(assignment.LhsExpression, lhs))
+        if (!IsExpressionLValue(assignment.LhsExpression, lhs))
         {
             context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
             return TypeRef.Error;
@@ -672,22 +694,57 @@ internal sealed partial class ExpressionResolutionPass
     }
 
     /// <summary>
-    /// Determines whether the given expression denotes a valid L-value (assignable storage location).
-    /// In Maho, any expression returning a mutable alias (<c>mut &amp;T</c> or <c>mut *T</c>) is a valid L-value,
-    /// as well as syntactic named expressions, index expressions, member accesses, and pointer dereferences.
+    /// Determines whether the given expression denotes a valid L-value (assignable and addressable storage location).
+    /// In Maho, any expression returning a mutable alias (<c>mut &amp;T</c> or <c>mut *T</c>) or reference is a valid L-value,
+    /// as well as variables, parameters, fields, index expressions, pointer dereferences, and member access on L-values.
     /// </summary>
     /// <param name="expr">The AST expression node to inspect.</param>
     /// <param name="resolvedType">The resolved semantic type of the expression.</param>
     /// <returns><see langword="true"/> if the expression is an L-value; otherwise <see langword="false"/>.</returns>
-    private static bool IsLValue(Expression expr, TypeRef resolvedType) =>
-        (resolvedType.SpecialType is AliasSemanticType { IsMutable: true }) ||
-        expr switch
-        {
-            NamedExpression => true,
-            IndexExpression => true,
-            MemberAccessExpression => true,
-            UnaryExpression u when u.OperatorToken.Kind == TokenKind.Asterisk => true,
-            _ => false
-        };
+    internal bool IsExpressionLValue(Expression expr, TypeRef resolvedType)
+    {
+        while (expr is ParenthesizedExpression p)
+            expr = p.Expression;
 
+        if (resolvedType.SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType)
+            return true;
+
+        if (expr is UnaryExpression u && u.OperatorToken.Kind == TokenKind.Asterisk)
+            return true;
+
+        if (expr is IndexExpression)
+            return true;
+
+        if (expr is MemberAccessExpression member)
+        {
+            if (member.Dot.Kind == TokenKind.MinusGreaterThan)
+                return true;
+            var recvType = context.GetExpressionType(member.Expression) ?? TypeRef.Unresolved;
+            return IsExpressionLValue(member.Expression, recvType);
+        }
+
+        if (expr is NamedExpression named)
+        {
+            if (named.Identifier.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
+                return false;
+
+            if (named.Identifier.MatchingKind is MatchingKeywordKind.This)
+                return true;
+
+            if (context.ResolvedTree.TryGetReference(named, out var h))
+            {
+                if (h.Kind is SymbolKind.Variable or SymbolKind.Parameter or SymbolKind.Field or SymbolKind.GlobalVariable)
+                    return true;
+
+                if (h.Kind == SymbolKind.Property && context.GetPropertySymbol(h) is { } prop && !prop.Flags.HasFlag(FunctionFlags.Static))
+                    return true;
+
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
 }

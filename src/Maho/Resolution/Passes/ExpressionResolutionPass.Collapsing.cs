@@ -193,6 +193,25 @@ internal sealed partial class ExpressionResolutionPass
                     var memberSym = LookupMemberOnType(targetType, access.Identifier.Value);
                     if (memberSym is MethodSymbol m)
                     {
+                        if (m.Parameters.Count > 0 &&
+                            context.GetParameterSymbol(m.Parameters[0]) is { } firstP &&
+                            firstP.Syntax?.Declarator.IsReceiver == true)
+                        {
+                            var rk = firstP.Syntax.Declarator.ReceiverKind;
+                            if (rk is not ReceiverKind.Value && rk is not ReceiverKind.None)
+                            {
+                                if (!IsExpressionLValue(access.Expression, targetType))
+                                {
+                                    context.Diagnostics.ReportInvalidReceiverForByRefThis(
+                                        access.Expression.GetSpan() ?? default,
+                                        m.Name.Text,
+                                        rk.ToString(),
+                                        access.Expression.GetSource());
+                                    context.SetExpressionType(call, TypeRef.Error);
+                                    return TypeRef.Error;
+                                }
+                            }
+                        }
                         context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(m));
                         context.ResolvedTree.AddReference(call, ResolutionContext.GetHandle(m));
                         context.SetExpressionType(call, m.ReturnType);

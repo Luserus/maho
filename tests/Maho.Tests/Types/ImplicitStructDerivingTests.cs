@@ -7,7 +7,7 @@ namespace Maho.Tests;
 public sealed class ImplicitStructDerivingTests
 {
     [Fact]
-    public void MinimalCompilation_WithoutStructIntrinsic_ReportsMH0240()
+    public void MinimalCompilation_WithoutStructIntrinsic_ReportsMH0021()
     {
         var preludeWithoutStruct = CompilerTestBed.FullPrelude.Replace(
             "\"Struct\"", "\"NotStruct\"");
@@ -18,7 +18,7 @@ public sealed class ImplicitStructDerivingTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Struct"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Struct"));
     }
 
     [Fact]

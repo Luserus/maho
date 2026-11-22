@@ -138,7 +138,7 @@ public sealed class CrossProjectDynTests
     }
 
     [Fact]
-    public void ExternalProject_ThinReferenceToSplitBase_EmitsMH0320()
+    public void ExternalProject_ThinReferenceToSplitBase_EmitsMH0555()
     {
         var libCompilation = Compilation.FromSource(LibPrelude, "Lib.mh");
         Assert.False(libCompilation.HasErrors);
@@ -164,6 +164,6 @@ public sealed class CrossProjectDynTests
             referencedCompilations: [libCompilation]);
 
         Assert.True(appCompilation.HasErrors);
-        Assert.Contains(appCompilation.Diagnostics, d => d.Code == "MH0320" && d.Message.Contains("MiddleB"));
+        Assert.Contains(appCompilation.Diagnostics, d => d.Code == "MH0555" && d.Message.Contains("MiddleB"));
     }
 }

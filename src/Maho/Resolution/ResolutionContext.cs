@@ -267,7 +267,7 @@ internal sealed class ResolutionContext
         Scopes = scopes ?? baseContext?.Scopes ?? [new Scope(null)];
         GlobalScope.GlobalNamespace = GlobalNamespace;
 
-        if (baseContext != null)
+        if (baseContext is not null)
         {
             AttributeSymbols.AddRange(baseContext.AttributeSymbols);
             NestedAttributeSymbols.AddRange(baseContext.NestedAttributeSymbols);

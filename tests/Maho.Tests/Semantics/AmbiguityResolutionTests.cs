@@ -81,7 +81,7 @@ public sealed class AmbiguityResolutionTests
         """;
 
     [Fact]
-    public void SiblingMemberCollision_DirectAccess_ReportsMH0410()
+    public void SiblingMemberCollision_DirectAccess_ReportsMH0556()
     {
         var source = Prelude + """
             public func Test(Derived d) -> Int32
@@ -92,7 +92,7 @@ public sealed class AmbiguityResolutionTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0410" && d.Message.Contains("priority"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0556" && d.Message.Contains("priority"));
     }
 
     [Fact]

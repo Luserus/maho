@@ -96,6 +96,40 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
+                public func Invoke(this) -> CustomTarget;
+            }
+
+            public struct CustomTarget : ValType, MyCallable
+            {
+                public literal int(int32 val)
+                {
+                    CustomTarget res;
+                    return res;
+                }
+
+                public func MyCallable.Invoke(this) -> CustomTarget
+                {
+                    return this;
+                }
+            }
+
+            public func Test() -> CustomTarget
+            {
+                CustomTarget c = 123();
+                return c;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Fact]
+    public void TargetTypedLiteralCall_WithByRefReceiver_ReportsMH2027()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public interface MyCallable
+            {
+                [OperatorFunction("Callable")]
                 public func Invoke(&this) -> CustomTarget;
             }
 
@@ -120,7 +154,8 @@ public sealed class CallableResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2027");
     }
 
     [Fact]
@@ -130,7 +165,7 @@ public sealed class CallableResolutionTests
             public interface MyCallable
             {
                 [OperatorFunction("Callable")]
-                public func Invoke(&this) -> CustomTarget;
+                public func Invoke(this) -> CustomTarget;
             }
 
             public struct CustomTarget : ValType, MyCallable
@@ -147,7 +182,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke(&this) -> CustomTarget
+                public func MyCallable.Invoke(this) -> CustomTarget
                 {
                     return this;
                 }

@@ -97,7 +97,7 @@ public sealed class C3LinearizationTests
     }
 
     [Fact]
-    public void InconsistentInheritanceOrder_ReportsMH0110()
+    public void InconsistentInheritanceOrder_ReportsMH0539()
     {
         var compilation = Compilation.FromSource("""
             public struct A;
@@ -108,6 +108,6 @@ public sealed class C3LinearizationTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0110" && d.Message.Contains('Z'));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0539" && d.Message.Contains('Z'));
     }
 }

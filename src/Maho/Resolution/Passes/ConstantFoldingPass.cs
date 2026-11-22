@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using Maho.Syntax;
 
@@ -15,70 +17,93 @@ internal sealed class ConstantFoldingPass : ResolutionPass
     private static FunctionSymbol? currentFunction;
     [ThreadStatic]
     private static MethodSymbol? currentMethod;
+    [ThreadStatic]
+    private static int constContextDepth;
+    [ThreadStatic]
+    private static HashSet<BinaryExpression>? reportedWarnings;
 
     public override void Resolve(ResolutionContext context)
     {
-        // 1. Evaluate globals
-        foreach (var global in context.GlobalVariableSymbols)
+        reportedWarnings = [];
+        try
         {
-            if (global.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
-                Evaluate(initExpr, context);
-        }
-
-        // 2. Evaluate fields
-        foreach (var field in context.FieldSymbols)
-        {
-            if (field.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
-                Evaluate(initExpr, context);
-        }
-
-        // 3. Evaluate functions
-        foreach (var fn in context.FunctionSymbols)
-        {
-            if (fn.Syntax?.Body is { } body)
+            // 1. Evaluate globals
+            foreach (var global in context.GlobalVariableSymbols)
             {
-                currentFunction = fn;
-                currentMethod = null;
-                try
+                if (global.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
                 {
-                    EvaluateBody(body, context);
+                    bool isConst = global.Flags.HasFlag(VariableFlags.Const);
+                    if (isConst) constContextDepth++;
+                    try { Evaluate(initExpr, context); }
+                    finally { if (isConst) constContextDepth--; }
                 }
-                finally
+            }
+
+            // 2. Evaluate fields
+            foreach (var field in context.FieldSymbols)
+            {
+                if (field.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
+                {
+                    bool isConst = field.Flags.HasFlag(VariableFlags.Const);
+                    if (isConst) constContextDepth++;
+                    try { Evaluate(initExpr, context); }
+                    finally { if (isConst) constContextDepth--; }
+                }
+            }
+
+            // 3. Evaluate functions
+            foreach (var fn in context.FunctionSymbols)
+            {
+                if (fn.Syntax?.Body is { } body)
+                {
+                    currentFunction = fn;
+                    currentMethod = null;
+                    try
+                    {
+                        EvaluateBody(body, context);
+                    }
+                    finally
+                    {
+                        currentFunction = null;
+                    }
+                }
+            }
+
+            // 4. Evaluate methods
+            foreach (var method in context.MethodSymbols)
+            {
+                if (method.Syntax?.Body is { } body)
                 {
                     currentFunction = null;
-                }
-            }
-        }
-
-        // 4. Evaluate methods
-        foreach (var method in context.MethodSymbols)
-        {
-            if (method.Syntax?.Body is { } body)
-            {
-                currentFunction = null;
-                currentMethod = method;
-                try
-                {
-                    EvaluateBody(body, context);
-                }
-                finally
-                {
-                    currentMethod = null;
-                }
-            }
-        }
-
-        // 5. Evaluate properties
-        foreach (var prop in context.PropertySymbols)
-        {
-            if (prop.Syntax is not null)
-            {
-                foreach (var acc in prop.Syntax.Body.Accessors)
-                {
-                    if (acc.Body is { } body)
+                    currentMethod = method;
+                    try
+                    {
                         EvaluateBody(body, context);
+                    }
+                    finally
+                    {
+                        currentMethod = null;
+                    }
                 }
             }
+
+            // 5. Evaluate properties
+            foreach (var prop in context.PropertySymbols)
+            {
+                if (prop.Syntax is not null)
+                {
+                    foreach (var acc in prop.Syntax.Body.Accessors)
+                    {
+                        if (acc.Body is { } body)
+                            EvaluateBody(body, context);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            reportedWarnings = null;
+            constContextDepth = 0;
         }
     }
 
@@ -106,7 +131,12 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                     break;
                 case LocalVariableDeclarationStatement varStmt:
                     if (varStmt.Declaration.Declarator.Initializer?.Initializer is { } initExpr)
-                        Evaluate(initExpr, context);
+                    {
+                        bool isConst = varStmt.Declaration.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Const);
+                        if (isConst) constContextDepth++;
+                        try { Evaluate(initExpr, context); }
+                        finally { if (isConst) constContextDepth--; }
+                    }
                     break;
                 case LocalReturnStatement retStmt:
                     if (retStmt.Statement.Expression is { } retExpr)
@@ -163,17 +193,29 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                     if (sym is LocalVariableSymbol local && local.Flags.HasFlag(VariableFlags.Const))
                     {
                         if (local.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
-                            return Evaluate(initExpr, context);
+                        {
+                            constContextDepth++;
+                            try { return Evaluate(initExpr, context); }
+                            finally { constContextDepth--; }
+                        }
                     }
                     else if (sym is FieldSymbol field && field.Flags.HasFlag(VariableFlags.Const))
                     {
                         if (field.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
-                            return Evaluate(initExpr, context);
+                        {
+                            constContextDepth++;
+                            try { return Evaluate(initExpr, context); }
+                            finally { constContextDepth--; }
+                        }
                     }
                     else if (sym is GlobalVariableSymbol global && global.Flags.HasFlag(VariableFlags.Const))
                     {
                         if (global.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
-                            return Evaluate(initExpr, context);
+                        {
+                            constContextDepth++;
+                            try { return Evaluate(initExpr, context); }
+                            finally { constContextDepth--; }
+                        }
                     }
                 }
                 return ConstantValue.None;
@@ -355,13 +397,27 @@ internal sealed class ConstantFoldingPass : ResolutionPass
             var li = l.AsInt;
             var ri = r.AsInt;
 
+            if ((opKind is TokenKind.ForwardSlash or TokenKind.Percentage) && ri == 0)
+            {
+                if (constContextDepth > 0)
+                {
+                    context.Diagnostics.ReportConstDivisionByZero(binary.OperatorToken.Span, binary.GetSource());
+                }
+                else
+                {
+                    if (reportedWarnings?.Add(binary) != false)
+                        context.Diagnostics.ReportDivisionByZeroWarning(binary.OperatorToken.Span, binary.GetSource());
+                }
+                return ConstantValue.None;
+            }
+
             return opKind switch
             {
                 TokenKind.Plus => ConstantValue.FromInt(li + ri),
                 TokenKind.Minus => ConstantValue.FromInt(li - ri),
                 TokenKind.Asterisk => ConstantValue.FromInt(li * ri),
-                TokenKind.ForwardSlash => ri == 0 ? ConstantValue.None : ConstantValue.FromInt(li / ri),
-                TokenKind.Percentage => ri == 0 ? ConstantValue.None : ConstantValue.FromInt(li % ri),
+                TokenKind.ForwardSlash => ConstantValue.FromInt(li / ri),
+                TokenKind.Percentage => ConstantValue.FromInt(li % ri),
                 TokenKind.Ampersand => ConstantValue.FromInt(li & ri),
                 TokenKind.VerticalBar => ConstantValue.FromInt(li | ri),
                 TokenKind.Caret => ConstantValue.FromInt(li ^ ri),
@@ -382,13 +438,27 @@ internal sealed class ConstantFoldingPass : ResolutionPass
             var lf = l.AsFloat;
             var rf = r.AsFloat;
 
+            if ((opKind is TokenKind.ForwardSlash or TokenKind.Percentage) && rf == 0.0)
+            {
+                if (constContextDepth > 0)
+                {
+                    context.Diagnostics.ReportConstDivisionByZero(binary.OperatorToken.Span, binary.GetSource());
+                }
+                else
+                {
+                    if (reportedWarnings?.Add(binary) != false)
+                        context.Diagnostics.ReportDivisionByZeroWarning(binary.OperatorToken.Span, binary.GetSource());
+                }
+                return ConstantValue.None;
+            }
+
             return opKind switch
             {
                 TokenKind.Plus => ConstantValue.FromFloat(lf + rf),
                 TokenKind.Minus => ConstantValue.FromFloat(lf - rf),
                 TokenKind.Asterisk => ConstantValue.FromFloat(lf * rf),
-                TokenKind.ForwardSlash => rf == 0.0 ? ConstantValue.None : ConstantValue.FromFloat(lf / rf),
-                TokenKind.Percentage => rf == 0.0 ? ConstantValue.None : ConstantValue.FromFloat(lf % rf),
+                TokenKind.ForwardSlash => ConstantValue.FromFloat(lf / rf),
+                TokenKind.Percentage => ConstantValue.FromFloat(lf % rf),
                 TokenKind.EqualsEquals => ConstantValue.FromBool(lf == rf),
                 TokenKind.ExclamationEquals => ConstantValue.FromBool(lf != rf),
                 TokenKind.LessThanSign => ConstantValue.FromBool(lf < rf),

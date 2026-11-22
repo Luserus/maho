@@ -76,7 +76,7 @@ public sealed class ControlFlowAnalysisTests
         """;
 
     [Fact]
-    public void MissingReturn_InNonUnitFunction_ReportsMH2017()
+    public void MissingReturn_InNonUnitFunction_ReportsMH1010()
     {
         var compilation = Compilation.FromSource(Prelude + """
             public func Compute(int32 x) -> int32
@@ -86,7 +86,7 @@ public sealed class ControlFlowAnalysisTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2017");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1010");
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class ControlFlowAnalysisTests
     }
 
     [Fact]
-    public void InfiniteLoop_WithoutBreak_InNonNeverFunction_ReportsMH2018()
+    public void InfiniteLoop_WithoutBreak_InNonNeverFunction_ReportsMH1011()
     {
         var compilation = Compilation.FromSource(Prelude + """
             public func RunForever() -> int32
@@ -154,6 +154,6 @@ public sealed class ControlFlowAnalysisTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2018");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1011");
     }
 }

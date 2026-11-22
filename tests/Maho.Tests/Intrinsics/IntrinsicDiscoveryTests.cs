@@ -221,7 +221,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void AbiMismatch_PrimitiveWithFields_EmitsMH0544()
+    public void AbiMismatch_PrimitiveWithFields_EmitsMH0020()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -233,12 +233,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("must have zero instance fields", diag.Message);
     }
 
     [Fact]
-    public void AbiMismatch_PrimitiveWithGenericParams_EmitsMH0544()
+    public void AbiMismatch_PrimitiveWithGenericParams_EmitsMH0020()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -247,12 +247,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("cannot have generic parameters", diag.Message);
     }
 
     [Fact]
-    public void AbiMismatch_PointerWithoutNUIntField_EmitsMH0544()
+    public void AbiMismatch_PointerWithoutNUIntField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -276,11 +276,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("must be of type 'NUInt'"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("must be of type 'NUInt'"));
     }
 
     [Fact]
-    public void AbiMismatch_PointerWithoutNUIntDeclared_EmitsMH0544()
+    public void AbiMismatch_PointerWithoutNUIntDeclared_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -302,11 +302,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("requires intrinsic 'NUInt'"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("requires intrinsic 'NUInt'"));
     }
 
     [Fact]
-    public void AbiMismatch_PointerWrongGenericCount_EmitsMH0544()
+    public void AbiMismatch_PointerWrongGenericCount_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -330,11 +330,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("must have exactly 1 generic parameter"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("must have exactly 1 generic parameter"));
     }
 
     [Fact]
-    public void AbiMismatch_PointerWrongFieldCount_EmitsMH0544()
+    public void AbiMismatch_PointerWrongFieldCount_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -359,11 +359,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("must have exactly 1 instance field"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("must have exactly 1 instance field"));
     }
 
     [Fact]
-    public void AbiMismatch_ReferenceRequiresNUIntField_EmitsMH0544()
+    public void AbiMismatch_ReferenceRequiresNUIntField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -392,11 +392,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544" && d.Message.Contains("Reference") && d.Message.Contains("must be of type 'NUInt'"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("Reference") && d.Message.Contains("must be of type 'NUInt'"));
     }
 
     [Fact]
-    public void AbiMismatch_StrWrongFirstField_EmitsMH0544()
+    public void AbiMismatch_StrWrongFirstField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -414,7 +414,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("first field must be a pointer or reference type", diag.Message);
     }
 
@@ -442,7 +442,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void AbiMismatch_StrWrongSecondField_EmitsMH0544()
+    public void AbiMismatch_StrWrongSecondField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -460,12 +460,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("second field must be of type 'NUInt'", diag.Message);
     }
 
     [Fact]
-    public void AbiMismatch_ArrayWrongFields_EmitsMH0544()
+    public void AbiMismatch_ArrayWrongFields_EmitsMH0020()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -478,7 +478,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("first field must be a pointer or reference type", diag.Message);
     }
 
@@ -594,7 +594,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void AbiMismatch_SpanWrongFirstField_EmitsMH0544()
+    public void AbiMismatch_SpanWrongFirstField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
@@ -607,7 +607,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0544");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
         Assert.Contains("first field must be a reference or pointer type", diag.Message);
     }
 
@@ -625,7 +625,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void UseSite_PointerWithoutPointerIntrinsic_EmitsMH0240()
+    public void UseSite_PointerWithoutPointerIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Foo
@@ -636,12 +636,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Pointer", diag.Message);
     }
 
     [Fact]
-    public void UseSite_ReferenceWithoutReferenceIntrinsic_EmitsMH0240()
+    public void UseSite_ReferenceWithoutReferenceIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Foo
@@ -652,12 +652,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Reference", diag.Message);
     }
 
     [Fact]
-    public void UseSite_ArrayWithoutArrayIntrinsic_EmitsMH0240()
+    public void UseSite_ArrayWithoutArrayIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Foo
@@ -668,12 +668,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Array", diag.Message);
     }
 
     [Fact]
-    public void UseSite_FixedArrayWithoutFixedArrayIntrinsic_EmitsMH0240()
+    public void UseSite_FixedArrayWithoutFixedArrayIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Foo
@@ -684,12 +684,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("FixedArray", diag.Message);
     }
 
     [Fact]
-    public void UseSite_SpanWithoutSpanIntrinsic_EmitsMH0240()
+    public void UseSite_SpanWithoutSpanIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Foo
@@ -700,7 +700,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Span", diag.Message);
     }
 

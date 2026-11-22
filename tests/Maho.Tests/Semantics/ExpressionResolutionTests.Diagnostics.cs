@@ -117,7 +117,7 @@ public sealed partial class ExpressionResolutionTests
             {
                 public literal int() { Concrete res; return res; }
                 public func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
-                public func Abs(&this) -> Concrete { return this; }
+                public func Abs(this) -> Concrete { return this; }
             }
 
             public struct Host
@@ -132,6 +132,31 @@ public sealed partial class ExpressionResolutionTests
             """);
 
         Assert.False(compilation.HasErrors);
+    }
+
+    [Fact]
+    public void LiteralMethodInvocation_WithByRefReceiver_ReportsMH2027()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public struct Concrete
+            {
+                public literal int() { Concrete res; return res; }
+                public func Abs(&this) -> Concrete { return this; }
+            }
+
+            public struct Host
+            {
+                public func Test() -> void
+                {
+                    Concrete c = 10.Abs();
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2027");
     }
 
     [Fact]

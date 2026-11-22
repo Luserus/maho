@@ -645,7 +645,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     {
         TypeRefKind.Resolved => Handle.ToString() ?? "Resolved",
         TypeRefKind.Inferred => "var",
-        TypeRefKind.Never => "!",
+        TypeRefKind.Never => "Never",
         TypeRefKind.Error => "<error>",
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Array or
@@ -657,7 +657,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToDisplayString(ResolutionContext? context = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+            return "Never";
 
         if (context is not null && Kind == TypeRefKind.Resolved && Handle is { } handle)
         {
@@ -678,7 +678,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToQualifiedString(ResolutionContext? context = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+        {
+            if (context is not null && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverH))
+                return ResolutionContext.GetQualifiedSymbolName(neverH, context);
+            return "Std.Never";
+        }
 
         if (Kind == TypeRefKind.Error)
             return "<error>";
@@ -786,7 +790,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public string ToLabelString(ResolutionContext? context = null, Scope? scope = null)
     {
         if (Kind == TypeRefKind.Never)
-            return "!";
+            return "Never";
 
         if (Kind == TypeRefKind.Error)
             return "<error>";

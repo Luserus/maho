@@ -5,7 +5,7 @@ namespace Maho.Tests;
 public sealed partial class IntrinsicDiscoveryTests
 {
     [Fact]
-    public void UseSite_InferredCollection_WithoutArray_EmitsMH0240()
+    public void UseSite_InferredCollection_WithoutArray_EmitsMH0021()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
             public struct Host
@@ -18,7 +18,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Array", diag.Message);
     }
 
@@ -40,7 +40,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void UseSite_UnsuffixedIntegerLiteral_WithoutInt32_EmitsMH0240()
+    public void UseSite_UnsuffixedIntegerLiteral_WithoutInt32_EmitsMH0021()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
             public struct Host
@@ -53,7 +53,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Int32", diag.Message);
     }
 
@@ -74,7 +74,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void UseSite_UnsuffixedFloatLiteral_WithoutFloat64_EmitsMH0240()
+    public void UseSite_UnsuffixedFloatLiteral_WithoutFloat64_EmitsMH0021()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
             public struct Host
@@ -87,12 +87,12 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Float64", diag.Message);
     }
 
     [Fact]
-    public void UseSite_UnsuffixedStringLiteral_WithoutStr_EmitsMH0240()
+    public void UseSite_UnsuffixedStringLiteral_WithoutStr_EmitsMH0021()
     {
         var lines = UseSitePrelude.Split(["\r\n", "\n"], StringSplitOptions.None);
         var preludeWithoutStr = string.Join("\n", lines.Where(l => !l.Contains("\"Str\"") && !l.Contains("struct Str") && !l.Contains("Int8& data") && !l.Contains("Int64 length")));
@@ -108,11 +108,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240" && d.Message.Contains("Str"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Str"));
     }
 
     [Fact]
-    public void UseSite_UnsuffixedCharLiteral_WithoutChar_EmitsMH0240()
+    public void UseSite_UnsuffixedCharLiteral_WithoutChar_EmitsMH0021()
     {
         var compilation = Compilation.FromSource(UseSitePrelude + """
             public struct Host
@@ -125,7 +125,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0240");
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
         Assert.Contains("Char", diag.Message);
     }
 
@@ -251,7 +251,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0544");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0020");
     }
 
     [Fact]
@@ -315,7 +315,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void OperatorFunction_BinaryWithThreeParameters_ReportsMH0242()
+    public void OperatorFunction_BinaryWithThreeParameters_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             public attribute OperatorFunction(Str fullName);
@@ -328,11 +328,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept exactly 2 parameters"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must accept exactly 2 parameters"));
     }
 
     [Fact]
-    public void OperatorFunction_IndirectMemberAccessReturningVoid_ReportsMH0242()
+    public void OperatorFunction_IndirectMemberAccessReturningVoid_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Unit")]
@@ -347,11 +347,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type cannot be void"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("return type cannot be void"));
     }
 
     [Fact]
-    public void OperatorFunction_ConstructorStatic_ReportsMH0242()
+    public void OperatorFunction_ConstructorStatic_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Unit")]
@@ -366,11 +366,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("constructors cannot be declared static"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("constructors cannot be declared static"));
     }
 
     [Fact]
-    public void OperatorFunction_IndexerGetterWithZeroParams_ReportsMH0242()
+    public void OperatorFunction_IndexerGetterWithZeroParams_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             public attribute OperatorFunction(Str fullName);
@@ -383,11 +383,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept at least 1 index parameter"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must accept at least 1 index parameter"));
     }
 
     [Fact]
-    public void OperatorFunction_DeclaredInStruct_ReportsMH0242()
+    public void OperatorFunction_DeclaredInStruct_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             public attribute OperatorFunction(Str fullName);
@@ -400,11 +400,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must be declared in an interface"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must be declared in an interface"));
     }
 
     [Fact]
-    public void OperatorFunction_UnknownOperatorName_ReportsMH0242()
+    public void OperatorFunction_UnknownOperatorName_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             public attribute OperatorFunction(Str fullName);
@@ -417,7 +417,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("unknown operator function"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("unknown operator function"));
     }
 
     [Fact]
@@ -545,7 +545,7 @@ public sealed partial class IntrinsicDiscoveryTests
             }
             """);
         Assert.True(nonStatic.HasErrors);
-        Assert.Contains(nonStatic.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must be declared static"));
+        Assert.Contains(nonStatic.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must be declared static"));
 
         var voidReturn = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Unit")]
@@ -559,7 +559,7 @@ public sealed partial class IntrinsicDiscoveryTests
             }
             """);
         Assert.True(voidReturn.HasErrors);
-        Assert.Contains(voidReturn.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type cannot be void"));
+        Assert.Contains(voidReturn.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("return type cannot be void"));
     }
 
     [Fact]
@@ -594,7 +594,7 @@ public sealed partial class IntrinsicDiscoveryTests
             }
             """);
         Assert.True(nonVoid.HasErrors);
-        Assert.Contains(nonVoid.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("return type must be void"));
+        Assert.Contains(nonVoid.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("return type must be void"));
     }
 
     [Fact]
@@ -637,7 +637,7 @@ public sealed partial class IntrinsicDiscoveryTests
             }
             """);
         Assert.True(badParamCount.HasErrors);
-        Assert.Contains(badParamCount.Diagnostics, d => d.Code == "MH0242" && d.Message.Contains("must accept exactly 2 parameters"));
+        Assert.Contains(badParamCount.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must accept exactly 2 parameters"));
     }
 
     [Fact]
@@ -658,7 +658,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void Lifecycle_DestructorNandCopy_ReportsMH0243()
+    public void Lifecycle_DestructorNandCopy_ReportsMH0561()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Unit")]
@@ -686,11 +686,11 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0243" && d.Message.Contains("cannot implement both 'Destructor' and 'Copy'"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0561" && d.Message.Contains("cannot implement both 'Destructor' and 'Copy'"));
     }
 
     [Fact]
-    public void Lifecycle_CopyNandMove_ReportsMH0244()
+    public void Lifecycle_CopyNandMove_ReportsMH0562()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
             [IntrinsicType("Unit")]
@@ -718,7 +718,7 @@ public sealed partial class IntrinsicDiscoveryTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0244" && d.Message.Contains("cannot implement both 'Copy' and 'Move'"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0562" && d.Message.Contains("cannot implement both 'Copy' and 'Move'"));
     }
 
     [Fact]

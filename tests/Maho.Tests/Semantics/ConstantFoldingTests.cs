@@ -371,4 +371,45 @@ public sealed class ConstantFoldingTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         Assert.DoesNotContain(compilation.Diagnostics, d => d.Code == "MH3001");
     }
+
+    [Fact]
+    public void Const_DivisionByZero_ReportsMH1500_Error()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{ConstantFoldingPrelude}}
+
+            public struct Evaluator
+            {
+                public const int32 Val = 10 / 0;
+
+                public func Test() -> void
+                {
+                    const int32 local = 42 % 0;
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1500" && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void NonConst_DivisionByZero_ReportsMH3002_Warning_AndCompiles()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{ConstantFoldingPrelude}}
+
+            public struct Evaluator
+            {
+                public func Test() -> void
+                {
+                    int32 x = 10 / 0;
+                    int32 y = 20 % 0;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH3002" && d.Severity == DiagnosticSeverity.Warning);
+    }
 }

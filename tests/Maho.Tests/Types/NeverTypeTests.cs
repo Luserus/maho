@@ -125,7 +125,7 @@ public sealed class NeverTypeTests
     }
 
     [Fact]
-    public void NeverType_DivergingFunction_WithDeclaredReturnType_ReportsMH2018()
+    public void NeverType_DivergingFunction_WithDeclaredReturnType_ReportsMH1011()
     {
         var compilation = Compilation.FromSource(Prelude + """
             public func Bad() -> int32
@@ -137,7 +137,7 @@ public sealed class NeverTypeTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2018");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1011");
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public sealed class NeverTypeTests
         // Since Panic() returns Never, the block terminates as Unreachable and doesn't fall through to exit.
         // And since all paths diverge (calling Panic()), the function Test() must return Never
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2018");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1011");
     }
 
     [Fact]

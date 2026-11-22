@@ -151,7 +151,7 @@ public sealed class CollectionExpressionTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0240");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021");
     }
 
     [Fact]

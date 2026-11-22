@@ -92,7 +92,7 @@ public sealed class DynCoercionTests
     }
 
     [Fact]
-    public void SplitBase_ThinReference_FailsWithMH0320()
+    public void SplitBase_ThinReference_FailsWithMH0555()
     {
         var source = PreludeAndHierarchy + """
             public func Test(Derived& d) -> Unit
@@ -103,7 +103,7 @@ public sealed class DynCoercionTests
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0320" && d.Message.Contains("MiddleB"));
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0555" && d.Message.Contains("MiddleB"));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class DynCoercionTests
     }
 
     [Fact]
-    public void SplitBase_MethodArgument_ThinFailsMH0320_DynSucceeds()
+    public void SplitBase_MethodArgument_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
             public func ConsumeThin(MiddleB& b) -> Unit {}
@@ -135,7 +135,7 @@ public sealed class DynCoercionTests
 
         var thinComp = Compilation.FromSource(thinSource);
         Assert.True(thinComp.HasErrors);
-        Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0320");
+        Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
             public func ConsumeDyn(dyn MiddleB& b) -> Unit {}
@@ -151,7 +151,7 @@ public sealed class DynCoercionTests
     }
 
     [Fact]
-    public void SplitBase_AsCast_ThinFailsMH0320_DynSucceeds()
+    public void SplitBase_AsCast_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
             public func Test(Derived& d) -> Unit
@@ -162,7 +162,7 @@ public sealed class DynCoercionTests
 
         var thinComp = Compilation.FromSource(thinSource);
         Assert.True(thinComp.HasErrors);
-        Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0320");
+        Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
             public func Test(Derived& d) -> Unit

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Maho.Text;
@@ -216,14 +217,32 @@ internal sealed class BorrowAnalysis
     // Projection-sensitive overlap is deliberately conservative until element-disjointness is
     // proven.  This is sound for fields, indices, dereferences, and dyn fat-reference data.
     /// <summary>
-    /// Determines whether two places might alias.
+    /// Determines whether two places might alias. Distinct fields of the same struct are disjoint.
     /// </summary>
-    /// <remarks>
-    /// This is intentionally root-conservative until projection-disjointness is proven by the
-    /// partial-move/field analysis. It remains sound for fields, indices, dereferences, and dyn
-    /// fat-reference data.
-    /// </remarks>
-    private static bool Overlaps(Place left, Place right) => ReferenceEquals(left.Root, right.Root);
+    private static bool Overlaps(Place left, Place right)
+    {
+        if (!ReferenceEquals(left.Root, right.Root))
+            return false;
+
+        int minLen = Math.Min(left.Projections.Count, right.Projections.Count);
+        for (int i = 0; i < minLen; i++)
+        {
+            var pLeft = left.Projections[i];
+            var pRight = right.Projections[i];
+
+            if (pLeft.Kind == PlaceProjectionKind.Field && pRight.Kind == PlaceProjectionKind.Field)
+            {
+                if (pLeft.Field != pRight.Field)
+                    return false; // Distinct fields do not overlap!
+            }
+            else if (pLeft.Kind != pRight.Kind)
+            {
+                return true;
+            }
+        }
+
+        return true;
+    }
 
     private static HashSet<Loan> Get(IReadOnlyDictionary<OwnershipBlock, HashSet<Loan>> map, OwnershipBlock block) =>
         map.TryGetValue(block, out var loans) ? loans : [];
