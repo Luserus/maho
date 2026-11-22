@@ -262,6 +262,13 @@ internal sealed class DiagnosticsManager
             .WithHelp("reassign all moved fields before moving the entire value")
             .Report();
 
+    /// <summary>Reports a safe borrow of a temporary value that would escape its statement.</summary>
+    public void ReportBorrowEscapesTemporary(TextSpan span, string targetDescription, SourceText? source = null) =>
+        BuildError("MH1008", $"cannot borrow temporary value which does not outlive {targetDescription}", span, source)
+            .WithPrimaryLabel(span, "temporary value does not live long enough", source)
+            .WithHelp("bind the value to a named local variable before taking its reference")
+            .Report();
+
     /// <summary> Reports assignment to a non-lvalue expression. </summary>
     public void ReportCannotAssignToNonLValue(TextSpan span, SourceText? source = null) =>
         BuildError("MH2009", "the left-hand side of an assignment must be a variable, field, property or indexer", span, source)
@@ -736,6 +743,24 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, reason, source)
             .Report();
 
+    /// <summary> Reports a duplicate operator function declaration. </summary>
+    public void ReportDuplicateOperatorFunction(
+        string operatorName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError("MH0563", $"duplicate operator function declaration for operator '{operatorName}'; only one interface operator function is allowed per operator", redeclSpan, redeclSource)
+            .WithPrimaryLabel(redeclSpan, $"duplicate declaration of operator function '{operatorName}' here", redeclSource);
+
+        if (firstDeclSpan is { } firstSpan)
+            builder.WithSecondaryLabel(firstSpan, $"previous declaration of operator function '{operatorName}' here", firstSource);
+
+        builder.WithHelp($"only one interface can declare an [OperatorFunction(\"{operatorName}\")] contract")
+            .Report();
+    }
+
     /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
     public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
         BuildError("MH0542", $"unknown intrinsic type '{intrinsicLiteral}'", span, source)
@@ -1021,5 +1046,44 @@ internal sealed class DiagnosticsManager
     public void ReportDivisionByZeroWarning(TextSpan span, SourceText? source = null) =>
         BuildWarning("MH3002", "division by zero detected; evaluation deferred to runtime", span, source)
             .WithPrimaryLabel(span, "division by zero will cause a runtime panic", source)
+            .Report();
+
+    /// <summary> Reports inconsistent term counts across elements in a collection expression. </summary>
+    public void ReportInconsistentCollectionTermCount(TextSpan span, int actual, int expected, SourceText? source = null) =>
+        BuildError("MH0568", $"inconsistent term count in collection expression: element has {actual} terms, expected {expected}", span, source)
+            .WithPrimaryLabel(span, $"element has {actual} terms, expected {expected}", source)
+            .Report();
+
+    /// <summary> Reports that a collection type does not support with(...) trailer initialization. </summary>
+    public void ReportCollectionMissingWithContract(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0569", $"collection type '{typeName}' does not support 'with' initialization; missing 'CollectionWith' contract", span, source)
+            .WithPrimaryLabel(span, "missing 'CollectionWith' operator implementation", source)
+            .WithHelp($"implement the 'CollectionWith<TArgs...>' operator contract on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports that a target type does not implement the Collection contract for the given term count. </summary>
+    public void ReportCollectionMissingContract(TextSpan span, string typeName, int termCount, SourceText? source = null) =>
+        BuildError("MH0570", $"type '{typeName}' does not implement 'Collection' contract with {termCount} terms", span, source)
+            .WithPrimaryLabel(span, $"does not implement Collection with {termCount} terms", source)
+            .Report();
+
+    /// <summary> Reports that an expression in a for-in loop is not iterable. </summary>
+    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0571", $"type '{typeName}' is not iterable; missing 'Iterable' contract", span, source)
+            .WithPrimaryLabel(span, $"type '{typeName}' is not iterable", source)
+            .WithHelp($"implement the 'Iterable<TItem, TIterator>' operator contract on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports that yield was used outside a generator function returning an Iterator or Iterable. </summary>
+    public void ReportInvalidYieldUsage(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0572", "'yield' can only be used in a function returning an Iterator or Iterable type", span, source)
+            .WithPrimaryLabel(span, "invalid 'yield' usage", source)
+            .WithHelp("ensure the enclosing function returns a type implementing 'Iterator<T>' or 'Iterable<T, ...>'")
+            .Report();
+
+    /// <summary> Reports a mismatch between yielded expression type and generator iterator item type. </summary>
+    public void ReportYieldTypeMismatch(TextSpan span, string yieldType, string itemType, SourceText? source = null) =>
+        BuildError("MH0573", $"yield expression of type '{yieldType}' cannot be assigned to iterator item type '{itemType}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{itemType}', found '{yieldType}'", source)
             .Report();
 }

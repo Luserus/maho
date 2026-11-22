@@ -74,8 +74,49 @@ internal static class CompilerTestBed
         [IntrinsicType("Enum")]
         public struct Enum : ValType;
 
+        public interface Deconstruct<T...>
+        {
+            [OperatorFunction("Deconstruct")]
+            public func Deconstruct(&this) -> (T...);
+        }
+
+        public interface DeconstructMut<T...>
+        {
+            [OperatorFunction("DeconstructMut")]
+            public func Deconstruct(mut &this) -> (mut &T...);
+        }
+
         [IntrinsicType("Tuple")]
-        public struct Tuple<T...> : ValType;
+        public struct Tuple<T...> : ValType, Deconstruct<T...>, DeconstructMut<T...>
+        {
+            [IntrinsicFunction("Tuple.Deconstruct()")]
+            public func Deconstruct.Deconstruct(&this) -> (T...);
+
+            [IntrinsicFunction("Tuple.DeconstructMut()")]
+            public func DeconstructMut.Deconstruct(mut &this) -> (mut &T...);
+        }
+
+        public interface Iterator<TItem>
+        {
+            [OperatorFunction("Iterator")]
+            public func Next(mut &this) -> TItem;
+        }
+
+        public interface Iterable<TItem, TIterator>
+        {
+            [OperatorFunction("Iterable")]
+            public func Iterate(&this) -> TIterator;
+        }
+
+        [IntrinsicType("FixedArray")]
+        public struct FixedArray<T, N : int32> : ValType, Iterator<T>;
+
+        [IntrinsicType("Array")]
+        public struct Array<T> : ValType, Iterator<T>
+        {
+            Pointer<T> data;
+            nuint length;
+        }
 
         public interface Callable<TReturn, TParams...>
         {

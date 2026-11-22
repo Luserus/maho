@@ -201,6 +201,14 @@ internal sealed partial class SymbolDiscoveryPass
         return symbols;
     }
 
+    private void ResolveLocalConstantDeclaration(ConstantDeclaration declaration, Scope scope, SymbolHandle containingSymbol)
+    {
+        var namePart = context.GetScopedSymbolName(declaration.Identifier).Last;
+        var symbol = context.CreateConstantSymbol(scope, namePart, containingNamespace: null, declaration);
+        symbol.Parent = containingSymbol;
+        symbol.Flags = ResolveVariableFlags(declaration.Modifiers) | VariableFlags.Const;
+    }
+
     private void ResolveLocal(Local local, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
     {
         switch (local)
@@ -223,6 +231,9 @@ internal sealed partial class SymbolDiscoveryPass
             case LocalFunctionDeclaration declaration:
                 RegisterLocalFunction(containingSymbol, ResolveLocalFunctionDeclaration(declaration.Function, scope, containingMethod));
                 break;
+            case LocalConstantDeclaration declaration:
+                ResolveLocalConstantDeclaration(declaration.Declaration, scope, containingSymbol);
+                break;
             case LocalLiteralMacroDeclaration:
                 break;
             case LocalMacroDeclaration declaration:
@@ -236,6 +247,10 @@ internal sealed partial class SymbolDiscoveryPass
             case LocalReturnStatement retStmt:
                 if (retStmt.Statement.Expression is not null)
                     DiscoverBlockExpressions(retStmt.Statement.Expression, scope, containingSymbol, containingMethod);
+                break;
+            case LocalYieldStatement yieldStmt:
+                if (yieldStmt.Expression is not null)
+                    DiscoverBlockExpressions(yieldStmt.Expression, scope, containingSymbol, containingMethod);
                 break;
             case LocalExpressionStatement exprStmt:
                 DiscoverBlockExpressions(exprStmt.Expression, scope, containingSymbol, containingMethod);
@@ -333,6 +348,21 @@ internal sealed partial class SymbolDiscoveryPass
 
             DiscoverBlockExpressions(whileExpr.Condition, whileScope, containingSymbol, containingMethod);
             DiscoverBlockExpressions(whileExpr.Body, whileScope, containingSymbol, containingMethod);
+        }
+        else if (expr is ForExpression forExpr)
+        {
+            var forScope = context.CreateScope(scope);
+            context.RegisterSyntaxScope(forExpr, forScope);
+            DiscoverBlockExpressions(forExpr.Collection, scope, containingSymbol, containingMethod);
+            if (forExpr.Declaration is not null)
+            {
+                ResolveLocalVariableDeclaration(forExpr.Declaration, forScope, containingSymbol);
+            }
+            if (forExpr.VariableExpression is not null)
+            {
+                DiscoverBlockExpressions(forExpr.VariableExpression, scope, containingSymbol, containingMethod);
+            }
+            DiscoverBlockExpressions(forExpr.Body, forScope, containingSymbol, containingMethod);
         }
         else if (expr is LambdaExpression lambda)
         {

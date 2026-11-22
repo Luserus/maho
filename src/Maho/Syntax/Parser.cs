@@ -161,7 +161,7 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Const or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
                                                    MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Mut ||
                                                    (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged && IsUntaggedDeclarationModifierAt(current));
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
@@ -480,7 +480,7 @@ internal sealed partial class Parser
         }
         else if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseTopLevelBlock(null, topLevelStatementsEnabled);
-        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
+        else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) || (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
                  CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
@@ -542,6 +542,8 @@ internal sealed partial class Parser
             return ParseMemberTypeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
             return new MemberFunctionDeclaration(ParseFunction(attributes, modifiers));
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace)
+            return ParseMemberConstantDeclaration(attributes, modifiers);
         else
             return ParseMemberFieldOrPropertyDeclaration(attributes, modifiers);
     }
@@ -566,7 +568,8 @@ internal sealed partial class Parser
             return ParseLocalStatement(parseMode);
 
         if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier ||
-            (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen))
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) ||
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseLocalDeclaration(parseMode);
 
         return ParseLocalStatement(parseMode);

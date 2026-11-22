@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Syntax;
 
 namespace Maho.Resolution;
 
@@ -23,8 +24,31 @@ internal sealed class NamespaceTrieNode
         list.Add(symbol);
     }
 
-    public IReadOnlyList<Symbol> GetSymbols(SymbolPart name) =>
-        SymbolsByName.TryGetValue(name, out var list) ? list : [];
+    public IReadOnlyList<Symbol> GetSymbols(SymbolPart name)
+    {
+        if (SymbolsByName.TryGetValue(name, out var list))
+            return list;
+
+        if (name.Arity > 0)
+        {
+            foreach (var (key, symbols) in SymbolsByName)
+            {
+                if (key.Text == name.Text && key.Arity != name.Arity)
+                {
+                    foreach (var sym in symbols)
+                    {
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
+                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        {
+                            return symbols;
+                        }
+                    }
+                }
+            }
+        }
+
+        return [];
+    }
 
     public Symbol? GetSymbol(SymbolHandle handle)
     {

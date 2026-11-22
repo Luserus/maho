@@ -421,6 +421,30 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
+    public void OperatorFunction_DuplicateAcrossInterfaces_ReportsMH0563()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+            intrinsic attribute OperatorFunction(Str name);
+
+            public interface FirstCallable
+            {
+                [OperatorFunction("Callable")]
+                public func Invoke(&this) -> Int8;
+            }
+
+            public interface SecondCallable
+            {
+                [OperatorFunction("Callable")]
+                public func Call(&this) -> Int8;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0563");
+        Assert.Contains("duplicate operator function declaration for operator 'Callable'", diag.Message);
+    }
+
+    [Fact]
     public void IntrinsicFunction_InIntrinsicType_TagsFunctionFlagsIntrinsic()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """

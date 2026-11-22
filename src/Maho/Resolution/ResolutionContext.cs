@@ -26,6 +26,7 @@ internal sealed class ResolutionContext
     public List<FunctionSymbol> FunctionSymbols { get; } = [];
     public List<MethodSymbol> MethodSymbols { get; } = [];
     public List<GlobalVariableSymbol> GlobalVariableSymbols { get; } = [];
+    public List<ConstantSymbol> ConstantSymbols { get; } = [];
     public List<FieldSymbol> FieldSymbols { get; } = [];
     public List<ParameterSymbol> ParameterSymbols { get; } = [];
     public IEnumerable<LocalVariableSymbol> LocalVariableSymbols =>
@@ -236,6 +237,7 @@ internal sealed class ResolutionContext
     private int functionID;
     private int methodID;
     private int globalVariableID;
+    private int constantID;
     private int fieldID;
     private int parameterID;
     private int propertyID;
@@ -276,6 +278,7 @@ internal sealed class ResolutionContext
             FunctionSymbols.AddRange(baseContext.FunctionSymbols);
             MethodSymbols.AddRange(baseContext.MethodSymbols);
             GlobalVariableSymbols.AddRange(baseContext.GlobalVariableSymbols);
+            ConstantSymbols.AddRange(baseContext.ConstantSymbols);
             FieldSymbols.AddRange(baseContext.FieldSymbols);
             ParameterSymbols.AddRange(baseContext.ParameterSymbols);
             PropertySymbols.AddRange(baseContext.PropertySymbols);
@@ -296,6 +299,7 @@ internal sealed class ResolutionContext
         functionID = FunctionSymbols.Count;
         methodID = MethodSymbols.Count;
         globalVariableID = GlobalVariableSymbols.Count;
+        constantID = ConstantSymbols.Count;
         fieldID = FieldSymbols.Count;
         parameterID = ParameterSymbols.Count;
         propertyID = PropertySymbols.Count;
@@ -551,6 +555,24 @@ internal sealed class ResolutionContext
         }
         else
             GlobalVariableSymbols.Add(symbol);
+
+        Register(enclosingScope, symbol, containingNamespace);
+        return symbol;
+    }
+
+    public ConstantSymbol CreateConstantSymbol(Scope enclosingScope, SymbolPart name, NamespaceTrieNode? containingNamespace, ConstantDeclaration? syntax)
+    {
+        bool isSink = name.Text == "_" || enclosingScope.IsSink;
+        SymbolID id = isSink ? new SymbolID(sinkID--) : constantID++;
+        var symbol = TrackSymbol(new ConstantSymbol(id, enclosingScope, name, containingNamespace, syntax));
+
+        if (isSink)
+        {
+            SinkSymbols.ConstantSymbols.Add(symbol);
+            sinkSymbolsByHandle[GetHandle(symbol)] = symbol;
+        }
+        else
+            ConstantSymbols.Add(symbol);
 
         Register(enclosingScope, symbol, containingNamespace);
         return symbol;
@@ -1161,6 +1183,34 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    public ConstantSymbol? GetConstantSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Constant)
+            return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetConstantSymbol(handle);
+            return null;
+        }
+
+        if (handle.ID.Value >= 0 && handle.ID.Value < ConstantSymbols.Count)
+            return ConstantSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is ConstantSymbol c)
+            return c;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetConstantSymbol(handle) is { } refConst)
+                    return refConst;
+            }
+        }
+
+        return null;
+    }
+
     public Symbol? GetSymbol(SymbolHandle handle)
     {
         if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
@@ -1178,6 +1228,7 @@ internal sealed class ResolutionContext
             SymbolKind.Function => GetFunctionSymbol(handle),
             SymbolKind.Method => GetMethodSymbol(handle),
             SymbolKind.GlobalVariable => GetGlobalVariableSymbol(handle),
+            SymbolKind.Constant => GetConstantSymbol(handle),
             SymbolKind.Variable => sinkSymbolsByHandle.TryGetValue(handle, out var sl) ? sl : null,
             SymbolKind.Field => GetFieldSymbol(handle),
             SymbolKind.Property => GetPropertySymbol(handle),

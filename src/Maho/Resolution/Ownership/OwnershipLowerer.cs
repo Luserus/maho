@@ -25,11 +25,20 @@ internal sealed class OwnershipLowerer
     private OwnershipBlock current = null!;
     private ParameterSymbol? receiverParameter;
     private int nextBlockId;
+    private int nextTemporaryId;
 
     public OwnershipLowerer(ResolutionContext context)
     {
         this.context = context;
         ownership = new OwnershipTypeClassifier(context);
+    }
+
+    private Place CreateTemporaryPlace(Expression expression, TypeRef type, Scope scope)
+    {
+        var tempSym = new TemporaryStorageSymbol(new SymbolID(++nextTemporaryId), scope, type);
+        var place = new Place(tempSym);
+        body.RegisterPlace(tempSym, type);
+        return place;
     }
 
     /// <summary>
@@ -146,8 +155,15 @@ internal sealed class OwnershipLowerer
                     LowerIf(conditional, scope);
                 else if (expression.Expression is WhileExpression loop)
                     LowerWhile(loop, scope);
+                else if (expression.Expression is ForExpression forExpr)
+                    LowerFor(forExpr, scope);
                 else
                     LowerValue(expression.Expression, scope);
+                break;
+
+            case LocalYieldStatement yieldStmt:
+                if (yieldStmt.Expression is not null)
+                    LowerValue(yieldStmt.Expression, scope);
                 break;
 
             case LocalReturnStatement returned:
@@ -238,19 +254,47 @@ internal sealed class OwnershipLowerer
         borrowed = default;
         borrowKind = BorrowKind.Shared;
 
-        if (targetType.SpecialType is AliasSemanticType { IsUnsafe: false } alias && TryGetPlace(initializer, scope, out borrowed))
+        if (targetType.SpecialType is AliasSemanticType { IsUnsafe: false } alias)
         {
-            borrowKind = alias.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
-            return true;
+            if (TryGetPlace(initializer, scope, out borrowed))
+            {
+                borrowKind = alias.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
+                return true;
+            }
+            if (IsTemporaryExpression(initializer))
+            {
+                borrowed = CreateTemporaryPlace(initializer, context.GetRequiredExpressionType(initializer), scope);
+                borrowKind = alias.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
+                return true;
+            }
+            return false;
         }
 
-        if (targetType.SpecialType is ReferenceSemanticType reference && initializer is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } address && TryGetPlace(address.Operand, scope, out borrowed))
+        if (targetType.SpecialType is ReferenceSemanticType reference && initializer is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } address)
         {
-            borrowKind = reference.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
-            return true;
+            if (TryGetPlace(address.Operand, scope, out borrowed))
+            {
+                borrowKind = reference.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
+                return true;
+            }
+            if (IsTemporaryExpression(address.Operand))
+            {
+                borrowed = CreateTemporaryPlace(address.Operand, context.GetRequiredExpressionType(address.Operand), scope);
+                borrowKind = reference.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
+                return true;
+            }
+            return false;
         }
 
         return false;
+    }
+
+    private static bool IsTemporaryExpression(Expression expr)
+    {
+        while (expr is ParenthesizedExpression p)
+            expr = p.Expression;
+
+        return expr is LiteralExpression or BinaryExpression or CallExpression or TupleExpression or ObjectCreationExpression;
     }
 
     /// <summary>
@@ -320,6 +364,35 @@ internal sealed class OwnershipLowerer
         current = exit;
     }
 
+    private void LowerFor(ForExpression expression, Scope scope)
+    {
+        var forScope = context.GetSyntaxScope(expression, scope);
+        LowerValue(expression.Collection, scope);
+
+        if (expression.Declaration is not null)
+            LowerDeclaration(expression.Declaration, forScope);
+
+        var header = AddBlock();
+        var loopBody = AddBlock();
+        var exit = AddBlock();
+        ConnectFallthrough(current, header);
+
+        current = header;
+        current.Terminator = OwnershipTerminator.Conditional(expression.Collection, loopBody, exit);
+        current.AddSuccessor(loopBody);
+        current.AddSuccessor(exit);
+
+        current = loopBody;
+        if (expression.VariableExpression is { } varExpr && TryGetPlace(varExpr, scope, out var place))
+        {
+            Emit(OwnershipStatementKind.Assign, place, varExpr.GetSpan() ?? default, varExpr.GetSource(), origin: varExpr);
+        }
+
+        LowerBranchExpression(expression.Body, forScope);
+        ConnectFallthrough(current, header);
+        current = exit;
+    }
+
     /// <summary>
     /// Lowers an expression used as a control-flow branch, preserving block-local lexical scope
     /// when the branch is a block expression.
@@ -346,6 +419,12 @@ internal sealed class OwnershipLowerer
         if (expression is WhileExpression loop)
         {
             LowerWhile(loop, scope);
+            return;
+        }
+
+        if (expression is ForExpression forExpr)
+        {
+            LowerFor(forExpr, scope);
             return;
         }
 
@@ -379,9 +458,22 @@ internal sealed class OwnershipLowerer
                 LowerAssignment(assignment, scope);
                 break;
 
-            case UnaryExpression unary when unary.OperatorToken.Kind == TokenKind.Ampersand && TryGetPlace(unary.Operand, scope, out var borrowed):
+            case UnaryExpression unary when unary.OperatorToken.Kind == TokenKind.Ampersand:
                 bool mutable = context.GetRequiredExpressionType(unary).SpecialType is ReferenceSemanticType reference && reference.IsMutable;
-                Emit(OwnershipStatementKind.Borrow, borrowed, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
+                if (TryGetPlace(unary.Operand, scope, out var borrowed))
+                {
+                    Emit(OwnershipStatementKind.Borrow, borrowed, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
+                }
+                else
+                {
+                    var operandType = context.GetRequiredExpressionType(unary.Operand);
+                    var tempPlace = CreateTemporaryPlace(unary.Operand, operandType, scope);
+                    Emit(OwnershipStatementKind.StorageLive, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
+                    LowerValue(unary.Operand, scope);
+                    Emit(OwnershipStatementKind.Assign, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
+                    Emit(OwnershipStatementKind.Borrow, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
+                    Emit(OwnershipStatementKind.StorageDead, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
+                }
                 break;
 
             case UnaryExpression unary:
@@ -403,7 +495,8 @@ internal sealed class OwnershipLowerer
 
             case IndexExpression index:
                 LowerPlaceEvaluation(index.Expression, scope);
-                LowerValue(index.Index, scope);
+                foreach (var arg in index.Arguments)
+                    LowerValue(arg, scope);
                 break;
 
             case TupleExpression tuple:
@@ -416,6 +509,11 @@ internal sealed class OwnershipLowerer
                     LowerValue(element, scope);
                 break;
 
+            case MultiTermExpression multiTerm:
+                foreach (var term in multiTerm.Terms)
+                    LowerValue(term, scope);
+                break;
+
             case BlockExpression block:
                 LowerBranchExpression(block, scope);
                 break;
@@ -426,6 +524,10 @@ internal sealed class OwnershipLowerer
 
             case WhileExpression loop:
                 LowerWhile(loop, scope);
+                break;
+
+            case ForExpression forExpr:
+                LowerFor(forExpr, scope);
                 break;
         }
     }
@@ -528,7 +630,7 @@ internal sealed class OwnershipLowerer
         {
             var argument = call.Arguments[index];
             var parameter = index < parameters.Count ? parameters[index] : null;
-            if (parameter is not null && IsSafeBorrow(parameter.Type) && TryGetPlace(argument, scope, out var place))
+            if (parameter is not null && IsSafeBorrow(parameter.Type))
             {
                 bool mutable = parameter.Type.SpecialType switch
                 {
@@ -536,7 +638,19 @@ internal sealed class OwnershipLowerer
                     AliasSemanticType alias => alias.IsMutable && !alias.IsUnsafe,
                     _ => false
                 };
-                Emit(OwnershipStatementKind.Borrow, place, argument.GetSpan() ?? default, argument.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: argument);
+                if (!TryGetPlace(argument, scope, out var place))
+                {
+                    place = CreateTemporaryPlace(argument, context.GetRequiredExpressionType(argument), scope);
+                    Emit(OwnershipStatementKind.StorageLive, place, argument.GetSpan() ?? default, argument.GetSource(), origin: argument);
+                    LowerValue(argument, scope);
+                    Emit(OwnershipStatementKind.Assign, place, argument.GetSpan() ?? default, argument.GetSource(), origin: argument);
+                    Emit(OwnershipStatementKind.Borrow, place, argument.GetSpan() ?? default, argument.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: argument);
+                    Emit(OwnershipStatementKind.StorageDead, place, argument.GetSpan() ?? default, argument.GetSource(), origin: argument);
+                }
+                else
+                {
+                    Emit(OwnershipStatementKind.Borrow, place, argument.GetSpan() ?? default, argument.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: argument);
+                }
             }
             else
             {
@@ -601,6 +715,12 @@ internal sealed class OwnershipLowerer
                 context.ResolvedTree.TryGetReference(member, out var fieldHandle) &&
                 fieldHandle.Kind == SymbolKind.Field &&
                 TryGetPlace(member.Expression, scope, out var receiver):
+                var recvType = context.GetExpressionType(member.Expression) ?? TypeRef.Unresolved;
+                if (ownership.IsOwningIndirection(recvType, out _))
+                {
+                    place = receiver.Dereference().ProjectField(fieldHandle);
+                    return true;
+                }
                 place = receiver.ProjectField(fieldHandle);
                 return true;
 

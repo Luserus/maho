@@ -38,14 +38,14 @@ internal sealed class MoveAnalysis
             foreach (var block in body.Blocks)
             {
                 var input = JoinPredecessors(block);
-                if (!StatesEqual(GetOrEmpty(incoming, block), input))
+                if (!incoming.TryGetValue(block, out var currentInput) || !StatesEqual(currentInput, input))
                 {
                     incoming[block] = input;
                     changed = true;
                 }
 
                 var output = Transfer(input, block.Statements);
-                if (!StatesEqual(GetOrEmpty(outgoing, block), output))
+                if (!outgoing.TryGetValue(block, out var currentOutput) || !StatesEqual(currentOutput, output))
                 {
                     outgoing[block] = output;
                     changed = true;
@@ -80,6 +80,13 @@ internal sealed class MoveAnalysis
         var unwrap = context.UnwrapAlias(h);
         if (!visited.Add(unwrap))
             return;
+
+        if (ownership.IsOwningIndirection(type, out var pointeeType))
+        {
+            var derefPlace = parent.Dereference();
+            result.Add(derefPlace);
+            CollectFieldPlaces(derefPlace, pointeeType, result, visited);
+        }
 
         foreach (var fieldHandle in GetTypeFields(type))
         {
@@ -162,10 +169,6 @@ internal sealed class MoveAnalysis
 
             case OwnershipStatementKind.Use when statement.UseKind == OwnershipUseKind.Move:
                 SetPlaceAndDescendants(state, targetPlace, InitializationState.Moved);
-                if (targetPlace.Projections.Count > 0)
-                {
-                    state[new Place(targetPlace.Root)] = InitializationState.Moved;
-                }
                 break;
         }
     }
@@ -233,23 +236,42 @@ internal sealed class MoveAnalysis
                         body.PlaceTypes.TryGetValue(statement.Place.Root, out var rootType) &&
                         ownership.HasExplicitLifecycle(rootType))
                     {
-                        context.Diagnostics.ReportPartialMoveDisallowed(
-                            statement.Span,
-                            GetPlaceName(statement.Place),
-                            rootType.ToQualifiedString(context),
-                            statement.Source);
+                        bool isAllowedOwningMove = false;
+                        if (ownership.IsOwningIndirection(rootType, out var pointeeType))
+                        {
+                            if (!ownership.HasExplicitLifecycle(pointeeType))
+                                isAllowedOwningMove = true;
+                        }
+
+                        if (!isAllowedOwningMove)
+                        {
+                            context.Diagnostics.ReportPartialMoveDisallowed(
+                                statement.Span,
+                                GetPlaceName(statement.Place),
+                                rootType.ToQualifiedString(context),
+                                statement.Source);
+                        }
                     }
                     // Check 2: If moving the whole struct, but some fields were partially moved
                     else if (statement.Place.Projections.Count == 0 &&
                              body.PlaceTypes.TryGetValue(statement.Place.Root, out var wholeType))
                     {
                         var fields = GetTypeFields(wholeType);
+                        bool isOwning = false;
+                        if (ownership.IsOwningIndirection(wholeType, out var pType))
+                        {
+                            fields = GetTypeFields(pType);
+                            isOwning = true;
+                        }
+
                         if (fields.Count > 0)
                         {
                             bool hasPartialMove = false;
                             foreach (var f in fields)
                             {
-                                var fPlace = statement.Place.ProjectField(f);
+                                var fPlace = isOwning
+                                    ? statement.Place.Dereference().ProjectField(f)
+                                    : statement.Place.ProjectField(f);
                                 var fState = state.GetValueOrDefault(fPlace, InitializationState.Uninitialized);
                                 if (fState is InitializationState.Moved or InitializationState.MaybeInitialized)
                                 {

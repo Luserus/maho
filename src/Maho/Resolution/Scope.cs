@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Maho.Syntax;
 
 namespace Maho.Resolution;
 
@@ -58,7 +59,36 @@ internal sealed class Scope
         return null;
     }
 
-    public IReadOnlyList<Symbol> GetLocalSymbols(SymbolPart name) => SymbolsByName.TryGetValue(name, out var symbols) ? symbols : [];
+    public IReadOnlyList<Symbol> GetLocalSymbols(SymbolPart name)
+    {
+        if (SymbolsByName.TryGetValue(name, out var symbols))
+            return symbols;
+
+        if (name.Arity > 0)
+        {
+            foreach (var (key, list) in SymbolsByName)
+            {
+                if (key.Text == name.Text && key.Arity != name.Arity)
+                {
+                    foreach (var sym in list)
+                    {
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
+                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        {
+                            return list;
+                        }
+                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp &&
+                            ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
+                        {
+                            return list;
+                        }
+                    }
+                }
+            }
+        }
+
+        return [];
+    }
 
     private static bool IsTypeSymbol(Symbol s) =>
         s is TypeSymbol or NestedTypeSymbol or GenericParameterSymbol or AliasSymbol;

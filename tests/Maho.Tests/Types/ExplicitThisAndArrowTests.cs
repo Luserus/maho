@@ -23,10 +23,10 @@ public sealed class ExplicitThisAndArrowTests
         [IntrinsicType("Metadata")]
         public struct Metadata<T>;
 
-        public interface Arrow<T>
+        public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> &T;
+            public func Arrow(&this) -> TReturn;
         }
 
         public interface Deref<T>
@@ -36,7 +36,7 @@ public sealed class ExplicitThisAndArrowTests
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<T>, Deref<T>
+        public struct Reference<T> : Arrow<&T>, Deref<T>
         {
             nuint raw;
             Metadata<T> metadata;
@@ -56,7 +56,7 @@ public sealed class ExplicitThisAndArrowTests
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T>, Deref<T>
+        public struct Pointer<T> : Arrow<T*>, Deref<T>
         {
             nuint addr;
             Metadata<T> metadata;
@@ -275,7 +275,7 @@ public sealed class ExplicitThisAndArrowTests
     public void Arrow_Returning_Alias_SingleArrowAccess_Succeeds()
     {
         var source = Prelude + """
-            public struct MyBox<T> : Arrow<T>
+            public struct MyBox<T> : Arrow<&T>
             {
                 T value;
 
@@ -299,17 +299,11 @@ public sealed class ExplicitThisAndArrowTests
     public void Arrow_Returning_Reference_DoubleArrowAccess_Succeeds()
     {
         var source = Prelude + """
-            public interface ArrowRef<T>
-            {
-                [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow(&this) -> T&;
-            }
-
-            public struct RefWrapper<T> : ArrowRef<T>
+            public struct RefWrapper<T> : Arrow<T&>
             {
                 T& target;
 
-                public func ArrowRef.Arrow(&this) -> T&
+                public func Arrow.Arrow(&this) -> T&
                 {
                     return this.target;
                 }
@@ -334,17 +328,11 @@ public sealed class ExplicitThisAndArrowTests
     public void Arrow_Returning_Reference_SingleArrowAccessToInnerMember_FailsWithMH2014()
     {
         var source = Prelude + """
-            public interface ArrowRef<T>
-            {
-                [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow(&this) -> T&;
-            }
-
-            public struct RefWrapper<T> : ArrowRef<T>
+            public struct RefWrapper<T> : Arrow<T&>
             {
                 T& target;
 
-                public func ArrowRef.Arrow(&this) -> T&
+                public func Arrow.Arrow(&this) -> T&
                 {
                     return this.target;
                 }

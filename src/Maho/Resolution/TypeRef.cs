@@ -90,8 +90,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Alias(TypeRef element, bool isMutable = false, bool isUnsafe = false) =>
         new TypeRef(TypeRefKind.Alias, null, new AliasSemanticType(element, isMutable, isUnsafe));
 
-    public static TypeRef Array(TypeRef element) =>
-        new TypeRef(TypeRefKind.Array, null, new ArraySemanticType(element));
+    public static TypeRef Array(TypeRef element, int dimension = 1, SymbolHandle? arrayHandle = null) =>
+        new TypeRef(TypeRefKind.Array, arrayHandle, new ArraySemanticType(element, dimension));
+
+    public static TypeRef FixedArray(TypeRef element, IReadOnlyList<Expression> sizes, SymbolHandle? fixedArrayHandle = null) =>
+        new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, sizes));
 
     public static TypeRef FixedArray(TypeRef element, Expression size, SymbolHandle? fixedArrayHandle = null) =>
         new TypeRef(TypeRefKind.FixedArray, fixedArrayHandle, new FixedArraySemanticType(element, size));
@@ -376,7 +379,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                     return true;
                 }
 
-                if (IsSubtypeOf(unwrappedSrcH2, unwrappedTargetH, context)) return true;
+                if (IsSubtypeOf(unwrappedSrcH2, unwrappedTargetH, context, superGen: SpecialType as GenericSemanticType)) return true;
             }
         }
 
@@ -520,7 +523,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out var intrinsicName) && intrinsicName == KnownIntrinsics.Char;
     }
 
-    internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null)
+    internal static bool IsSubtypeOf(SymbolHandle subHandle, SymbolHandle superHandle, ResolutionContext context, HashSet<SymbolHandle>? visited = null, GenericSemanticType? superGen = null)
     {
         subHandle = context.UnwrapAlias(subHandle);
         superHandle = context.UnwrapAlias(superHandle);
@@ -545,7 +548,30 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             {
                 if (b.Handle is { } bHandle)
                 {
-                    if (IsSubtypeOf(bHandle, superHandle, context, visited))
+                    var unwrappedBHandle = context.UnwrapAlias(bHandle);
+                    if (unwrappedBHandle == superHandle)
+                    {
+                        if (superGen is not null && b.SpecialType is GenericSemanticType baseGen)
+                        {
+                            if (superGen.TypeArguments.Count == baseGen.TypeArguments.Count)
+                            {
+                                bool match = true;
+                                for (int i = 0; i < superGen.TypeArguments.Count; i++)
+                                {
+                                    if (!superGen.TypeArguments[i].IsAssignableFrom(baseGen.TypeArguments[i], context))
+                                    {
+                                        match = false;
+                                        break;
+                                    }
+                                }
+                                if (match) return true;
+                            }
+                            continue;
+                        }
+                        return true;
+                    }
+
+                    if (IsSubtypeOf(bHandle, superHandle, context, visited, superGen))
                         return true;
                 }
             }
@@ -624,10 +650,28 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return Span(s.ElementType.Substitute(typeArgs));
 
         if (SpecialType is FixedArraySemanticType f)
-            return FixedArray(f.ElementType.Substitute(typeArgs), f.Size, Handle);
+            return FixedArray(f.ElementType.Substitute(typeArgs), f.Sizes, Handle);
 
         if (SpecialType is DynSemanticType dyn)
             return Dyn(dyn.TargetType.Substitute(typeArgs));
+
+        if (SpecialType is TupleSemanticType t)
+        {
+            var newElements = new List<TupleElement>();
+            foreach (var elem in t.Elements)
+            {
+                var sub = elem.Type.Substitute(typeArgs);
+                if (sub.SpecialType is TupleSemanticType subTuple && elem.Type.Handle is { } eh && typeArgs.ContainsKey(eh))
+                {
+                    newElements.AddRange(subTuple.Elements);
+                }
+                else
+                {
+                    newElements.Add(new TupleElement(sub, elem.Name));
+                }
+            }
+            return Tuple(newElements, Handle);
+        }
 
         if (SpecialType is UntaggedSemanticType untagged)
             return Untagged(untagged.InnerType.Substitute(typeArgs));

@@ -14,6 +14,7 @@ internal sealed class SymbolSink
     public List<FunctionSymbol> FunctionSymbols { get; } = [];
     public List<MethodSymbol> MethodSymbols { get; } = [];
     public List<GlobalVariableSymbol> GlobalVariableSymbols { get; } = [];
+    public List<ConstantSymbol> ConstantSymbols { get; } = [];
     public List<FieldSymbol> FieldSymbols { get; } = [];
     public List<ParameterSymbol> ParameterSymbols { get; } = [];
     public List<PropertySymbol> PropertySymbols { get; } = [];

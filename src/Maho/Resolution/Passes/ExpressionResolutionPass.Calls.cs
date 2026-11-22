@@ -110,31 +110,6 @@ internal sealed partial class ExpressionResolutionPass
                 return TypeRef.Error;
             }
 
-            if (call.Callee is MemberAccessExpression memAccess &&
-                context.ResolvedTree.TryGetReference(memAccess, out var mHandle) &&
-                context.GetMethodSymbol(mHandle) is { } calledMethod)
-            {
-                if (calledMethod.Parameters.Count > 0 &&
-                    context.GetParameterSymbol(calledMethod.Parameters[0]) is { } firstP &&
-                    firstP.Syntax?.Declarator.IsReceiver == true)
-                {
-                    var rk = firstP.Syntax.Declarator.ReceiverKind;
-                    if (rk is not ReceiverKind.Value && rk is not ReceiverKind.None)
-                    {
-                        var recvType = context.GetExpressionType(memAccess.Expression) ?? TypeRef.Unresolved;
-                        if (!IsExpressionLValue(memAccess.Expression, recvType))
-                        {
-                            context.Diagnostics.ReportInvalidReceiverForByRefThis(
-                                memAccess.Expression.GetSpan() ?? default,
-                                calledMethod.Name.Text,
-                                rk.ToString(),
-                                memAccess.Expression.GetSource());
-                            return TypeRef.Error;
-                        }
-                    }
-                }
-            }
-
             return TypeCheckFunctionTypeCall(call, delType.ParameterTypes, delType.ReturnType, argTypes, scope, containingFunction);
         }
 
@@ -248,20 +223,6 @@ internal sealed partial class ExpressionResolutionPass
                             firstParameter.Syntax?.Declarator.IsReceiver == true)
                         {
                             argumentStart = 1;
-                            var rk = firstParameter.Syntax.Declarator.ReceiverKind;
-                            if (rk is not ReceiverKind.Value && rk is not ReceiverKind.None)
-                            {
-                                if (!IsExpressionLValue(call.Callee, calleeType))
-                                {
-                                    context.Diagnostics.ReportInvalidReceiverForByRefThis(
-                                        call.Callee.GetSpan() ?? default,
-                                        call.Callee.ToString() ?? "callee",
-                                        rk.ToString(),
-                                        call.Callee.GetSource());
-                                    result = TypeRef.Error;
-                                    return true;
-                                }
-                            }
                         }
 
                         if (method.Parameters.Count - argumentStart == argTypes.Count)

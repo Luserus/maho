@@ -7,17 +7,26 @@ internal sealed class IndexExpression : Expression
     public Expression Expression { get; }
     /// <summary> Opening bracket token. </summary>
     public Token OpenBracketToken { get; }
-    /// <summary> Index expression. </summary>
-    public Expression Index { get; }
+    /// <summary> Index argument expressions. </summary>
+    public SeparatedSyntaxList<Expression> Arguments { get; }
     /// <summary> Closing bracket token. </summary>
     public Token CloseBracketToken { get; }
 
-    /// <summary> Creates one index expression node. </summary>
-    public IndexExpression(Expression expression, Token openBracketToken, Expression index, Token closeBracketToken)
+    /// <summary> Gets the first index expression (for backward compatibility). </summary>
+    public Expression Index => Arguments.Count > 0 ? Arguments[0] : null!;
+
+    /// <summary> Creates one multi-argument index expression node. </summary>
+    public IndexExpression(Expression expression, Token openBracketToken, SeparatedSyntaxList<Expression> arguments, Token closeBracketToken)
     {
         Expression = expression;
         OpenBracketToken = openBracketToken;
-        Index = index;
+        Arguments = arguments;
         CloseBracketToken = closeBracketToken;
+    }
+
+    /// <summary> Creates one single-argument index expression node. </summary>
+    public IndexExpression(Expression expression, Token openBracketToken, Expression index, Token closeBracketToken)
+        : this(expression, openBracketToken, new SeparatedSyntaxList<Expression>([index]), closeBracketToken)
+    {
     }
 }

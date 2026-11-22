@@ -429,6 +429,27 @@ internal sealed partial class IntrinsicDiscoveryPass
                     return;
                 }
                 break;
+
+            case OperatorKind.CollectionAdd:
+            case OperatorKind.CollectionWith:
+            case OperatorKind.Deconstruct:
+            case OperatorKind.DeconstructMut:
+            case OperatorKind.Iterable:
+            case OperatorKind.Iterator:
+            case OperatorKind.OwningDeref:
+                if (isStatic)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                break;
+        }
+
+        if (context.DiscoveredOperators.TryGetOperators(opKind, out var existing) && existing.Count > 0)
+        {
+            var first = existing[0];
+            context.Diagnostics.ReportDuplicateOperatorFunction(fullName, sigSpan, first.Span, source, first.Source);
+            return;
         }
 
         var methodHandle = ResolutionContext.GetHandle(method);

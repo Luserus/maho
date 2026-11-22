@@ -121,6 +121,13 @@ internal static class KnownIntrinsics
     public const string OpCallable = "Callable";
     public const string OpUnwrap = "Unwrap";
     public const string OpTry = "Try";
+    public const string OpCollectionAdd = "CollectionAdd";
+    public const string OpCollectionWith = "CollectionWith";
+    public const string OpDeconstruct = "Deconstruct";
+    public const string OpDeconstructMut = "DeconstructMut";
+    public const string OpIterable = "Iterable";
+    public const string OpIterator = "Iterator";
+    public const string OpOwningDeref = "OwningDeref";
 
     // Standard Intrinsic Function Contract Literals
     public const string FnFunctionInvoke = "Function.Invoke(TParams...)";
@@ -131,13 +138,18 @@ internal static class KnownIntrinsics
     public const string FnMutablePointerDeref = "MutablePointer.Deref()";
     public const string FnValueTypeAssign = "ValueType.Assign()";
     public const string FnStructAssign = "Struct.Assign()";
+    public const string FnTupleDeconstruct = "Tuple.Deconstruct()";
+    public const string FnTupleDeconstructMut = "Tuple.DeconstructMut()";
+    public const string FnDropInPlace = "Memory.DropInPlace";
     public const string FnInt32Add = "Int32.Add(Int32, Int32)";
     public const string FnInt32Sub = "Int32.Subtract(Int32, Int32)";
     public const string FnInt32Mul = "Int32.Multiply(Int32, Int32)";
     public const string FnInt32Div = "Int32.Divide(Int32, Int32)";
     public const string FnInt32Rem = "Int32.Remainder(Int32, Int32)";
-    public const string FnInt32Equality = "Int32.Equality(Int32, Int32)";
-    public const string FnInt32Inequality = "Int32.Inequality(Int32, Int32)";
+    public const string FnInt32Equals = "Int32.Equals(Int32, Int32)";
+    public const string FnInt32NotEquals = "Int32.NotEquals(Int32, Int32)";
+    public const string FnInt32Equality = FnInt32Equals;
+    public const string FnInt32Inequality = FnInt32NotEquals;
     public const string FnInt32LessThan = "Int32.LessThan(Int32, Int32)";
     public const string FnInt32LessThanOrEqual = "Int32.LessThanOrEqual(Int32, Int32)";
     public const string FnInt32GreaterThan = "Int32.GreaterThan(Int32, Int32)";
@@ -183,7 +195,7 @@ internal static class KnownIntrinsics
         Float16, Float32, Float64, Float128,
         Bool, Char, Unit, Never,
         ValueType, Struct, Enum, Tuple,
-        FixedArray, Metadata
+        Metadata
     ];
 
     public static readonly HashSet<string> AllOperatorNames =
@@ -205,7 +217,10 @@ internal static class KnownIntrinsics
         OpRotateLeftAssignment, OpRotateRightAssignment,
         OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast,
         OpNew, OpPut, OpCopy, OpMove, OpCallable,
-        OpUnwrap, OpTry
+        OpUnwrap, OpTry,
+        OpCollectionAdd, OpCollectionWith,
+        OpDeconstruct, OpDeconstructMut,
+        OpIterable, OpIterator, OpOwningDeref
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -269,6 +284,13 @@ internal static class KnownIntrinsics
             case OpCallable: kind = OperatorKind.Callable; return true;
             case OpUnwrap: kind = OperatorKind.Unwrap; return true;
             case OpTry: kind = OperatorKind.Try; return true;
+            case OpCollectionAdd: kind = OperatorKind.CollectionAdd; return true;
+            case OpCollectionWith: kind = OperatorKind.CollectionWith; return true;
+            case OpDeconstruct: kind = OperatorKind.Deconstruct; return true;
+            case OpDeconstructMut: kind = OperatorKind.DeconstructMut; return true;
+            case OpIterable: kind = OperatorKind.Iterable; return true;
+            case OpIterator: kind = OperatorKind.Iterator; return true;
+            case OpOwningDeref: kind = OperatorKind.OwningDeref; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -334,6 +356,13 @@ internal static class KnownIntrinsics
         OperatorKind.Callable => OpCallable,
         OperatorKind.Unwrap => OpUnwrap,
         OperatorKind.Try => OpTry,
+        OperatorKind.CollectionAdd => OpCollectionAdd,
+        OperatorKind.CollectionWith => OpCollectionWith,
+        OperatorKind.Deconstruct => OpDeconstruct,
+        OperatorKind.DeconstructMut => OpDeconstructMut,
+        OperatorKind.Iterable => OpIterable,
+        OperatorKind.Iterator => OpIterator,
+        OperatorKind.OwningDeref => OpOwningDeref,
         _ => string.Empty
     };
 }

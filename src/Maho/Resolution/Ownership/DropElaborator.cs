@@ -40,10 +40,67 @@ internal sealed class DropElaborator
                 if (statement.Place.Projections.Count == 0 &&
                     statement.Kind is OwnershipStatementKind.Assign or OwnershipStatementKind.StorageDead &&
                     body.PlaceTypes.TryGetValue(statement.Place.Root, out var type) &&
-                    ownership.RequiresDrop(type))
+                    (ownership.RequiresDrop(type) || (ownership.IsOwningIndirection(type, out var pDropType) && ownership.RequiresDrop(pDropType))))
                 {
+                    // Case 0: Owning indirection (e.g. Box<T>)
+                    if (ownership.IsOwningIndirection(type, out var pointeeType))
+                    {
+                        if (ownership.RequiresDrop(pointeeType))
+                        {
+                            var pointeeFields = GetTypeFields(pointeeType);
+                            if (pointeeFields.Count > 0)
+                            {
+                                foreach (var f in pointeeFields)
+                                {
+                                    if (context.GetFieldSymbol(f) is { } fSym && ownership.RequiresDrop(fSym.Type))
+                                    {
+                                        var fPlace = statement.Place.Dereference().ProjectField(f);
+                                        var fInit = state.GetValueOrDefault(fPlace, InitializationState.Uninitialized);
+                                        if (fInit is InitializationState.Initialized or InitializationState.MaybeInitialized)
+                                        {
+                                            elaborated.Add(new OwnershipStatement(
+                                                OwnershipStatementKind.Drop,
+                                                fPlace,
+                                                statement.Span,
+                                                statement.Source,
+                                                Conditional: fInit == InitializationState.MaybeInitialized,
+                                                Origin: statement.Origin));
+                                            state[fPlace] = InitializationState.Uninitialized;
+                                        }
+                                    }
+                                }
+                            }
+                            else if (ownership.HasExplicitDestructor(pointeeType))
+                            {
+                                var derefPlace = statement.Place.Dereference();
+                                elaborated.Add(new OwnershipStatement(
+                                    OwnershipStatementKind.Drop,
+                                    derefPlace,
+                                    statement.Span,
+                                    statement.Source,
+                                    Origin: statement.Origin));
+                            }
+                        }
+
+                        // Then drop the container itself
+                        if (ownership.RequiresDrop(type))
+                        {
+                            var init = state.GetValueOrDefault(statement.Place, InitializationState.Uninitialized);
+                            if (init is InitializationState.Initialized or InitializationState.MaybeInitialized)
+                            {
+                                elaborated.Add(new OwnershipStatement(
+                                    OwnershipStatementKind.Drop,
+                                    statement.Place,
+                                    statement.Span,
+                                    statement.Source,
+                                    Conditional: init == InitializationState.MaybeInitialized,
+                                    Origin: statement.Origin));
+                                state[statement.Place] = InitializationState.Uninitialized;
+                            }
+                        }
+                    }
                     // Case 1: Monolithic drop if type has explicit Destructor
-                    if (ownership.HasExplicitDestructor(type))
+                    else if (ownership.HasExplicitDestructor(type))
                     {
                         var init = state.GetValueOrDefault(statement.Place, InitializationState.Uninitialized);
                         if (init is InitializationState.Initialized or InitializationState.MaybeInitialized)
@@ -129,14 +186,39 @@ internal sealed class DropElaborator
             case OwnershipStatementKind.StorageLive:
             case OwnershipStatementKind.StorageDead:
             case OwnershipStatementKind.Drop:
-                state[statement.Place] = InitializationState.Uninitialized;
+                SetPlaceAndDescendants(state, statement.Place, InitializationState.Uninitialized);
                 break;
             case OwnershipStatementKind.Assign:
-                state[statement.Place] = InitializationState.Initialized;
+                SetPlaceAndDescendants(state, statement.Place, InitializationState.Initialized);
                 break;
             case OwnershipStatementKind.Use when statement.UseKind == OwnershipUseKind.Move:
-                state[statement.Place] = InitializationState.Moved;
+                SetPlaceAndDescendants(state, statement.Place, InitializationState.Moved);
                 break;
         }
+    }
+
+    private static void SetPlaceAndDescendants(Dictionary<Place, InitializationState> state, Place target, InitializationState newState)
+    {
+        state[target] = newState;
+        foreach (var place in System.Linq.Enumerable.ToList(state.Keys))
+        {
+            if (IsStrictDescendant(place, target))
+                state[place] = newState;
+        }
+    }
+
+    private static bool IsStrictDescendant(Place candidate, Place ancestor)
+    {
+        if (!ReferenceEquals(candidate.Root, ancestor.Root))
+            return false;
+        if (candidate.Projections.Count <= ancestor.Projections.Count)
+            return false;
+
+        for (int i = 0; i < ancestor.Projections.Count; i++)
+        {
+            if (!candidate.Projections[i].Equals(ancestor.Projections[i]))
+                return false;
+        }
+        return true;
     }
 }

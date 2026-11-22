@@ -321,6 +321,49 @@ internal sealed partial class ExpressionResolutionPass
 
             if (!isStaticAccessOnType)
             {
+                var ownership = new Maho.Resolution.Ownership.OwnershipTypeClassifier(context);
+                if (ownership.IsOwningIndirection(receiverType, out var pointeeType) && pointeeType.Handle is { } pointeeH)
+                {
+                    var (pointeeMember, pointeeAmbiguous, _) = FindMemberInTypeHierarchy(pointeeH, memberName, isExplicitInterfaceAccess: false);
+                    if (pointeeAmbiguous)
+                    {
+                        var typeSymObj = (Symbol?)context.GetTypeSymbol(pointeeH) ?? context.GetSymbol(pointeeH);
+                        context.Diagnostics.ReportAmbiguousMemberAccess(
+                            access.Identifier.Span,
+                            memberName,
+                            typeSymObj?.Name.Text ?? pointeeType.ToString(),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+
+                    if (pointeeMember is not null)
+                    {
+                        if (pointeeMember is MethodSymbol pMethod && pMethod.Flags.HasFlag(FunctionFlags.Static))
+                        {
+                            var typeSymObj = (Symbol?)context.GetTypeSymbol(pointeeH) ?? context.GetSymbol(pointeeH);
+                            context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
+                                access.Identifier.Span,
+                                memberName,
+                                typeSymObj?.Name.Text ?? pointeeType.ToString(),
+                                access.GetSource());
+                            return TypeRef.Error;
+                        }
+
+                        context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(pointeeMember));
+                        var pType = GetTypeFromSymbol(pointeeMember);
+                        if (pointeeType.SpecialType is GenericSemanticType pGst &&
+                            context.GetSymbol(pointeeH) is TypeSymbol pTs &&
+                            pTs.GenericParameters.Count == pGst.TypeArguments.Count)
+                        {
+                            Dictionary<SymbolHandle, TypeRef> subst = [];
+                            for (int i = 0; i < pTs.GenericParameters.Count; i++)
+                                subst[pTs.GenericParameters[i]] = pGst.TypeArguments[i];
+                            pType = SubstituteTypeRef(pType, subst);
+                        }
+                        return pType;
+                    }
+                }
+
                 context.Diagnostics.ReportMemberNotFound(
                     access.Identifier.Span,
                     memberName,
@@ -608,10 +651,13 @@ internal sealed partial class ExpressionResolutionPass
     private TypeRef ResolveIndex(IndexExpression index, Scope scope, SymbolHandle containingFunction)
     {
         var targetType = ResolveExpression(index.Expression, scope, containingFunction);
-        ResolveExpression(index.Index, scope, containingFunction);
+        foreach (var arg in index.Arguments)
+            ResolveExpression(arg, scope, containingFunction);
 
         if (targetType.SpecialType is ArraySemanticType arraySemantic)
             return arraySemantic.ElementType;
+        if (targetType.SpecialType is FixedArraySemanticType fixedArraySemantic)
+            return fixedArraySemantic.ElementType;
         if (targetType.SpecialType is SpanSemanticType spanSemantic)
             return spanSemantic.ElementType;
         if (targetType.SpecialType is PointerSemanticType ptrSemantic)

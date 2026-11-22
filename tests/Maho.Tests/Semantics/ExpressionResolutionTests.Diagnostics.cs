@@ -107,16 +107,10 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface ConcreteAdd
-            {
-                [OperatorFunction("Addition")]
-                public func Add(Concrete l, Concrete r) -> Concrete;
-            }
-
-            public struct Concrete : ConcreteAdd
+            public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
                 public func Abs(this) -> Concrete { return this; }
             }
 
@@ -165,16 +159,10 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface ConcreteAdd
-            {
-                [OperatorFunction("Addition")]
-                public func Add(Concrete l, Concrete r) -> Concrete;
-            }
-
-            public struct Concrete : ConcreteAdd
+            public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public func ConcreteAdd.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
             }
 
             public struct Host
@@ -395,17 +383,11 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Callable
-            {
-                [OperatorFunction("Callable")]
-                public func Call(&this, int32 x, int32 y) -> int32;
-            }
-
-            public struct Multiplier : Callable
+            public struct Multiplier : Callable<int32, int32, int32>
             {
                 public int32 Factor;
 
-                public func Callable.Call(&this, int32 x, int32 y) -> int32
+                public func Callable.Invoke(&this, int32 x, int32 y) -> int32
                 {
                     return x;
                 }
@@ -508,17 +490,11 @@ public sealed partial class ExpressionResolutionTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface AddMixed<TLhs, TRhs, TReturn>
-            {
-                [OperatorFunction("Addition")]
-                public func Add(TLhs l, TRhs r) -> TReturn;
-            }
-
             [IntrinsicType("UInt64")]
-            public struct uint64 : AddMixed<uint64, int32, uint64>
+            public struct uint64 : Add<uint64, int32, uint64>
             {
                 [IntrinsicFunction("UInt64.Add(UInt64, Int32)")]
-                public func AddMixed.Add(uint64 l, int32 r) -> uint64;
+                public func Add.Add(uint64 l, int32 r) -> uint64;
 
                 [IntrinsicFunction("UInt64.<u64>")]
                 public literal u64(int32 v);

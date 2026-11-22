@@ -297,16 +297,6 @@ internal sealed partial class ExpressionResolutionPass
         // 1. Built-in language pointer/reference operations
         if (opKind == OperatorKind.AddressOf)
         {
-            if (!IsExpressionLValue(unary.Operand, operand))
-            {
-                context.Diagnostics.ReportInvalidReceiverForByRefThis(
-                    unary.Operand.GetSpan() ?? default,
-                    "&",
-                    "AddressOf",
-                    unary.Operand.GetSource());
-                return TypeRef.Error;
-            }
-
             if (TryResolveUnaryOverload(OperatorKind.AddressOf, operand, unary, out var addrResult))
                 return addrResult;
 
@@ -651,6 +641,65 @@ internal sealed partial class ExpressionResolutionPass
                 return collapsed.IsError ? TypeRef.Error : targetType;
             }
 
+            // 2c. Target-typed collection expression
+            if (assignment.RhsExpression is CollectionExpression colExpr)
+            {
+                TypeCheckCollectionExpression(colExpr, targetType, scope, containingFunction, assignment);
+                return targetType;
+            }
+
+            // 2d. Tuple destructuring assignment: (a, b) = pt;
+            if (assignment.LhsExpression is TupleExpression tupleLhs)
+            {
+                if (TryResolveDeconstructTuple(rhs, out var rhsTuple, out var deconstructMethod))
+                {
+                    if (deconstructMethod != default)
+                        context.ResolvedTree.AddReference(assignment, deconstructMethod);
+
+                    if (tupleLhs.Arguments.Count != rhsTuple!.Elements.Count)
+                    {
+                        context.Diagnostics.ReportTupleDestructureMismatch(
+                            tupleLhs.GetSpan() ?? default,
+                            $"expected {tupleLhs.Arguments.Count} elements, but right-hand side provides {rhsTuple.Elements.Count}",
+                            assignment.GetSource());
+                    }
+                    else
+                    {
+                        for (int i = 0; i < tupleLhs.Arguments.Count; i++)
+                        {
+                            var lhsElemExpr = tupleLhs.Arguments[i];
+                            var lhsElemType = context.GetExpressionType(lhsElemExpr) ?? TypeRef.Unresolved;
+                            var rhsElemType = rhsTuple.Elements[i].Type;
+
+                            if (rhsElemType.IsLiteral && !lhsElemType.IsLiteral && !lhsElemType.IsError && !lhsElemType.IsUnresolved && !lhsElemType.IsInferred)
+                            {
+                                CollapseExpression(lhsElemExpr, rhsElemType, scope, containingFunction);
+                            }
+                            else if (!lhsElemType.IsAssignableFrom(rhsElemType, context) &&
+                                     !TryResolveImplicitCast(rhsElemType, lhsElemType, out _))
+                            {
+                                context.Diagnostics.ReportAssignmentTypeMismatch(
+                                    lhsElemExpr.GetSpan() ?? default,
+                                    rhsElemType.ToQualifiedString(context),
+                                    lhsElemType.ToQualifiedString(context),
+                                    rhsLabel: rhsElemType.ToLabelString(context, scope),
+                                    lhsLabel: lhsElemType.ToLabelString(context, scope),
+                                    source: assignment.GetSource());
+                            }
+                        }
+                    }
+                    return targetType;
+                }
+                else if (!rhs.IsError && !rhs.IsInferred && !rhs.IsUnresolved)
+                {
+                    context.Diagnostics.ReportTupleDestructureMismatch(
+                        assignment.RhsExpression.GetSpan() ?? default,
+                        $"cannot destructure non-tuple expression of type '{rhs.ToDisplayString(context)}'",
+                        assignment.GetSource());
+                    return TypeRef.Error;
+                }
+            }
+
             // 3. Verify type compatibility: assignability or registered implicit conversion operator
             if (!targetType.IsAssignableFrom(rhs, context) &&
                 !TryResolveImplicitCast(rhs, targetType, out _) &&
@@ -708,6 +757,9 @@ internal sealed partial class ExpressionResolutionPass
 
         if (resolvedType.SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType)
             return true;
+
+        if (expr is TupleExpression tupleExpr)
+            return tupleExpr.Arguments.All(arg => IsExpressionLValue(arg, context.GetExpressionType(arg) ?? TypeRef.Unresolved));
 
         if (expr is UnaryExpression u && u.OperatorToken.Kind == TokenKind.Asterisk)
             return true;

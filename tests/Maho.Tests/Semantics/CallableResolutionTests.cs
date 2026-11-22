@@ -93,13 +93,7 @@ public sealed class CallableResolutionTests
     public void TargetTypedLiteralCall_ResolvesOverloadViaTargetType()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public interface MyCallable
-            {
-                [OperatorFunction("Callable")]
-                public func Invoke(this) -> CustomTarget;
-            }
-
-            public struct CustomTarget : ValType, MyCallable
+            public struct CustomTarget : Callable<CustomTarget>
             {
                 public literal int(int32 val)
                 {
@@ -107,7 +101,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke(this) -> CustomTarget
+                public func Callable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }
@@ -124,16 +118,10 @@ public sealed class CallableResolutionTests
     }
 
     [Fact]
-    public void TargetTypedLiteralCall_WithByRefReceiver_ReportsMH2027()
+    public void TargetTypedLiteralCall_WithByRefReceiver_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public interface MyCallable
-            {
-                [OperatorFunction("Callable")]
-                public func Invoke(&this) -> CustomTarget;
-            }
-
-            public struct CustomTarget : ValType, MyCallable
+            public struct CustomTarget : Callable<CustomTarget>
             {
                 public literal int(int32 val)
                 {
@@ -141,7 +129,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke(&this) -> CustomTarget
+                public func Callable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }
@@ -154,21 +142,14 @@ public sealed class CallableResolutionTests
             }
             """);
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2027");
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
     public void TargetTypedLiteralCall_AmbiguousLiteralOverloads_ReportsMH2013()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public interface MyCallable
-            {
-                [OperatorFunction("Callable")]
-                public func Invoke(this) -> CustomTarget;
-            }
-
-            public struct CustomTarget : ValType, MyCallable
+            public struct CustomTarget : Callable<CustomTarget>
             {
                 public literal int(int32 val)
                 {
@@ -182,7 +163,7 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func MyCallable.Invoke(this) -> CustomTarget
+                public func Callable.Invoke(&this) -> CustomTarget
                 {
                     return this;
                 }

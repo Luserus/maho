@@ -625,6 +625,35 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
+    public void FixedArray_ValidABI_MultidimensionalContract_Succeeds()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+
+            [IntrinsicType("FixedArray")]
+            public struct FixedArray<T, N, D>;
+            """);
+
+        Assert.False(compilation.HasErrors);
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray));
+    }
+
+    [Fact]
+    public void FixedArray_DuplicateIntrinsic_ReportsMH0543()
+    {
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+
+            [IntrinsicType("FixedArray")]
+            public struct FixedArray1D<T, N>;
+
+            [IntrinsicType("FixedArray")]
+            public struct FixedArrayND<T, N, D>;
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0543");
+    }
+
+    [Fact]
     public void UseSite_PointerWithoutPointerIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""

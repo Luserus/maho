@@ -550,4 +550,62 @@ public sealed class LifetimeAnalysisTests
         // Field 'b' was never moved, so on scope exit it is unconditionally dropped
         Assert.Contains(allDrops, d => !d.Conditional && d.Place.Projections.Any(p => p.Field == handleB));
     }
+
+    [Fact]
+    public void TemporaryMaterialization_MutThisReceiver_Succeeds()
+    {
+        var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public struct Counter
+            {
+                public int32 count;
+                public func Increment(mut &this) -> void
+                {
+                    this.count = 42;
+                }
+            }
+
+            public func MakeCounter() -> Counter
+            {
+                Counter c;
+                return c;
+            }
+
+            public func Test() -> void
+            {
+                Counter c;
+                c.Increment();
+                MakeCounter().Increment();
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void TemporaryBorrow_EscapingToLocal_ReportsMH1008()
+    {
+        var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public func Test() -> void
+            {
+                var addr = &42;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1008");
+    }
+
+    [Fact]
+    public void TemporaryBorrow_EscapingReturn_ReportsMH1008()
+    {
+        var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public func Test() -> &int32
+            {
+                return &42;
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH1008");
+    }
 }

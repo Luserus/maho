@@ -226,6 +226,10 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     {
                         block = ProcessWhile(whileExpr, block, exit, newBlock);
                     }
+                    else if (exprStmt.Expression is ForExpression forExpr)
+                    {
+                        block = ProcessFor(forExpr, block, exit, newBlock);
+                    }
                     else
                     {
                         var exprType = context.GetExpressionType(exprStmt.Expression);
@@ -252,6 +256,17 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     block.AddSuccessor(exit);
                     // Code following a return begins in a new block (potentially unreachable)
                     block = newBlock();
+                    break;
+
+                case LocalYieldStatement yieldStmt:
+                    if (yieldStmt.Expression is not null)
+                        block.Instructions.Add(yieldStmt.Expression);
+                    if (yieldStmt.IsBreak)
+                    {
+                        block.Terminator = BlockTerminator.Return();
+                        block.AddSuccessor(exit);
+                        block = newBlock();
+                    }
                     break;
 
                 case LocalVariableDeclarationStatement varStmt:
@@ -361,6 +376,49 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         // Body executes statements then unconditionally loops back to header
         bodyBlock.Instructions.Add(whileExpr.Body);
         if (whileExpr.Body is BlockExpression blockBody)
+        {
+            var endBody = ProcessLocals(blockBody.Locals, bodyBlock, exit, newBlock);
+            if (endBody.Terminator.Kind == BlockTerminatorKind.Unreachable && endBody.Successors.Count == 0)
+            {
+                endBody.Terminator = BlockTerminator.Branch(headerBlock);
+                endBody.AddSuccessor(headerBlock);
+            }
+        }
+        else
+        {
+            bodyBlock.Terminator = BlockTerminator.Branch(headerBlock);
+            bodyBlock.AddSuccessor(headerBlock);
+        }
+
+        return exitBlock;
+    }
+
+    /// <summary>
+    /// Lowers a <see cref="ForExpression"/> loop into header, body, and exit basic blocks with a backedge.
+    /// </summary>
+    private BasicBlock ProcessFor(
+        ForExpression forExpr,
+        BasicBlock current,
+        BasicBlock exit,
+        Func<BasicBlock> newBlock)
+    {
+        var headerBlock = newBlock();
+        var bodyBlock = newBlock();
+        var exitBlock = newBlock();
+
+        // Jump into loop header
+        current.Terminator = BlockTerminator.Branch(headerBlock);
+        current.AddSuccessor(headerBlock);
+
+        // Header tests collection/next
+        headerBlock.Instructions.Add(forExpr.Collection);
+        headerBlock.Terminator = BlockTerminator.Conditional(forExpr.Collection, bodyBlock, exitBlock);
+        headerBlock.AddSuccessor(bodyBlock);
+        headerBlock.AddSuccessor(exitBlock);
+
+        // Body executes statements then unconditionally loops back to header
+        bodyBlock.Instructions.Add(forExpr.Body);
+        if (forExpr.Body is BlockExpression blockBody)
         {
             var endBody = ProcessLocals(blockBody.Locals, bodyBlock, exit, newBlock);
             if (endBody.Terminator.Kind == BlockTerminatorKind.Unreachable && endBody.Successors.Count == 0)

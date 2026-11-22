@@ -32,14 +32,43 @@ internal sealed class BorrowEscapeAnalysis
     /// </remarks>
     public void Analyze()
     {
+        IndexLoans();
+
+        // 1. Safe borrows of temporaries cannot escape statement to local variables
+        foreach (var statement in body.Blocks.SelectMany(static block => block.Statements))
+        {
+            if (statement.Kind != OwnershipStatementKind.Borrow)
+                continue;
+
+            if (statement.LoanOwner is LocalVariableSymbol localOwner && statement.Place.Root is TemporaryStorageSymbol)
+            {
+                context.Diagnostics.ReportBorrowEscapesTemporary(
+                    statement.Span,
+                    $"local variable '{localOwner.Name.Text}'",
+                    statement.Source);
+            }
+        }
+
+        // 2. Safe borrows cannot escape enclosing function
         if (!ReturnsSafeBorrow())
             return;
 
-        IndexLoans();
         foreach (var block in body.Blocks)
         {
-            if (block.Terminator.ReturnExpression is { } returned && TryFindReferent(returned, out var referent) && referent.Root is LocalVariableSymbol local)
-                Report(returned, local);
+            if (block.Terminator.ReturnExpression is { } returned && TryFindReferent(returned, out var referent))
+            {
+                if (referent.Root is TemporaryStorageSymbol)
+                {
+                    context.Diagnostics.ReportBorrowEscapesTemporary(
+                        returned.GetSpan() ?? default,
+                        "enclosing function",
+                        returned.GetSource());
+                }
+                else if (referent.Root is LocalVariableSymbol local)
+                {
+                    Report(returned, local);
+                }
+            }
         }
     }
 

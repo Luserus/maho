@@ -686,27 +686,6 @@ internal sealed partial class ExpressionResolutionPass
     }
 
     /// <summary>
-    /// Resolves a collection literal expression (<c>[a, b, c]</c>) and types it as an array.
-    /// </summary>
-    /// <param name="collection">The collection expression syntax node.</param>
-    /// <param name="scope">The current lexical scope.</param>
-    /// <param name="containingFunction">Handle to the enclosing function or method symbol.</param>
-    /// <returns>An array <see cref="TypeRef"/> wrapping the inferred element type.</returns>
-    private TypeRef ResolveCollection(CollectionExpression collection, Scope scope, SymbolHandle containingFunction)
-    {
-        TypeRef elemType = TypeRef.Unresolved;
-        foreach (var item in collection.Expressions)
-        {
-            var itemType = ResolveExpression(item, scope, containingFunction);
-            if (elemType.IsUnresolved)
-                elemType = itemType;
-        }
-
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrayHandle);
-        return TypeRef.FixedArray(elemType, collection.Expressions.Count, fixedArrayHandle != default ? fixedArrayHandle : null);
-    }
-
-    /// <summary>
     /// Resolves a type syntax node to a semantic <see cref="TypeRef"/> by querying the lexical scope.
     /// </summary>
     /// <param name="syntax">The type syntax node to resolve.</param>
@@ -722,7 +701,7 @@ internal sealed partial class ExpressionResolutionPass
                 PointerTypeModifier => TypeRef.Pointer(inner),
                 ReferenceTypeModifier => TypeRef.Reference(inner),
                 OptionalTypeModifier => TypeRef.Optional(inner),
-                ArrayTypeModifier => TypeRef.Array(inner),
+                ArrayTypeModifier arrMod => TypeRef.Array(inner, arrMod.Dimension),
                 _ => TypeRef.Error
             };
         }
@@ -734,15 +713,36 @@ internal sealed partial class ExpressionResolutionPass
                 return TypeRef.Dyn(inner);
             if (prefixModified.Modifier is UntaggedTypeModifier)
                 return TypeRef.Untagged(inner);
+            if (prefixModified.Modifier is SafeAliasTypeModifier safeMod)
+                return TypeRef.Alias(inner, isMutable: safeMod.IsMutable, isUnsafe: false);
+            if (prefixModified.Modifier is UnsafeAliasTypeModifier unsafeMod)
+                return TypeRef.Alias(inner, isMutable: unsafeMod.IsMutable, isUnsafe: true);
             return TypeRef.Error;
         }
 
         var name = ResolutionContext.GetSymbolName(syntax);
         var syms = scope.ResolveType(name);
         if (syms.Count > 0)
-            return TypeRef.Resolved(ResolutionContext.GetHandle(syms[0]));
+        {
+            var handle = ResolutionContext.GetHandle(syms[0]);
+            var res = TypeRef.Resolved(handle);
+            if (IsInterfaceSymbol(context, handle))
+                return TypeRef.Dyn(res);
+            return res;
+        }
 
         return TypeRef.Unresolved;
+    }
+
+    private static bool IsInterfaceSymbol(ResolutionContext context, SymbolHandle handle)
+    {
+        var sym = context.GetSymbol(handle);
+        return sym switch
+        {
+            TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
+            NestedTypeSymbol nts => nts.TypeKind == TypeKind.Interface,
+            _ => false
+        };
     }
 
 }

@@ -273,6 +273,30 @@ internal sealed partial class Parser
         return (false, LookaheadResultContext.MissingDelimeter);
     }
 
+    /// <summary> Checks whether the upcoming tokens in a 'for' loop header look like a variable declaration. </summary>
+    private bool LooksLikeForVariableDeclaration()
+    {
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Var)
+            return true;
+
+        if (IsCurrentTokenModifier)
+            return true;
+
+        lookaheadCurrent = current;
+        var (type, success, _) = LookaheadParseTypeSyntax();
+        if (!success)
+            return false;
+
+        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.In)
+            return false;
+
+        var (name, nameSuccess) = LookaheadParseNamedSyntax();
+        if (!nameSuccess)
+            return false;
+
+        return LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.In;
+    }
+
     /// <summary> Consumes the current speculative token and advances the lookahead cursor. </summary>
     private Token LookaheadConsume()
     {
@@ -580,7 +604,7 @@ internal sealed partial class Parser
         else
             baseType = new SimpleType(identifier);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType(fromLookahead: true).Success)
+        if (identifier.MatchingKind is not MatchingKeywordKind.Var && LookaheadCurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType(fromLookahead: true).Success)
         {
             var (uniformTuple, success) = LookaheadParseUniformTupleType(baseType);
             if (!success)
@@ -631,7 +655,7 @@ internal sealed partial class Parser
 
         LookaheadConsume(); // consume ')'
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Identifier or TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
+        if ((LookaheadCurrentToken.Kind == TokenKind.Identifier && LookaheadCurrentToken.MatchingKind != MatchingKeywordKind.In) || LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand)
         {
             lookaheadCurrent = saved;
             return (true, LookaheadResultContext.Success);
@@ -824,6 +848,21 @@ internal sealed partial class Parser
             var ampersand = LookaheadConsume();
             var closeBracket = LookaheadConsume();
             return (new SpanTypeModifier(openBracket, ampersand, closeBracket), true);
+        }
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Comma)
+        {
+            int dimension = 1;
+            while (LookaheadCurrentToken.Kind is TokenKind.Comma)
+            {
+                LookaheadConsume();
+                dimension++;
+            }
+            if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
+                return (new ArrayTypeModifier(openBracket, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), dimension), false);
+
+            var closeBracket = LookaheadConsume();
+            return (new ArrayTypeModifier(openBracket, closeBracket, dimension), true);
         }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)

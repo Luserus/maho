@@ -229,6 +229,21 @@ internal sealed partial class DeclarationResolutionPass
             }
         }
 
+        // 7b. Constants
+        foreach (var constant in context.ConstantSymbols)
+        {
+            if (constant.Syntax is not null)
+            {
+                ValidateModifierList(
+                    constant.Syntax.Modifiers,
+                    allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Static, MatchingKeywordKind.Unsafe],
+                    itemKind: "constant",
+                    name: constant.Name.Text,
+                    span: constant.Syntax.Identifier.GetSpan() ?? default,
+                    source: constant.Syntax.GetSource());
+            }
+        }
+
         // 8. Attributes
         foreach (var attr in context.AttributeSymbols)
         {

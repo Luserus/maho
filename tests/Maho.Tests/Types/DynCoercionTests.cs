@@ -1,3 +1,5 @@
+using Maho.Resolution;
+
 namespace Maho.Tests;
 
 public sealed class DynCoercionTests
@@ -52,6 +54,15 @@ public sealed class DynCoercionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
+            public func Callable.Invoke(&this, TParams args) -> TReturn;
+        }
+
+        [IntrinsicType("Delegate")]
+        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        {
+            nuint codeAddress;
+            ValType* env;
+            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
@@ -173,5 +184,74 @@ public sealed class DynCoercionTests
 
         var dynComp = Compilation.FromSource(dynSource);
         Assert.False(dynComp.HasErrors, string.Join("\n", dynComp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void ImplicitDyn_Interface_ResolvesAsDynSemanticType_OutsideGenerics()
+    {
+        var source = PreludeAndHierarchy + """
+            public interface IGreetable
+            {
+                public func Greet(&this) -> Int32;
+            }
+
+            public struct Greeter : IGreetable
+            {
+                public func Greet(&this) -> Int32 { return 42; }
+            }
+
+            public func TestAlias(&IGreetable g) -> Int32
+            {
+                return g.Greet();
+            }
+
+            public func TestOwned(IGreetable g) -> Int32
+            {
+                return g.Greet();
+            }
+            """;
+
+        var comp = Compilation.FromSource(source);
+        Assert.False(comp.HasErrors, string.Join("\n", comp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var greetableSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "IGreetable");
+        var testAliasSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestAlias");
+        var paramAlias = comp.Context.GetParameterSymbol(testAliasSym.Parameters[0])!;
+        Assert.True(paramAlias.Type.SpecialType is AliasSemanticType);
+        var aliasInner = ((AliasSemanticType)paramAlias.Type.SpecialType).TargetType;
+        Assert.True(aliasInner.SpecialType is DynSemanticType);
+
+        var testOwnedSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestOwned");
+        var paramOwned = comp.Context.GetParameterSymbol(testOwnedSym.Parameters[0])!;
+        Assert.True(paramOwned.Type.SpecialType is DynSemanticType);
+
+        // Verify struct base types is trait bound, NOT dyn
+        var greeterSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "Greeter");
+        var ifaceBase = greeterSym.BaseTypes.First(b => b.Handle == ResolutionContext.GetHandle(greetableSym));
+        Assert.False(ifaceBase.SpecialType is DynSemanticType);
+    }
+
+    [Fact]
+    public void GenericConstraint_Interface_RemainsStaticTraitBound()
+    {
+        var source = PreludeAndHierarchy + """
+            public interface IWorker
+            {
+                public func Work(&this) -> Int32;
+            }
+
+            public func Execute<T>(T item) -> Int32 where T : IWorker
+            {
+                return 1;
+            }
+            """;
+
+        var comp = Compilation.FromSource(source);
+        Assert.False(comp.HasErrors, string.Join("\n", comp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var executeFn = comp.Context.FunctionSymbols.First(f => f.Name.Text == "Execute");
+        var tParam = comp.Context.GenericParameterSymbols[executeFn.GenericParameters[0].ID];
+        Assert.Single(tParam.Constraints);
+        Assert.False(tParam.Constraints[0].SpecialType is DynSemanticType);
     }
 }

@@ -368,6 +368,7 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
 
         // Group 4: Array (requires Pointer, NUInt) and Span (requires Reference, NUInt)
         ValidateArray(typesByIntrinsic);
+        ValidateFixedArray(typesByIntrinsic);
         ValidateSpan(typesByIntrinsic);
 
         // Group 5: Function (requires NUInt) and Delegate (requires NUInt, Pointer)

@@ -158,15 +158,9 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_CallableFixedArray_InvokesCallable()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public interface ArrayCallable
+            public struct CustomFixedArray : Callable<int32>
             {
-                [OperatorFunction("Callable")]
-                public func Invoke(&this) -> int32;
-            }
-
-            public struct CustomFixedArray : ValType, ArrayCallable
-            {
-                public func ArrayCallable.Invoke(&this) -> int32
+                public func Callable.Invoke(&this) -> int32
                 {
                     return 42;
                 }
@@ -181,5 +175,190 @@ public sealed class CollectionExpressionTests
             """);
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Fact]
+    public void CollectionExpression_MultiTerm_UntypedInfersFixedArrayOfTuples()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public func Test() -> Unit
+            {
+                var map = [1 : 2, 3 : 4];
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
+        var local = Assert.Single(fn.LocalVariables);
+        Assert.Equal(TypeRefKind.FixedArray, local.Type.Kind);
+        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Tuple, fixedArr.ElementType.Kind);
+        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        Assert.Equal(2, tupleSem.Elements.Count);
+    }
+
+    [Fact]
+    public void CollectionExpression_FourTerms_Succeeds()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public func Test() -> Unit
+            {
+                var quads = [1 : 2 : 3 : 4, 5 : 6 : 7 : 8];
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
+        var local = Assert.Single(fn.LocalVariables);
+        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
+        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        Assert.Equal(4, tupleSem.Elements.Count);
+    }
+
+    [Fact]
+    public void CollectionExpression_InconsistentTermCount_ReportsMH0568()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public func Test() -> Unit
+            {
+                var bad = [1 : 2, 3];
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0568");
+    }
+
+    [Fact]
+    public void CollectionExpression_TargetTypedContract_Succeeds()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public interface Collection<TKey, TValue>
+            {
+                [OperatorFunction("CollectionAdd")]
+                public func Add(mut &this, TKey key, TValue value) -> Unit;
+            }
+
+            public struct MyMap : Collection<int32, int64>
+            {
+                public func Add(mut &this, int32 key, int64 value) -> Unit {}
+            }
+
+            public func Test() -> Unit
+            {
+                MyMap m = [1 : 100, 2 : 200];
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void CollectionExpression_MissingCollectionContract_ReportsMH0570()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public interface Collection<T>
+            {
+                [OperatorFunction("CollectionAdd")]
+                public func Add(mut &this, T item) -> Unit;
+            }
+
+            public struct NotACollection;
+
+            public func Test() -> Unit
+            {
+                NotACollection c = [1, 2, 3];
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0570");
+    }
+
+    [Fact]
+    public void CollectionExpression_WithTrailer_WithoutCollectionWith_ReportsMH0569()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public interface Collection<T>
+            {
+                [OperatorFunction("CollectionAdd")]
+                public func Add(mut &this, T item) -> Unit;
+            }
+
+            public struct MyList : Collection<int32>
+            {
+                public func Add(mut &this, int32 item) -> Unit {}
+            }
+
+            public func Test() -> Unit
+            {
+                MyList list = [1, 2] with(10);
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0569");
+    }
+
+    [Fact]
+    public void CollectionExpression_WithTrailer_WithCollectionWith_Succeeds()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            public interface Collection<T>
+            {
+                [OperatorFunction("CollectionAdd")]
+                public func Add(mut &this, T item) -> Unit;
+            }
+
+            public interface CollectionWith<TCount>
+            {
+                [OperatorFunction("CollectionWith")]
+                public func With(mut &this, TCount capacity) -> Unit;
+            }
+
+            public struct MyList : Collection<int32>, CollectionWith<int32>
+            {
+                public func Add(mut &this, int32 item) -> Unit {}
+                public func With(mut &this, int32 capacity) -> Unit {}
+            }
+
+            public func Test() -> Unit
+            {
+                MyList list = [1, 2] with(10);
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void MultidimensionalArray_RankAndIndexer_Succeeds()
+    {
+        var compilation = Compilation.FromSource(Prelude + """
+            [IntrinsicType("Array")]
+            public struct Array<T, D : int32>
+            {
+                T* data;
+                nuint len;
+            }
+
+            public func Test(int32[,] grid, int32[,,] cube) -> int32
+            {
+                int32 x = grid[1, 2];
+                return x;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
+        var gridParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
+        Assert.Equal(TypeRefKind.Array, gridParam.Type.Kind);
+        var arrSem = Assert.IsType<ArraySemanticType>(gridParam.Type.SpecialType);
+        Assert.Equal(2, arrSem.Dimension);
+
+        var cubeParam = compilation.Context.GetParameterSymbol(fn.Parameters[1])!;
+        Assert.Equal(TypeRefKind.Array, cubeParam.Type.Kind);
+        var cubeSem = Assert.IsType<ArraySemanticType>(cubeParam.Type.SpecialType);
+        Assert.Equal(3, cubeSem.Dimension);
     }
 }

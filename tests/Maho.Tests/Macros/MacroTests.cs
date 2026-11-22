@@ -25,7 +25,7 @@ public sealed partial class MacroTests
         {
             [IntrinsicFunction("Int32.Add(Int32, Int32)")]
             public func Add.Add(int32 left, int32 right) -> int32;
-            [IntrinsicFunction("Int32.Mul(Int32, Int32)")]
+            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")]
             public func Mul.Mul(int32 left, int32 right) -> int32;
         }
 

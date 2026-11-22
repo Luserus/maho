@@ -78,16 +78,25 @@ public sealed class ConstantFoldingTests
             [IntrinsicFunction("Bool.LogicalNot(Bool)")] public func LogicalNot.Not(bool o) -> bool;
         }
 
-        public interface StrAdd<T> { [OperatorFunction("Addition")] public func Add(Str l, Str r) -> Str; }
-        public interface StrEq<T> { [OperatorFunction("Equality")] public func Eq(Str l, Str r) -> bool; }
+        public interface Add<T> { [OperatorFunction("Addition")] public func Add(T l, T r) -> T; }
+        public interface Sub<T> { [OperatorFunction("Subtraction")] public func Sub(T l, T r) -> T; }
+        public interface Mul<T> { [OperatorFunction("Multiplication")] public func Mul(T l, T r) -> T; }
+        public interface Div<T> { [OperatorFunction("Division")] public func Div(T l, T r) -> T; }
+        public interface Rem<T> { [OperatorFunction("Remainder")] public func Rem(T l, T r) -> T; }
+        public interface Eq<T> { [OperatorFunction("Equality")] public func Eq(T l, T r) -> bool; }
+        public interface Neq<T> { [OperatorFunction("Inequality")] public func Neq(T l, T r) -> bool; }
+        public interface Lt<T> { [OperatorFunction("LessThan")] public func Lt(T l, T r) -> bool; }
+        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public func Le(T l, T r) -> bool; }
+        public interface Gt<T> { [OperatorFunction("GreaterThan")] public func Gt(T l, T r) -> bool; }
+        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public func Ge(T l, T r) -> bool; }
 
         [IntrinsicType("Str")]
-        public struct Str : StrAdd<Str>, StrEq<Str>
+        public struct Str : Add<Str>, Eq<Str>
         {
             public int8& buffer;
             public nuint length;
-            [IntrinsicFunction("Str.Add(Str, Str)")] public func StrAdd.Add(Str l, Str r) -> Str;
-            [IntrinsicFunction("Str.Eq(Str, Str)")] public func StrEq.Eq(Str l, Str r) -> bool;
+            [IntrinsicFunction("Str.Add(Str, Str)")] public func Add.Add(Str l, Str r) -> Str;
+            [IntrinsicFunction("Str.Eq(Str, Str)")] public func Eq.Eq(Str l, Str r) -> bool;
         }
 
         public interface Callable<TReturn, TParams...>
@@ -113,33 +122,21 @@ public sealed class ConstantFoldingTests
             public func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
-        public interface Add<T> { [OperatorFunction("Addition")] public func Add(int32 l, int32 r) -> int32; }
-        public interface Sub<T> { [OperatorFunction("Subtraction")] public func Sub(int32 l, int32 r) -> int32; }
-        public interface Mul<T> { [OperatorFunction("Multiplication")] public func Mul(int32 l, int32 r) -> int32; }
-        public interface Div<T> { [OperatorFunction("Division")] public func Div(int32 l, int32 r) -> int32; }
-        public interface Rem<T> { [OperatorFunction("Remainder")] public func Rem(int32 l, int32 r) -> int32; }
-        public interface Eq<T> { [OperatorFunction("Equality")] public func Eq(int32 l, int32 r) -> bool; }
-        public interface Neq<T> { [OperatorFunction("Inequality")] public func Neq(int32 l, int32 r) -> bool; }
-        public interface Lt<T> { [OperatorFunction("LessThan")] public func Lt(int32 l, int32 r) -> bool; }
-        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public func Le(int32 l, int32 r) -> bool; }
-        public interface Gt<T> { [OperatorFunction("GreaterThan")] public func Gt(int32 l, int32 r) -> bool; }
-        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public func Ge(int32 l, int32 r) -> bool; }
-
         [IntrinsicType("Int32")]
         public struct int32 : Add<int32>, Sub<int32>, Mul<int32>, Div<int32>, Rem<int32>,
                               Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
         {
             [IntrinsicFunction("Int32.Add(Int32, Int32)")] public func Add.Add(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Sub(Int32, Int32)")] public func Sub.Sub(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Mul(Int32, Int32)")] public func Mul.Mul(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Div(Int32, Int32)")] public func Div.Div(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Rem(Int32, Int32)")] public func Rem.Rem(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Eq(Int32, Int32)")] public func Eq.Eq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.Neq(Int32, Int32)")] public func Neq.Neq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.Lt(Int32, Int32)")] public func Lt.Lt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.Le(Int32, Int32)")] public func Le.Le(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.Gt(Int32, Int32)")] public func Gt.Gt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.Ge(Int32, Int32)")] public func Ge.Ge(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Subtract(Int32, Int32)")] public func Sub.Sub(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")] public func Mul.Mul(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Divide(Int32, Int32)")] public func Div.Div(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Remainder(Int32, Int32)")] public func Rem.Rem(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Equals(Int32, Int32)")] public func Eq.Eq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.NotEquals(Int32, Int32)")] public func Neq.Neq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThan(Int32, Int32)")] public func Lt.Lt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")] public func Le.Le(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")] public func Gt.Gt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")] public func Ge.Ge(int32 l, int32 r) -> bool;
         }
 
         [IntrinsicType("Never")]
@@ -411,5 +408,59 @@ public sealed class ConstantFoldingTests
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH3002" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Const_Untyped_CollapsesLate_IntoDifferentTypes()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{ConstantFoldingPrelude}}
+
+            public const MaxBufferSize = 1024;
+
+            public struct BufferHolder
+            {
+                public func Test() -> void
+                {
+                    int32 a = MaxBufferSize;
+                    int64 b = MaxBufferSize;
+                    const LocalSize = 256;
+                    int32 c = LocalSize;
+                    int64 d = LocalSize;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Contains(compilation.Context.ConstantSymbols, c => c.Name.Text == "MaxBufferSize");
+    }
+
+    [Fact]
+    public void Const_Typed_CollapsesEarly()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{ConstantFoldingPrelude}}
+
+            public const int32 ExplicitInt = 100;
+
+            public struct Checker
+            {
+                public const int64 MemberConst = 200;
+
+                public func Test() -> void
+                {
+                    int32 a = ExplicitInt;
+                    int64 b = MemberConst;
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        var topConst = compilation.Context.ConstantSymbols.FirstOrDefault(c => c.Name.Text == "ExplicitInt");
+        Assert.NotNull(topConst);
+        Assert.True(topConst.Type.Handle.HasValue);
+        var sym = compilation.Context.GetSymbol(topConst.Type.Handle.Value) as TypeSymbol;
+        Assert.NotNull(sym);
+        Assert.Equal("int32", sym.Name.Text);
     }
 }

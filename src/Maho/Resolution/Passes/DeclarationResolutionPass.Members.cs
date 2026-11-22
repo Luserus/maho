@@ -271,6 +271,19 @@ internal sealed partial class DeclarationResolutionPass
     private void ResolveVariable(LocalVariableSymbol symbol, VariableDeclaration? syntax) =>
         ResolveVariableCore(symbol, syntax, value => symbol.Type = value, value => symbol.Attributes = value, allowInference: true);
 
+    private void ResolveConstant(ConstantSymbol symbol)
+    {
+        if (symbol.Syntax is not { } syntax)
+            return;
+
+        if (syntax.Type is not null)
+            symbol.Type = ResolveType(syntax.Type, symbol.EnclosingScope);
+        else
+            symbol.Type = TypeRef.Unresolved;
+
+        symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
+    }
+
     private void ResolveVariableCore(Symbol symbol, VariableDeclaration? syntax, Action<TypeRef> setType, Action<List<SymbolHandle>> setAttributes, bool allowInference = false)
     {
         if (syntax is null)
@@ -385,6 +398,10 @@ internal sealed partial class DeclarationResolutionPass
                 break;
             case LocalReturnStatement statement:
                 ResolveExpression(statement.Statement.Expression, scope, containingFunction);
+                break;
+            case LocalYieldStatement statement:
+                if (statement.Expression is not null)
+                    ResolveExpression(statement.Expression, scope, containingFunction);
                 break;
             case LocalGotoStatement statement:
                 ResolveLabelReference(statement, new SymbolPart(statement.Identifier), containingFunction);

@@ -89,6 +89,63 @@ internal sealed class OwnershipTypeClassifier
     }
 
     /// <summary>
+    /// Checks whether a type implements the <see cref="OperatorKind.OwningDeref"/> interface contract,
+    /// indicating that it is an owning container/smart pointer that exclusively owns its pointee.
+    /// </summary>
+    public bool IsOwningIndirection(TypeRef type, out TypeRef pointeeType)
+    {
+        pointeeType = TypeRef.Unresolved;
+        if (type.Handle is not { } handle)
+            return false;
+
+        var unwrap = context.UnwrapAlias(handle);
+        if (context.DiscoveredOperators.TryGetOperators(OperatorKind.OwningDeref, out var candidates))
+        {
+            var sym = context.GetSymbol(unwrap);
+            IReadOnlyList<TypeRef> baseTypes = sym switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+
+            foreach (var cand in candidates)
+            {
+                var match = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
+                if (match.Handle.HasValue)
+                {
+                    if (match.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count >= 1)
+                    {
+                        var retType = gst.TypeArguments[0];
+                        if (type.SpecialType is GenericSemanticType containerGst && sym is TypeSymbol containerSym)
+                        {
+                            Dictionary<SymbolHandle, TypeRef> subst = [];
+                            for (int i = 0; i < containerSym.GenericParameters.Count && i < containerGst.TypeArguments.Count; i++)
+                            {
+                                subst[containerSym.GenericParameters[i]] = containerGst.TypeArguments[i];
+                            }
+                            retType = retType.Substitute(subst);
+                        }
+
+                        if (retType.SpecialType is ReferenceSemanticType refType)
+                            pointeeType = refType.ElementType;
+                        else if (retType.SpecialType is PointerSemanticType ptrType)
+                            pointeeType = ptrType.ElementType;
+                        else if (retType.SpecialType is AliasSemanticType aliasType)
+                            pointeeType = aliasType.TargetType;
+                        else
+                            pointeeType = retType;
+
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Computes destructor requirement after recursion/cache checks have been performed by
     /// <see cref="RequiresDrop"/>.
     /// </summary>

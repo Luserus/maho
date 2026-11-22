@@ -163,12 +163,31 @@ internal sealed partial class DeclarationResolutionPass
         bool isStatic = ifaceMethod.Flags.HasFlag(FunctionFlags.Static);
         var expectedReturn = ifaceMethod.ReturnType.Substitute(typeArgs);
 
-        var expectedParamTypes = new List<TypeRef>(ifaceMethod.Parameters.Count);
+        var expectedParamTypes = new List<TypeRef>();
         foreach (var ph in ifaceMethod.Parameters)
         {
             if (context.GetParameterSymbol(ph) is { } paramSym)
             {
-                expectedParamTypes.Add(paramSym.Type.Substitute(typeArgs));
+                var subst = paramSym.Type.Substitute(typeArgs);
+                bool isVariadicParam = paramSym.Syntax?.Declarator.Type is ModifiedType m && m.Modifier is VariadicTypeModifier;
+                bool isVariadicGeneric = ifaceSym.GenericParameters.Count > 0 &&
+                    (context.GetSymbol(ifaceSym.GenericParameters[^1]) as GenericParameterSymbol)?.IsVariadic == true &&
+                    (paramSym.Type.Handle == ifaceSym.GenericParameters[^1] ||
+                     (paramSym.Syntax?.Declarator.Type is SimpleType st &&
+                      context.GetSymbol(ifaceSym.GenericParameters[^1]) is GenericParameterSymbol gpSym &&
+                      st.Name.Value == gpSym.Name.Text));
+
+                if ((isVariadicParam || isVariadicGeneric) && subst.SpecialType is TupleSemanticType tup)
+                {
+                    foreach (var elem in tup.Elements)
+                    {
+                        expectedParamTypes.Add(elem.Type);
+                    }
+                }
+                else
+                {
+                    expectedParamTypes.Add(subst);
+                }
             }
             else
             {
@@ -389,12 +408,30 @@ internal sealed partial class DeclarationResolutionPass
             };
 
             var currentTypeArgs = new Dictionary<SymbolHandle, TypeRef>(parentTypeArgs);
-            if (typeRef.SpecialType is GenericSemanticType gen && genericParams.Count == gen.TypeArguments.Count)
+            if (typeRef.SpecialType is GenericSemanticType gen)
             {
-                for (int i = 0; i < genericParams.Count; i++)
+                bool hasVariadic = genericParams.Count > 0 &&
+                    (context.GetSymbol(genericParams[^1]) as GenericParameterSymbol)?.IsVariadic == true;
+
+                if (genericParams.Count == gen.TypeArguments.Count)
                 {
-                    var substitutedArg = gen.TypeArguments[i].Substitute(parentTypeArgs);
-                    currentTypeArgs[genericParams[i]] = substitutedArg;
+                    for (int i = 0; i < genericParams.Count; i++)
+                    {
+                        var substitutedArg = gen.TypeArguments[i].Substitute(parentTypeArgs);
+                        currentTypeArgs[genericParams[i]] = substitutedArg;
+                    }
+                }
+                else if (hasVariadic && gen.TypeArguments.Count >= genericParams.Count - 1)
+                {
+                    int fixedCount = genericParams.Count - 1;
+                    for (int i = 0; i < fixedCount; i++)
+                    {
+                        currentTypeArgs[genericParams[i]] = gen.TypeArguments[i].Substitute(parentTypeArgs);
+                    }
+                    var variadicArgs = gen.TypeArguments.Skip(fixedCount).Select(a => a.Substitute(parentTypeArgs)).ToList();
+                    context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupH);
+                    var tupleType = TypeRef.Tuple(variadicArgs.Select(a => new TupleElement(a, null)).ToList(), tupH != default ? tupH : null);
+                    currentTypeArgs[genericParams[^1]] = tupleType;
                 }
             }
 

@@ -258,7 +258,7 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ImplicitTopLevel_SelectsSingleFileUsingTopLevelWhenNoEntryFile()
+    public void AnalyzeProjectFile_ImplicitTopLevel_RequiresEntryFileOrPragmaDirective()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -275,8 +275,8 @@ public sealed class MahoCompilerTests
 
             Compilation result = AnalyzeProject(projectPath);
 
-            Assert.False(result.HasErrors);
-            Assert.Equal(Path.GetFullPath(secondPath), result.EntryFile);
+            Assert.True(result.HasErrors);
+            Assert.Contains(result.Diagnostics, d => d.Code == "MH0160");
         }
         finally
         {
@@ -285,7 +285,7 @@ public sealed class MahoCompilerTests
     }
 
     [Fact]
-    public void AnalyzeProjectFile_ImplicitTopLevel_RejectsMultipleFilesUsingTopLevel()
+    public void AnalyzeProjectFile_ImplicitTopLevel_RejectsMultipleFilesUsingTopLevelWhenNoEntryFile()
     {
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"maho-project-implicit-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -303,7 +303,7 @@ public sealed class MahoCompilerTests
             Compilation result = AnalyzeProject(projectPath);
 
             Assert.True(result.HasErrors);
-            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0161"));
+            Assert.All(result.Files, file => Assert.Contains(file.Diagnostics, diagnostic => diagnostic.Code == "MH0160"));
         }
         finally
         {

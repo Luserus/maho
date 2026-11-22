@@ -48,7 +48,8 @@ internal sealed partial class DeclarationResolutionPass
                 break;
             case IndexExpression index:
                 ResolveExpression(index.Expression, scope, containingSymbol);
-                ResolveExpression(index.Index, scope, containingSymbol);
+                foreach (var arg in index.Arguments)
+                    ResolveExpression(arg, scope, containingSymbol);
                 break;
             case MemberAccessExpression access:
                 ResolveMemberAccess(access, scope, containingSymbol);
@@ -78,6 +79,19 @@ internal sealed partial class DeclarationResolutionPass
                 ResolveExpression(loop.Condition, whileScope, containingSymbol);
                 ResolveExpression(loop.Body, whileScope, containingSymbol);
                 break;
+            case ForExpression forExpr:
+                Scope forScope = context.GetSyntaxScope(forExpr, scope);
+                ResolveExpression(forExpr.Collection, scope, containingSymbol);
+                if (forExpr.Declaration is not null)
+                {
+                    ResolveDeclarationSyntax(forExpr.Declaration, forScope, containingSymbol);
+                }
+                if (forExpr.VariableExpression is not null)
+                {
+                    ResolveExpression(forExpr.VariableExpression, scope, containingSymbol);
+                }
+                ResolveExpression(forExpr.Body, forScope, containingSymbol);
+                break;
             case ElseExpression @else:
                 ResolveExpression(@else.Expression, scope, containingSymbol);
                 break;
@@ -97,6 +111,10 @@ internal sealed partial class DeclarationResolutionPass
                     if (modifier is CollectionConstructorModifier constructor)
                         foreach (var argument in constructor.Arguments)
                             ResolveExpression(argument, scope, containingSymbol);
+                break;
+            case MultiTermExpression multiTerm:
+                foreach (var term in multiTerm.Terms)
+                    ResolveExpression(term, scope, containingSymbol);
                 break;
             case ConstructorCallExpression constructor:
                 ResolveType(constructor.Type, scope);

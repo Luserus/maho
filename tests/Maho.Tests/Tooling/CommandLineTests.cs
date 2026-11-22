@@ -480,8 +480,8 @@ public sealed class CommandLineTests
             string file1 = Path.Combine(tempDir, "First.mh");
             string file2 = Path.Combine(tempDir, "Second.mh");
 
-            File.WriteAllText(file1, "call1();");
-            File.WriteAllText(file2, "call2();");
+            File.WriteAllText(file1, "#pragma toplevel enable\ncall1();");
+            File.WriteAllText(file2, "#pragma toplevel enable\ncall2();");
 
             using var sw = new StringWriter();
             var originalError = Console.Error;

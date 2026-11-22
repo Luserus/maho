@@ -27,6 +27,42 @@ internal sealed class ConstantFoldingPass : ResolutionPass
         reportedWarnings = [];
         try
         {
+            // 0. Evaluate dedicated constants
+            foreach (var constant in context.ConstantSymbols)
+            {
+                if (constant.Syntax?.Value is { } valExpr)
+                {
+                    constContextDepth++;
+                    try
+                    {
+                        var folded = Evaluate(valExpr, context);
+                        constant.Value = folded;
+
+                        if (constant.Syntax.Type is null && folded.Kind != ConstantValueKind.None)
+                        {
+                            constant.Type = folded.Kind switch
+                            {
+                                ConstantValueKind.Int =>
+                                    TypeRef.Literal(CompileTimeLiteralKind.Int, folded.Value?.ToString() ?? "0"),
+                                ConstantValueKind.Float =>
+                                    TypeRef.Literal(CompileTimeLiteralKind.Float, folded.Value?.ToString() ?? "0.0"),
+                                ConstantValueKind.Str =>
+                                    TypeRef.Literal(CompileTimeLiteralKind.Str, folded.Value?.ToString() ?? ""),
+                                ConstantValueKind.Char =>
+                                    TypeRef.Literal(CompileTimeLiteralKind.Char, folded.Value?.ToString() ?? ""),
+                                ConstantValueKind.Bool =>
+                                    context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Bool, out var boolHandle) && boolHandle != default ? TypeRef.Resolved(boolHandle) : constant.Type,
+                                _ => constant.Type
+                            };
+                        }
+                    }
+                    finally
+                    {
+                        constContextDepth--;
+                    }
+                }
+            }
+
             // 1. Evaluate globals
             foreach (var global in context.GlobalVariableSymbols)
             {
@@ -138,6 +174,14 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                         finally { if (isConst) constContextDepth--; }
                     }
                     break;
+                case LocalConstantDeclaration constStmt:
+                    if (constStmt.Declaration.Value is { } constValExpr)
+                    {
+                        constContextDepth++;
+                        try { Evaluate(constValExpr, context); }
+                        finally { constContextDepth--; }
+                    }
+                    break;
                 case LocalReturnStatement retStmt:
                     if (retStmt.Statement.Expression is { } retExpr)
                         Evaluate(retExpr, context);
@@ -211,6 +255,17 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                     else if (sym is GlobalVariableSymbol global && global.Flags.HasFlag(VariableFlags.Const))
                     {
                         if (global.Syntax?.Declarator.Initializer?.Initializer is { } initExpr)
+                        {
+                            constContextDepth++;
+                            try { return Evaluate(initExpr, context); }
+                            finally { constContextDepth--; }
+                        }
+                    }
+                    else if (sym is ConstantSymbol constSym)
+                    {
+                        if (constSym.Value.Kind != ConstantValueKind.None)
+                            return constSym.Value;
+                        if (constSym.Syntax?.Value is { } initExpr)
                         {
                             constContextDepth++;
                             try { return Evaluate(initExpr, context); }

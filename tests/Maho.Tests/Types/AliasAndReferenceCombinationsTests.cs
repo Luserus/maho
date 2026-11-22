@@ -38,18 +38,6 @@ public sealed class AliasAndReferenceCombinationsTests
             public func Deref(&this) -> TReturn;
         }
 
-        public interface MutDeref<TReturn>
-        {
-            [OperatorFunction("Dereference")]
-            public func Deref(mut &this) -> TReturn;
-        }
-
-        public interface MutArrow<TReturn>
-        {
-            [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(mut &this) -> TReturn;
-        }
-
         public interface Addr<T>
         {
             [OperatorFunction("AddressOf")]
@@ -72,15 +60,15 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutableReference")]
-        public struct MutableReference<T> : MutArrow<mut &T>, MutDeref<mut &T>
+        public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutableReference.Deref()")]
-            public func MutDeref.Deref(mut &this) -> mut &T;
+            public func Deref.Deref(&this) -> mut &T;
 
-            public func MutArrow.Arrow(mut &this) -> mut &T
+            public func Arrow.Arrow(&this) -> mut &T
             {
                 return *this;
             }
@@ -102,15 +90,15 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutablePointer")]
-        public struct MutablePointer<T> : MutArrow<mut &T>, MutDeref<mut &T>
+        public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T>
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutablePointer.Deref()")]
-            public func MutDeref.Deref(mut &this) -> mut &T;
+            public func Deref.Deref(&this) -> mut &T;
 
-            public func MutArrow.Arrow(mut &this) -> mut &T
+            public func Arrow.Arrow(&this) -> mut &T
             {
                 return *this;
             }
@@ -560,7 +548,7 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void MutDeref_And_MutArrow_Separate_Interfaces_With_Receiver_Parameters()
+    public void Deref_And_Arrow_Interfaces_With_Receiver_Parameters()
     {
         var source = Prelude + """
             public struct Item
