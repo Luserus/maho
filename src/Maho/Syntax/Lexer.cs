@@ -430,6 +430,8 @@ internal sealed partial class Lexer
             3 when identifier.SequenceEqual("dyn") => MatchingKeywordKind.Dyn,
             3 when identifier.SequenceEqual("int") => MatchingKeywordKind.Int,
             3 when identifier.SequenceEqual("str") => MatchingKeywordKind.Str,
+            3 when identifier.SequenceEqual("try") => MatchingKeywordKind.Try,
+            3 when identifier.SequenceEqual("ext") => MatchingKeywordKind.Ext,
             4 when identifier.SequenceEqual("goto") => MatchingKeywordKind.Goto,
             4 when identifier.SequenceEqual("else") => MatchingKeywordKind.Else,
             4 when identifier.SequenceEqual("enum") => MatchingKeywordKind.Enum,
@@ -449,6 +451,8 @@ internal sealed partial class Lexer
             5 when identifier.SequenceEqual("using") => MatchingKeywordKind.Using,
             5 when identifier.SequenceEqual("yield") => MatchingKeywordKind.Yield,
             5 when identifier.SequenceEqual("break") => MatchingKeywordKind.Break,
+            5 when identifier.SequenceEqual("throw") => MatchingKeywordKind.Throw,
+            5 when identifier.SequenceEqual("catch") => MatchingKeywordKind.Catch,
             5 when identifier.SequenceEqual("float") => MatchingKeywordKind.Float,
             5 when identifier.SequenceEqual("class") => MatchingKeywordKind.Class,
             5 when identifier.SequenceEqual("union") => MatchingKeywordKind.Union,
@@ -471,6 +475,7 @@ internal sealed partial class Lexer
             7 when identifier.SequenceEqual("virtual") => MatchingKeywordKind.Virtual,
             7 when identifier.SequenceEqual("postfix") => MatchingKeywordKind.Postfix,
             7 when identifier.SequenceEqual("literal") => MatchingKeywordKind.Literal,
+            7 when identifier.SequenceEqual("finally") => MatchingKeywordKind.Finally,
             8 when identifier.SequenceEqual("Unsealed") => MatchingKeywordKind.Unsealed,
             8 when identifier.SequenceEqual("internal") => MatchingKeywordKind.Internal,
             8 when identifier.SequenceEqual("operator") => MatchingKeywordKind.Operator,
@@ -481,6 +486,7 @@ internal sealed partial class Lexer
             9 when identifier.SequenceEqual("protected") => MatchingKeywordKind.Protected,
             9 when identifier.SequenceEqual("namespace") => MatchingKeywordKind.Namespace,
             9 when identifier.SequenceEqual("interface") => MatchingKeywordKind.Interface,
+            9 when identifier.SequenceEqual("extension") => MatchingKeywordKind.Extension,
             _ => MatchingKeywordKind.None,
         };
     }

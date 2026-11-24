@@ -37,10 +37,25 @@ internal sealed class NamespaceTrieNode
                 {
                     foreach (var sym in symbols)
                     {
-                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
-                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
                         {
-                            return symbols;
+                            if (gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                                return symbols;
+
+                            if (key.Arity > name.Arity)
+                            {
+                                bool allDefaults = true;
+                                for (int p = name.Arity; p < gp.Count; p++)
+                                {
+                                    if (gp[p].DefaultType == null)
+                                    {
+                                        allDefaults = false;
+                                        break;
+                                    }
+                                }
+                                if (allDefaults)
+                                    return symbols;
+                            }
                         }
                     }
                 }

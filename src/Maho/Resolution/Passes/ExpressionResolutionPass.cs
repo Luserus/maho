@@ -30,9 +30,9 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     private SymbolHandle? hInt8, hInt16, hInt32, hInt64, hInt128, hNInt;
     private SymbolHandle? hUInt8, hUInt16, hUInt32, hUInt64, hUInt128, hNUInt;
     private SymbolHandle? hFloat16, hFloat32, hFloat64, hFloat128;
-    private SymbolHandle? hBool, hChar, hStr, hVoid;
+    private SymbolHandle? hBool, hChar, hStr;
 
-    private TypeRef voidType = TypeRef.Unresolved;
+    private TypeRef voidType = TypeRef.EmptyTuple;
     private TypeRef boolType = TypeRef.Unresolved;
 
     /// <summary>Tracks visited function bodies to avoid redundant evaluation across multiple traversal passes.</summary>
@@ -62,6 +62,9 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     /// <summary>Tracks the current property accessor kind being resolved (get/set), if any.</summary>
     private PropertyAccessorKind? currentAccessorKind;
 
+    private int currentCatchDepth = 0;
+    private bool inFinallyBlock = false;
+
     /// <summary>
     /// Executes Pass 5: binds expression types, dispatches operators against library interfaces,
     /// and resolves retroactive literal collapsing across all statements.
@@ -70,6 +73,8 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     public override void Resolve(ResolutionContext context)
     {
         this.context = context;
+        currentCatchDepth = 0;
+        inFinallyBlock = false;
         CacheIntrinsicHandles();
 
         // 1. Resolve top-level statements / main scope locals
@@ -185,12 +190,6 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
 
         if (intrinsics.TryGet(KnownIntrinsics.Char, out var c)) hChar = c;
         if (intrinsics.TryGet(KnownIntrinsics.Str, out var s)) hStr = s;
-
-        if (intrinsics.TryGet(KnownIntrinsics.Unit, out var v))
-        {
-            hVoid = v;
-            voidType = TypeRef.Resolved(v);
-        }
     }
 
     /// <summary>Checks whether a type reference corresponds to a signed integer primitive.</summary>
@@ -214,19 +213,8 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     /// <summary>Checks whether a type reference corresponds to canonical boolean.</summary>
     private bool IsBool(TypeRef t) => t.Handle is { } h && h == hBool;
 
-    /// <summary>Checks whether a type reference corresponds to <c>void</c>.</summary>
-    private bool IsVoidType(TypeRef t)
-    {
-        if (t.Handle is { } h)
-        {
-            var unwrapped = context.UnwrapAlias(h);
-            if (hVoid is not null && unwrapped == hVoid.Value)
-                return true;
-            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
-                return true;
-        }
-        return false;
-    }
+    /// <summary>Checks whether a type reference corresponds to empty tuple ().</summary>
+    private bool IsVoidType(TypeRef t) => t.IsEmptyTuple;
 
     /// <summary>Retrieves the lexical child scope owned by a symbol, or returns its enclosing scope.</summary>
     private static Scope GetOwnedScope(Symbol symbol) =>
@@ -286,6 +274,9 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 case TopLevelReturnStatement retStmt:
                     if (retStmt.Statement.Expression is { } retExpr)
                         ResolveExpression(retExpr, scope, main);
+                    break;
+                case TopLevelThrowStatement throwStmt:
+                    ResolveTopLevelThrowStatement(throwStmt, scope, main);
                     break;
             }
         }
@@ -356,6 +347,10 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 ResolveReturnStatement(returnStmt, scope, containingFunction, expectedReturnType);
                 break;
 
+            case LocalThrowStatement throwStmt:
+                ResolveThrowStatement(throwStmt, scope, containingFunction);
+                break;
+
             case LocalVariableDeclarationStatement varStmt:
                 ResolveVariableDeclaration(varStmt.Declaration, scope, containingFunction);
                 break;
@@ -383,12 +378,20 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     /// </summary>
     private void ResolveReturnStatement(LocalReturnStatement returnStmt, Scope scope, SymbolHandle containingFunction, TypeRef expectedReturnType)
     {
+        if (inFinallyBlock)
+        {
+            context.Diagnostics.ReportControlLeavesFinally(returnStmt.Statement.Keyword.Span, "return", returnStmt.GetSource());
+        }
+
         TextSpan span;
 
         if (returnStmt.Statement.Expression is { } expr)
         {
             var returnedType = ResolveExpression(expr, scope, containingFunction);
             span = expr.GetSpan() ?? returnStmt.Statement.Keyword.Span;
+
+            if (returnedType.IsError || returnedType.Kind == TypeRefKind.Error)
+                return;
 
             if (lambdaReturnTypes.Count > 0)
                 lambdaReturnTypes.Peek().Add(returnedType);
@@ -453,20 +456,13 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             if (lambdaReturnTypes.Count > 0)
                 lambdaReturnTypes.Peek().Add(voidType);
 
-            var unitQualified = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var uH))
-                ? ResolutionContext.GetQualifiedSymbolName(uH, context)
-                : KnownIntrinsics.Unit;
-            var unitLabel = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out uH))
-                ? ResolutionContext.GetLabelSymbolName(uH, context, scope)
-                : KnownIntrinsics.Unit;
-
             if (expectedReturnType.IsNever(context))
             {
                 context.Diagnostics.ReportReturnTypeMismatch(
                     span,
-                    unitQualified,
+                    "()",
                     "!",
-                    exprLabel: unitLabel,
+                    exprLabel: "()",
                     returnLabel: "!",
                     source: returnStmt.GetSource());
                 return;
@@ -478,13 +474,90 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 {
                     context.Diagnostics.ReportReturnTypeMismatch(
                         span,
-                        unitQualified,
+                        "()",
                         expectedReturnType.ToQualifiedString(context),
-                        exprLabel: unitLabel,
+                        exprLabel: "()",
                         returnLabel: expectedReturnType.ToLabelString(context, scope),
                         source: returnStmt.GetSource());
                 }
             }
+        }
+    }
+
+    private void ResolveThrowStatement(LocalThrowStatement throwStmt, Scope scope, SymbolHandle containingFunction)
+    {
+        if (throwStmt.Statement.Expression is { } expr)
+        {
+            var thrownType = ResolveExpression(expr, scope, containingFunction);
+            if (thrownType.IsError || thrownType.Kind == TypeRefKind.Error)
+                return;
+
+            ValidateThrownType(thrownType, expr.GetSpan() ?? throwStmt.Statement.Keyword.Span, scope, throwStmt.GetSource());
+        }
+        else
+        {
+            if (currentCatchDepth <= 0)
+                context.Diagnostics.ReportBareThrowOutsideCatch(throwStmt.Statement.Keyword.Span, throwStmt.GetSource());
+        }
+    }
+
+    private void ResolveTopLevelThrowStatement(TopLevelThrowStatement throwStmt, Scope scope, SymbolHandle main)
+    {
+        if (throwStmt.Statement.Expression is { } expr)
+        {
+            var thrownType = ResolveExpression(expr, scope, main);
+            if (thrownType.IsError || thrownType.Kind == TypeRefKind.Error)
+                return;
+
+            ValidateThrownType(thrownType, expr.GetSpan() ?? throwStmt.Statement.Keyword.Span, scope, throwStmt.GetSource());
+        }
+        else
+        {
+            if (currentCatchDepth <= 0)
+                context.Diagnostics.ReportBareThrowOutsideCatch(throwStmt.Statement.Keyword.Span, throwStmt.GetSource());
+        }
+    }
+
+    private void ValidateThrownType(TypeRef thrownType, TextSpan span, Scope scope, SourceText? source)
+    {
+        if (thrownType.Kind == TypeRefKind.Error)
+            return;
+
+        bool isRefOrPointer = thrownType.SpecialType is ReferenceSemanticType or PointerSemanticType or AliasSemanticType;
+        if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle) && thrownType.Handle == refHandle)
+            isRefOrPointer = true;
+        if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefHandle) && thrownType.Handle == mutRefHandle)
+            isRefOrPointer = true;
+        if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrHandle) && thrownType.Handle == ptrHandle)
+            isRefOrPointer = true;
+        if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrHandle) && thrownType.Handle == mutPtrHandle)
+            isRefOrPointer = true;
+
+        if (isRefOrPointer)
+        {
+            context.Diagnostics.ReportThrowMustBeValueOrMoved(span, thrownType.ToQualifiedString(context), source);
+            return;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Throwable, out var throwableHandle))
+        {
+            var throwableType = TypeRef.Resolved(throwableHandle);
+            if (!throwableType.IsAssignableFrom(thrownType, context))
+            {
+                context.Diagnostics.ReportTypeNotThrowable(
+                    span,
+                    thrownType.ToQualifiedString(context),
+                    thrownType.ToLabelString(context, scope),
+                    source);
+            }
+        }
+        else
+        {
+            context.Diagnostics.ReportTypeNotThrowable(
+                span,
+                thrownType.ToQualifiedString(context),
+                thrownType.ToLabelString(context, scope),
+                source);
         }
     }
 

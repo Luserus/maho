@@ -28,6 +28,9 @@ internal sealed class ResolutionContext
     public List<GlobalVariableSymbol> GlobalVariableSymbols { get; } = [];
     public List<ConstantSymbol> ConstantSymbols { get; } = [];
     public List<FieldSymbol> FieldSymbols { get; } = [];
+    public List<ExtensionSymbol> ExtensionSymbols { get; } = [];
+    public List<SymbolHandle> StaticConstructors { get; } = [];
+    public SymbolHandle? EntryPoint { get; internal set; }
     public List<ParameterSymbol> ParameterSymbols { get; } = [];
     public IEnumerable<LocalVariableSymbol> LocalVariableSymbols =>
         FunctionSymbols.SelectMany(f => f.LocalVariables).Concat(MethodSymbols.SelectMany(m => m.LocalVariables));
@@ -287,6 +290,7 @@ internal sealed class ResolutionContext
             AliasSymbols.AddRange(baseContext.AliasSymbols);
             MacroSymbols.AddRange(baseContext.MacroSymbols);
             EnumVariantSymbols.AddRange(baseContext.EnumVariantSymbols);
+            ExtensionSymbols.AddRange(baseContext.ExtensionSymbols);
         }
 
         ReferencedProjects = referencedProjects ?? baseContext?.ReferencedProjects ?? [];
@@ -308,6 +312,7 @@ internal sealed class ResolutionContext
         aliasID = AliasSymbols.Count;
         macroID = MacroSymbols.Count;
         enumVariantID = EnumVariantSymbols.Count;
+        extensionID = ExtensionSymbols.Count;
 
         ResolvedTree.OnReferenceAdded = (syntax, symbol) =>
         {
@@ -688,11 +693,11 @@ internal sealed class ResolutionContext
         return symbol;
     }
 
-    public GenericParameterSymbol CreateGenericParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic)
+    public GenericParameterSymbol CreateGenericParameterSymbol(Scope enclosingScope, SymbolPart name, Symbol genericSymbol, GenericParameterKind parameterKind, bool isVariadic, GenericParameterSyntax? syntax = null)
     {
         bool isSink = name.Text == "_" || enclosingScope.IsSink;
         SymbolID id = isSink ? new SymbolID(sinkID--) : genericParameterID++;
-        var symbol = TrackSymbol(new GenericParameterSymbol(id, enclosingScope, name, genericSymbol, parameterKind, isVariadic));
+        var symbol = TrackSymbol(new GenericParameterSymbol(id, enclosingScope, name, genericSymbol, parameterKind, isVariadic, syntax));
 
         if (isSink)
         {
@@ -1099,6 +1104,46 @@ internal sealed class ResolutionContext
         return null;
     }
 
+    private int extensionID;
+
+    public ExtensionSymbol CreateExtensionSymbol(Scope enclosingScope, Scope extensionScope, SymbolPart name, TypeSyntax targetTypeSyntax, ExtensionDeclaration? syntax)
+    {
+        var id = new SymbolID(extensionID++);
+        var symbol = new ExtensionSymbol(id, enclosingScope, extensionScope, name, targetTypeSyntax, syntax);
+        TrackSymbol(symbol);
+        ExtensionSymbols.Add(symbol);
+        Register(enclosingScope, symbol);
+        return symbol;
+    }
+
+    public ExtensionSymbol? GetExtensionSymbol(SymbolHandle handle)
+    {
+        if (handle.Kind != SymbolKind.Extension)
+            return null;
+        if (handle.ProjectId != 0 && handle.ProjectId != ProjectId)
+        {
+            if (TryGetReferencedContext(handle.ProjectId, out var refContext))
+                return refContext.GetExtensionSymbol(handle);
+            return null;
+        }
+
+        if (handle.ID.Value >= 0 && handle.ID.Value < ExtensionSymbols.Count)
+            return ExtensionSymbols[handle.ID];
+        if (sinkSymbolsByHandle.TryGetValue(handle, out var s) && s is ExtensionSymbol ext)
+            return ext;
+
+        if (handle.ProjectId == 0)
+        {
+            foreach (var refProj in ReferencedProjects)
+            {
+                if (refProj.GetExtensionSymbol(handle) is { } refSym)
+                    return refSym;
+            }
+        }
+
+        return null;
+    }
+
     public PropertySymbol? GetPropertySymbol(SymbolHandle handle)
     {
         if (handle.Kind != SymbolKind.Property)
@@ -1238,6 +1283,7 @@ internal sealed class ResolutionContext
             SymbolKind.Attribute => GetAttributeSymbol(handle),
             SymbolKind.NestedAttribute => GetNestedAttributeSymbol(handle),
             SymbolKind.EnumVariant => GetEnumVariantSymbol(handle),
+            SymbolKind.Extension => GetExtensionSymbol(handle),
             _ => sinkSymbolsByHandle.TryGetValue(handle, out var s) ? s : null
         };
 

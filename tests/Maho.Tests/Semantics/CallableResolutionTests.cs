@@ -21,8 +21,6 @@ public sealed class CallableResolutionTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -79,7 +77,7 @@ public sealed class CallableResolutionTests
     public void StandaloneLiteralCall_WhenNotCallable_ReportsMH0611()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 123();
             }

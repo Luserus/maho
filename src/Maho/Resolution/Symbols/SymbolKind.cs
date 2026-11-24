@@ -28,5 +28,6 @@ internal enum SymbolKind : byte
     Constant,
     Label,
     Macro,
-    EnumVariant
+    EnumVariant,
+    Extension
 }

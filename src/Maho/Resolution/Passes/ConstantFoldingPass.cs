@@ -292,6 +292,14 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                 Evaluate(whileExpr.Body, context);
                 return ConstantValue.None;
 
+            case TryExpression tryExpr:
+                Evaluate(tryExpr.TryBlock, context);
+                foreach (var catchClause in tryExpr.CatchClauses)
+                    Evaluate(catchClause.Block, context);
+                if (tryExpr.FinallyClause is { } finallyClause)
+                    Evaluate(finallyClause.Block, context);
+                return ConstantValue.None;
+
             case BlockExpression blockExpr:
                 EvaluateLocals(blockExpr.Locals, context);
                 ConstantValue last = ConstantValue.None;

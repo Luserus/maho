@@ -85,6 +85,9 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
+        if (lhsTypeName.Contains("<error>") || rhsTypeName.Contains("<error>"))
+            return;
+
         var lhsDisplay = lhsLabel ?? lhsTypeName;
         var rhsDisplay = rhsLabel ?? rhsTypeName;
         var builder = BuildError("MH2001", $"cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'", opSpan, source)
@@ -116,6 +119,9 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
+        if (operandTypeName.Contains("<error>"))
+            return;
+
         var operandDisplay = operandLabel ?? operandTypeName;
         var builder = BuildError("MH2002", $"cannot apply unary operator '{op}' to operand of type '{operandTypeName}'", opSpan, source)
             .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
@@ -140,6 +146,9 @@ internal sealed class DiagnosticsManager
         string? lhsLabel = null,
         SourceText? source = null)
     {
+        if (rhsTypeName.Contains("<error>") || lhsTypeName.Contains("<error>"))
+            return;
+
         var rhsDisplay = rhsLabel ?? rhsTypeName;
         BuildError("MH2003", $"cannot assign expression of type '{rhsTypeName}' to variable of type '{lhsTypeName}'", span, source)
             .WithPrimaryLabel(span, rhsDisplay, source)
@@ -156,6 +165,9 @@ internal sealed class DiagnosticsManager
         string? paramLabel = null,
         SourceText? source = null)
     {
+        if (argTypeName.Contains("<error>") || paramTypeName.Contains("<error>"))
+            return;
+
         var argDisplay = argLabel ?? argTypeName;
         BuildError("MH2004", $"argument {index}: cannot convert from '{argTypeName}' to '{paramTypeName}'", span, source)
             .WithPrimaryLabel(span, argDisplay, source)
@@ -177,6 +189,9 @@ internal sealed class DiagnosticsManager
         string? returnLabel = null,
         SourceText? source = null)
     {
+        if (exprTypeName.Contains("<error>") || returnTypeName.Contains("<error>"))
+            return;
+
         var exprDisplay = exprLabel ?? exprTypeName;
         BuildError("MH2006", $"cannot convert return expression of type '{exprTypeName}' to return type '{returnTypeName}'", span, source)
             .WithPrimaryLabel(span, exprDisplay, source)
@@ -415,6 +430,51 @@ internal sealed class DiagnosticsManager
         BuildError("MH0161", "only one source file may contain top-level statements", span, source)
             .WithPrimaryLabel(span, "extra top-level statement source declared here", source)
             .WithHelp("ensure only a single file in the project has top-level statements")
+            .Report();
+
+    /// <summary> Reports that 'Main' function can only be declared at top level in global or namespace scope. </summary>
+    public void ReportMainMustBeTopLevel(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0162", "'Main' function can only be declared at top level in global or namespace scope", span, source)
+            .WithPrimaryLabel(span, "'Main' cannot be declared as a type member", source)
+            .WithHelp("move 'Main' to the top level of the file or namespace")
+            .Report();
+
+    /// <summary> Reports an invalid signature on the top-level 'Main' entry point. </summary>
+    public void ReportInvalidMainSignature(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0163", "invalid 'Main' entry point signature; supported signatures are '() -> void', '() -> int32', '(Array<Str>) -> void', '(Array<Str>) -> int32', '(Str[&]) -> void', or '(Str[&]) -> int32'", span, source)
+            .WithPrimaryLabel(span, "invalid 'Main' signature", source)
+            .WithHelp("change the signature to a supported entry point signature, e.g. '() -> void' or '() -> int32'")
+            .Report();
+
+    /// <summary> Reports ambiguous 'Main' entry points across compilation units. </summary>
+    public void ReportAmbiguousMainEntryPoint(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH0164", message, span, source)
+            .WithPrimaryLabel(span, "ambiguous entry point", source)
+            .WithHelp("specify the entry point file using the EntryFile configuration")
+            .Report();
+
+    /// <summary> Reports that a type declares more than one static constructor. </summary>
+    public void ReportDuplicateStaticConstructor(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0165", $"type '{typeName}' cannot declare more than one static constructor", span, source)
+            .WithPrimaryLabel(span, "duplicate static constructor", source)
+            .Report();
+
+    /// <summary> Reports that an extension declares a stored field. </summary>
+    public void ReportExtensionCannotDeclareFields(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0170", "extensions cannot declare stored fields", span, source)
+            .WithPrimaryLabel(span, "extensions cannot declare stored fields", source)
+            .Report();
+
+    /// <summary> Reports that an extension specifies a base struct or class instead of an interface. </summary>
+    public void ReportExtensionCannotSpecifyBaseStruct(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0171", $"extensions cannot specify a base struct or class, only interfaces; found '{typeName}'", span, source)
+            .WithPrimaryLabel(span, "base struct or class not permitted on extension", source)
+            .Report();
+
+    /// <summary> Reports that an extension method call is ambiguous between multiple extensions. </summary>
+    public void ReportAmbiguousExtensionMethod(TextSpan span, string memberName, SourceText? source = null) =>
+        BuildError("MH0172", $"call to extension method '{memberName}' is ambiguous between multiple extensions", span, source)
+            .WithPrimaryLabel(span, "ambiguous extension method call", source)
             .Report();
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
@@ -761,6 +821,38 @@ internal sealed class DiagnosticsManager
             .Report();
     }
 
+    /// <summary> Reports a method overload that differs solely by receiver modifier. </summary>
+    public void ReportMethodOverloadSolelyByReceiver(
+        string methodName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError(
+            "MH0564",
+            $"method '{methodName}' cannot be overloaded solely by receiver modifier; use distinct method names or generic parameters",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, "conflicting receiver overload", redeclSource);
+
+        if (firstDeclSpan.HasValue)
+            builder = builder.WithSecondaryLabel(firstDeclSpan.Value, "previous receiver declaration here", firstSource);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports a default generic type that does not satisfy declared type constraints. </summary>
+    public void ReportDefaultGenericConstraintViolation(
+        TextSpan span,
+        string paramName,
+        string defaultTypeName,
+        string constraintName,
+        SourceText? source = null) =>
+        BuildError("MH0125", $"default type '{defaultTypeName}' for generic parameter '{paramName}' does not satisfy constraint '{constraintName}'", span, source)
+            .WithPrimaryLabel(span, $"does not satisfy '{constraintName}'", source)
+            .Report();
+
     /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
     public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
         BuildError("MH0542", $"unknown intrinsic type '{intrinsicLiteral}'", span, source)
@@ -1085,5 +1177,35 @@ internal sealed class DiagnosticsManager
     public void ReportYieldTypeMismatch(TextSpan span, string yieldType, string itemType, SourceText? source = null) =>
         BuildError("MH0573", $"yield expression of type '{yieldType}' cannot be assigned to iterator item type '{itemType}'", span, source)
             .WithPrimaryLabel(span, $"expected '{itemType}', found '{yieldType}'", source)
+            .Report();
+
+    /// <summary> Reports that a thrown type does not implement the Throwable interface. </summary>
+    public void ReportTypeNotThrowable(TextSpan span, string typeName, string? label = null, SourceText? source = null)
+    {
+        var display = label ?? typeName;
+        BuildError("MH2030", $"type '{typeName}' is not throwable; must implement 'Throwable'", span, source)
+            .WithPrimaryLabel(span, $"type '{display}' cannot be thrown", source)
+            .WithHelp("implement interface 'Throwable' to throw values of this type")
+            .Report();
+    }
+
+    /// <summary> Reports that an expression in a throw statement is a reference or pointer rather than a value. </summary>
+    public void ReportThrowMustBeValueOrMoved(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH2032", $"exceptions must be thrown by value or moved; cannot throw reference or pointer '{typeName}' directly", span, source)
+            .WithPrimaryLabel(span, "cannot throw reference or pointer directly", source)
+            .WithHelp("throw an owned value of a type implementing 'Throwable' instead")
+            .Report();
+
+    /// <summary> Reports a bare re-throw statement used outside of a catch block. </summary>
+    public void ReportBareThrowOutsideCatch(TextSpan span, SourceText? source = null) =>
+        BuildError("MH2031", "a re-throw statement without an expression is only valid inside a catch block", span, source)
+            .WithPrimaryLabel(span, "cannot re-throw outside a catch block", source)
+            .Report();
+
+    /// <summary> Reports an attempt to branch out of a finally block via return, break, or continue. </summary>
+    public void ReportControlLeavesFinally(TextSpan span, string kind, SourceText? source = null) =>
+        BuildError("MH2033", $"control cannot leave the body of a finally clause with '{kind}'", span, source)
+            .WithPrimaryLabel(span, $"'{kind}' not allowed in finally clause", source)
+            .WithHelp("remove the branch statement from the finally clause")
             .Report();
 }

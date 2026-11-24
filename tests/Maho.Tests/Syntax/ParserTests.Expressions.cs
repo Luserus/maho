@@ -179,7 +179,7 @@ public sealed partial class ParserTests
             public struct Box<T, N: int,> : Base<T,>, Other,
                 where T : Constraint, OtherConstraint,
             {
-                public func Function(Int32 a, Int32 b,) -> void
+                public func Function(Int32 a, Int32 b,) -> ()
                 {
                     Call(a, b,);
                     new Int32[] { a, b, };
@@ -263,7 +263,7 @@ public sealed partial class ParserTests
     public void Parse_FunctionParameter_WithAttributes()
     {
         FunctionDeclaration function = ParseSingleTopLevelFunction("""
-            func Foo([NotNull] int x, [First][Second(1)] string y = "default") -> void;
+            func Foo([NotNull] int x, [First][Second(1)] string y = "default") -> ();
             """);
 
         Assert.Equal(2, function.Signature.Parameters.Count);
@@ -430,7 +430,7 @@ public sealed partial class ParserTests
 
                 const
                 {
-                    func UnsafeFunc() -> void { }
+                    func UnsafeFunc() -> () { }
                 }
             }
 
@@ -439,12 +439,12 @@ public sealed partial class ParserTests
                 UnitVar = 1,
                 TupleVar(int x) = 2,
                 StructVar { int x; } = 3;
-                public func Method() -> void { }
+                public func Method() -> () { }
             }
 
             public union MyUnion (int | string)
             {
-                public func Method() -> void { }
+                public func Method() -> () { }
             }
 
             public static func identity<T>(T value) -> int where T: Extra.Nested
@@ -457,7 +457,7 @@ public sealed partial class ParserTests
                 return 0;
             }
 
-            public static func Forward() -> void;
+            public static func Forward() -> ();
 
             global { using Extra; int globalBlockValue = 0; }
             call();
@@ -960,7 +960,7 @@ public sealed partial class ParserTests
     public void Parse_GenericDeclarationInStatementContext_ParsesAsDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 A<B> C;
             }
@@ -1006,7 +1006,7 @@ public sealed partial class ParserTests
     public void Parse_ExpressionGenericsComparison_ParsesAsBinaryExpressions()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var r1 = A<B>(x);
                 var r2 = A<B>(x, y);
@@ -1033,7 +1033,7 @@ public sealed partial class ParserTests
     public void Parse_ExpressionGenericsCall_ParsesAsCallExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var r1 = A<B, C>(x);
                 var r2 = A<B>(p: x);
@@ -1065,7 +1065,7 @@ public sealed partial class ParserTests
     public void Parse_TurbofishOnVariableInstance_ParsesAsGenericNameExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var v = A::<B>;
             }
@@ -1084,7 +1084,7 @@ public sealed partial class ParserTests
     public void Parse_TupleSyntax_SupportsNamedElementsAndUniformTuple()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 (Type a, Type2 b, Type3 c) var1;
                 Type (a, b, c) var2;
@@ -1127,7 +1127,7 @@ public sealed partial class ParserTests
     public void Parse_SuffixedLiteralsInExpressions_ParsesAsLiteralExpressionsWithSuffixProperties()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var a = 123f32 + 456i32;
                 var b = 1.5e-3f32 * 2_000e1_0f64;

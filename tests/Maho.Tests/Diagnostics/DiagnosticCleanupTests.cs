@@ -20,7 +20,6 @@ public sealed class DiagnosticCleanupTests
             [IntrinsicType("Int32")] public struct Int32;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Unit")] public struct Unit;
             [IntrinsicType("Bool")] public struct Bool;
 
             [IntrinsicType("Reference")]
@@ -68,7 +67,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 Int32 x;
                 Int64 y = x;
@@ -90,7 +89,7 @@ public sealed class DiagnosticCleanupTests
             using MyInt = Std.Int32;
             using MyLong = Std.Int64;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyInt x;
                 MyLong y = x;
@@ -110,7 +109,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test(func(Int32) -> Int64 fp) -> Unit
+            public func Test(func(Int32) -> Int64 fp) -> ()
             {
                 fp.NonExistent;
             }
@@ -135,7 +134,7 @@ public sealed class DiagnosticCleanupTests
                 return res;
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 TargetFn.NonExistent;
             }
@@ -154,7 +153,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test(Function<Int64, Int32> f) -> Unit
+            public func Test(Function<Int64, Int32> f) -> ()
             {
                 f.NonExistent;
             }
@@ -184,8 +183,8 @@ public sealed class DiagnosticCleanupTests
                 [IntrinsicType("Pointer")] public struct Pointer<T> { MyNUInt addr; }
                 [IntrinsicType("ValueType")] public struct ValType;
 
-                [IntrinsicType("Unit")] public struct MyUnit;
                 [IntrinsicType("Int32")] public struct MyInt32;
+                public struct MyUnit;
 
                 public interface Callable<TReturn, TParams...>
                 {
@@ -229,7 +228,7 @@ public sealed class DiagnosticCleanupTests
 
             public struct CustomPoint;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 CustomPoint a;
                 CustomPoint b;

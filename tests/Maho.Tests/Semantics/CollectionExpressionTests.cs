@@ -21,8 +21,6 @@ public sealed class CollectionExpressionTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -82,7 +80,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_Unconstrained_InfersFixedArray()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
             }
@@ -112,8 +110,6 @@ public sealed class CollectionExpressionTests
             public struct int32;
             [IntrinsicType("NUInt")]
             public struct nuint;
-            [IntrinsicType("Unit")]
-            public struct Unit;
             [IntrinsicType("Bool")]
             public struct bool;
 
@@ -144,7 +140,7 @@ public sealed class CollectionExpressionTests
             """;
 
         var compilation = Compilation.FromSource(PreludeWithoutFixedArray + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
             }
@@ -181,7 +177,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_MultiTerm_UntypedInfersFixedArrayOfTuples()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var map = [1 : 2, 3 : 4];
             }
@@ -201,7 +197,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_FourTerms_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var quads = [1 : 2 : 3 : 4, 5 : 6 : 7 : 8];
             }
@@ -219,7 +215,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_InconsistentTermCount_ReportsMH0568()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var bad = [1 : 2, 3];
             }
@@ -236,15 +232,15 @@ public sealed class CollectionExpressionTests
             public interface Collection<TKey, TValue>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, TKey key, TValue value) -> Unit;
+                public func Add(mut &this, TKey key, TValue value) -> ();
             }
 
             public struct MyMap : Collection<int32, int64>
             {
-                public func Add(mut &this, int32 key, int64 value) -> Unit {}
+                public func Add(mut &this, int32 key, int64 value) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyMap m = [1 : 100, 2 : 200];
             }
@@ -260,12 +256,12 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                public func Add(mut &this, T item) -> ();
             }
 
             public struct NotACollection;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 NotACollection c = [1, 2, 3];
             }
@@ -282,15 +278,15 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                public func Add(mut &this, T item) -> ();
             }
 
             public struct MyList : Collection<int32>
             {
-                public func Add(mut &this, int32 item) -> Unit {}
+                public func Add(mut &this, int32 item) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyList list = [1, 2] with(10);
             }
@@ -307,22 +303,22 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                public func Add(mut &this, T item) -> ();
             }
 
             public interface CollectionWith<TCount>
             {
                 [OperatorFunction("CollectionWith")]
-                public func With(mut &this, TCount capacity) -> Unit;
+                public func With(mut &this, TCount capacity) -> ();
             }
 
             public struct MyList : Collection<int32>, CollectionWith<int32>
             {
-                public func Add(mut &this, int32 item) -> Unit {}
-                public func With(mut &this, int32 capacity) -> Unit {}
+                public func Add(mut &this, int32 item) -> () {}
+                public func With(mut &this, int32 capacity) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyList list = [1, 2] with(10);
             }

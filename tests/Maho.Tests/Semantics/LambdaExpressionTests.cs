@@ -17,7 +17,6 @@ public sealed class LambdaExpressionTests
         [IntrinsicType("Int8")] public struct int8;
         [IntrinsicType("Int64")] public struct int64;
         [IntrinsicType("NUInt")] public struct nuint;
-        [IntrinsicType("Unit")] public struct void;
         [IntrinsicType("Int32")] public struct int32;
 
         [IntrinsicType("Reference")]
@@ -73,7 +72,7 @@ public sealed class LambdaExpressionTests
     public void Parse_LambdaExpressions_VariousForms_ParseCorrectly()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var l1 = x => x;
                 var l2 = (x, y) => x;
@@ -112,7 +111,7 @@ public sealed class LambdaExpressionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     func(int32) -> int32 f = x => x;
                 }
@@ -130,7 +129,7 @@ public sealed class LambdaExpressionTests
 
             public struct Host
             {
-                public func Test(int32 captured) -> void
+                public func Test(int32 captured) -> ()
                 {
                     delegate(int32) -> int32 d = x => captured;
                 }
@@ -148,7 +147,7 @@ public sealed class LambdaExpressionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     func(int32) -> int32 f = (int32 x) -> int32 => {
                         int32 y = x;
@@ -169,7 +168,7 @@ public sealed class LambdaExpressionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     func(int32) -> int32 f = (int32 x) -> int32 => {
                         int32 y = x;

@@ -11,8 +11,6 @@ public sealed partial class MacroTests
 
         intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         [IntrinsicType("NUInt")]
         public struct nuint;
@@ -169,7 +167,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -214,7 +212,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -252,7 +250,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 temp = 1;
                     int32 other = 2;
@@ -288,7 +286,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -357,7 +355,7 @@ public sealed partial class MacroTests
             {
                 public struct List;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     List arr = $wrap(10, 20, 30);
                 }
@@ -389,7 +387,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     $call_all(print, 1, 2, 3);
                 }

@@ -21,6 +21,8 @@ internal sealed partial class Parser
             return ParseTopLevelBlock(null, topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Attribute)
             return ParseTopLevelAttributeDeclaration(attributes, modifiers);
+        else if (CurrentToken.MatchingKind is MatchingKeywordKind.Extension)
+            return new TopLevelExtensionDeclaration(ParseExtensionDeclaration(attributes, modifiers));
         else if (IsCurrentTokenTypeDeclarationStart)
             return ParseTopLevelTypeDeclaration(attributes, modifiers);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen)
@@ -437,6 +439,45 @@ internal sealed partial class Parser
     {
         var type = ParseType(attributes, modifiers);
         return new TopLevelTypeDeclaration(type);
+    }
+
+    private ExtensionDeclaration ParseExtensionDeclaration(IReadOnlyList<AttributeListSyntax> attributes, IReadOnlyList<Token> modifiers)
+    {
+        var keyword = Consume();
+
+        Token? lessThan = null;
+        SeparatedSyntaxList<GenericParameterSyntax>? genericParameters = null;
+        Token? greaterThan = null;
+
+        if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters(fromLookahead: false).Success)
+        {
+            lessThan = Consume();
+            genericParameters = ParseGenericParameterList();
+            greaterThan = ExpectToken(TokenKind.GreaterThanSign, "'>'", "to close the generic parameter list");
+        }
+
+        TypeSyntax targetType = ParseTypeSyntax();
+
+        TypeBaseClause? baseClause = null;
+        if (CurrentToken.Kind is TokenKind.Colon)
+            baseClause = ParseTypeBaseClause();
+
+        List<TypeConstraintClause> constraints = [];
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
+            constraints.Add(ParseTypeConstraintClause());
+
+        TypeBody body;
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+            body = ParseTypeBlockBody();
+        else if (CurrentToken.Kind is TokenKind.Semicolon)
+            body = ParseTypeEmptyBody();
+        else
+        {
+            diagnostics.ReportExpectedBody(CurrentToken.Span, "an extension body", GetTokenDisplay(CurrentToken), "after the extension declaration");
+            body = new TypeEmptyBody(CreateMissingToken());
+        }
+
+        return new ExtensionDeclaration(attributes, modifiers, keyword, lessThan, genericParameters, greaterThan, targetType, baseClause, constraints, body);
     }
 
     private TopLevelBlockDeclaration ParseTopLevelBlock(Token? attachedKeyword, bool topLevelStatementsEnabled)
@@ -1196,6 +1237,9 @@ internal sealed partial class Parser
     private TypeSyntax ParseParenthesizedType()
     {
         var openParen = Consume();
+        if (CurrentToken.Kind is TokenKind.RightParen)
+            return new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), Consume());
+
         var nodesAndSeparators = new List<SyntaxNode>();
 
         var firstType = ParseTypeSyntax();
@@ -1530,7 +1574,15 @@ internal sealed partial class Parser
                 };
             }
 
-            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
+            Token? equals = null;
+            TypeSyntax? defaultType = null;
+            if (CurrentToken.Kind is TokenKind.Equals)
+            {
+                equals = Consume();
+                defaultType = ParseTypeSyntax();
+            }
+
+            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind, equals, defaultType));
 
             if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());

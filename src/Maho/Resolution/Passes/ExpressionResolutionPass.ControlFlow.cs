@@ -104,6 +104,116 @@ internal sealed partial class ExpressionResolutionPass
     }
 
     /// <summary>
+    /// Resolves a <c>try-catch-finally</c> expression: resolves the try block, checks catch clause
+    /// type filters (ensuring they implement <see cref="KnownIntrinsics.Throwable"/> directly or via reference),
+    /// scopes catch variables, and checks finally clause restrictions.
+    /// </summary>
+    private TypeRef ResolveTry(TryExpression tryExpr, Scope scope, SymbolHandle containingFunction)
+    {
+        var tryType = ResolveExpression(tryExpr.TryBlock, scope, containingFunction);
+        var commonType = tryType;
+
+        foreach (var catchClause in tryExpr.CatchClauses)
+        {
+            var catchScope = context.GetSyntaxScope(catchClause, scope);
+            TypeRef? boundType = null;
+
+            if (catchClause.Type is not null)
+            {
+                boundType = ResolveTypeSyntax(catchClause.Type, catchScope);
+                ValidateCatchType(boundType.Value, catchClause.Type.GetSpan() ?? default, catchScope, catchClause.GetSource());
+            }
+
+            if (catchClause.VariableIdentifier is { } varId && varId.Value != "_")
+            {
+                var varPart = new SymbolPart(varId.Value);
+                if (catchScope.SymbolsByName.TryGetValue(varPart, out var symList) && symList.Count > 0 && symList[0] is LocalVariableSymbol local)
+                {
+                    local.Type = boundType ?? (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Throwable, out var th) ? TypeRef.Resolved(th) : TypeRef.Unresolved);
+                }
+            }
+
+            currentCatchDepth++;
+            try
+            {
+                var catchType = ResolveExpression(catchClause.Block, catchScope, containingFunction);
+                if (commonType.IsNever(context))
+                    commonType = catchType;
+            }
+            finally
+            {
+                currentCatchDepth--;
+            }
+        }
+
+        if (tryExpr.FinallyClause is { } finallyClause)
+        {
+            inFinallyBlock = true;
+            try
+            {
+                ResolveExpression(finallyClause.Block, scope, containingFunction);
+            }
+            finally
+            {
+                inFinallyBlock = false;
+            }
+        }
+
+        return commonType;
+    }
+
+    private void ValidateCatchType(TypeRef catchType, TextSpan span, Scope scope, SourceText? source)
+    {
+        if (catchType.Kind == TypeRefKind.Error)
+            return;
+
+        // Catch type can be:
+        // 1. Concrete struct: must implement Throwable
+        // 2. Reference / view: &T, mut &T, dyn &T, T&, dyn T&, Reference<T>, where T implements Throwable
+        TypeRef pointee = catchType;
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            if (pointee.SpecialType is ReferenceSemanticType r)
+            {
+                pointee = r.ElementType;
+                changed = true;
+            }
+            else if (pointee.SpecialType is AliasSemanticType a)
+            {
+                pointee = a.TargetType;
+                changed = true;
+            }
+            else if (pointee.SpecialType is DynSemanticType d)
+            {
+                pointee = d.TargetType;
+                changed = true;
+            }
+            else if (pointee.SpecialType is GenericSemanticType gen &&
+                     context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) &&
+                     gen.TargetHandle == refH)
+            {
+                pointee = gen.TypeArguments.Count > 0 ? gen.TypeArguments[0] : TypeRef.Unresolved;
+                changed = true;
+            }
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Throwable, out var throwableHandle))
+        {
+            var throwableType = TypeRef.Resolved(throwableHandle);
+            if (!throwableType.IsAssignableFrom(pointee, context))
+            {
+                context.Diagnostics.ReportTypeNotThrowable(
+                    span,
+                    catchType.ToQualifiedString(context),
+                    catchType.ToLabelString(context, scope),
+                    source);
+            }
+        }
+    }
+
+    /// <summary>
     /// Resolves a block expression: enters a block scope, resolves local statements sequentially,
     /// evaluates the final tail expression (if any), and triggers <see cref="CollapseRemainingLocals"/>
     /// for any local literals left unconstrained at the end of the block.
@@ -254,6 +364,9 @@ internal sealed partial class ExpressionResolutionPass
 
                 if (explicitReturnType is { } expRet)
                 {
+                    if (bodyType.IsError || bodyType.Kind == TypeRefKind.Error || expRet.IsError || expRet.Kind == TypeRefKind.Error)
+                        return TypeRef.Error;
+
                     if (bodyType.IsLiteral)
                         bodyType = CollapseExpression(lambda.Body, expRet, lambdaScope, containingFunction);
 
@@ -544,6 +657,7 @@ internal sealed partial class ExpressionResolutionPass
     {
         var isPut = constructorCall.Kind == ObjectCreationKind.Put;
         var targetType = ResolveTypeSyntax(constructorCall.Type, scope);
+        MethodSymbol? boundNewOperator = null;
 
         var ctorArgTypes = new List<TypeRef>(constructorCall.Arguments.Count);
         foreach (var arg in constructorCall.Arguments)
@@ -587,6 +701,7 @@ internal sealed partial class ExpressionResolutionPass
                 {
                     if (context.GetMethodSymbol(candidate.MethodHandle) is { } newMethod)
                     {
+                        boundNewOperator = newMethod;
                         if (constructorCall.AllocationArguments is { } aArgs)
                         {
                             for (int i = 0; i < aArgs.Count && i < newMethod.Parameters.Count; i++)
@@ -651,7 +766,26 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
-        return isPut ? voidType : targetType;
+        if (isPut)
+            return voidType;
+
+        // If a custom New operator was bound, use its return type
+        if (boundNewOperator is not null)
+            return boundNewOperator.ReturnType;
+
+        // Default New operator: returns Box<targetType>
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Box, out var boxHandle))
+        {
+            var boxName = context.GetTypeSymbol(boxHandle)?.Name.Text ?? KnownIntrinsics.Box;
+            return TypeRef.Generic(boxHandle, boxName, [targetType]);
+        }
+
+        if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Box))
+        {
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(constructorCall.GetSpan() ?? default, "new expression", KnownIntrinsics.Box, constructorCall.GetSource());
+        }
+
+        return targetType;
     }
 
     /// <summary>

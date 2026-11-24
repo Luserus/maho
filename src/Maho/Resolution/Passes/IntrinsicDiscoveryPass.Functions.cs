@@ -62,7 +62,7 @@ internal sealed partial class IntrinsicDiscoveryPass
         int totalParamCount = method.Syntax?.Signature.Parameters.Count ?? method.Parameters.Count;
         int paramCount = hasReceiver ? totalParamCount - 1 : totalParamCount;
         var returnTypeSyntax = method.Syntax?.Signature.ReturnType;
-        bool isVoidReturn = returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope);
+        bool isVoidReturn = method.Syntax?.Signature.ArrowToken is null || (returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope));
         bool isRefReturn = returnTypeSyntax is not null && IsReferenceType(returnTypeSyntax, method.EnclosingScope);
         var sigSpan = method.Syntax?.Signature.Identifier.GetSpan() ?? app.GetSpan() ?? default;
         var source = method.Syntax?.GetSource();
@@ -178,6 +178,25 @@ internal sealed partial class IntrinsicDiscoveryPass
                 if (!isVoidReturn)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors must return void", source);
+                    return;
+                }
+                break;
+
+            // StaticConstructor
+            case OperatorKind.StaticConstructor:
+                if (hasReceiver)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors cannot have a receiver parameter", source);
+                    return;
+                }
+                if (totalParamCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors cannot accept parameters", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors must return void", source);
                     return;
                 }
                 break;
@@ -580,15 +599,8 @@ internal sealed partial class IntrinsicDiscoveryPass
 
     private bool IsVoidType(TypeSyntax type, Scope scope)
     {
-        if (type is UnionType)
-            return false;
-
-        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle))
-        {
-            var resolved = ResolveTypeSymbol(type, scope);
-            if (resolved == unitHandle)
-                return true;
-        }
+        if (type is TupleType tuple && tuple.Elements.Count == 0)
+            return true;
 
         return false;
     }

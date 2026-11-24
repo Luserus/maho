@@ -51,7 +51,7 @@ public sealed class ScopeDirectiveTests
             {
                 const
                 {
-                    public func Compute() -> void { }
+                    public func Compute() -> () { }
                 }
             }
             """);

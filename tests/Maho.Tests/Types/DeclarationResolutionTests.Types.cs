@@ -115,7 +115,7 @@ public sealed partial class DeclarationResolutionTests
             public struct TypeB;
             public struct TypeC;
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 (TypeA a, TypeB b, TypeC c) = (1, 2, 3);
             }
@@ -141,13 +141,13 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_MultipleFunctionsHaveIndependentLocalVariableIdsAndIndexers()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func First() -> void
+            public func First() -> ()
             {
                 int a = 1;
                 int b = 2;
             }
 
-            public func Second() -> void
+            public func Second() -> ()
             {
                 int x = 10;
                 int y = 20;
@@ -197,7 +197,7 @@ public sealed partial class DeclarationResolutionTests
             public attribute Marker;
             public attribute Config(int value);
 
-            public func Foo([Marker] int a, [Config(42)] string b, int c) -> void
+            public func Foo([Marker] int a, [Config(42)] string b, int c) -> ()
             {
             }
             """);
@@ -338,11 +338,11 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Int32;
-            public func Process(Int32 value) -> void { }
-            public func Process(Int32* value) -> void { }
-            public func Process(Int32[&] value) -> void { }
-            public func Process(Int32[] value) -> void { }
-            public func Process(Int32[10] value) -> void { }
+            public func Process(Int32 value) -> () { }
+            public func Process(Int32* value) -> () { }
+            public func Process(Int32[&] value) -> () { }
+            public func Process(Int32[] value) -> () { }
+            public func Process(Int32[10] value) -> () { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -388,7 +388,7 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct var;
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var x = 1;
             }
@@ -411,7 +411,7 @@ public sealed partial class DeclarationResolutionTests
             {
                 public struct var;
             }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Holder.var x;
             }
@@ -436,7 +436,7 @@ public sealed partial class DeclarationResolutionTests
         // When struct var is in scope, parameter type "var" resolves to struct var
         var (_, diag1, _, root1) = CompilerTestBed.Parse("""
             public struct var;
-            public func Test(var p) -> void { }
+            public func Test(var p) -> () { }
             """);
 
         Assert.Empty(diag1.Diagnostics);
@@ -448,7 +448,7 @@ public sealed partial class DeclarationResolutionTests
 
         // When struct var is NOT in scope, parameter type "var" reports error
         var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public func Test(var p) -> void { }
+            public func Test(var p) -> () { }
             """);
 
         Assert.Empty(diag2.Diagnostics);
@@ -462,18 +462,18 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawaySymbols_PutInSink_MultipleCanCoexist_NotLoweredOrInGlobalTables()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func _() -> void { }
-            public func _(int a) -> void { }
+            public func _() -> () { }
+            public func _(int a) -> () { }
             public struct _
             {
                 public int x;
-                public func Method() -> void { }
+                public func Method() -> () { }
             }
             public struct _
             {
                 public int y;
             }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var _ = 1;
                 var _ = 2;
@@ -512,7 +512,7 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value;
-            public func _() -> void
+            public func _() -> ()
             {
                 Value a;
                 Value b = a;
@@ -549,9 +549,9 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawaySymbols_CannotBeReferenced()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func _() -> void { }
+            public func _() -> () { }
             public struct _ { }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var _ = 1;
                 var a = _;
@@ -604,7 +604,7 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawayParameters_CanCoexist_AndRoutedToSink()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Handler(int _, int _) -> void { }
+            public func Handler(int _, int _) -> () { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -623,9 +623,9 @@ public sealed partial class DeclarationResolutionTests
         // it cannot be called from active code, but its body resolution still validates types
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct User;
-            public func ActiveFn(User u) -> void { }
+            public func ActiveFn(User u) -> () { }
             // Temporarily inactivated function for testing
-            public func _(User u) -> void
+            public func _(User u) -> ()
             {
                 ActiveFn(u);
             }

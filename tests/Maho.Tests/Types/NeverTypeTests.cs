@@ -21,8 +21,6 @@ public sealed class NeverTypeTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Never")]
         public struct Never;
         [IntrinsicType("Bool")]

@@ -43,12 +43,14 @@ internal sealed partial class ExpressionResolutionPass
                     var argType = ResolveExpression(tuple.Arguments[i], scope, containingFunction);
                     elements.Add(new TupleElement(argType, null));
                 }
-                if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Tuple))
+                if (tuple.Arguments.Count > 0 && context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Tuple))
                 {
                     context.Diagnostics.ReportMissingIntrinsicForSyntax(tuple.GetSpan() ?? default, "tuple expression", KnownIntrinsics.Tuple, tuple.GetSource());
                 }
-                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleHandle);
-                result = TypeRef.Tuple(elements, tupleHandle != default ? tupleHandle : null);
+                SymbolHandle? tupleIntrinsicHandle = null;
+                if (tuple.Arguments.Count > 0 && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tH))
+                    tupleIntrinsicHandle = tH;
+                result = TypeRef.Tuple(elements, tupleIntrinsicHandle);
                 break;
 
             case BinaryExpression binary:
@@ -85,6 +87,10 @@ internal sealed partial class ExpressionResolutionPass
 
             case ForExpression forExpr:
                 result = ResolveFor(forExpr, scope, containingFunction);
+                break;
+
+            case TryExpression tryExpr:
+                result = ResolveTry(tryExpr, scope, containingFunction);
                 break;
 
             case BlockExpression block:

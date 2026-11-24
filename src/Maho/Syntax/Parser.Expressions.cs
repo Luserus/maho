@@ -281,6 +281,7 @@ internal sealed partial class Parser
                 MatchingKeywordKind.While => ParseWhileExpression(),
                 MatchingKeywordKind.For => ParseForExpression(),
                 MatchingKeywordKind.Match => ParseMatchExpression(),
+                MatchingKeywordKind.Try => ParseTryExpression(),
                 MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
                 MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
                 _ => ParseNamedExpression()
@@ -771,6 +772,87 @@ internal sealed partial class Parser
 
         var closeBrace = ExpectToken(TokenKind.RightBrace, "'}'", "to close the match body");
         return new MatchExpression(matchKeyword, openParen, expression, closeParen, openBrace, arms, closeBrace);
+    }
+
+    private TryExpression ParseTryExpression()
+    {
+        var tryKeyword = Consume();
+        BlockExpression tryBlock;
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            tryBlock = ParseBlockExpression();
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "after 'try'");
+            tryBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+        }
+
+        var catchClauses = new List<CatchClause>();
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Catch)
+        {
+            var catchKeyword = Consume();
+            Token? openParen = null;
+            TypeSyntax? type = null;
+            Token? varId = null;
+            Token? closeParen = null;
+
+            if (CurrentToken.Kind is TokenKind.LeftParen)
+            {
+                openParen = Consume();
+                if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && text[CurrentToken.Span.Start] == '_')
+                {
+                    varId = Consume();
+                }
+                else
+                {
+                    type = ParseTypeSyntax();
+                    if (CurrentToken.Kind is TokenKind.Identifier)
+                    {
+                        varId = Consume();
+                    }
+                }
+                closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close catch specification");
+            }
+
+            BlockExpression catchBlock;
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                catchBlock = ParseBlockExpression();
+            }
+            else
+            {
+                diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "for catch block");
+                catchBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+            }
+
+            catchClauses.Add(new CatchClause(catchKeyword, openParen, type, varId, closeParen, catchBlock));
+        }
+
+        FinallyClause? finallyClause = null;
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Finally)
+        {
+            var finallyKeyword = Consume();
+            BlockExpression finallyBlock;
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                finallyBlock = ParseBlockExpression();
+            }
+            else
+            {
+                diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "for finally block");
+                finallyBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+            }
+
+            finallyClause = new FinallyClause(finallyKeyword, finallyBlock);
+        }
+
+        if (catchClauses.Count == 0 && finallyClause is null)
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'catch' or 'finally'", GetTokenDisplay(CurrentToken), "after 'try' block");
+        }
+
+        return new TryExpression(tryKeyword, tryBlock, catchClauses, finallyClause);
     }
 
     private PatternSyntax ParsePattern()

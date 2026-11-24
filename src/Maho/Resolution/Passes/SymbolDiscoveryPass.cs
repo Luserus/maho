@@ -153,6 +153,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
                 return containingNamespace;
+            case TopLevelExtensionDeclaration declaration:
+                ResolveTopLevelExtensionDeclaration(declaration.Extension, scope, containingNamespace);
+                return containingNamespace;
             case TopLevelLiteralMacroDeclaration:
                 return containingNamespace;
             case TopLevelMacroDeclaration declaration:
@@ -438,6 +441,56 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         ResolveTypeBody(declaration.Body, typeScope, ResolutionContext.GetHandle(symbol));
 
         return symbol;
+    }
+
+    private void ResolveTopLevelExtensionDeclaration(ExtensionDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
+        var extScope = context.CreateScope(enclosingScope);
+
+        var accessibility = Accessibility.Internal;
+        foreach (var mod in declaration.Modifiers)
+        {
+            if (mod.MatchingKind == MatchingKeywordKind.Public)
+                accessibility = Accessibility.Public;
+            else if (mod.MatchingKind == MatchingKeywordKind.Internal)
+                accessibility = Accessibility.Internal;
+        }
+
+        var namePart = new SymbolPart($"$ext_{declaration.TargetType.GetSpan()?.Start ?? 0}");
+        var extSymbol = context.CreateExtensionSymbol(ownerScope, extScope, namePart, declaration.TargetType, declaration);
+        extSymbol.Accessibility = accessibility;
+
+        ResolutionContext.BindChildScope(ownerScope, extSymbol, extScope);
+        context.RegisterSyntaxScope(declaration.Body, extScope);
+
+        if (declaration.GenericParameters is not null)
+        {
+            extSymbol.GenericParameters = ResolveGenericParametersFromList(declaration.GenericParameters.Value, extScope, extSymbol);
+        }
+
+        if (declaration.Body is TypeBlockBody blockBody)
+        {
+            foreach (var member in blockBody.Members)
+            {
+                if (member is MemberFieldDeclaration fieldDecl)
+                {
+                    var span = fieldDecl.Declaration.Declarator.Identifier.GetSpan() ?? fieldDecl.Declaration.GetSpan() ?? default;
+                    context.Diagnostics.ReportExtensionCannotDeclareFields(span, fieldDecl.Declaration.GetSource());
+                }
+            }
+        }
+
+        var extHandle = ResolutionContext.GetHandle(extSymbol);
+        ResolveTypeBody(declaration.Body, extScope, extHandle);
+
+        foreach (var sym in extScope.Symbols.Values)
+        {
+            if (sym is MethodSymbol m)
+                extSymbol.Methods.Add(ResolutionContext.GetHandle(m));
+            else if (sym is PropertySymbol p)
+                extSymbol.Properties.Add(ResolutionContext.GetHandle(p));
+        }
     }
 
     private void ResolveTypeBody(TypeBody body, Scope scope, SymbolHandle containingType)

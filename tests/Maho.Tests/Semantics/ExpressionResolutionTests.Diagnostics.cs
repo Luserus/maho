@@ -18,12 +18,12 @@ public sealed partial class ExpressionResolutionTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> void { }
+                public func NormalMethod(&this) -> () { }
             }
 
             public struct Host
             {
-                public func Test(untagged E e) -> void
+                public func Test(untagged E e) -> ()
                 {
                     e.NormalMethod();
                 }
@@ -42,12 +42,12 @@ public sealed partial class ExpressionResolutionTests
 
             public enum Shape
             {
-                Circle { public func Draw() -> void {} }
+                Circle { public func Draw() -> () {} }
             }
 
             public struct Host
             {
-                public func Test(Shape s) -> void
+                public func Test(Shape s) -> ()
                 {
                     s.Circle.Draw();
                 }
@@ -84,7 +84,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -116,7 +116,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10;
                     var y = x + 10.Abs();
@@ -125,7 +125,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     Concrete c = 10.Abs();
                 }
@@ -167,7 +167,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10;
                     var y = x + 10.Abs();
@@ -188,10 +188,10 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func FromInt32(int32 x) -> void {}
-                public func FromInt64(int64 x) -> void {}
+                public func FromInt32(int32 x) -> () {}
+                public func FromInt64(int64 x) -> () {}
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10;
                     FromInt32(x);
@@ -212,7 +212,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10;
                     x.NonExistentMethod();
@@ -232,7 +232,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var t = true;
                     var f = false;
@@ -240,7 +240,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -259,14 +259,14 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var res = 10 + 20;
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var host = Assert.Single(compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>(), t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
         var test = Assert.Single(body.Members.OfType<MemberFunctionDeclaration>());
@@ -291,7 +291,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test(bool cond, Dog d, Cat c) -> void
+                public func Test(bool cond, Dog d, Cat c) -> ()
                 {
                     var res = if (cond) d else c;
                 }
@@ -317,7 +317,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -337,7 +337,7 @@ public sealed partial class ExpressionResolutionTests
             public interface Put
             {
                 [OperatorFunction("Put")]
-                public func Put(int32 offset) -> void;
+                public func Put(int32 offset) -> ();
             }
 
             public struct Point : New, Put
@@ -359,14 +359,14 @@ public sealed partial class ExpressionResolutionTests
                     return p;
                 }
 
-                public func Put.Put(int32 offset) -> void
+                public func Put.Put(int32 offset) -> ()
                 {
                 }
             }
 
             public struct Host
             {
-                public func Test(Arena pool) -> void
+                public func Test(Arena pool) -> ()
                 {
                     var p1 = new(pool) Point(10, 20);
                     put(4) Point(30, 40);
@@ -374,7 +374,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -402,7 +402,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -415,7 +415,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test(NonCallable n) -> void
+                public func Test(NonCallable n) -> ()
                 {
                     n(1, 2);
                 }
@@ -440,7 +440,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     Overloaded o = 42;
                 }
@@ -459,9 +459,9 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func ExpectInt64(int64 val) -> void { }
+                public func ExpectInt64(int64 val) -> () { }
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10;
                     ExpectInt64(x);
@@ -469,7 +469,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int64, out var hInt64));
 
@@ -512,7 +512,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
@@ -546,7 +546,7 @@ public sealed partial class ExpressionResolutionTests
                     return 10;
                 }
 
-                public func Main() -> int32
+                public func Run() -> int32
                 {
                     var x = 100;
                     x = Some();
@@ -555,14 +555,14 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var context = compilation.Context!;
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Int32, out var hInt32));
 
         var host = compilation.SyntaxTrees[0].Root.Members.OfType<TopLevelTypeDeclaration>()
             .First(t => t.Type.Name.ToString() == "Host");
         var body = Assert.IsType<TypeBlockBody>(host.Type.Body);
-        var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Main");
+        var method = body.Members.OfType<MemberFunctionDeclaration>().First(m => m.Function.Signature.Identifier.ToString() == "Run");
         var funcBody = Assert.IsType<FunctionBlockBody>(method.Function.Body);
         var scope = context.GetSyntaxScope(funcBody, context.Scopes[0]);
 
@@ -578,7 +578,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Main() -> int32
+                public func Run() -> int32
                 {
                     var x = 100;
                     x = 200;
@@ -587,7 +587,7 @@ public sealed partial class ExpressionResolutionTests
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     [Fact]
@@ -598,7 +598,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Main() -> void
+                public func Main() -> ()
                 {
                     var x = 100;
                     x = true;

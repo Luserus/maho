@@ -151,7 +151,9 @@ internal enum OperatorKind
     /// <summary>Iterator next element advance operator (<c>Iterator&lt;TItem&gt;</c> interface).</summary>
     Iterator,
     /// <summary>Owning dereference operator (<c>OwningDeref&lt;TReturn&gt;</c> interface).</summary>
-    OwningDeref
+    OwningDeref,
+    /// <summary>Static constructor operator (<c>StaticConstructor</c> interface).</summary>
+    StaticConstructor
 }
 
 

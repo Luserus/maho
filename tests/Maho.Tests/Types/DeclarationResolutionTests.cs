@@ -292,7 +292,7 @@ public sealed partial class DeclarationResolutionTests
             public var global = 10;
             public struct Container
             {
-                public func Method() -> void
+                public func Method() -> ()
                 {
                     var local = 20;
                 }
@@ -502,10 +502,10 @@ public sealed partial class DeclarationResolutionTests
 
             public struct Container
             {
-                public func Method<T>() -> void where T : ConstraintAlias { }
+                public func Method<T>() -> () where T : ConstraintAlias { }
             }
 
-            public func Function<T>() -> void where T : ConstraintAlias { }
+            public func Function<T>() -> () where T : ConstraintAlias { }
 
             using Projected<T> where T : ConstraintAlias = GenericType<T>;
             """);

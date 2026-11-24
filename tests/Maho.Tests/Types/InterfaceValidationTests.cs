@@ -17,7 +17,6 @@ public sealed class InterfaceValidationTests
         [IntrinsicType("Int32")] public struct Int32;
         [IntrinsicType("Int64")] public struct Int64;
         [IntrinsicType("NUInt")] public struct NUInt;
-        [IntrinsicType("Unit")] public struct void;
         [IntrinsicType("Bool")] public struct Bool;
 
         [IntrinsicType("Reference")]

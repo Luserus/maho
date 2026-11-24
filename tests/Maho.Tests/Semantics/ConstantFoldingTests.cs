@@ -22,8 +22,6 @@ public sealed class ConstantFoldingTests
         [IntrinsicType("Enum")]
         public struct Enum : ValType;
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         public interface Deref<TReturn>
         {
@@ -316,7 +314,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int8 x = 128;
                 }
@@ -336,7 +334,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     uint8 y = 300;
                 }
@@ -355,7 +353,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int8 a = 127;
                     uint8 c = 255;
@@ -379,7 +377,7 @@ public sealed class ConstantFoldingTests
             {
                 public const int32 Val = 10 / 0;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     const int32 local = 42 % 0;
                 }
@@ -398,7 +396,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 10 / 0;
                     int32 y = 20 % 0;
@@ -420,7 +418,7 @@ public sealed class ConstantFoldingTests
 
             public struct BufferHolder
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 a = MaxBufferSize;
                     int64 b = MaxBufferSize;
@@ -447,7 +445,7 @@ public sealed class ConstantFoldingTests
             {
                 public const int64 MemberConst = 200;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 a = ExplicitInt;
                     int64 b = MemberConst;

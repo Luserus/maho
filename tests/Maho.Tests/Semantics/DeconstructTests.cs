@@ -21,8 +21,6 @@ public sealed class DeconstructTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -92,7 +90,7 @@ public sealed class DeconstructTests
     public void TupleDeconstruction_Declaration_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var (a, b) = (10, 20);
             }
@@ -120,7 +118,7 @@ public sealed class DeconstructTests
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 var (px, py) = pt;
             }
@@ -148,7 +146,7 @@ public sealed class DeconstructTests
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 int32 px = 0;
                 int32 py = 0;
@@ -163,7 +161,7 @@ public sealed class DeconstructTests
     public void TupleDeconstruction_ElementCountMismatch_ReportsMH0530()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var (a, b, c) = (10, 20);
             }
@@ -188,7 +186,7 @@ public sealed class DeconstructTests
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 var (a, b, c) = pt;
             }
@@ -207,7 +205,7 @@ public sealed class DeconstructTests
                 public int32 x;
             }
 
-            public func Test(NonDeconstructable item) -> Unit
+            public func Test(NonDeconstructable item) -> ()
             {
                 var (a, b) = item;
             }

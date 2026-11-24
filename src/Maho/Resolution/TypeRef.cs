@@ -74,6 +74,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Error => new TypeRef(TypeRefKind.Error, null);
     public static TypeRef Never => new TypeRef(TypeRefKind.Never, null);
     public static TypeRef Resolved(SymbolHandle handle) => new TypeRef(TypeRefKind.Resolved, handle);
+    public static TypeRef EmptyTuple { get; } = Tuple([]);
+
+    public bool IsEmptyTuple => Kind == TypeRefKind.Tuple && SpecialType is TupleSemanticType { Elements.Count: 0 };
 
     public static TypeRef Literal(CompileTimeLiteralType literal) =>
         new TypeRef(TypeRefKind.Literal, null, literal);

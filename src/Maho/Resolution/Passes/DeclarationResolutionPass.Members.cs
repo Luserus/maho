@@ -24,15 +24,7 @@ internal sealed partial class DeclarationResolutionPass
 
         if (symbol.Syntax.Signature.ArrowToken is null)
         {
-            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-            {
-                var span = symbol.Syntax.Signature.Identifier.GetSpan() ?? default;
-                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "omitted return type", KnownIntrinsics.Unit, symbol.Syntax.GetSource());
-            }
-            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle))
-                symbol.ReturnType = TypeRef.Resolved(unitHandle);
-            else
-                symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
+            symbol.ReturnType = TypeRef.EmptyTuple;
         }
         else
         {
@@ -40,7 +32,7 @@ internal sealed partial class DeclarationResolutionPass
         }
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters, scope);
 
         foreach (var handle in symbol.Parameters)
         {
@@ -105,26 +97,17 @@ internal sealed partial class DeclarationResolutionPass
             symbol.Flags |= FunctionFlags.Static | FunctionFlags.Literal;
             symbol.ReturnType = symbol.Parent is { } parentHandle ? TypeRef.Resolved(parentHandle) : TypeRef.Error;
         }
+        else if (symbol.Syntax.Signature.ArrowToken is null)
+        {
+            symbol.ReturnType = TypeRef.EmptyTuple;
+        }
         else
-            if (symbol.Syntax.Signature.ArrowToken is null)
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-                {
-                    var span = symbol.Syntax.Signature.Identifier.GetSpan() ?? default;
-                    context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "omitted return type", KnownIntrinsics.Unit, symbol.Syntax.GetSource());
-                }
-                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle))
-                    symbol.ReturnType = TypeRef.Resolved(unitHandle);
-                else
-                    symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
-            }
-            else
-            {
-                symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
-            }
+        {
+            symbol.ReturnType = ResolveType(symbol.Syntax.Signature.ReturnType, scope, allowInference: false);
+        }
 
         ResolveTypeConstraints(symbol.Syntax.Signature.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Signature.Identifier, symbol.GenericParameters, scope);
 
         foreach (var handle in symbol.Parameters)
         {
@@ -149,6 +132,16 @@ internal sealed partial class DeclarationResolutionPass
             symbol.Type = TypeRef.Delegate(symbol.ReturnType, fnParamTypes);
 
         var parentSym = symbol.Parent is { } pH ? context.GetSymbol(pH) : null;
+        if (parentSym is ExtensionSymbol)
+        {
+            bool hasReceiver = symbol.Parameters.Count > 0 &&
+                context.GetParameterSymbol(symbol.Parameters[0])?.Syntax?.Declarator.ReceiverKind != ReceiverKind.None;
+            if (!hasReceiver)
+            {
+                symbol.Flags |= FunctionFlags.Static;
+                symbol.Type = TypeRef.Function(symbol.ReturnType, fnParamTypes);
+            }
+        }
         bool isParentInterface = (parentSym as TypeSymbol)?.TypeKind == TypeKind.Interface || (parentSym as NestedTypeSymbol)?.TypeKind == TypeKind.Interface;
         bool isParentIntrinsic = false;
         if (symbol.Parent is { } pHandle)
@@ -218,17 +211,30 @@ internal sealed partial class DeclarationResolutionPass
 
             if (parentHandle is not null)
             {
-                var baseType = TypeRef.Resolved(parentHandle.Value);
+                TypeRef baseType;
                 var parentSym = context.GetSymbol(parentHandle.Value);
-                IReadOnlyList<SymbolHandle>? genParams = parentSym switch
+                if (parentSym is ExtensionSymbol extSym)
                 {
-                    TypeSymbol ts => ts.GenericParameters,
-                    NestedTypeSymbol nts => nts.GenericParameters,
-                    _ => null
-                };
-                if (genParams is not null && genParams.Count > 0)
+                    if (extSym.TargetTypeRef.Kind == TypeRefKind.Unresolved && extSym.Syntax is not null)
+                    {
+                        extSym.TargetTypeRef = ResolveType(extSym.Syntax.TargetType, extSym.Scope, allowInference: false);
+                        extSym.TargetTypeHandle = extSym.TargetTypeRef.Handle;
+                    }
+                    baseType = extSym.TargetTypeRef;
+                }
+                else
                 {
-                    baseType = TypeRef.Generic(parentHandle.Value, parentSym?.Name.Text ?? "", genParams.Select(TypeRef.Resolved).ToList());
+                    baseType = TypeRef.Resolved(parentHandle.Value);
+                    IReadOnlyList<SymbolHandle>? genParams = parentSym switch
+                    {
+                        TypeSymbol ts => ts.GenericParameters,
+                        NestedTypeSymbol nts => nts.GenericParameters,
+                        _ => null
+                    };
+                    if (genParams is not null && genParams.Count > 0)
+                    {
+                        baseType = TypeRef.Generic(parentHandle.Value, parentSym?.Name.Text ?? "", genParams.Select(TypeRef.Resolved).ToList());
+                    }
                 }
 
                 bool isUntaggedReceiver = symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged);

@@ -36,7 +36,7 @@ internal sealed partial class DeclarationResolutionPass
         return null;
     }
 
-    private void ResolveGenericParameterDeclarations(NamedSyntax name, IReadOnlyList<SymbolHandle> parameters)
+    private void ResolveGenericParameterDeclarations(NamedSyntax name, IReadOnlyList<SymbolHandle> parameters, Scope scope)
     {
         var genericName = name switch
         {
@@ -49,7 +49,16 @@ internal sealed partial class DeclarationResolutionPass
             return;
 
         for (int index = 0; index < genericName.GenericParameters.Count && index < parameters.Count; index++)
-            context.ResolvedTree.AddReference(genericName.GenericParameters[index], parameters[index]);
+        {
+            var handle = parameters[index];
+            var paramSyntax = genericName.GenericParameters[index];
+            context.ResolvedTree.AddReference(paramSyntax, handle);
+            if (paramSyntax.DefaultType is { } defaultTypeSyntax)
+            {
+                var defType = ResolveType(defaultTypeSyntax, scope);
+                context.GenericParameterSymbols[handle.ID].DefaultType = defType;
+            }
+        }
     }
 
     private List<SymbolHandle> ResolveAttributes(IReadOnlyList<AttributeListSyntax> attributes, Scope scope)
@@ -100,19 +109,9 @@ internal sealed partial class DeclarationResolutionPass
         {
             TypeRef ret;
             if (fnSyntax.ArrowToken is not null)
-            {
                 ret = ResolveType(fnSyntax.ReturnType, scope, reportDiagnostics);
-            }
             else
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-                {
-                    if (reportDiagnostics)
-                        context.Diagnostics.ReportMissingIntrinsicForSyntax(fnSyntax.FuncKeyword.Span, "omitted function pointer return type", KnownIntrinsics.Unit, fnSyntax.GetSource());
-                }
-                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle);
-                ret = unitHandle != default ? TypeRef.Resolved(unitHandle) : ResolveType(fnSyntax.ReturnType, scope, reportDiagnostics);
-            }
+                ret = TypeRef.EmptyTuple;
 
             var paramTypes = new List<TypeRef>(fnSyntax.ParameterTypes.Count);
             foreach (var p in fnSyntax.ParameterTypes)
@@ -131,19 +130,9 @@ internal sealed partial class DeclarationResolutionPass
         {
             TypeRef ret;
             if (delSyntax.ArrowToken is not null)
-            {
                 ret = ResolveType(delSyntax.ReturnType, scope, reportDiagnostics);
-            }
             else
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-                {
-                    if (reportDiagnostics)
-                        context.Diagnostics.ReportMissingIntrinsicForSyntax(delSyntax.DelegateKeyword.Span, "omitted delegate return type", KnownIntrinsics.Unit, delSyntax.GetSource());
-                }
-                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle);
-                ret = unitHandle != default ? TypeRef.Resolved(unitHandle) : ResolveType(delSyntax.ReturnType, scope, reportDiagnostics);
-            }
+                ret = TypeRef.EmptyTuple;
 
             var paramTypes = new List<TypeRef>(delSyntax.ParameterTypes.Count);
             foreach (var p in delSyntax.ParameterTypes)
@@ -178,6 +167,9 @@ internal sealed partial class DeclarationResolutionPass
 
         if (syntax is TupleType tuple)
         {
+            if (tuple.Elements.Count == 0)
+                return TypeRef.EmptyTuple;
+
             var elements = new List<TupleElement>(tuple.Elements.Count);
             foreach (var elem in tuple.Elements)
             {
@@ -292,6 +284,19 @@ internal sealed partial class DeclarationResolutionPass
                 foreach (var arg in generic.GenericArguments)
                     typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
 
+                var genericParams = GetGenericParameters(targetH);
+                if (typeArgs.Count < genericParams.Count)
+                {
+                    for (int i = typeArgs.Count; i < genericParams.Count; i++)
+                    {
+                        var gp = context.GenericParameterSymbols[genericParams[i].ID];
+                        if (gp.DefaultType is { } def && def.IsResolved)
+                            typeArgs.Add(def);
+                        else
+                            break;
+                    }
+                }
+
                 var gen = TypeRef.Generic(targetH, generic.Name.Value, typeArgs);
                 if (!isTraitBoundContext && IsInterfaceSymbol(context, targetH))
                     return TypeRef.Dyn(gen);
@@ -324,6 +329,19 @@ internal sealed partial class DeclarationResolutionPass
                     var typeArgs = new List<TypeRef>(qualifiedGeneric.GenericArguments.Count);
                     foreach (var arg in qualifiedGeneric.GenericArguments)
                         typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
+
+                    var genericParams = GetGenericParameters(qtargetH);
+                    if (typeArgs.Count < genericParams.Count)
+                    {
+                        for (int i = typeArgs.Count; i < genericParams.Count; i++)
+                        {
+                            var gp = context.GenericParameterSymbols[genericParams[i].ID];
+                            if (gp.DefaultType is { } def && def.IsResolved)
+                                typeArgs.Add(def);
+                            else
+                                break;
+                        }
+                    }
 
                     var gen = TypeRef.Generic(qtargetH, qualifiedGeneric.Name.Value, typeArgs);
                     if (!isTraitBoundContext && IsInterfaceSymbol(context, qtargetH))

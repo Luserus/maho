@@ -80,6 +80,12 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             ResolveFunction(function);
         }
 
+        foreach (var extension in context.ExtensionSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(extension));
+            ResolveExtension(extension);
+        }
+
         foreach (var method in context.MethodSymbols)
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(method));
@@ -218,6 +224,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckDuplicateProperties();
         ValidateInterfaceImplementations();
         ValidateModifiers();
+        ValidateGenericParameterDefaults();
+        ValidateMainEntryPoints();
     }
 
     private void ResolveTopLevelStatements(CompilationUnit root)
@@ -314,7 +322,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters, scope);
 
         if (symbol is ISumTypeSymbol sumType)
             ResolveSumType(sumType, symbol, syntax, scope);
@@ -369,14 +377,13 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
         bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
-        bool isUnit = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitH) && handle == unitH;
         bool isTuple = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleH) && handle == tupleH;
         bool isPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH) && handle == ptrH;
         bool isMutPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrH) && handle == mutPtrH;
         bool isReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) && handle == refH;
         bool isMutReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefH) && handle == mutRefH;
 
-        if (isValueType || isNever || isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isUnit || isTuple || isPointer || isMutPointer || isReference || isMutReference)
+        if (isValueType || isNever || isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isTuple || isPointer || isMutPointer || isReference || isMutReference)
             return;
 
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
@@ -527,7 +534,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters, scope);
 
         if (symbol is ISumTypeSymbol sumType)
             ResolveSumType(sumType, symbol, syntax, scope);
@@ -581,7 +588,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         }
 
         ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters, scope);
         var target = ResolveType(symbol.Syntax.Target, scope, reportDiagnostics: !symbol.IsGlobalAlias);
 
         symbol.HasCompatibleConstraints = target.IsResolved &&
@@ -656,14 +663,14 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             if (constraint.IsError)
                 continue;
 
-            if (constraint.IsResolved && constraint.Handle is { } constraintHandle && !SatisfiesConstraint(candidate, constraintHandle, []))
+            if (constraint.IsResolved && constraint.Handle is { } constraintHandle && !SatisfiesConstraint(context, candidate, constraintHandle, []))
                 return false;
         }
 
         return true;
     }
 
-    private bool SatisfiesConstraint(SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
+    internal static bool SatisfiesConstraint(ResolutionContext context, SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
     {
         if (candidate == required)
             return true;
@@ -677,7 +684,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 if (context.GetGenericParameterSymbol(candidate) is { } gp)
                 {
                     foreach (var constraint in gp.Constraints)
-                        if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(constraintHandle, required, visited))
+                        if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(context, constraintHandle, required, visited))
                             return true;
                 }
                 break;
@@ -685,7 +692,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 if (context.GetTypeSymbol(candidate) is { } typeSym)
                 {
                     foreach (var baseType in typeSym.BaseTypes)
-                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
+                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(context, baseHandle, required, visited))
                             return true;
                 }
                 break;
@@ -693,15 +700,62 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 if (context.GetNestedTypeSymbol(candidate) is { } nestedTypeSym)
                 {
                     foreach (var baseType in nestedTypeSym.BaseTypes)
-                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
+                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(context, baseHandle, required, visited))
                             return true;
                 }
                 break;
             case SymbolKind.Alias when context.GetAliasSymbol(candidate)?.Target is { IsResolved: true, Handle: { } target }:
-                return SatisfiesConstraint(target, required, visited);
+                return SatisfiesConstraint(context, target, required, visited);
         }
 
         return false;
+    }
+
+    private void ResolveExtension(ExtensionSymbol ext)
+    {
+        if (ext.Syntax is null)
+            return;
+
+        if (ext.Syntax.Constraints.Count > 0)
+        {
+            ResolveTypeConstraints(ext.Syntax.Constraints, ext.GenericParameters, ext.Scope);
+        }
+
+        ext.TargetTypeRef = ResolveType(ext.Syntax.TargetType, ext.Scope, allowInference: false);
+        ext.TargetTypeHandle = ext.TargetTypeRef.Handle;
+
+        if (ext.Syntax.Base is not null)
+        {
+            var resolvedBases = ResolveTypes(ext.Syntax.Base.BaseTypes, ext.Scope, isTraitBoundContext: true);
+            foreach (var b in resolvedBases)
+            {
+                if (b.Handle is { } bHandle && context.GetSymbol(bHandle) is TypeSymbol bTypeSym)
+                {
+                    if (bTypeSym.TypeKind != TypeKind.Interface)
+                    {
+                        var span = ext.Syntax.Base.GetSpan() ?? default;
+                        context.Diagnostics.ReportExtensionCannotSpecifyBaseStruct(span, bTypeSym.Name.Text, ext.Syntax.GetSource());
+                        continue;
+                    }
+                }
+
+                ext.BaseInterfaces.Add(b);
+
+                if (ext.TargetTypeHandle is { } targetH)
+                {
+                    if (context.GetTypeSymbol(targetH) is TypeSymbol targetTypeSym)
+                    {
+                        if (!targetTypeSym.BaseTypes.Contains(b))
+                            targetTypeSym.BaseTypes.Add(b);
+                    }
+                    else if (context.GetNestedTypeSymbol(targetH) is NestedTypeSymbol targetNestedSym)
+                    {
+                        if (!targetNestedSym.BaseTypes.Contains(b))
+                            targetNestedSym.BaseTypes.Add(b);
+                    }
+                }
+            }
+        }
     }
 
 }

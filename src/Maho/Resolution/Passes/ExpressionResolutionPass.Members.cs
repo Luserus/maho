@@ -364,6 +364,24 @@ internal sealed partial class ExpressionResolutionPass
                     }
                 }
 
+                var extResult = TryResolveExtensionMember(access, receiverType, memberName, isStaticAccessOnType, scope);
+                if (extResult is not null)
+                    return extResult.Value;
+
+                context.Diagnostics.ReportMemberNotFound(
+                    access.Identifier.Span,
+                    memberName,
+                    originalReceiverType.ToQualifiedString(context),
+                    labelTypeName: originalReceiverType.ToLabelString(context, scope),
+                    source: access.GetSource());
+                return TypeRef.Error;
+            }
+            else
+            {
+                var extResult = TryResolveExtensionMember(access, receiverType, memberName, isStaticAccessOnType, scope);
+                if (extResult is not null)
+                    return extResult.Value;
+
                 context.Diagnostics.ReportMemberNotFound(
                     access.Identifier.Span,
                     memberName,
@@ -374,7 +392,171 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
+        var extFallback = TryResolveExtensionMember(access, receiverType, memberName, isStaticAccessOnType, scope);
+        if (extFallback is not null)
+            return extFallback.Value;
+
         return TypeRef.Unresolved;
+    }
+
+    private TypeRef? TryResolveExtensionMember(
+        MemberAccessExpression access,
+        TypeRef receiverType,
+        string memberName,
+        bool isStaticAccessOnType,
+        Scope scope)
+    {
+        List<(ExtensionSymbol Extension, Symbol Member, Dictionary<SymbolHandle, TypeRef> TypeArgs)> matching = [];
+
+        foreach (var ext in context.ExtensionSymbols)
+        {
+            if (ext.Accessibility == Accessibility.Internal && !context.IsDeclaredInCurrentProject(ResolutionContext.GetHandle(ext)))
+                continue;
+
+            Dictionary<SymbolHandle, TypeRef> typeArgs = [];
+            if (!TryUnifyExtensionTarget(ext.TargetTypeRef, receiverType, ext.GenericParameters, typeArgs))
+                continue;
+
+            Symbol? candidate = null;
+            foreach (var mH in ext.Methods)
+            {
+                if (context.GetMethodSymbol(mH) is { } m && m.Name.Text == memberName)
+                {
+                    bool hasReceiver = m.Parameters.Count > 0 &&
+                        context.GetParameterSymbol(m.Parameters[0])?.Syntax?.Declarator.ReceiverKind is not null &&
+                        context.GetParameterSymbol(m.Parameters[0])!.Syntax!.Declarator.ReceiverKind != ReceiverKind.None &&
+                        !m.Flags.HasFlag(FunctionFlags.Static);
+
+                    if (isStaticAccessOnType && !hasReceiver)
+                    {
+                        candidate = m;
+                        break;
+                    }
+                    else if (!isStaticAccessOnType && hasReceiver)
+                    {
+                        candidate = m;
+                        break;
+                    }
+                }
+            }
+
+            if (candidate is null)
+            {
+                foreach (var pH in ext.Properties)
+                {
+                    if (context.GetPropertySymbol(pH) is { } p && p.Name.Text == memberName)
+                    {
+                        bool isPropStatic = p.Flags.HasFlag(FunctionFlags.Static);
+                        if (isStaticAccessOnType == isPropStatic)
+                        {
+                            candidate = p;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (candidate is not null)
+            {
+                matching.Add((ext, candidate, typeArgs));
+            }
+        }
+
+        if (matching.Count > 1)
+        {
+            context.Diagnostics.ReportAmbiguousExtensionMethod(access.Identifier.Span, memberName, access.GetSource());
+            return TypeRef.Error;
+        }
+
+        if (matching.Count == 1)
+        {
+            var (matchedExt, matchedMember, matchedArgs) = matching[0];
+            context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(matchedMember));
+            var memberType = GetTypeFromSymbol(matchedMember);
+            if (matchedArgs.Count > 0)
+                memberType = SubstituteTypeRef(memberType, matchedArgs);
+            return memberType;
+        }
+
+        return null;
+    }
+
+    private bool TryUnifyExtensionTarget(
+        TypeRef targetPattern,
+        TypeRef actualType,
+        IReadOnlyList<SymbolHandle> genericParams,
+        Dictionary<SymbolHandle, TypeRef> typeArgs)
+    {
+        if (targetPattern.Handle is { } th && genericParams.Contains(th))
+        {
+            if (typeArgs.TryGetValue(th, out var existing))
+                return existing.Equals(actualType);
+            typeArgs[th] = actualType;
+            return true;
+        }
+
+        if (targetPattern.SpecialType is GenericSemanticType targetGst &&
+            actualType.SpecialType is GenericSemanticType actualGst)
+        {
+            if (targetPattern.Handle != actualType.Handle)
+                return false;
+            if (targetGst.TypeArguments.Count != actualGst.TypeArguments.Count)
+                return false;
+
+            for (int i = 0; i < targetGst.TypeArguments.Count; i++)
+            {
+                if (!TryUnifyExtensionTarget(targetGst.TypeArguments[i], actualGst.TypeArguments[i], genericParams, typeArgs))
+                    return false;
+            }
+
+            foreach (var gpH in genericParams)
+            {
+                if (typeArgs.TryGetValue(gpH, out var boundArg))
+                {
+                    if (context.GetGenericParameterSymbol(gpH) is { } gpSym)
+                    {
+                        foreach (var constraint in gpSym.Constraints)
+                        {
+                            if (constraint.IsResolved && constraint.Handle is { } cH)
+                            {
+                                if (boundArg.Handle is not { } bH || !DeclarationResolutionPass.SatisfiesConstraint(context, bH, cH, []))
+                                    return false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        if (targetPattern.Handle is { } targetH && actualType.Handle is { } actualH)
+        {
+            if (targetH == actualH)
+            {
+                foreach (var gpH in genericParams)
+                {
+                    if (typeArgs.TryGetValue(gpH, out var boundArg))
+                    {
+                        if (context.GetGenericParameterSymbol(gpH) is { } gpSym)
+                        {
+                            foreach (var constraint in gpSym.Constraints)
+                            {
+                                if (constraint.IsResolved && constraint.Handle is { } cH)
+                                {
+                                    if (boundArg.Handle is not { } bH || !DeclarationResolutionPass.SatisfiesConstraint(context, bH, cH, []))
+                                        return false;
+                                }
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+        return targetPattern.Equals(actualType);
     }
 
     private bool TryResolveIndirectMemberAccessOperator(TypeRef type, out TypeRef elemType)

@@ -18,8 +18,6 @@ public sealed class AliasAndReferenceCombinationsTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Never")]
         public struct Never;
 
@@ -287,7 +285,7 @@ public sealed class AliasAndReferenceCombinationsTests
                     mut Int32& r2,
                     Int32 mut& r3,
                     mut Int32 mut& r4
-                ) -> Unit
+                ) -> ()
                 {
                     r2 = r1;
                     r4 = r3;

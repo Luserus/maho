@@ -127,9 +127,9 @@ public sealed class DeclarationDiagnosticsTests
         var compilation = Compilation.FromSource($$"""
             {{CompilerTestBed.FullPrelude}}
 
-            public partial func DoWork() -> void;
-            public partial func DoWork() -> void;
-            public partial func DoWork() -> void;
+            public partial func DoWork() -> ();
+            public partial func DoWork() -> ();
+            public partial func DoWork() -> ();
             """);
 
         Assert.False(compilation.HasErrors);
@@ -142,8 +142,8 @@ public sealed class DeclarationDiagnosticsTests
         var compilation = Compilation.FromSource($$"""
             {{CompilerTestBed.FullPrelude}}
 
-            public partial func Calculate(int32 x) -> void;
-            public partial func Calculate(int32 x) -> void
+            public partial func Calculate(int32 x) -> ();
+            public partial func Calculate(int32 x) -> ()
             {
                 return;
             }
@@ -157,15 +157,14 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialFunction_MultipleBodies_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
-            public struct void;
             public struct int;
 
-            public partial func Action(int x) -> void
+            public partial func Action(int x) -> ()
             {
                 return;
             }
 
-            public partial func Action(int x) -> void
+            public partial func Action(int x) -> ()
             {
                 return;
             }
@@ -183,18 +182,17 @@ public sealed class DeclarationDiagnosticsTests
     public void PartialMethod_MultipleBodiesInType_EmitsMH0533()
     {
         var compilation = Compilation.FromSource("""
-            public struct void;
 
             public partial struct Service
             {
-                public partial func Process() -> void;
+                public partial func Process() -> ();
 
-                public partial func Process() -> void
+                public partial func Process() -> ()
                 {
                     return;
                 }
 
-                public partial func Process() -> void
+                public partial func Process() -> ()
                 {
                     return;
                 }
@@ -214,14 +212,14 @@ public sealed class DeclarationDiagnosticsTests
             public struct IntA : Struct;
             public struct IntB : Struct;
 
-            public partial func Compute(IntA a) -> void;
-            public partial func Compute(IntA a) -> void
+            public partial func Compute(IntA a) -> ();
+            public partial func Compute(IntA a) -> ()
             {
                 return;
             }
 
-            public partial func Compute(IntB b) -> void;
-            public partial func Compute(IntB b) -> void
+            public partial func Compute(IntB b) -> ();
+            public partial func Compute(IntB b) -> ()
             {
                 return;
             }
@@ -251,11 +249,10 @@ public sealed class DeclarationDiagnosticsTests
     public void DuplicateFunction_NonPartial_EmitsMH0532()
     {
         var compilation = Compilation.FromSource("""
-            public struct void;
             public struct Param;
 
-            public func Execute(Param p) -> void { return; }
-            public func Execute(Param p) -> void { return; }
+            public func Execute(Param p) -> () { return; }
+            public func Execute(Param p) -> () { return; }
             """);
 
         Assert.True(compilation.HasErrors);
@@ -391,8 +388,8 @@ public sealed class DeclarationDiagnosticsTests
     [Fact]
     public void PartialFunction_MultiFile_MultipleBodies_EmitsMH0533()
     {
-        var (_, _, _, root1) = CompilerTestBed.Parse("public partial func Work() -> void { return; }");
-        var (_, _, _, root2) = CompilerTestBed.Parse("public partial func Work() -> void { return; }");
+        var (_, _, _, root1) = CompilerTestBed.Parse("public partial func Work() -> () { return; }");
+        var (_, _, _, root2) = CompilerTestBed.Parse("public partial func Work() -> () { return; }");
         var context = new Resolver().Resolve([
             SyntaxTree.CreateSingleRoot(root1, "first.mh"),
             SyntaxTree.CreateSingleRoot(root2, "second.mh")
@@ -492,8 +489,7 @@ public sealed class DeclarationDiagnosticsTests
     public void UnresolvedType_InTupleDestructuring_EmitsMH0500ExactlyOnce()
     {
         var compilation = Compilation.FromSource("""
-            public struct Unit;
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 UnknownType (a, b, c) = (1, 2, 3);
                 return default;
@@ -509,8 +505,7 @@ public sealed class DeclarationDiagnosticsTests
     public void UnresolvedType_InMultipleDeclarators_EmitsMH0500ExactlyOnce()
     {
         var compilation = Compilation.FromSource("""
-            public struct Unit;
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 UnknownType a, b, c;
                 return default;

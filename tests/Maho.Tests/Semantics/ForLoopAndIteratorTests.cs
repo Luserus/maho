@@ -21,8 +21,6 @@ public sealed class ForLoopAndIteratorTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -107,7 +105,7 @@ public sealed class ForLoopAndIteratorTests
     public void ForLoop_DeclaringVariable_FixedArray_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
                 for (var x in arr)
@@ -124,7 +122,7 @@ public sealed class ForLoopAndIteratorTests
     public void ForLoop_ReusingExistingVariable_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
                 int32 x = 0;
@@ -161,7 +159,7 @@ public sealed class ForLoopAndIteratorTests
                 }
             }
 
-            public func Test(MyCollection col) -> Unit
+            public func Test(MyCollection col) -> ()
             {
                 for (var item in col)
                 {
@@ -177,7 +175,7 @@ public sealed class ForLoopAndIteratorTests
     public void ForLoop_TupleDestructuringInHeader_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var pairs = [(1, 10), (2, 20)];
                 for (var (k, v) in pairs)
@@ -200,7 +198,7 @@ public sealed class ForLoopAndIteratorTests
                 public int32 val;
             }
 
-            public func Test(NotIterable col) -> Unit
+            public func Test(NotIterable col) -> ()
             {
                 for (var x in col)
                 {
@@ -239,7 +237,7 @@ public sealed class ForLoopAndIteratorTests
     public void Generator_YieldInNonIteratorFunction_ReportsMH0572()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 yield 1;
             }

@@ -13,6 +13,7 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
 {
     private ResolutionContext context = null!;
     private SymbolHandle? currentType;
+    private ExtensionSymbol? currentExtension;
     private SymbolHandle? currentCallable;
     private Scope currentScope = null!;
     private SourceText? currentSource;
@@ -77,6 +78,13 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             if (method.Syntax is not null)
             {
                 currentType = method.Parent;
+                currentExtension = null;
+                if (method.Parent is { } pH && context.GetSymbol(pH) is ExtensionSymbol extSym)
+                {
+                    currentExtension = extSym;
+                    currentType = extSym.TargetTypeHandle;
+                }
+
                 currentCallable = ResolutionContext.GetHandle(method);
                 currentScope = GetOwnedScope(method);
                 currentSource = method.Syntax.GetSource();
@@ -93,6 +101,13 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             if (prop.Syntax is not null)
             {
                 currentType = prop.Parent;
+                currentExtension = null;
+                if (prop.Parent is { } pH && context.GetSymbol(pH) is ExtensionSymbol extSym)
+                {
+                    currentExtension = extSym;
+                    currentType = extSym.TargetTypeHandle;
+                }
+
                 currentCallable = ResolutionContext.GetHandle(prop);
                 currentScope = prop.EnclosingScope;
                 currentSource = prop.Syntax.GetSource();
@@ -256,6 +271,18 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
                 CheckExpression(whileExpr.Body, isAssignmentLhs: false);
                 break;
 
+            case TryExpression tryExpr:
+                CheckExpression(tryExpr.TryBlock, isAssignmentLhs: false);
+                foreach (var catchClause in tryExpr.CatchClauses)
+                {
+                    if (catchClause.Type is not null)
+                        CheckTypeSyntaxAccessibility(catchClause.Type);
+                    CheckExpression(catchClause.Block, isAssignmentLhs: false);
+                }
+                if (tryExpr.FinallyClause is { } finallyClause)
+                    CheckExpression(finallyClause.Block, isAssignmentLhs: false);
+                break;
+
             case BlockExpression blockExpr:
                 CheckLocals(blockExpr.Locals);
                 break;
@@ -301,6 +328,24 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
 
     private void CheckSymbolAccessibility(Symbol targetSymbol, TextSpan span)
     {
+        if (targetSymbol is FieldSymbol field)
+        {
+            var declTypeHandle = GetDeclaringTypeHandle(field);
+            if (currentExtension is not null && declTypeHandle is not null && currentExtension.TargetTypeHandle == declTypeHandle)
+            {
+                CheckAccessibility(field, field.ExtensionAccessibility, span);
+                return;
+            }
+
+            if (currentType is not null && declTypeHandle is not null && currentType == declTypeHandle && currentExtension is null)
+            {
+                return;
+            }
+
+            CheckAccessibility(field, field.DirectAccessibility, span);
+            return;
+        }
+
         var acc = GetAccessibility(targetSymbol, context);
         CheckAccessibility(targetSymbol, acc, span);
     }

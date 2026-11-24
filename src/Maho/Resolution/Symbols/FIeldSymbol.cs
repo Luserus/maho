@@ -6,6 +6,8 @@ namespace Maho.Resolution;
 internal sealed class FieldSymbol : Symbol
 {
     public VariableFlags Flags { get; internal set; }
+    public Accessibility DirectAccessibility { get; internal set; } = Accessibility.Private;
+    public Accessibility ExtensionAccessibility { get; internal set; } = Accessibility.Private;
     public SymbolHandle? Parent { get; }
 
     public IReadOnlyList<SymbolHandle> GenericParameters { get; internal set; }

@@ -250,7 +250,7 @@ public sealed class VisibilityAnalysisTests
                     return c.Setting;
                 }
 
-                public func Writer(mut Config c) -> void
+                public func Writer(mut Config c) -> ()
                 {
                     c.Setting = 10;
                 }
@@ -308,7 +308,7 @@ public sealed class VisibilityAnalysisTests
         var compilation = Compilation.FromSource($$"""
             {{VisibilityPrelude}}
 
-            protected func TopLevelProtected() -> void { }
+            protected func TopLevelProtected() -> () { }
             """);
 
         Assert.True(compilation.HasErrors);

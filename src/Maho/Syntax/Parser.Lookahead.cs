@@ -692,6 +692,9 @@ internal sealed partial class Parser
     {
         int saved = lookaheadCurrent;
         var openParen = LookaheadConsume();
+        if (LookaheadCurrentToken.Kind is TokenKind.RightParen)
+            return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), LookaheadConsume()), true);
+
         var nodesAndSeparators = new List<SyntaxNode>();
         bool hasComma = false;
 
@@ -949,6 +952,7 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
                 case MatchingKeywordKind.Mut:
+                case MatchingKeywordKind.Ext:
                     list.Add(LookaheadConsume());
                     break;
 
@@ -1077,7 +1081,18 @@ internal sealed partial class Parser
                 };
             }
 
-            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind));
+            Token? equals = null;
+            TypeSyntax? defaultType = null;
+            if (LookaheadCurrentToken.Kind is TokenKind.Equals)
+            {
+                equals = LookaheadConsume();
+                var (dt, ok, _) = LookaheadParseTypeSyntax();
+                if (!ok)
+                    return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
+                defaultType = dt;
+            }
+
+            nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind, equals, defaultType));
 
             if (LookaheadCurrentToken.Kind is TokenKind.Comma)
             {

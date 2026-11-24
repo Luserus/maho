@@ -10,8 +10,6 @@ public sealed partial class ExpressionResolutionTests
 
         intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         [IntrinsicType("Bool")]
         public struct bool;
@@ -164,7 +162,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var a = 42;
                     var b = true;
@@ -200,7 +198,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var (x, y) = (10, true);
                 }
@@ -234,14 +232,14 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Helper() -> void
+                public func Helper() -> ()
                 {
                     return;
                 }
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
-                    void v = Helper();
+                    () v = Helper();
                     var inferredVoid = v;
                     return inferredVoid;
                 }
@@ -259,7 +257,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var add = 10 + 20;
                     var sub = 30 - 5;
@@ -342,7 +340,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = 10 + true;
                 }
@@ -361,7 +359,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x = -true;
                 }
@@ -380,7 +378,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = true;
                 }
@@ -399,9 +397,9 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Foo(int32 x) -> void { }
+                public func Foo(int32 x) -> () { }
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     Foo(true);
                 }
@@ -420,9 +418,9 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Foo(int32 x, int32 y) -> void { }
+                public func Foo(int32 x, int32 y) -> () { }
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     Foo(1);
                 }
@@ -460,7 +458,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     if (42)
                     {
@@ -481,7 +479,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var x;
                 }
@@ -500,7 +498,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     10 = 20;
                 }
@@ -519,7 +517,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     var (a, b) = 42;
                 }
@@ -544,7 +542,7 @@ public sealed partial class ExpressionResolutionTests
 
             public struct Host
             {
-                public func Test(UntaggedData d) -> void
+                public func Test(UntaggedData d) -> ()
                 {
                     match (d)
                     {

@@ -21,8 +21,6 @@ public sealed class ControlFlowAnalysisTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
@@ -93,7 +91,7 @@ public sealed class ControlFlowAnalysisTests
     public void UnitFunction_OmittedReturn_CompilesCleanly()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func DoNothing() -> Unit
+            public func DoNothing() -> ()
             {
             }
             """);
@@ -102,7 +100,7 @@ public sealed class ControlFlowAnalysisTests
     }
 
     [Fact]
-    public void Function_OmittedReturnType_DefaultsToUnit_CompilesCleanly()
+    public void Function_OmittedReturnType_DefaultsToEmptyTuple_CompilesCleanly()
     {
         var compilation = Compilation.FromSource(Prelude + """
             public func DoSomething(int32 x)
@@ -113,15 +111,14 @@ public sealed class ControlFlowAnalysisTests
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "DoSomething");
-        Assert.True(compilation.Context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle));
-        Assert.Equal(unitHandle, fn.ReturnType.Handle);
+        Assert.True(fn.ReturnType.IsEmptyTuple);
     }
 
     [Fact]
-    public void FunctionPointer_OmittedReturnType_DefaultsToUnit()
+    public void FunctionPointer_OmittedReturnType_DefaultsToEmptyTuple()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func TestFnPtr(func(int32) fn) -> Unit
+            public func TestFnPtr(func(int32) fn) -> ()
             {
             }
             """);
@@ -130,10 +127,10 @@ public sealed class ControlFlowAnalysisTests
     }
 
     [Fact]
-    public void Delegate_OmittedReturnType_DefaultsToUnit()
+    public void Delegate_OmittedReturnType_DefaultsToEmptyTuple()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func TestDelegate(delegate(int32) del) -> Unit
+            public func TestDelegate(delegate(int32) del) -> ()
             {
             }
             """);

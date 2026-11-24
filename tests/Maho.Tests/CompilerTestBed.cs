@@ -28,8 +28,6 @@ internal static class CompilerTestBed
         [IntrinsicType("NUInt")]
         public struct nuint;
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         [IntrinsicType("Bool")]
         public struct bool;
@@ -47,6 +45,15 @@ internal static class CompilerTestBed
 
             [IntrinsicFunction("Reference.Deref()")]
             public func Deref.Deref(&this) -> T&;
+        }
+
+        [IntrinsicType("MutableReference")]
+        public struct MutableReference<T> : Deref<T mut&>
+        {
+            public nuint raw;
+
+            [IntrinsicFunction("MutableReference.Deref()")]
+            public func Deref.Deref(&this) -> T mut&;
         }
 
         [IntrinsicType("Str")]
@@ -87,7 +94,7 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Tuple")]
-        public struct Tuple<T...> : ValType, Deconstruct<T...>, DeconstructMut<T...>
+        public struct Tuple<T...> : Deconstruct<T...>, DeconstructMut<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
             public func Deconstruct.Deconstruct(&this) -> (T...);
@@ -109,13 +116,20 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N : int32> : ValType, Iterator<T>;
+        public struct FixedArray<T, N : int32> : Iterator<T>;
 
         [IntrinsicType("Array")]
-        public struct Array<T> : ValType, Iterator<T>
+        public struct Array<T> : Iterator<T>
         {
             Pointer<T> data;
             nuint length;
+        }
+
+        [IntrinsicType("Span")]
+        public struct Span<T>
+        {
+            public Pointer<T> data;
+            public nuint length;
         }
 
         public interface Callable<TReturn, TParams...>
@@ -125,7 +139,7 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Function")]
-        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        public struct Function<TReturn, TParams...> : Callable<TReturn, TParams...>
         {
             public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
@@ -133,12 +147,64 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        public struct Delegate<TReturn, TParams...> : Callable<TReturn, TParams...>
         {
             public nuint codeAddress;
             public Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
             public func Callable.Invoke(&this, TParams args) -> TReturn;
+        }
+
+        public interface Allocator
+        {
+            public func Allocate(mut &this, nuint size, nuint alignment) -> ValType*;
+            public func Deallocate(mut &this, ValType* ptr, nuint size, nuint alignment) -> ();
+        }
+
+        public struct GlobalAllocator : Allocator
+        {
+            public ValType* handle;
+
+            public func Allocate(mut &this, nuint size, nuint alignment) -> ValType*
+            {
+                return handle;
+            }
+
+            public func Deallocate(mut &this, ValType* ptr, nuint size, nuint alignment) -> ()
+            {
+            }
+        }
+
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            public func Arrow(&this) -> TReturn;
+        }
+
+        [IntrinsicType("Box")]
+        public struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where A : Allocator
+        {
+            public T* pointer;
+            public A allocator;
+
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *pointer;
+            }
+
+            public func Deref.Deref(&this) -> &T
+            {
+                return *pointer;
+            }
+        }
+
+        [IntrinsicType("Throwable")]
+        public interface Throwable;
+
+        public interface StaticConstructor
+        {
+            [OperatorFunction("StaticConstructor")]
+            public func Init() -> ();
         }
         """;
 

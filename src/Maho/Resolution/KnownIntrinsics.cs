@@ -35,8 +35,9 @@ internal static class KnownIntrinsics
     public const string Bool = "Bool";
     public const string Char = "Char";
     public const string Str = "Str";
-    public const string Unit = "Unit";
     public const string Never = "Never";
+    public const string Throwable = "Throwable";
+    public const string Box = "Box";
 
     // Value types and Callables
     public const string ValueType = "ValueType";
@@ -128,6 +129,8 @@ internal static class KnownIntrinsics
     public const string OpIterable = "Iterable";
     public const string OpIterator = "Iterator";
     public const string OpOwningDeref = "OwningDeref";
+    public const string OpStaticConstructor = "StaticConstructor";
+    public const string StaticConstructor = "StaticConstructor";
 
     // Standard Intrinsic Function Contract Literals
     public const string FnFunctionInvoke = "Function.Invoke(TParams...)";
@@ -148,8 +151,6 @@ internal static class KnownIntrinsics
     public const string FnInt32Rem = "Int32.Remainder(Int32, Int32)";
     public const string FnInt32Equals = "Int32.Equals(Int32, Int32)";
     public const string FnInt32NotEquals = "Int32.NotEquals(Int32, Int32)";
-    public const string FnInt32Equality = FnInt32Equals;
-    public const string FnInt32Inequality = FnInt32NotEquals;
     public const string FnInt32LessThan = "Int32.LessThan(Int32, Int32)";
     public const string FnInt32LessThanOrEqual = "Int32.LessThanOrEqual(Int32, Int32)";
     public const string FnInt32GreaterThan = "Int32.GreaterThan(Int32, Int32)";
@@ -168,10 +169,10 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Str, Unit, Never,
+        Bool, Char, Str, Box, Never,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
         Pointer, MutablePointer, Reference, MutableReference, Metadata,
-        FixedArray, Array, Span, Optional
+        FixedArray, Array, Span, Optional, Throwable
     ];
 
     public static readonly HashSet<string> IntegerTypes =
@@ -193,9 +194,9 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Unit, Never,
+        Bool, Char, Never,
         ValueType, Struct, Enum, Tuple,
-        Metadata
+        Metadata, Throwable
     ];
 
     public static readonly HashSet<string> AllOperatorNames =
@@ -220,7 +221,8 @@ internal static class KnownIntrinsics
         OpUnwrap, OpTry,
         OpCollectionAdd, OpCollectionWith,
         OpDeconstruct, OpDeconstructMut,
-        OpIterable, OpIterator, OpOwningDeref
+        OpIterable, OpIterator, OpOwningDeref,
+        OpStaticConstructor
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -291,6 +293,7 @@ internal static class KnownIntrinsics
             case OpIterable: kind = OperatorKind.Iterable; return true;
             case OpIterator: kind = OperatorKind.Iterator; return true;
             case OpOwningDeref: kind = OperatorKind.OwningDeref; return true;
+            case OpStaticConstructor: kind = OperatorKind.StaticConstructor; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -363,6 +366,7 @@ internal static class KnownIntrinsics
         OperatorKind.Iterable => OpIterable,
         OperatorKind.Iterator => OpIterator,
         OperatorKind.OwningDeref => OpOwningDeref,
+        OperatorKind.StaticConstructor => OpStaticConstructor,
         _ => string.Empty
     };
 }

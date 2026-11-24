@@ -72,15 +72,45 @@ internal sealed class Scope
                 {
                     foreach (var sym in list)
                     {
-                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
-                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
                         {
-                            return list;
+                            if (gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                                return list;
+
+                            if (key.Arity > name.Arity)
+                            {
+                                bool allDefaults = true;
+                                for (int p = name.Arity; p < gp.Count; p++)
+                                {
+                                    if (gp[p].DefaultType == null)
+                                    {
+                                        allDefaults = false;
+                                        break;
+                                    }
+                                }
+                                if (allDefaults)
+                                    return list;
+                            }
                         }
-                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp &&
-                            ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
+                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp)
                         {
-                            return list;
+                            if (ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
+                                return list;
+
+                            if (key.Arity > name.Arity)
+                            {
+                                bool allDefaults = true;
+                                for (int p = name.Arity; p < ngp.Count; p++)
+                                {
+                                    if (ngp[p].DefaultType == null)
+                                    {
+                                        allDefaults = false;
+                                        break;
+                                    }
+                                }
+                                if (allDefaults)
+                                    return list;
+                            }
                         }
                     }
                 }

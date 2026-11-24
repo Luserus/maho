@@ -21,8 +21,6 @@ public sealed class FunctionPointerAndDelegateTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         [IntrinsicType("Int32")]
         public struct int32;
@@ -81,7 +79,7 @@ public sealed class FunctionPointerAndDelegateTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             func(int, int) -> int fnPtr;
-            delegate(string) -> void del;
+            delegate(string) -> () del;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -97,7 +95,8 @@ public sealed class FunctionPointerAndDelegateTests
         var delType = Assert.IsType<DelegateTypeSyntax>(topDel.Declaration.Type);
         Assert.Single(delType.ParameterTypes);
         Assert.NotNull(delType.ReturnType);
-        Assert.Equal("void", Assert.IsType<SimpleType>(delType.ReturnType).Name.Value);
+        var tupleRet = Assert.IsType<TupleType>(delType.ReturnType);
+        Assert.Empty(tupleRet.Elements);
     }
 
     [Fact]
@@ -109,7 +108,7 @@ public sealed class FunctionPointerAndDelegateTests
             public struct Host
             {
                 public func(int32, int32) -> int32 fnVar;
-                public delegate(int32) -> void delVar;
+                public delegate(int32) -> () delVar;
             }
             """);
 
@@ -141,7 +140,6 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
             [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
 
             public func(int32) -> int32 fn;
@@ -161,7 +159,6 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
             [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
 
             public delegate(int32) -> int32 del;
@@ -197,7 +194,7 @@ public sealed class FunctionPointerAndDelegateTests
 
             public struct Host
             {
-                public func Test(delegate(int32) -> void d, int32 a) -> void
+                public func Test(delegate(int32) -> () d, int32 a) -> ()
                 {
                     d(a);
                 }
@@ -265,7 +262,7 @@ public sealed class FunctionPointerAndDelegateTests
 
             public struct Sample
             {
-                public func Method() -> void;
+                public func Method() -> ();
             }
             """);
 
@@ -284,19 +281,18 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
             [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void;
             [IntrinsicType("Int32")] public struct int32;
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     DoSomething();
                 }
 
-                public func DoSomething() -> void
+                public func DoSomething() -> ()
                 {
                 }
             }
@@ -341,7 +337,7 @@ public sealed class FunctionPointerAndDelegateTests
                     return () => () => 42;
                 }
 
-                public func Main() -> int32
+                public func Run() -> int32
                 {
                     var x = Some;
                     var f1 = x();
@@ -367,7 +363,7 @@ public sealed class FunctionPointerAndDelegateTests
                     return () => () => 42;
                 }
 
-                public func Main() -> int32
+                public func Run() -> int32
                 {
                     return Some()()();
                 }
@@ -390,7 +386,7 @@ public sealed class FunctionPointerAndDelegateTests
                     return () => () => 42;
                 }
 
-                public func Main() -> void
+                public func Run() -> ()
                 {
                     Some()()()();
                 }

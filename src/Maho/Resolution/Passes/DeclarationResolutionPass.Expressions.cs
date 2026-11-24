@@ -92,6 +92,26 @@ internal sealed partial class DeclarationResolutionPass
                 }
                 ResolveExpression(forExpr.Body, forScope, containingSymbol);
                 break;
+            case TryExpression tryExpr:
+                ResolveExpression(tryExpr.TryBlock, scope, containingSymbol);
+                foreach (var catchClause in tryExpr.CatchClauses)
+                {
+                    Scope catchScope = context.GetSyntaxScope(catchClause, scope);
+                    if (catchClause.Type is not null && catchClause.VariableIdentifier is { } varId && varId.Value != "_")
+                    {
+                        var varPart = new SymbolPart(varId.Value);
+                        if (catchScope.SymbolsByName.TryGetValue(varPart, out var symList) && symList.Count > 0 && symList[0] is LocalVariableSymbol local)
+                        {
+                            local.Type = ResolveType(catchClause.Type, catchScope);
+                        }
+                    }
+                    ResolveExpression(catchClause.Block, catchScope, containingSymbol);
+                }
+                if (tryExpr.FinallyClause is { } finallyClause)
+                {
+                    ResolveExpression(finallyClause.Block, scope, containingSymbol);
+                }
+                break;
             case ElseExpression @else:
                 ResolveExpression(@else.Expression, scope, containingSymbol);
                 break;

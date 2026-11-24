@@ -15,8 +15,6 @@ public sealed class DynCoercionTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
 
         [IntrinsicType("Reference")]
         public struct Reference<T>
@@ -106,7 +104,7 @@ public sealed class DynCoercionTests
     public void SplitBase_ThinReference_FailsWithMH0555()
     {
         var source = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 MiddleB& refB = d;
             }
@@ -136,9 +134,9 @@ public sealed class DynCoercionTests
     public void SplitBase_MethodArgument_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
-            public func ConsumeThin(MiddleB& b) -> Unit {}
+            public func ConsumeThin(MiddleB& b) -> () {}
 
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 ConsumeThin(d);
             }
@@ -149,9 +147,9 @@ public sealed class DynCoercionTests
         Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
-            public func ConsumeDyn(dyn MiddleB& b) -> Unit {}
+            public func ConsumeDyn(dyn MiddleB& b) -> () {}
 
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 ConsumeDyn(d);
             }
@@ -165,7 +163,7 @@ public sealed class DynCoercionTests
     public void SplitBase_AsCast_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 var b = d as MiddleB&;
             }
@@ -176,7 +174,7 @@ public sealed class DynCoercionTests
         Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 var b = d as dyn MiddleB&;
             }

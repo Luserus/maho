@@ -92,8 +92,14 @@ internal sealed class OwnershipTerminator
     /// <summary>Creates a return terminator and retains its source expression for escape analysis.</summary>
     public static OwnershipTerminator Return(Expression? expression = null) => new(OwnershipTerminatorKind.Return, condition: expression);
 
+    /// <summary>Creates a throw terminator and retains its source expression for escape analysis.</summary>
+    public static OwnershipTerminator Throw(Expression? expression = null) => new(OwnershipTerminatorKind.Throw, condition: expression);
+
     /// <summary>The returned expression for a return terminator, if any.</summary>
     public Expression? ReturnExpression => Kind == OwnershipTerminatorKind.Return ? Condition : null;
+
+    /// <summary>The thrown expression for a throw terminator, if any.</summary>
+    public Expression? ThrowExpression => Kind == OwnershipTerminatorKind.Throw ? Condition : null;
 
     private OwnershipTerminator(OwnershipTerminatorKind kind, OwnershipBlock? target = null, OwnershipBlock? falseTarget = null, Expression? condition = null)
     {
@@ -110,5 +116,6 @@ internal enum OwnershipTerminatorKind : byte
     Fallthrough,
     Branch,
     Conditional,
-    Return
+    Return,
+    Throw
 }

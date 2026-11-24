@@ -17,7 +17,7 @@ public sealed class DropInPlaceAndOwningDerefTests
         public interface Destructor
         {
             [OperatorFunction("Destructor")]
-            public func Drop(&this) -> void;
+            public func Drop(&this) -> ();
         }
 
         public struct Box<T> : Destructor, Deref<T&>, OwningDeref<mut &T>
@@ -34,7 +34,7 @@ public sealed class DropInPlaceAndOwningDerefTests
                 return this.ptr;
             }
 
-            public func Destructor.Drop(&this) -> void
+            public func Destructor.Drop(&this) -> ()
             {
             }
         }
@@ -44,7 +44,7 @@ public sealed class DropInPlaceAndOwningDerefTests
     public void MultidimensionalFixedArray_SyntaxAndTypeResolution_Succeeds()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public func Test() -> void
+            public func Test() -> ()
             {
                 int32[5, 4] grid2D;
                 int32[2, 3, 4] grid3D;
@@ -71,7 +71,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> void {}
+                public func Destructor.Drop(&this) -> () {}
             }
 
             public struct Pair
@@ -80,9 +80,9 @@ public sealed class DropInPlaceAndOwningDerefTests
                 public Resource second;
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test(Box<Pair> b) -> void
+            public func Test(Box<Pair> b) -> ()
             {
                 var r1 = b.first;
                 Consume(r1);
@@ -117,7 +117,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> void {}
+                public func Destructor.Drop(&this) -> () {}
             }
 
             public struct Pair
@@ -126,10 +126,10 @@ public sealed class DropInPlaceAndOwningDerefTests
                 public Resource second;
             }
 
-            public func ConsumeResource(Resource r) -> void {}
-            public func ConsumeBox(Box<Pair> b) -> void {}
+            public func ConsumeResource(Resource r) -> () {}
+            public func ConsumeBox(Box<Pair> b) -> () {}
 
-            public func Test(Box<Pair> b) -> void
+            public func Test(Box<Pair> b) -> ()
             {
                 var r1 = b.first;
                 ConsumeResource(r1);

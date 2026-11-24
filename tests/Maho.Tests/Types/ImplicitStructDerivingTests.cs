@@ -32,7 +32,6 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
             [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void : ValType;
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -55,12 +54,10 @@ public sealed class ImplicitStructDerivingTests
         var userPointSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "UserPoint");
         Assert.Contains(TypeRef.Resolved(hStruct), userPointSym.BaseTypes);
 
-        var voidSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "void");
-        Assert.Contains(TypeRef.Resolved(hValType), voidSym.BaseTypes);
     }
 
     [Fact]
-    public void Hierarchy_Void_DerivesFromValueType()
+    public void Hierarchy_Struct_DerivesFromValueType()
     {
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Str name);
@@ -76,17 +73,14 @@ public sealed class ImplicitStructDerivingTests
 
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
-
-            [IntrinsicType("Unit")]
-            public struct void : ValType;
             """);
 
         Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
 
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var hValType));
-        var voidSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "void");
-        Assert.Contains(TypeRef.Resolved(hValType), voidSym.BaseTypes);
+        var structSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Struct");
+        Assert.Contains(TypeRef.Resolved(hValType), structSym.BaseTypes);
     }
 
     [Fact]

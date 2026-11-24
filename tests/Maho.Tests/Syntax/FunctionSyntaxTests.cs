@@ -114,7 +114,7 @@ public sealed class FunctionSyntaxTests
     public void FunctionDeclaration_EmptyBody_ParsesCorrectly()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Forward(int x) -> void;
+            public func Forward(int x) -> ();
             """);
 
         Assert.Empty(diagnostics.Diagnostics);

@@ -157,6 +157,8 @@ internal sealed class OwnershipLowerer
                     LowerWhile(loop, scope);
                 else if (expression.Expression is ForExpression forExpr)
                     LowerFor(forExpr, scope);
+                else if (expression.Expression is TryExpression tryExpr)
+                    LowerTry(tryExpr, scope);
                 else
                     LowerValue(expression.Expression, scope);
                 break;
@@ -171,6 +173,15 @@ internal sealed class OwnershipLowerer
                     LowerValue(value, scope);
                 ExitAllScopes();
                 current.Terminator = OwnershipTerminator.Return(returned.Statement.Expression);
+                current.AddSuccessor(body.Exit);
+                current = AddBlock();
+                break;
+
+            case LocalThrowStatement thrown:
+                if (thrown.Statement.Expression is { } thrownVal)
+                    LowerValue(thrownVal, scope);
+                ExitAllScopes();
+                current.Terminator = OwnershipTerminator.Throw(thrown.Statement.Expression);
                 current.AddSuccessor(body.Exit);
                 current = AddBlock();
                 break;
@@ -393,6 +404,53 @@ internal sealed class OwnershipLowerer
         current = exit;
     }
 
+    private void LowerTry(TryExpression tryExpr, Scope scope)
+    {
+        var tryBlock = AddBlock();
+        var mergeBlock = AddBlock();
+        var finallyBlock = tryExpr.FinallyClause is not null ? AddBlock() : mergeBlock;
+
+        ConnectFallthrough(current, tryBlock);
+        current = tryBlock;
+
+        LowerBranchExpression(tryExpr.TryBlock, scope);
+        ConnectFallthrough(current, finallyBlock);
+
+        foreach (var catchClause in tryExpr.CatchClauses)
+        {
+            var catchScope = context.GetSyntaxScope(catchClause, scope);
+            var catchEntry = AddBlock();
+            tryBlock.AddSuccessor(catchEntry);
+            current = catchEntry;
+
+            BeginScope();
+            if (catchClause.VariableIdentifier is { } varId && varId.Value != "_")
+            {
+                var varPart = new SymbolPart(varId.Value);
+                if (catchScope.SymbolsByName.TryGetValue(varPart, out var symList) && symList.Count > 0 && symList[0] is LocalVariableSymbol local)
+                {
+                    var place = new Place(local);
+                    body.RegisterPlace(local, local.Type);
+                    scopes.Peek().Add(local);
+                    Emit(OwnershipStatementKind.StorageLive, place, varId.Span, catchClause.GetSource());
+                }
+            }
+
+            LowerBranchExpression(catchClause.Block, catchScope);
+            EndScope();
+            ConnectFallthrough(current, finallyBlock);
+        }
+
+        if (tryExpr.FinallyClause is { } finallyClause)
+        {
+            current = finallyBlock;
+            LowerBranchExpression(finallyClause.Block, scope);
+            ConnectFallthrough(current, mergeBlock);
+        }
+
+        current = mergeBlock;
+    }
+
     /// <summary>
     /// Lowers an expression used as a control-flow branch, preserving block-local lexical scope
     /// when the branch is a block expression.
@@ -425,6 +483,12 @@ internal sealed class OwnershipLowerer
         if (expression is ForExpression forExpr)
         {
             LowerFor(forExpr, scope);
+            return;
+        }
+
+        if (expression is TryExpression tryExpr)
+        {
+            LowerTry(tryExpr, scope);
             return;
         }
 
@@ -528,6 +592,10 @@ internal sealed class OwnershipLowerer
 
             case ForExpression forExpr:
                 LowerFor(forExpr, scope);
+                break;
+
+            case TryExpression tryExpr:
+                LowerTry(tryExpr, scope);
                 break;
         }
     }

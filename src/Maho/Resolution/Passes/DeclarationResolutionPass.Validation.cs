@@ -446,6 +446,47 @@ internal sealed partial class DeclarationResolutionPass
         if (group.Count <= 1)
             return;
 
+        // Check for conflicting methods differing solely by receiver
+        for (int i = 0; i < group.Count; i++)
+        {
+            var fnA = group[i];
+            bool hasReceiverA = fnA.Parameters.Count > 0 &&
+                                context.GetParameterSymbol(fnA.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+            if (!hasReceiverA)
+                continue;
+
+            var nonReceiverA = fnA.Parameters.Skip(1).ToList();
+
+            for (int j = i + 1; j < group.Count; j++)
+            {
+                var fnB = group[j];
+                bool hasReceiverB = fnB.Parameters.Count > 0 &&
+                                    context.GetParameterSymbol(fnB.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+                if (!hasReceiverB)
+                    continue;
+
+                var nonReceiverB = fnB.Parameters.Skip(1).ToList();
+
+                if (SignaturesMatch(fnA.GenericParameters, nonReceiverA, fnB.GenericParameters, nonReceiverB))
+                {
+                    var recvA = context.GetParameterSymbol(fnA.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+                    var recvB = context.GetParameterSymbol(fnB.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+
+                    if (recvA != recvB)
+                    {
+                        var firstSpan = fnA.Syntax?.Signature.Identifier.GetSpan() ?? fnA.Syntax?.GetSpan() ?? default;
+                        var redeclSpan = fnB.Syntax?.Signature.Identifier.GetSpan() ?? fnB.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportMethodOverloadSolelyByReceiver(
+                            fnB.Symbol.Name.ToString(),
+                            redeclSpan,
+                            firstSpan,
+                            fnB.Syntax?.GetSource(),
+                            fnA.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+
         // Partition into sub-groups by parameter signature
         var subGroups = new List<List<FunctionSignatureInfo>>();
 
@@ -531,8 +572,19 @@ internal sealed partial class DeclarationResolutionPass
                 for (int i = 1; i < subGroup.Count; i++)
                 {
                     var redecl = subGroup[i];
-                    var redeclSpan = redecl.Syntax?.Signature.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
                     var fnName = redecl.Symbol.Name.ToString();
+
+                    if (fnName == "Main")
+                    {
+                        var earlierInSameFile = subGroup.Take(i).FirstOrDefault(prev => prev.Syntax?.GetSource() == redecl.Syntax?.GetSource());
+                        if (earlierInSameFile.Symbol is null)
+                        {
+                            // First declaration of 'Main' in this file; multi-file Main is disambiguated by ValidateMainEntryPoints.
+                            continue;
+                        }
+                    }
+
+                    var redeclSpan = redecl.Syntax?.Signature.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
                     context.Diagnostics.ReportDuplicateFunctionDeclaration(
                         fnName,
                         redeclSpan,
@@ -596,6 +648,23 @@ internal sealed partial class DeclarationResolutionPass
         if (genIndexA >= 0 || genIndexB >= 0)
             return genIndexA == genIndexB;
 
+        // An immutable safe alias &T at call-site Foo(v) can refer to both T and &T, causing ambiguity.
+        if (unwrappedA.SpecialType is AliasSemanticType aliasA && !aliasA.IsMutable)
+        {
+            if (unwrappedB.SpecialType is AliasSemanticType aliasB)
+            {
+                if (aliasA.IsMutable == aliasB.IsMutable)
+                    return ParameterTypesMatch(aliasA.TargetType, genericParamsA, aliasB.TargetType, genericParamsB, null, null);
+                return false;
+            }
+            return ParameterTypesMatch(aliasA.TargetType, genericParamsA, unwrappedB, genericParamsB, null, null);
+        }
+
+        if (unwrappedB.SpecialType is AliasSemanticType aliasB2 && !aliasB2.IsMutable)
+        {
+            return ParameterTypesMatch(unwrappedA, genericParamsA, aliasB2.TargetType, genericParamsB, null, null);
+        }
+
         if (unwrappedA.IsSpecial || unwrappedB.IsSpecial)
         {
             if (unwrappedA.Kind != unwrappedB.Kind)
@@ -604,9 +673,9 @@ internal sealed partial class DeclarationResolutionPass
             return (unwrappedA.SpecialType, unwrappedB.SpecialType) switch
             {
                 (PointerSemanticType pA, PointerSemanticType pB) =>
-                    ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
+                    pA.IsMutable == pB.IsMutable && ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
                 (ReferenceSemanticType rA, ReferenceSemanticType rB) =>
-                    ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
+                    rA.IsMutable == rB.IsMutable && ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
                 (SpanSemanticType sA, SpanSemanticType sB) =>
                     ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
                 (ArraySemanticType aA, ArraySemanticType aB) =>
@@ -620,6 +689,8 @@ internal sealed partial class DeclarationResolutionPass
                     tA.Elements.Zip(tB.Elements).All(pair =>
                         ParameterTypesMatch(pair.First.Type, genericParamsA, pair.Second.Type, genericParamsB, null, null) &&
                         string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)),
+                (AliasSemanticType alA, AliasSemanticType alB) =>
+                    alA.IsMutable == alB.IsMutable && ParameterTypesMatch(alA.TargetType, genericParamsA, alB.TargetType, genericParamsB, null, null),
                 _ => unwrappedA.Equals(unwrappedB)
             };
         }
@@ -788,4 +859,206 @@ internal sealed partial class DeclarationResolutionPass
         }
     }
 
+    private void ValidateMainEntryPoints()
+    {
+        // 1. Ensure 'Main' is not declared on any type (method)
+        foreach (var m in context.MethodSymbols)
+        {
+            if (m.Name.Text == "Main" && m.Syntax is not null)
+            {
+                var span = m.Syntax.Signature.Identifier.GetSpan() ?? m.Syntax.GetSpan() ?? default;
+                context.Diagnostics.ReportMainMustBeTopLevel(span, m.Syntax.GetSource());
+            }
+        }
+
+        // 2. Discover and validate top-level Main functions
+        var validMainCandidates = new List<FunctionSymbol>();
+
+        foreach (var fn in context.FunctionSymbols)
+        {
+            if (fn.Name.Text != "Main")
+                continue;
+
+            // Synthetic top-level statements Main (syntax is null)
+            if (fn.Syntax is null)
+                continue;
+
+            var span = fn.Syntax.Signature.Identifier.GetSpan() ?? fn.Syntax.GetSpan() ?? default;
+            var source = fn.Syntax.GetSource();
+
+            // Must not be generic
+            if (fn.GenericParameters.Count > 0)
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+                continue;
+            }
+
+            // Return type must be void (Unit) or int32 (Int32)
+            bool isValidReturn = IsVoidType(fn.ReturnType) || IsInt32Type(fn.ReturnType);
+            if (!isValidReturn)
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+                continue;
+            }
+
+            // Parameters: 0 or 1 parameter of Array<Str> / Span<Str>
+            if (fn.Parameters.Count == 0)
+            {
+                validMainCandidates.Add(fn);
+            }
+            else if (fn.Parameters.Count == 1)
+            {
+                var param = context.GetParameterSymbol(fn.Parameters[0]);
+                var paramType = param?.Type ?? TypeRef.Error;
+                if (IsValidStringCollectionParam(paramType))
+                {
+                    validMainCandidates.Add(fn);
+                }
+                else
+                {
+                    context.Diagnostics.ReportInvalidMainSignature(span, source);
+                }
+            }
+            else
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+            }
+        }
+
+        // 3. Disambiguate entry point
+        if (validMainCandidates.Count == 1)
+        {
+            context.EntryPoint = ResolutionContext.GetHandle(validMainCandidates[0]);
+        }
+        else if (validMainCandidates.Count > 1)
+        {
+            var entryFileOption = context.Options.EntryFile;
+            if (entryFileOption is not null)
+            {
+                var matching = validMainCandidates.Where(fn => MatchesEntryFile(fn, entryFileOption)).ToList();
+                if (matching.Count == 1)
+                {
+                    context.EntryPoint = ResolutionContext.GetHandle(matching[0]);
+                }
+                else if (matching.Count > 1)
+                {
+                    var span = matching[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                    context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                        span,
+                        $"ambiguous entry point: multiple 'Main' functions found in entry file '{entryFileOption}'",
+                        matching[0].Syntax?.GetSource());
+                }
+                else
+                {
+                    var span = validMainCandidates[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                    context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                        span,
+                        $"entry file '{entryFileOption}' does not declare a valid 'Main' entry point",
+                        validMainCandidates[0].Syntax?.GetSource());
+                }
+            }
+            else
+            {
+                var span = validMainCandidates[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                    span,
+                    "ambiguous entry point: multiple valid 'Main' functions found across compilation units; specify an entry file using the EntryFile configuration",
+                    validMainCandidates[0].Syntax?.GetSource());
+            }
+        }
+    }
+
+    private bool IsVoidType(TypeRef t) => t.IsEmptyTuple;
+
+    private bool IsInt32Type(TypeRef t)
+    {
+        if (t.Handle is { } h)
+        {
+            var unwrapped = context.UnwrapAlias(h);
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) &&
+                (intrinsicName == KnownIntrinsics.Int32 || intrinsicName == "int32"))
+                return true;
+            if (context.GetTypeSymbol(unwrapped) is { } ts &&
+                (ts.Name.Text == "Int32" || ts.Name.Text == "int32" || ts.Name.Text == "int"))
+                return true;
+        }
+        return false;
+    }
+
+    private bool IsValidStringCollectionParam(TypeRef paramType)
+    {
+        if (paramType.SpecialType is ArraySemanticType arr)
+        {
+            return IsStrType(arr.ElementType);
+        }
+
+        if (paramType.SpecialType is SpanSemanticType sp)
+        {
+            return IsStrType(sp.ElementType);
+        }
+
+        if (paramType.SpecialType is GenericSemanticType gen)
+        {
+            bool isArrayOrSpan = false;
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrH) && context.UnwrapAlias(gen.TargetHandle) == arrH)
+                isArrayOrSpan = true;
+            else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var spanH) && context.UnwrapAlias(gen.TargetHandle) == spanH)
+                isArrayOrSpan = true;
+            else if (context.GetTypeSymbol(gen.TargetHandle) is { } ts && (ts.Name.Text == "Array" || ts.Name.Text == "Span"))
+                isArrayOrSpan = true;
+
+            if (isArrayOrSpan && gen.TypeArguments.Count == 1 && IsStrType(gen.TypeArguments[0]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsStrType(TypeRef t)
+    {
+        if (t.Handle is { } h)
+        {
+            var unwrapped = context.UnwrapAlias(h);
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var name) &&
+                (name == KnownIntrinsics.Str || name == "str"))
+                return true;
+            if (context.GetTypeSymbol(unwrapped) is { } ts &&
+                (ts.Name.Text == "Str" || ts.Name.Text == "str"))
+                return true;
+        }
+        return t.SpecialType?.ToString() == "Str" || t.SpecialType?.ToString() == "str";
+    }
+
+    private static bool MatchesEntryFile(FunctionSymbol fn, string entryOption)
+    {
+        var path = fn.Syntax?.GetSource()?.FilePath;
+        if (path is null)
+            return false;
+
+        return string.Equals(path, entryOption, System.StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(System.IO.Path.GetFileName(path), entryOption, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ValidateGenericParameterDefaults()
+    {
+        foreach (var gp in context.GenericParameterSymbols)
+        {
+            if (gp.DefaultType is { } def && def.IsResolved && gp.Constraints.Count > 0)
+            {
+                foreach (var constraint in gp.Constraints)
+                {
+                    if (!constraint.IsAssignableFrom(def, context))
+                    {
+                        var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                            span,
+                            gp.Name.ToString(),
+                            def.ToDisplayString(context),
+                            constraint.ToDisplayString(context),
+                            gp.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+    }
 }

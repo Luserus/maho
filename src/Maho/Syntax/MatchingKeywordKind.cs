@@ -67,5 +67,11 @@ internal enum MatchingKeywordKind : byte
     Mut,
     In,
     Yield,
-    Break
+    Break,
+    Throw,
+    Try,
+    Catch,
+    Finally,
+    Ext,
+    Extension
 }

@@ -17,8 +17,6 @@ public sealed class ConstructorInitializerTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
 
         [IntrinsicType("Reference")]
         public struct Reference<T>
@@ -75,7 +73,7 @@ public sealed class ConstructorInitializerTests
         var source = Prelude + """
             public struct Base;
 
-            public func OrdinaryFunction() -> Unit : Base()
+            public func OrdinaryFunction() -> () : Base()
             {
             }
             """;
@@ -93,7 +91,7 @@ public sealed class ConstructorInitializerTests
 
             public struct Derived : Base
             {
-                public func NormalMethod() -> Unit : Base()
+                public func NormalMethod() -> () : Base()
                 {
                 }
             }

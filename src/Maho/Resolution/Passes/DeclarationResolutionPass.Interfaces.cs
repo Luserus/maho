@@ -71,7 +71,7 @@ internal sealed partial class DeclarationResolutionPass
                         continue;
 
                     // Abstract method: must be implemented
-                    if (!IsInterfaceMethodImplemented(typeSymbol, ifaceSym, ifaceMethod, typeArgs))
+                    if (!IsInterfaceMethodImplemented(typeSymbol, ifaceSym, ifaceMethod, typeArgs, out var implementingMethod))
                     {
                         var ifaceMemberSpan = ifaceMethod.Syntax?.Signature.Identifier.GetSpan() ??
                                               ifaceMethod.Syntax?.GetSpan() ?? default;
@@ -85,6 +85,19 @@ internal sealed partial class DeclarationResolutionPass
                             typeSource,
                             ifaceMemberSpan,
                             ifaceMemberSource);
+                    }
+                    else if (HasOperatorOnInterface(ifaceHandle, OperatorKind.StaticConstructor) && implementingMethod is not null)
+                    {
+                        var mHandle = ResolutionContext.GetHandle(implementingMethod);
+                        if (context.StaticConstructors.Any(existing => context.GetMethodSymbol(existing)?.Parent == typeHandle))
+                        {
+                            var span = implementingMethod.Syntax?.Signature.Identifier.GetSpan() ?? default;
+                            context.Diagnostics.ReportDuplicateStaticConstructor(span, typeSymbol.Name.ToString(), implementingMethod.Syntax?.GetSource());
+                        }
+                        else
+                        {
+                            context.StaticConstructors.Add(mHandle);
+                        }
                     }
                 }
                 else if (sym is PropertySymbol ifaceProp)
@@ -140,9 +153,17 @@ internal sealed partial class DeclarationResolutionPass
         Symbol typeSymbol,
         TypeSymbol ifaceSym,
         MethodSymbol ifaceMethod,
-        Dictionary<SymbolHandle, TypeRef> typeArgs)
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        out MethodSymbol? implementingMethod)
     {
+        implementingMethod = null;
         var candidateScopes = new List<Scope> { GetOwnedScope(typeSymbol) };
+        var typeH = ResolutionContext.GetHandle(typeSymbol);
+        foreach (var ext in context.ExtensionSymbols)
+        {
+            if (ext.TargetTypeHandle == typeH)
+                candidateScopes.Add(ext.Scope);
+        }
 
         IReadOnlyList<SymbolHandle> bases = typeSymbol switch
         {
@@ -276,6 +297,7 @@ internal sealed partial class DeclarationResolutionPass
                 if (method.Syntax?.Body is FunctionEmptyBody && !method.Flags.HasFlag(FunctionFlags.Intrinsic))
                     continue;
 
+                implementingMethod = method;
                 return true;
             }
         }
@@ -292,6 +314,12 @@ internal sealed partial class DeclarationResolutionPass
         bool requiresSetter)
     {
         var candidateScopes = new List<Scope> { GetOwnedScope(typeSymbol) };
+        var typeH = ResolutionContext.GetHandle(typeSymbol);
+        foreach (var ext in context.ExtensionSymbols)
+        {
+            if (ext.TargetTypeHandle == typeH)
+                candidateScopes.Add(ext.Scope);
+        }
 
         IReadOnlyList<SymbolHandle> bases = typeSymbol switch
         {

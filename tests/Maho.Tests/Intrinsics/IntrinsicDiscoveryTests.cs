@@ -47,8 +47,6 @@ public sealed partial class IntrinsicDiscoveryTests
 
         intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         public interface Callable<TReturn, TParams...>
         {
@@ -657,10 +655,10 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_PointerWithoutPointerIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
+            public struct Dummy;
             public struct Foo
             {
-                public struct void;
-                void* ptr;
+                Dummy* ptr;
             }
             """);
 
@@ -673,10 +671,10 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_ReferenceWithoutReferenceIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
+            public struct Dummy;
             public struct Foo
             {
-                public struct void;
-                void& r;
+                Dummy& r;
             }
             """);
 
@@ -689,10 +687,10 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_ArrayWithoutArrayIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
+            public struct Dummy;
             public struct Foo
             {
-                public struct void;
-                void[] arr;
+                Dummy[] arr;
             }
             """);
 
@@ -705,10 +703,10 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_FixedArrayWithoutFixedArrayIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
+            public struct Dummy;
             public struct Foo
             {
-                public struct void;
-                void[5] arr;
+                Dummy[5] arr;
             }
             """);
 
@@ -721,10 +719,10 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_SpanWithoutSpanIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
+            public struct Dummy;
             public struct Foo
             {
-                public struct void;
-                void[&] span;
+                Dummy[&] span;
             }
             """);
 

@@ -115,7 +115,7 @@ public sealed class DynSyntaxTests
     public void BaseInitializerClause_ParsesMultipleInitializers()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Construct(int x) -> Unit : Base1(x), Base2(42)
+            public func Construct(int x) -> () : Base1(x), Base2(42)
             {
             }
             """);
@@ -142,7 +142,7 @@ public sealed class DynSyntaxTests
     public void BaseInitializerClause_CombinedWithWhereConstraints_BothOrders()
     {
         var (_, diag1, _, root1) = CompilerTestBed.Parse("""
-            public func MethodA<T>() -> Unit where T : Marker : BaseType(10)
+            public func MethodA<T>() -> () where T : Marker : BaseType(10)
             {
             }
             """);
@@ -153,7 +153,7 @@ public sealed class DynSyntaxTests
         Assert.NotNull(topFunc1.Function.Signature.BaseClause);
 
         var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public func MethodB<T>() -> Unit : BaseType(20) where T : Marker
+            public func MethodB<T>() -> () : BaseType(20) where T : Marker
             {
             }
             """);

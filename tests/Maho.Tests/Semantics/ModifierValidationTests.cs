@@ -138,7 +138,7 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            protected func SecretFunc() -> void { }
+            protected func SecretFunc() -> () { }
             """);
 
         Assert.True(compilation.HasErrors);
@@ -156,7 +156,7 @@ public sealed class ModifierValidationTests
                 Active,
                 Inactive;
 
-                public func Process(untagged &this) -> void { }
+                public func Process(untagged &this) -> () { }
             }
 
             public untagged union Shape
@@ -164,7 +164,7 @@ public sealed class ModifierValidationTests
                 int32 circle;
                 int32 square;
 
-                public func Describe(untagged &this) -> void { }
+                public func Describe(untagged &this) -> () { }
             }
             """);
 
@@ -193,11 +193,11 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public untagged func TopFunc() -> void { }
+            public untagged func TopFunc() -> () { }
 
             public struct S
             {
-                public untagged func MemberMethod(&this) -> void { }
+                public untagged func MemberMethod(&this) -> () { }
             }
             """);
 
@@ -214,7 +214,7 @@ public sealed class ModifierValidationTests
 
             public struct S
             {
-                public func Method(untagged &this) -> void { }
+                public func Method(untagged &this) -> () { }
             }
             """);
 
@@ -230,7 +230,7 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public func TestFunc(untagged int32 x) -> void { }
+            public func TestFunc(untagged int32 x) -> () { }
             """);
 
         Assert.True(compilation.HasErrors);

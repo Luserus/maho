@@ -911,4 +911,24 @@ internal sealed partial class IntrinsicDiscoveryPass
 
         context.DiscoveredIntrinsics.Register(KnownIntrinsics.FixedArray, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
     }
+
+    private void ValidateBox(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
+    {
+        if (!typesByIntrinsic.TryGetValue(KnownIntrinsics.Box, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Box))
+            return;
+
+        var entry = list[0];
+        var symbol = entry.Symbol;
+        var syntax = GetSyntax(symbol);
+
+        int gpCount = GetGenericParameterCount(symbol);
+        if (gpCount is not (1 or 2))
+        {
+            var span = syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Box, "must have 1 or 2 generic parameters (<T> or <T, A>)", syntax?.GetSource());
+            return;
+        }
+
+        context.DiscoveredIntrinsics.Register(KnownIntrinsics.Box, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
+    }
 }

@@ -162,19 +162,24 @@ internal sealed partial class SymbolDiscoveryPass
 
     private void ResolveFieldDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingType)
     {
+        var (dirAcc, extAcc) = ResolveFieldAccessibility(declaration.Modifiers);
         var declarator = declaration.Declarator;
         if (declarator.Identifier is TupleName tupleName)
         {
             foreach (var elem in tupleName.Elements)
             {
                 var symbol = context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(elem).Last, containingType, declaration);
-                symbol.Flags = ResolveVariableFlags(declaration.Modifiers);
+                symbol.DirectAccessibility = dirAcc;
+                symbol.ExtensionAccessibility = extAcc;
+                symbol.Flags = ResolveVariableFlags(declaration.Modifiers, dirAcc);
             }
         }
         else
         {
             var symbol = context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier).Last, containingType, declaration);
-            symbol.Flags = ResolveVariableFlags(declaration.Modifiers);
+            symbol.DirectAccessibility = dirAcc;
+            symbol.ExtensionAccessibility = extAcc;
+            symbol.Flags = ResolveVariableFlags(declaration.Modifiers, dirAcc);
         }
     }
 
@@ -364,6 +369,25 @@ internal sealed partial class SymbolDiscoveryPass
             }
             DiscoverBlockExpressions(forExpr.Body, forScope, containingSymbol, containingMethod);
         }
+        else if (expr is TryExpression tryExpr)
+        {
+            DiscoverBlockExpressions(tryExpr.TryBlock, scope, containingSymbol, containingMethod);
+            foreach (var catchClause in tryExpr.CatchClauses)
+            {
+                var catchScope = context.CreateScope(scope);
+                context.RegisterSyntaxScope(catchClause, catchScope);
+                if (catchClause.VariableIdentifier is { } varId && varId.Value != "_")
+                {
+                    var varPart = new SymbolPart(varId.Value);
+                    context.CreateLocalVariableSymbol(catchScope, varPart, containingSymbol, null);
+                }
+                DiscoverBlockExpressions(catchClause.Block, catchScope, containingSymbol, containingMethod);
+            }
+            if (tryExpr.FinallyClause is { } finallyClause)
+            {
+                DiscoverBlockExpressions(finallyClause.Block, scope, containingSymbol, containingMethod);
+            }
+        }
         else if (expr is LambdaExpression lambda)
         {
             Scope lambdaScope = context.CreateScope(scope);
@@ -425,15 +449,76 @@ internal sealed partial class SymbolDiscoveryPass
         if (genericName is null)
             return [];
 
-        var genericParameters = new List<SymbolHandle>(genericName.GenericParameters.Count);
+        return ResolveGenericParametersFromList(genericName.GenericParameters, scope, genericSymbol);
+    }
 
-        foreach (var genericParameter in genericName.GenericParameters)
+    private List<SymbolHandle> ResolveGenericParametersFromList(SeparatedSyntaxList<GenericParameterSyntax> list, Scope scope, Symbol genericSymbol)
+    {
+        var genericParameters = new List<SymbolHandle>(list.Count);
+
+        foreach (var genericParameter in list)
         {
-            var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic);
+            var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic, genericParameter);
             genericParameters.Add(ResolutionContext.GetHandle(symbol));
         }
 
         return genericParameters;
+    }
+
+    public static (Accessibility Direct, Accessibility Extension) ResolveFieldAccessibility(IReadOnlyList<Token> modifiers)
+    {
+        int extIndex = -1;
+        for (int i = 0; i < modifiers.Count; i++)
+        {
+            if (modifiers[i].MatchingKind == MatchingKeywordKind.Ext)
+            {
+                extIndex = i;
+                break;
+            }
+        }
+
+        if (extIndex < 0)
+        {
+            foreach (var mod in modifiers)
+            {
+                if (mod.MatchingKind == MatchingKeywordKind.Public)
+                    return (Accessibility.Public, Accessibility.Public);
+                if (mod.MatchingKind == MatchingKeywordKind.Internal)
+                    return (Accessibility.Internal, Accessibility.Internal);
+                if (mod.MatchingKind == MatchingKeywordKind.Protected)
+                    return (Accessibility.Protected, Accessibility.Protected);
+                if (mod.MatchingKind == MatchingKeywordKind.Private)
+                    return (Accessibility.Private, Accessibility.Private);
+            }
+            return (Accessibility.Private, Accessibility.Private);
+        }
+
+        Accessibility direct = Accessibility.Private;
+        for (int i = 0; i < extIndex; i++)
+        {
+            var kind = modifiers[i].MatchingKind;
+            if (kind == MatchingKeywordKind.Public) direct = Accessibility.Public;
+            else if (kind == MatchingKeywordKind.Internal) direct = Accessibility.Internal;
+            else if (kind == MatchingKeywordKind.Protected) direct = Accessibility.Protected;
+            else if (kind == MatchingKeywordKind.Private) direct = Accessibility.Private;
+        }
+
+        Accessibility? ext = null;
+        for (int i = extIndex + 1; i < modifiers.Count; i++)
+        {
+            var kind = modifiers[i].MatchingKind;
+            if (kind == MatchingKeywordKind.Public) ext = Accessibility.Public;
+            else if (kind == MatchingKeywordKind.Internal) ext = Accessibility.Internal;
+            else if (kind == MatchingKeywordKind.Protected) ext = Accessibility.Protected;
+            else if (kind == MatchingKeywordKind.Private) ext = Accessibility.Private;
+        }
+
+        if (ext is null)
+        {
+            ext = (direct == Accessibility.Internal) ? Accessibility.Public : Accessibility.Internal;
+        }
+
+        return (direct, ext.Value);
     }
 
     private static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode containingNamespace, NamedSyntax name)
@@ -537,7 +622,7 @@ internal sealed partial class SymbolDiscoveryPass
         return flags;
     }
 
-    private static VariableFlags ResolveVariableFlags(IReadOnlyList<Token> modifiers)
+    private static VariableFlags ResolveVariableFlags(IReadOnlyList<Token> modifiers, Accessibility? directAccessibility = null)
     {
         var flags = VariableFlags.None;
 
@@ -545,14 +630,35 @@ internal sealed partial class SymbolDiscoveryPass
         {
             flags |= mod.MatchingKind switch
             {
-                MatchingKeywordKind.Public => VariableFlags.Public,
-                MatchingKeywordKind.Internal => VariableFlags.Internal,
-                MatchingKeywordKind.Private => VariableFlags.Private,
                 MatchingKeywordKind.Static => VariableFlags.Static,
-                MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
                 _ => VariableFlags.None
             };
+        }
+
+        if (directAccessibility is not null)
+        {
+            flags |= directAccessibility.Value switch
+            {
+                Accessibility.Public => VariableFlags.Public,
+                Accessibility.Internal => VariableFlags.Internal,
+                Accessibility.Protected => VariableFlags.Protected,
+                _ => VariableFlags.Private
+            };
+        }
+        else
+        {
+            foreach (var mod in modifiers)
+            {
+                flags |= mod.MatchingKind switch
+                {
+                    MatchingKeywordKind.Public => VariableFlags.Public,
+                    MatchingKeywordKind.Internal => VariableFlags.Internal,
+                    MatchingKeywordKind.Private => VariableFlags.Private,
+                    MatchingKeywordKind.Protected => VariableFlags.Protected,
+                    _ => VariableFlags.None
+                };
+            }
         }
 
         return flags;

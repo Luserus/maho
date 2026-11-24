@@ -17,8 +17,6 @@ public sealed class AmbiguityResolutionTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
 
         [IntrinsicType("Reference")]
         public struct Reference<T>

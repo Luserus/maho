@@ -50,23 +50,42 @@ internal sealed class BorrowEscapeAnalysis
         }
 
         // 2. Safe borrows cannot escape enclosing function
-        if (!ReturnsSafeBorrow())
-            return;
+        if (ReturnsSafeBorrow())
+        {
+            foreach (var block in body.Blocks)
+            {
+                if (block.Terminator.ReturnExpression is { } returned && TryFindReferent(returned, out var referent))
+                {
+                    if (referent.Root is TemporaryStorageSymbol)
+                    {
+                        context.Diagnostics.ReportBorrowEscapesTemporary(
+                            returned.GetSpan() ?? default,
+                            "enclosing function",
+                            returned.GetSource());
+                    }
+                    else if (referent.Root is LocalVariableSymbol local)
+                    {
+                        Report(returned, local);
+                    }
+                }
+            }
+        }
 
+        // 3. Safe borrows cannot escape through throw statements
         foreach (var block in body.Blocks)
         {
-            if (block.Terminator.ReturnExpression is { } returned && TryFindReferent(returned, out var referent))
+            if (block.Terminator.ThrowExpression is { } thrown && TryFindReferent(thrown, out var referent))
             {
                 if (referent.Root is TemporaryStorageSymbol)
                 {
                     context.Diagnostics.ReportBorrowEscapesTemporary(
-                        returned.GetSpan() ?? default,
-                        "enclosing function",
-                        returned.GetSource());
+                        thrown.GetSpan() ?? default,
+                        "enclosing function (via throw)",
+                        thrown.GetSource());
                 }
                 else if (referent.Root is LocalVariableSymbol local)
                 {
-                    Report(returned, local);
+                    Report(thrown, local);
                 }
             }
         }

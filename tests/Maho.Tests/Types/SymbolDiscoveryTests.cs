@@ -179,7 +179,7 @@ public sealed class SymbolDiscoveryTests
                         using MemberBlockAlias = Target;
                     }
 
-                    public func Method<U>() -> void
+                    public func Method<U>() -> ()
                     {
                         using LocalAlias = Target;
                         using GenericLocalAlias<L> = Target;

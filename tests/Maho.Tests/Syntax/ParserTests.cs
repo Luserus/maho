@@ -298,7 +298,7 @@ public sealed partial class ParserTests
     public void Parse_LocalBlock_SupportsUsingDirective_And_AliasDeclaration()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 {
                     using Std.Collections;
@@ -328,7 +328,7 @@ public sealed partial class ParserTests
     public void Parse_LocalBlock_RequiresSemicolonOnNonFinalExpressions()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 {
                     int x = 1;
@@ -345,7 +345,7 @@ public sealed partial class ParserTests
     public void Parse_LocalBlock_AllowsTrailingExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 var val = {
                     int x = 1;
@@ -361,7 +361,7 @@ public sealed partial class ParserTests
     public void Parse_TrailingBlockExpressionInBlockContext()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 var val = {
                     int x = 1;
@@ -377,7 +377,7 @@ public sealed partial class ParserTests
     public void Parse_StandaloneScopeBlockWithoutSemicolon()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 {
                     int x = 1;
@@ -393,7 +393,7 @@ public sealed partial class ParserTests
     public void Parse_IfStatementWithoutSemicolonWhenEndingWithBlock()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 if (1)
                 {
@@ -414,7 +414,7 @@ public sealed partial class ParserTests
     public void Parse_IfStatementWithEmbeddedExpressionAndSemicolon()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 if (1) call();
                 int y = 3;
@@ -428,7 +428,7 @@ public sealed partial class ParserTests
     public void Parse_FunctionBodyDisallowsTrailingExpressionAndReportsExpectedReturn()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 int x = 1;
                 x + 2
@@ -444,7 +444,7 @@ public sealed partial class ParserTests
     public void Parse_FunctionBlockBody_RequiresSemicolonOnExpressions()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 int x = 1;
                 x + 2
@@ -458,7 +458,7 @@ public sealed partial class ParserTests
     public void Parse_BlockExpression_SupportsMultipleStatementsAndFinalExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 var val = {
                     int x = 1;
@@ -486,7 +486,7 @@ public sealed partial class ParserTests
     public void Parse_WhileExpression_WithoutSemicolon_WhenBodyEndsWithBlock()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 while (true)
                 {
@@ -510,7 +510,7 @@ public sealed partial class ParserTests
     public void Parse_WhileExpression_AsFinalExpressionInBlockExpression()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public static func Test() -> void
+            public static func Test() -> ()
             {
                 var val = {
                     int x = 0;
@@ -743,7 +743,7 @@ public sealed partial class ParserTests
 
         // No diagnostics for [x]; inside a function
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            func Foo() -> void
+            func Foo() -> ()
             {
                 [x];
             }
@@ -801,7 +801,7 @@ public sealed partial class ParserTests
     public void Parse_StatementBracketDisambiguation_UnclosedBracketReportsError()
     {
         var (_, diagnostics, _, _) = CompilerTestBed.Parse("""
-            func Foo() -> void
+            func Foo() -> ()
             {
                 [x][;
             }
@@ -913,7 +913,7 @@ public sealed partial class ParserTests
                 {
                     const
                     {
-                        func Func() -> void { }
+                        func Func() -> () { }
                     }
                 }
             }

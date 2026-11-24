@@ -18,8 +18,6 @@ public sealed class MultipleSharedBaseTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
 
         [IntrinsicType("Metadata")]
         public struct Metadata<T>;

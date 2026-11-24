@@ -27,15 +27,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func Test()
             {
@@ -55,15 +55,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func Test(bool choose)
             {
@@ -83,15 +83,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func Test(Resource value)
             {
@@ -111,15 +111,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func Test(Resource value)
             {
@@ -139,15 +139,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func ReadThroughReference(int32 value) -> int32
             {
@@ -155,7 +155,7 @@ public sealed class LifetimeAnalysisTests
                 return *reference;
             }
 
-            public func ReferencePreventsMove(Resource value) -> void
+            public func ReferencePreventsMove(Resource value) -> ()
             {
                 Resource& reference = &value;
                 Consume(value);
@@ -196,15 +196,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func CannotCopy(Resource value) -> void
+            public func CannotCopy(Resource value) -> ()
             {
                 &Resource alias = value;
                 Resource copy = alias;
@@ -223,15 +223,15 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
 
             public func Test(Resource value)
             {
@@ -252,15 +252,15 @@ public sealed class LifetimeAnalysisTests
             public interface Destructor
             {
                 [OperatorFunction("Destructor")]
-                public func Drop(&this) -> void;
+                public func Drop(&this) -> ();
             }
 
             public struct Resource : Destructor
             {
-                public func Drop(&this) -> void {}
+                public func Drop(&this) -> () {}
             }
 
-            public func Consume(Resource resource) -> void {}
+            public func Consume(Resource resource) -> () {}
             """);
 
         var function = Assert.Single(compilation.Context.FunctionSymbols, f => f.Name.Text == "Consume");
@@ -292,12 +292,12 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
             public struct Pair
@@ -306,9 +306,9 @@ public sealed class LifetimeAnalysisTests
                 public Resource b;
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Pair p;
                 Consume(p.a);
@@ -326,12 +326,12 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
             public struct Pair
@@ -340,9 +340,9 @@ public sealed class LifetimeAnalysisTests
                 public Resource b;
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Pair p;
                 Consume(p.a);
@@ -361,12 +361,12 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
             public struct Pair
@@ -375,10 +375,10 @@ public sealed class LifetimeAnalysisTests
                 public Resource b;
             }
 
-            public func Consume(Resource r) -> void {}
-            public func ConsumePair(Pair p) -> void {}
+            public func Consume(Resource r) -> () {}
+            public func ConsumePair(Pair p) -> () {}
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Pair p;
                 Consume(p.a);
@@ -397,12 +397,12 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
             public struct Pair
@@ -411,10 +411,10 @@ public sealed class LifetimeAnalysisTests
                 public Resource b;
             }
 
-            public func Consume(Resource r) -> void {}
-            public func ConsumePair(Pair p) -> void {}
+            public func Consume(Resource r) -> () {}
+            public func ConsumePair(Pair p) -> () {}
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Pair p;
                 Resource r1;
@@ -438,23 +438,23 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public struct Resource : Move<Resource>
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
             }
 
             public struct Monolithic : Move<Monolithic>
             {
                 public Resource res;
-                public func Move(Monolithic& dest, Monolithic& source) -> void {}
+                public func Move(Monolithic& dest, Monolithic& source) -> () {}
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Monolithic m;
                 Consume(m.res);
@@ -475,7 +475,7 @@ public sealed class LifetimeAnalysisTests
                 public int32 b;
             }
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Pair p;
                 mut &int32 refA = p.a;
@@ -495,19 +495,19 @@ public sealed class LifetimeAnalysisTests
             public interface Move<T>
             {
                 [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> void;
+                public func Move(T& dest, T& source) -> ();
             }
 
             public interface Destructor
             {
                 [OperatorFunction("Destructor")]
-                public func Drop(&this) -> void;
+                public func Drop(&this) -> ();
             }
 
             public struct Resource : Move<Resource>, Destructor
             {
-                public func Move(Resource& dest, Resource& source) -> void {}
-                public func Drop(&this) -> void {}
+                public func Move(Resource& dest, Resource& source) -> () {}
+                public func Drop(&this) -> () {}
             }
 
             public struct Pair
@@ -516,9 +516,9 @@ public sealed class LifetimeAnalysisTests
                 public Resource b;
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test(bool cond) -> void
+            public func Test(bool cond) -> ()
             {
                 Pair p;
                 Resource r1;
@@ -558,7 +558,7 @@ public sealed class LifetimeAnalysisTests
             public struct Counter
             {
                 public int32 count;
-                public func Increment(mut &this) -> void
+                public func Increment(mut &this) -> ()
                 {
                     this.count = 42;
                 }
@@ -570,7 +570,7 @@ public sealed class LifetimeAnalysisTests
                 return c;
             }
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Counter c;
                 c.Increment();
@@ -585,7 +585,7 @@ public sealed class LifetimeAnalysisTests
     public void TemporaryBorrow_EscapingToLocal_ReportsMH1008()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var addr = &42;
             }

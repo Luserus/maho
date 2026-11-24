@@ -13,8 +13,6 @@ public class ExplicitInterfaceTests
 
         intrinsic attribute OperatorFunction(Str name);
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         [IntrinsicType("NUInt")]
         public struct nuint;
@@ -115,19 +113,17 @@ public class ExplicitInterfaceTests
             }
 
             // Custom void type name: Unit
-            [IntrinsicType("Unit")]
-            public struct Unit;
 
             public interface Ctor<T>
             {
                 [OperatorFunction("Constructor")]
-                public func Construct(&this) -> Unit;
+                public func Construct(&this) -> ();
             }
 
             public interface Dtor<T>
             {
                 [OperatorFunction("Destructor")]
-                public func Destruct(&this) -> Unit;
+                public func Destruct(&this) -> ();
             }
             """);
 
@@ -153,8 +149,6 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
 
-            [IntrinsicType("Unit")]
-            public struct void;
 
             [IntrinsicType("NUInt")]
             public struct nuint;
@@ -211,7 +205,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add<Int32>>.Add(1, 2);
                 }
@@ -252,7 +246,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     // Int32.Add should NOT resolve because Add.Add is interface-scoped!
                     Int32.Add(1, 2);
@@ -293,7 +287,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -340,7 +334,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -384,7 +378,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -429,7 +423,7 @@ public class ExplicitInterfaceTests
                 public func Inc(&this) -> int32;
 
                 [OperatorFunction("AdditionAssignment")]
-                public func AddAssign(&this, int32 rhs) -> void;
+                public func AddAssign(&this, int32 rhs) -> ();
             }
 
             public interface Idx<T, TIdx>
@@ -438,7 +432,7 @@ public class ExplicitInterfaceTests
                 public func Get(&this, int32 index) -> int32;
 
                 [OperatorFunction("IndexerSetter")]
-                public func Set(&this, int32 val, int32 index) -> void;
+                public func Set(&this, int32 val, int32 index) -> ();
             }
 
             public interface Cast<TFrom, TTo>
@@ -496,7 +490,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Ops.Add>.Add(1, 2);
                 }

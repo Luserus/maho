@@ -19,8 +19,6 @@ public sealed class CrossProjectDynTests
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
 
         [IntrinsicType("Reference")]
         public struct Reference<T>
@@ -152,7 +150,7 @@ public sealed class CrossProjectDynTests
                 public Int32 d;
             }
 
-            public func TestThinSplit(Derived& d) -> Unit
+            public func TestThinSplit(Derived& d) -> ()
             {
                 MiddleB& refB = d;
             }
