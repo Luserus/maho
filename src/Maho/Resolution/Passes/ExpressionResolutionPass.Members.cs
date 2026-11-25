@@ -31,6 +31,67 @@ internal sealed partial class ExpressionResolutionPass
         var receiverType = ResolveExpression(access.Expression, scope, containingFunction);
         var memberName = access.Identifier.Value;
 
+        // Module-qualified namespace chain: ModA::Ns.Sub.Symbol or global::Ns.Symbol
+        if (scopedNamespaceChains.TryGetValue(access.Expression, out var nsMatches))
+        {
+            var part = new SymbolPart(access.Identifier);
+            var matchedModules = new List<(ResolutionContext Mod, Symbol Sym)>();
+            var deeperNamespaces = new List<(ResolutionContext Mod, NamespaceTrieNode Node)>();
+
+            foreach (var (mod, nsNode) in nsMatches)
+            {
+                bool foundInThisMod = false;
+                foreach (var s in nsNode.GetSymbols(part))
+                {
+                    if (s.ProjectId == mod.ProjectId)
+                    {
+                        matchedModules.Add((mod, s));
+                        foundInThisMod = true;
+                        break;
+                    }
+                }
+
+                if (!foundInThisMod && nsNode.Next.TryGetValue(part, out var nextNs) &&
+                    ResolutionContext.HasOwnedSymbolsInSubtree(nextNs, mod.ProjectId))
+                {
+                    deeperNamespaces.Add((mod, nextNs));
+                }
+            }
+
+            if (matchedModules.Count > 1)
+            {
+                context.Diagnostics.ReportAmbiguousModuleMember(
+                    access.Identifier.Span,
+                    access.Expression is ScopeResolutionExpression sr ? sr.Qualifier.Value : memberName,
+                    memberName,
+                    access.GetSource());
+                return TypeRef.Error;
+            }
+
+            if (matchedModules.Count == 1)
+            {
+                var sym = matchedModules[0].Sym;
+                var h = ResolutionContext.GetHandle(sym);
+                context.ResolvedTree.AddReference(access, h);
+                if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
+                    context.SetConstantValue(access, c.Value);
+                return GetTypeFromSymbol(sym);
+            }
+
+            if (deeperNamespaces.Count > 0)
+            {
+                scopedNamespaceChains[access] = deeperNamespaces;
+                return TypeRef.Unresolved;
+            }
+
+            context.Diagnostics.ReportMemberNotFound(
+                access.Identifier.Span,
+                memberName,
+                nsMatches[0].Node.Name.Text,
+                source: access.GetSource());
+            return TypeRef.Error;
+        }
+
         // If receiver is an uncollapsed literal, defer resolution until collapsed
         if (receiverType.IsLiteral)
         {
@@ -80,12 +141,21 @@ internal sealed partial class ExpressionResolutionPass
 
         // Check if access.Expression is a TypeSymbol (static access / enum variant)
         bool isStaticAccessOnType = access.Expression is TypeAsExpression;
-        if (!isStaticAccessOnType && access.Expression is NamedExpression namedExpr && namedExpr.Identifier.MatchingKind is not MatchingKeywordKind.This)
+        if (!isStaticAccessOnType)
         {
-            if (context.ResolvedTree.TryGetReference(namedExpr, out var namedH) && context.GetSymbol(namedH) is TypeSymbol)
+            if (access.Expression is NamedExpression namedExpr && namedExpr.Identifier.MatchingKind is not MatchingKeywordKind.This)
+            {
+                if (context.ResolvedTree.TryGetReference(namedExpr, out var namedH) && context.GetSymbol(namedH) is TypeSymbol or NestedTypeSymbol)
+                    isStaticAccessOnType = true;
+                else if (receiverType.Kind == TypeRefKind.Resolved && receiverType.Handle is { } rh && context.GetTypeSymbol(rh) is { } ts && namedExpr.Identifier.Value == ts.Name.Text)
+                    isStaticAccessOnType = true;
+            }
+            else if (access.Expression is ScopeResolutionExpression or MemberAccessExpression &&
+                     context.ResolvedTree.TryGetReference(access.Expression, out var exprH) &&
+                     context.GetSymbol(exprH) is TypeSymbol or NestedTypeSymbol)
+            {
                 isStaticAccessOnType = true;
-            else if (receiverType.Kind == TypeRefKind.Resolved && receiverType.Handle is { } rh && context.GetTypeSymbol(rh) is { } ts && namedExpr.Identifier.Value == ts.Name.Text)
-                isStaticAccessOnType = true;
+            }
         }
 
         // Untagged union and sum type member safety checks (instance members only!)
@@ -239,6 +309,46 @@ internal sealed partial class ExpressionResolutionPass
         {
             bool isExplicitInterfaceAccess = access.Expression is TypeAsExpression;
             var (member, isAmbiguous, _) = FindMemberInTypeHierarchy(recvHandle.Value, memberName, isExplicitInterfaceAccess);
+
+            if (member is null && !isAmbiguous && !isExplicitInterfaceAccess &&
+                context.GetEnclosingOwnerHandle(containingFunction, scope) is { } ownerH)
+            {
+                var unwrappedRecv = context.UnwrapAlias(recvHandle.Value);
+                InterfaceConformance? matchedTier1Conf = null;
+                Symbol? matchedIfaceMember = null;
+
+                foreach (var conf in context.Conformances)
+                {
+                    if (conf.OwnerHandle != ownerH || conf.TargetType.Handle is not { } confTargetH)
+                        continue;
+                    if (context.UnwrapAlias(confTargetH) != unwrappedRecv)
+                        continue;
+
+                    foreach (var implHandle in conf.MethodMap.Values)
+                    {
+                        if (context.GetSymbol(implHandle) is { } implSym && implSym.Name.Text == memberName)
+                        {
+                            bool implStatic = implSym is MethodSymbol im && im.Flags.HasFlag(FunctionFlags.Static) ||
+                                              implSym is PropertySymbol ip && ip.Flags.HasFlag(FunctionFlags.Static);
+                            if (implStatic == isStaticAccessOnType)
+                            {
+                                matchedTier1Conf = conf;
+                                matchedIfaceMember = implSym;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (matchedIfaceMember is not null)
+                        break;
+                }
+
+                if (matchedIfaceMember is not null && matchedTier1Conf is not null)
+                {
+                    member = matchedIfaceMember;
+                    context.ResolvedTree.AddConformance(access, matchedTier1Conf);
+                }
+            }
 
             if (isAmbiguous)
             {
@@ -422,6 +532,9 @@ internal sealed partial class ExpressionResolutionPass
             {
                 if (context.GetMethodSymbol(mH) is { } m && m.Name.Text == memberName)
                 {
+                    if (m.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                        continue;
+
                     bool hasReceiver = m.Parameters.Count > 0 &&
                         context.GetParameterSymbol(m.Parameters[0])?.Syntax?.Declarator.ReceiverKind is not null &&
                         context.GetParameterSymbol(m.Parameters[0])!.Syntax!.Declarator.ReceiverKind != ReceiverKind.None &&
@@ -446,6 +559,9 @@ internal sealed partial class ExpressionResolutionPass
                 {
                     if (context.GetPropertySymbol(pH) is { } p && p.Name.Text == memberName)
                     {
+                        if (p.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                            continue;
+
                         bool isPropStatic = p.Flags.HasFlag(FunctionFlags.Static);
                         if (isStaticAccessOnType == isPropStatic)
                         {

@@ -162,7 +162,8 @@ internal sealed partial class Parser
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
                                                    MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Mut or MatchingKeywordKind.Ext ||
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Mut or MatchingKeywordKind.Ext ||
+                                                   (CurrentToken.MatchingKind is MatchingKeywordKind.Global && !LooksLikeColonColonAt(1)) ||
                                                    (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged && IsUntaggedDeclarationModifierAt(current));
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
@@ -182,7 +183,7 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Throw
         and not MatchingKeywordKind.Try and not MatchingKeywordKind.Catch and not MatchingKeywordKind.Finally
         and not MatchingKeywordKind.True and not MatchingKeywordKind.False
-        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This
+        and not MatchingKeywordKind.Null and not MatchingKeywordKind.Default and not MatchingKeywordKind.This
         and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
         and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
         and not MatchingKeywordKind.Mut and not MatchingKeywordKind.Ext and not MatchingKeywordKind.Extension;
@@ -418,7 +419,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective() || IsExternUsingDirective())
             {
                 var parsedDirectives = ParseDirectives(out bool enabled, topLevelStatementsEnabled);
                 directives.AddRange(parsedDirectives);
@@ -463,6 +464,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
     private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
+        if (IsExternUsingDirective())
+            return new TopLevelExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -485,7 +489,7 @@ internal sealed partial class Parser
         else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) || (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
-                 CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
+                 (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1)))
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
@@ -499,6 +503,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember(IReadOnlyList<AttributeListSyntax>? initialAttributes = null)
     {
+        if (IsExternUsingDirective())
+            return new MemberExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -553,6 +560,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
+        if (IsExternUsingDirective())
+            return new LocalExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -595,7 +605,7 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
 
-    /// <summary>Parses either a type argument or a compile-time expression argument.</summary>
+    /// <summary>Parses either a type argument, a <c>Type as Interface</c> conformance argument, or a compile-time expression argument.</summary>
     private TypeSyntax ParseGenericArgument()
     {
         if (IsLiteralTokenKind(CurrentToken.Kind))
@@ -604,7 +614,15 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
             return new NamedExpressionGenericArgument(new IdentifierNameExpression(Consume()));
 
-        return ParseTypeSyntax();
+        var type = ParseTypeSyntax();
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
+        {
+            var asKeyword = Consume();
+            var interfaceType = ParseTypeSyntax();
+            return new ConformanceQualifiedType(type, asKeyword, interfaceType);
+        }
+
+        return type;
     }
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>

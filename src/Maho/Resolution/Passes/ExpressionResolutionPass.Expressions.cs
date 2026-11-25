@@ -32,6 +32,10 @@ internal sealed partial class ExpressionResolutionPass
                 result = ResolveNamed(named, scope, containingFunction);
                 break;
 
+            case ScopeResolutionExpression scopeExpr:
+                result = ResolveScopeResolution(scopeExpr, scope, containingFunction);
+                break;
+
             case ParenthesizedExpression paren:
                 result = ResolveExpression(paren.Expression, scope, containingFunction);
                 break;
@@ -103,6 +107,14 @@ internal sealed partial class ExpressionResolutionPass
 
             case ConstructorCallExpression constructorCall:
                 result = ResolveConstructorCall(constructorCall, scope, containingFunction);
+                break;
+
+            case ObjectInitializerExpression objInit:
+                result = ResolveObjectInitializer(objInit, scope, containingFunction);
+                break;
+
+            case DefaultExpression defaultExpr:
+                result = ResolveDefaultExpression(defaultExpr, scope);
                 break;
 
             case TypeAsExpression typeAs:
@@ -330,7 +342,37 @@ internal sealed partial class ExpressionResolutionPass
                 }
             }
 
-            context.ResolvedTree.AddReference(named, ResolutionContext.GetHandle(sym));
+            var symHandle = ResolutionContext.GetHandle(sym);
+            context.ResolvedTree.AddReference(named, symHandle);
+
+            if (named is GenericNameExpression genericExpr)
+            {
+                var resolvedArgs = new List<TypeRef>(genericExpr.GenericArguments.Count);
+                foreach (var arg in genericExpr.GenericArguments)
+                    resolvedArgs.Add(ResolveTypeSyntax(arg, scope));
+                context.ValidateGenericTypeArgumentConformances(
+                    symHandle,
+                    [.. genericExpr.GenericArguments],
+                    resolvedArgs,
+                    scope,
+                    containingFunction,
+                    reportDiagnostics: true);
+            }
+
+            if (sym is MethodSymbol ifaceImplMethod &&
+                ifaceImplMethod.Flags.HasFlag(FunctionFlags.InterfaceScoped) &&
+                context.GetEnclosingOwnerHandle(containingFunction, scope) is { } ownerH)
+            {
+                foreach (var conf in context.Conformances)
+                {
+                    if (conf.OwnerHandle == ownerH && conf.MethodMap.ContainsValue(symHandle))
+                    {
+                        context.ResolvedTree.AddConformance(named, conf);
+                        break;
+                    }
+                }
+            }
+
             var resType = GetTypeFromSymbol(sym);
             if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
                 context.SetConstantValue(named, c.Value);
@@ -340,6 +382,74 @@ internal sealed partial class ExpressionResolutionPass
         // 4. Fallback check for previously recorded resolution tree references
         if (context.ResolvedTree.TryGetReference(named, out var handle))
             return GetTypeFromHandle(handle);
+
+        return TypeRef.Unresolved;
+    }
+
+    private TypeRef ResolveScopeResolution(ScopeResolutionExpression scopeExpr, Scope scope, SymbolHandle containingFunction)
+    {
+        if (context.ResolvedTree.TryGetReference(scopeExpr, out var existingH))
+            return GetTypeFromHandle(existingH);
+
+        var hygiene = context.GetHygiene(scopeExpr.Member);
+        var part = scopeExpr.Member is GenericNameExpression generic
+            ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count, hygiene)
+            : new SymbolPart(scopeExpr.Member.Identifier, 0, hygiene);
+
+        List<TypeRef>? resolvedGenericArgs = null;
+        if (scopeExpr.Member is GenericNameExpression genericExpr)
+        {
+            resolvedGenericArgs = new List<TypeRef>(genericExpr.GenericArguments.Count);
+            foreach (var arg in genericExpr.GenericArguments)
+                resolvedGenericArgs.Add(ResolveTypeSyntax(arg, scope));
+        }
+
+        var path = new SymbolName(part);
+        var syms = context.ResolveScopedSymbols(
+            scopeExpr.Qualifier,
+            path,
+            scope,
+            typesOnly: false,
+            scopeExpr.GetSpan() ?? default,
+            scopeExpr.GetSource(),
+            reportAmbiguity: true,
+            out bool isAmbiguousAcrossModules);
+
+        if (syms.Count > 0)
+        {
+            var sym = syms[0];
+            var h = ResolutionContext.GetHandle(sym);
+            context.ResolvedTree.AddReference(scopeExpr, h);
+            context.ResolvedTree.AddReference(scopeExpr.Member, h);
+
+            if (scopeExpr.Member is GenericNameExpression gExpr && resolvedGenericArgs is not null)
+            {
+                context.ValidateGenericTypeArgumentConformances(
+                    h,
+                    [.. gExpr.GenericArguments],
+                    resolvedGenericArgs,
+                    scope,
+                    containingFunction,
+                    reportDiagnostics: true);
+            }
+
+            if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
+                context.SetConstantValue(scopeExpr, c.Value);
+            return GetTypeFromSymbol(sym);
+        }
+
+        if (!isAmbiguousAcrossModules && scopeExpr.Member is IdentifierNameExpression)
+        {
+            var nsMatches = context.ResolveScopedNamespaces(
+                scopeExpr.Qualifier,
+                path,
+                scope,
+                scopeExpr.GetSpan() ?? default,
+                scopeExpr.GetSource(),
+                reportAmbiguity: false);
+            if (nsMatches.Count > 0)
+                scopedNamespaceChains[scopeExpr] = nsMatches;
+        }
 
         return TypeRef.Unresolved;
     }

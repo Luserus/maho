@@ -260,7 +260,7 @@ internal sealed partial class DeclarationResolutionPass
             if (prefixModified.Modifier is DynTypeModifier)
             {
                 var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext: true);
-                return TypeRef.Dyn(inner);
+                return TypeRef.Dyn(inner, isExplicitDyn: true);
             }
 
             return TypeRef.Error;
@@ -289,13 +289,16 @@ internal sealed partial class DeclarationResolutionPass
                 {
                     for (int i = typeArgs.Count; i < genericParams.Count; i++)
                     {
-                        var gp = context.GenericParameterSymbols[genericParams[i].ID];
-                        if (gp.DefaultType is { } def && def.IsResolved)
+                        var gp = context.GetGenericParameterSymbol(genericParams[i]);
+                        if (gp?.DefaultType is { } def && def.IsResolved)
                             typeArgs.Add(def);
                         else
                             break;
                     }
                 }
+
+                if (genericParams.Count == 0 || typeArgs.Count > 0)
+                    context.ValidateGenericTypeArgumentConformances(targetH, generic.GenericArguments.ToList(), typeArgs, scope, default, reportDiagnostics);
 
                 var gen = TypeRef.Generic(targetH, generic.Name.Value, typeArgs);
                 if (!isTraitBoundContext && IsInterfaceSymbol(context, targetH))
@@ -335,13 +338,16 @@ internal sealed partial class DeclarationResolutionPass
                     {
                         for (int i = typeArgs.Count; i < genericParams.Count; i++)
                         {
-                            var gp = context.GenericParameterSymbols[genericParams[i].ID];
-                            if (gp.DefaultType is { } def && def.IsResolved)
+                            var gp = context.GetGenericParameterSymbol(genericParams[i]);
+                            if (gp?.DefaultType is { } def && def.IsResolved)
                                 typeArgs.Add(def);
                             else
                                 break;
                         }
                     }
+
+                    if (genericParams.Count == 0 || typeArgs.Count > 0)
+                        context.ValidateGenericTypeArgumentConformances(qtargetH, qualifiedGeneric.GenericArguments.ToList(), typeArgs, scope, default, reportDiagnostics);
 
                     var gen = TypeRef.Generic(qtargetH, qualifiedGeneric.Name.Value, typeArgs);
                     if (!isTraitBoundContext && IsInterfaceSymbol(context, qtargetH))
@@ -363,6 +369,22 @@ internal sealed partial class DeclarationResolutionPass
             return result;
         }
 
+        if (syntax is ScopeQualifiedType scopeQualified)
+        {
+            return ResolveScopeQualifiedType(scopeQualified, scope, reportDiagnostics, isUntaggedContext, isTraitBoundContext);
+        }
+
+        if (syntax is ConformanceQualifiedType confQualified)
+        {
+            return context.ResolveConformanceQualifiedType(
+                confQualified,
+                scope,
+                default,
+                (ts, sc) => ResolveType(ts, sc, reportDiagnostics, allowInference: false, isUntaggedContext: false, isTraitBoundContext: true),
+                (ts, sc) => ResolveType(ts, sc, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext),
+                reportDiagnostics);
+        }
+
         ResolveTypeChildren(syntax, scope);
 
         var finalRes = ResolveTypeName(syntax, scope, reportDiagnostics);
@@ -371,6 +393,108 @@ internal sealed partial class DeclarationResolutionPass
             return TypeRef.Dyn(finalRes);
         return finalRes;
     }
+
+    private TypeRef ResolveScopeQualifiedType(
+        ScopeQualifiedType scopeQualified,
+        Scope scope,
+        bool reportDiagnostics,
+        bool isUntaggedContext,
+        bool isTraitBoundContext)
+    {
+        var memberPath = ResolutionContext.GetSymbolName(scopeQualified.MemberType);
+        GenericType? leafGeneric = FindLeafGenericType(scopeQualified.MemberType);
+        SymbolHandle handle;
+        if (context.ResolvedTree.TryGetReference(scopeQualified, out var preboundH))
+        {
+            handle = preboundH;
+        }
+        else
+        {
+            var syms = context.ResolveScopedSymbols(
+                scopeQualified.Qualifier,
+                memberPath,
+                scope,
+                typesOnly: true,
+                scopeQualified.GetSpan() ?? default,
+                scopeQualified.GetSource(),
+                reportAmbiguity: reportDiagnostics,
+                out bool isAmbiguousAcrossModules);
+
+            if (syms.Count == 0)
+            {
+                if (leafGeneric is not null)
+                    ResolveGenericArguments(leafGeneric, null, scope);
+
+                if (reportDiagnostics && !isAmbiguousAcrossModules)
+                {
+                    context.Diagnostics.ReportUnresolvedTypeReference(
+                        scopeQualified.GetSpan() ?? default,
+                        $"{scopeQualified.Qualifier.Value}::{memberPath.ToDisplayString()}",
+                        scopeQualified.GetSource(),
+                        scopeQualified.ExpansionOrigin);
+                }
+                return TypeRef.Error;
+            }
+
+            handle = ResolutionContext.GetHandle(syms[0]);
+            context.ResolvedTree.AddReference(scopeQualified, handle);
+            context.ResolvedTree.AddReference(scopeQualified.MemberType, handle);
+        }
+
+        if (leafGeneric is not null)
+        {
+            context.ResolvedTree.AddReference(leafGeneric, handle);
+            ResolveGenericArguments(leafGeneric, handle, scope);
+
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optH) &&
+                handle == optH &&
+                leafGeneric.GenericArguments.Count == 1)
+            {
+                return TypeRef.Optional(ResolveType(leafGeneric.GenericArguments[0], scope, reportDiagnostics), optH);
+            }
+
+            var typeArgs = new List<TypeRef>(leafGeneric.GenericArguments.Count);
+            foreach (var arg in leafGeneric.GenericArguments)
+                typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
+
+            var genericParams = GetGenericParameters(handle);
+            if (typeArgs.Count < genericParams.Count)
+            {
+                for (int i = typeArgs.Count; i < genericParams.Count; i++)
+                {
+                    var gp = context.GetGenericParameterSymbol(genericParams[i]);
+                    if (gp?.DefaultType is { } def && def.IsResolved)
+                        typeArgs.Add(def);
+                    else
+                        break;
+                }
+            }
+
+            if (genericParams.Count == 0 || typeArgs.Count > 0)
+                context.ValidateGenericTypeArgumentConformances(handle, leafGeneric.GenericArguments.ToList(), typeArgs, scope, default, reportDiagnostics);
+
+            var gen = TypeRef.Generic(handle, leafGeneric.Name.Value, typeArgs);
+            if (!isTraitBoundContext && IsInterfaceSymbol(context, handle))
+                return TypeRef.Dyn(gen);
+            return gen;
+        }
+
+        if (scopeQualified.MemberType is QualifiedType qt)
+            context.ResolvedTree.AddReference(qt.Right, handle);
+
+        var res = TypeRef.Resolved(handle);
+        CheckUntaggedUsage(res, scopeQualified, isUntaggedContext, reportDiagnostics);
+        if (!isTraitBoundContext && IsInterfaceSymbol(context, handle))
+            return TypeRef.Dyn(res);
+        return res;
+    }
+
+    private static GenericType? FindLeafGenericType(TypeSyntax syntax) => syntax switch
+    {
+        GenericType gt => gt,
+        QualifiedType qt => FindLeafGenericType(qt.Right),
+        _ => null
+    };
 
     private static bool IsInterfaceSymbol(ResolutionContext context, SymbolHandle handle)
     {
@@ -482,9 +606,9 @@ internal sealed partial class DeclarationResolutionPass
         {
             var argument = generic.GenericArguments[index];
             var parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
-                ? context.GenericParameterSymbols[parameters[index].ID]
-                : (parameters.Count > 0 && parameters[^1].Kind is SymbolKind.GenericParameter && context.GenericParameterSymbols[parameters[^1].ID].IsVariadic
-                    ? context.GenericParameterSymbols[parameters[^1].ID]
+                ? context.GetGenericParameterSymbol(parameters[index])
+                : (parameters.Count > 0 && parameters[^1].Kind is SymbolKind.GenericParameter && context.GetGenericParameterSymbol(parameters[^1]) is { IsVariadic: true } variadicParam
+                    ? variadicParam
                     : null);
 
             switch (argument)

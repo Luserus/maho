@@ -16,6 +16,9 @@ internal sealed partial class DeclarationResolutionPass
             case NamedExpression named:
                 ResolveNamedExpression(named, scope);
                 break;
+            case ScopeResolutionExpression scopeExpr:
+                ResolveScopeResolutionExpression(scopeExpr, scope);
+                break;
             case BinaryExpression binary:
                 ResolveExpression(binary.LeftExpression, scope, containingSymbol);
                 ResolveExpression(binary.RightExpression, scope, containingSymbol);
@@ -31,11 +34,13 @@ internal sealed partial class DeclarationResolutionPass
                 ResolveExpression(parenthesized.Expression, scope, containingSymbol);
                 break;
             case AsExpression asExpr:
+                context.TryPrebindConformanceInterface(asExpr.Type, scope);
                 ResolveType(asExpr.Type, scope);
                 ResolveExpression(asExpr.Expression, scope, containingSymbol);
                 break;
             case TypeAsExpression typeAs:
                 ResolveType(typeAs.TargetType, scope);
+                context.TryPrebindConformanceInterface(typeAs.InterfaceType, scope);
                 ResolveType(typeAs.InterfaceType, scope);
                 break;
             case TupleExpression tuple:
@@ -139,10 +144,31 @@ internal sealed partial class DeclarationResolutionPass
             case ConstructorCallExpression constructor:
                 ResolveType(constructor.Type, scope);
 
+                if (constructor.AllocationArguments is { } ctorAllocArgs)
+                    foreach (var argument in ctorAllocArgs) ResolveExpression(argument, scope, containingSymbol);
+
                 foreach (var argument in constructor.Arguments)
                     ResolveExpression(argument, scope, containingSymbol);
 
                 ResolveInitializer(constructor.WithClause?.Initializer, scope, containingSymbol);
+                break;
+            case ObjectInitializerExpression objInit:
+                ResolveType(objInit.Type, scope);
+
+                if (objInit.AllocationArguments is { } initAllocArgs)
+                    foreach (var argument in initAllocArgs) ResolveExpression(argument, scope, containingSymbol);
+
+                foreach (var item in objInit.Initializer.Expressions)
+                {
+                    if (item is AssignmentExpression assign)
+                        ResolveExpression(assign.RhsExpression, scope, containingSymbol);
+                    else
+                        ResolveExpression(item, scope, containingSymbol);
+                }
+                break;
+            case DefaultExpression defaultExpr:
+                if (defaultExpr.ExplicitType is not null)
+                    ResolveType(defaultExpr.ExplicitType, scope);
                 break;
             case ArrayCreationExpression array:
                 ResolveType(array.Type, scope);
@@ -180,6 +206,37 @@ internal sealed partial class DeclarationResolutionPass
         if (syntax is GenericNameExpression genericName)
             foreach (var argument in genericName.GenericArguments)
                 ResolveType(argument, scope);
+    }
+
+    private void ResolveScopeResolutionExpression(ScopeResolutionExpression scopeExpr, Scope scope)
+    {
+        var hygiene = context.GetHygiene(scopeExpr.Member);
+        var part = scopeExpr.Member is GenericNameExpression generic
+            ? new SymbolPart(generic.Identifier, generic.GenericArguments.Count, hygiene)
+            : new SymbolPart(scopeExpr.Member.Identifier, 0, hygiene);
+
+        var syms = context.ResolveScopedSymbols(
+            scopeExpr.Qualifier,
+            new SymbolName(part),
+            scope,
+            typesOnly: false,
+            scopeExpr.GetSpan() ?? default,
+            scopeExpr.GetSource(),
+            reportAmbiguity: false,
+            out _);
+
+        if (syms.Count == 1)
+        {
+            var handle = ResolutionContext.GetHandle(syms[0]);
+            context.ResolvedTree.AddReference(scopeExpr, handle);
+            context.ResolvedTree.AddReference(scopeExpr.Member, handle);
+        }
+
+        if (scopeExpr.Member is GenericNameExpression genericName)
+        {
+            foreach (var argument in genericName.GenericArguments)
+                ResolveType(argument, scope);
+        }
     }
 
     private void ResolveNamed(NamedSyntax syntax, Scope scope, SyntaxNode reference)

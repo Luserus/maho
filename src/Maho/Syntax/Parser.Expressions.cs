@@ -74,7 +74,7 @@ internal sealed partial class Parser
 
                 continue;
             }
-            else if (CurrentToken.Kind is TokenKind.LeftBrace && left is MemberAccessExpression or IdentifierNameExpression && LooksLikeTypeInitializer())
+            else if (CurrentToken.Kind is TokenKind.LeftBrace && left is MemberAccessExpression or IdentifierNameExpression or ScopeResolutionExpression && LooksLikeTypeInitializer())
             {
                 var initializer = ParseTypeInitializer();
                 left = new VariantCreationExpression(left, initializer);
@@ -283,8 +283,9 @@ internal sealed partial class Parser
                 MatchingKeywordKind.Match => ParseMatchExpression(),
                 MatchingKeywordKind.Try => ParseTryExpression(),
                 MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
+                MatchingKeywordKind.Default => ParseDefaultExpression(),
                 MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
-                _ => ParseNamedExpression()
+                _ => ParsePrimaryIdentifierOrScopedExpression()
             },
             TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
                 or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
@@ -299,6 +300,20 @@ internal sealed partial class Parser
         var argument = ParseExpression();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'nameof' expression");
         return new NameofExpression(keyword, openParen, argument, closeParen);
+    }
+
+    private DefaultExpression ParseDefaultExpression()
+    {
+        var keyword = Consume();
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+        {
+            var openParen = Consume();
+            var explicitType = ParseTypeSyntax();
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'default(Type)' expression");
+            return new DefaultExpression(keyword, openParen, explicitType, closeParen);
+        }
+
+        return new DefaultExpression(keyword);
     }
 
     private TypeAsExpression ParseTypeAsExpression()
@@ -326,17 +341,27 @@ internal sealed partial class Parser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
 
+    private bool LooksLikeColonColonAt(int offset = 0)
+    {
+        var first = Peek(offset);
+        if (first.Kind is TokenKind.ColonColon)
+            return true;
+
+        var second = Peek(offset + 1);
+        return first.Kind is TokenKind.Colon &&
+               second.Kind is TokenKind.Colon &&
+               first.Span.End == second.Span.Start &&
+               first.TrailingTrivia.Length == 0 &&
+               second.LeadingTrivia.Length == 0;
+    }
+
     private bool LooksLikeTurbofish()
     {
-        if (CurrentToken.Kind is TokenKind.ColonColon)
-            return Peek().Kind is TokenKind.LessThanSign;
+        if (!LooksLikeColonColonAt(0))
+            return false;
 
-        return CurrentToken.Kind is TokenKind.Colon &&
-               Peek().Kind is TokenKind.Colon &&
-               CurrentToken.Span.End == Peek().Span.Start &&
-               CurrentToken.TrailingTrivia.Length == 0 &&
-               Peek().LeadingTrivia.Length == 0 &&
-               Peek(2).Kind is TokenKind.LessThanSign;
+        int afterColon = CurrentToken.Kind is TokenKind.ColonColon ? 1 : 2;
+        return Peek(afterColon).Kind is TokenKind.LessThanSign;
     }
 
     private Token ConsumeColonColon()
@@ -347,6 +372,26 @@ internal sealed partial class Parser
         var first = Consume();
         var second = Consume();
         return new Token(text, new TextSpan(first.Span.Start, second.Span.End - first.Span.Start), TokenKind.ColonColon, first.LeadingTrivia, second.TrailingTrivia);
+    }
+
+    private Expression ParsePrimaryIdentifierOrScopedExpression()
+    {
+        if ((CurrentToken.MatchingKind is MatchingKeywordKind.Global || CurrentToken.Kind is TokenKind.Identifier) &&
+            LooksLikeColonColonAt(1))
+        {
+            int afterColon = Peek(1).Kind is TokenKind.ColonColon ? 2 : 3;
+            if (Peek(afterColon).Kind is not TokenKind.LessThanSign)
+            {
+                var qualifier = Consume();
+                var colonColon = ConsumeColonColon();
+                NamedExpression member = CurrentToken.Kind is TokenKind.Identifier
+                    ? ParseNamedExpression()
+                    : new IdentifierNameExpression(ExpectIdentifierToken("after '::'"));
+                return new ScopeResolutionExpression(qualifier, colonColon, member);
+            }
+        }
+
+        return ParseNamedExpression();
     }
 
     private NamedExpression ParseNamedExpression()
@@ -672,6 +717,22 @@ internal sealed partial class Parser
                 return new ArrayCreationExpression(keyword, kind, elementType, fixedModifier.LeftBracket, fixedModifier.Size, fixedModifier.RightBracket, initializer, withClause);
             }
         }
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            var initializer = ParseTypeInitializer();
+            return new ObjectInitializerExpression(
+                keyword,
+                kind,
+                allocLessThan,
+                allocTypeArguments,
+                allocGreaterThan,
+                allocOpenParen,
+                allocArguments,
+                allocCloseParen,
+                type,
+                initializer);
+        }
+
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", GetObjectCreationContext(keyword.MatchingKind));
 
         var arguments = ParseExpressionArgumentList();

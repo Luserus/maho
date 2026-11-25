@@ -302,7 +302,7 @@ public sealed partial class ExpressionResolutionTests
 
                 public func Add.Add(Vector left, Vector right) -> Vector
                 {
-                    Vector result;
+                    Vector result = default;
                     return result;
                 }
             }

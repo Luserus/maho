@@ -101,12 +101,12 @@ public sealed partial class ParserTests
         TypeBaseClause baseClause = Assert.IsType<TypeBaseClause>(type.Base);
         Assert.Equal(2, baseClause.BaseTypes.Count);
 
-        GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0]);
+        GenericType firstBaseType = Assert.IsType<GenericType>(baseClause.BaseTypes[0].Type);
         Assert.Equal("Base", firstBaseType.Name.Value);
         NamedExpressionGenericArgument firstBaseArgument = Assert.IsType<NamedExpressionGenericArgument>(firstBaseType.GenericArguments[0]);
         Assert.Equal("T", firstBaseArgument.Expression.Identifier.Value);
 
-        QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1]);
+        QualifiedType secondBaseType = Assert.IsType<QualifiedType>(baseClause.BaseTypes[1].Type);
         Assert.Equal("Outer", Assert.IsType<SimpleType>(secondBaseType.Left).Name.Value);
         Assert.Equal("Inner", Assert.IsType<SimpleType>(secondBaseType.Right).Name.Value);
 
@@ -202,7 +202,7 @@ public sealed partial class ParserTests
         AssertTrailingComma(box.Attributes[0].Attributes);
         AssertTrailingComma(name.GenericParameters);
         AssertTrailingComma(baseClause.BaseTypes);
-        AssertTrailingComma(Assert.IsType<GenericType>(baseClause.BaseTypes[0]).GenericArguments);
+        AssertTrailingComma(Assert.IsType<GenericType>(baseClause.BaseTypes[0].Type).GenericArguments);
         AssertTrailingComma(constraint.Constraints);
         AssertTrailingComma(function.Signature.Parameters);
         AssertTrailingComma(Assert.IsType<CallExpression>(Assert.IsType<LocalExpressionStatement>(body.Locals[0]).Expression).Arguments);
@@ -1262,5 +1262,107 @@ public sealed partial class ParserTests
         var fixedArrMod = Assert.IsType<FixedArrayTypeModifier>(fixedMod.Modifier);
         var sizeLit = Assert.IsType<LiteralExpression>(fixedArrMod.Size);
         Assert.Equal("10", sizeLit.Literal.Value);
+    }
+
+    [Fact]
+    public void Parse_ScopeResolution_TypesExpressionsDirectivesAndConformanceArgs()
+    {
+        var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
+            extern using Disamb;
+            using ModA::Collections.Generic;
+            using global::LocalNs;
+
+            public struct Foo : private ModA::Bar, internal global::Baz, public Plain
+            {
+                public func ModA::Bar.Step(&this) -> () { }
+            }
+
+            public func Run() -> ()
+            {
+                Std.Int32& a = x;
+                ModA::Ns.Item mut& b = y;
+                global::MyStruct c = default;
+                var d = default(ModA::Point);
+                var e = put Point { x = 1, y = 2 };
+                var f = new(alloc) Point { x = 3, y = 4 };
+                HashSet<Foo as ModA::Hash> hs = default;
+                var g = (ob as ModA::Bar).Step();
+                var h = global::Helper::<int32>();
+                var s = arr[1:5];
+            }
+            """);
+
+        Assert.Empty(diagnostics.Diagnostics);
+        Assert.Single(root.ExternUsings);
+        Assert.Equal("Disamb", Assert.IsType<SimpleName>(root.ExternUsings[0].AliasName).Name.Value);
+        Assert.Equal(2, root.Usings.Count);
+        Assert.IsType<ScopeQualifiedName>(root.Usings[0].Namespace);
+        Assert.IsType<ScopeQualifiedName>(root.Usings[1].Namespace);
+
+        var fooDecl = Assert.IsType<TopLevelTypeDeclaration>(root.Members[0]);
+        var baseTypes = fooDecl.Type.Base!.BaseTypes;
+        Assert.Equal(3, baseTypes.Count);
+        Assert.Equal(MatchingKeywordKind.Private, baseTypes[0].VisibilityModifier!.MatchingKind);
+        Assert.IsType<ScopeQualifiedType>(baseTypes[0].Type);
+        Assert.Equal(MatchingKeywordKind.Internal, baseTypes[1].VisibilityModifier!.MatchingKind);
+        Assert.IsType<ScopeQualifiedType>(baseTypes[1].Type);
+        Assert.Equal(MatchingKeywordKind.Public, baseTypes[2].VisibilityModifier!.MatchingKind);
+
+        var runDecl = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[1]);
+        var body = Assert.IsType<FunctionBlockBody>(runDecl.Function.Body);
+
+        // Std.Int32& has ReferenceTypeModifier wrapping QualifiedType (postfix outside qualification)
+        var varA = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[0]);
+        var modA = Assert.IsType<ModifiedType>(varA.Declaration.Type);
+        Assert.IsType<ReferenceTypeModifier>(modA.Modifier);
+        Assert.IsType<QualifiedType>(modA.Type);
+
+        // ModA::Ns.Item mut&
+        var varB = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[1]);
+        var modB = Assert.IsType<ModifiedType>(varB.Declaration.Type);
+        Assert.IsType<ReferenceTypeModifier>(modB.Modifier);
+        var scopeB = Assert.IsType<ScopeQualifiedType>(modB.Type);
+        Assert.Equal("ModA", scopeB.Qualifier.Value);
+        Assert.IsType<QualifiedType>(scopeB.MemberType);
+
+        // global::MyStruct = default
+        var varC = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[2]);
+        var scopeC = Assert.IsType<ScopeQualifiedType>(varC.Declaration.Type);
+        Assert.Equal(MatchingKeywordKind.Global, scopeC.Qualifier.MatchingKind);
+        Assert.IsType<DefaultExpression>(varC.Declaration.Declarator.Initializer!.Initializer);
+
+        // default(ModA::Point)
+        var varD = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[3]);
+        var defD = Assert.IsType<DefaultExpression>(varD.Declaration.Declarator.Initializer!.Initializer);
+        Assert.IsType<ScopeQualifiedType>(defD.ExplicitType);
+
+        // put Point { x = 1, y = 2 } and new(alloc) Point { ... }
+        var varE = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[4]);
+        Assert.IsType<ObjectInitializerExpression>(varE.Declaration.Declarator.Initializer!.Initializer);
+        var varF = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[5]);
+        var initF = Assert.IsType<ObjectInitializerExpression>(varF.Declaration.Declarator.Initializer!.Initializer);
+        Assert.NotNull(initF.AllocationArguments);
+
+        // HashSet<Foo as ModA::Hash>
+        var varHs = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[6]);
+        var genHs = Assert.IsType<GenericType>(varHs.Declaration.Type);
+        var confArg = Assert.IsType<ConformanceQualifiedType>(genHs.GenericArguments[0]);
+        Assert.IsType<SimpleType>(confArg.TargetType);
+        Assert.IsType<ScopeQualifiedType>(confArg.InterfaceType);
+
+        // (ob as ModA::Bar).Step()
+        var varG = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[7]);
+        var callG = Assert.IsType<CallExpression>(varG.Declaration.Declarator.Initializer!.Initializer);
+        var memberG = Assert.IsType<MemberAccessExpression>(callG.Callee);
+        var parenG = Assert.IsType<ParenthesizedExpression>(memberG.Expression);
+        var asG = Assert.IsType<AsExpression>(parenG.Expression);
+        Assert.IsType<ScopeQualifiedType>(asG.Type);
+
+        // global::Helper::<int32>()
+        var varH = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[8]);
+        var callH = Assert.IsType<CallExpression>(varH.Declaration.Declarator.Initializer!.Initializer);
+        var scopeExprH = Assert.IsType<ScopeResolutionExpression>(callH.Callee);
+        Assert.Equal(MatchingKeywordKind.Global, scopeExprH.Qualifier.MatchingKind);
+        Assert.IsType<GenericNameExpression>(scopeExprH.Member);
     }
 }

@@ -11,6 +11,8 @@ internal sealed class CompilationUnit : SyntaxNode
     public IReadOnlyList<PragmaDirective> Pragmas { get; }
     /// <summary> File-level using directives that import namespaces for this compilation unit. </summary>
     public IReadOnlyList<UsingDirective> Usings { get; }
+    /// <summary> File-level <c>extern using</c> directives that import external module aliases. </summary>
+    public IReadOnlyList<ExternUsingDirective> ExternUsings { get; }
     /// <summary> Top-level members contained in the file. </summary>
     public IReadOnlyList<TopLevel> Members { get; internal set; }
     /// <summary> Synthetic end-of-file token closing the unit. </summary>
@@ -24,15 +26,19 @@ internal sealed class CompilationUnit : SyntaxNode
         Directives = directives;
         var pragmas = new List<PragmaDirective>();
         var usings = new List<UsingDirective>();
+        var externUsings = new List<ExternUsingDirective>();
         foreach (var directive in directives)
         {
             if (directive is PragmaDirective pragma)
                 pragmas.Add(pragma);
             else if (directive is UsingDirective @using)
                 usings.Add(@using);
+            else if (directive is ExternUsingDirective externUsing)
+                externUsings.Add(externUsing);
         }
         Pragmas = pragmas;
         Usings = usings;
+        ExternUsings = externUsings;
         Members = members;
         EndToken = endToken;
         EnablesTopLevelStatements = enablesTopLevelStatements;

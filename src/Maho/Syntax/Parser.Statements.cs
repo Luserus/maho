@@ -17,7 +17,7 @@ internal sealed partial class Parser
                     return ParseTopLevelGotoStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Throw)
                     return ParseTopLevelThrowStatement();
-                else if (Peek().Kind is TokenKind.Colon)
+                else if (Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1))
                     return ParseTopLevelLabelStatement();
                 break;
 
@@ -82,7 +82,7 @@ internal sealed partial class Parser
                     return ParseLocalYieldStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Throw)
                     return ParseLocalThrowStatement();
-                else if (Peek().Kind is TokenKind.Colon)
+                else if (Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1))
                     return ParseLocalLabelStatement();
                 else if (LooksLikeVariableDeclaration() is (var success, var context))
                 {

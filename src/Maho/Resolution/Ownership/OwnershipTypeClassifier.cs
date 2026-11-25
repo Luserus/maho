@@ -153,6 +153,121 @@ internal sealed class OwnershipTypeClassifier
     /// Pointer-like handles never own their referent. Structural aggregates require drop when any
     /// contained value does; opaque allocation/capture forms are conservatively treated as owning.
     /// </remarks>
+    /// <summary>
+    /// Returns true if <paramref name="type"/> is a zero-sized empty struct (no own or inherited
+    /// instance fields and not a storage-bearing scalar/primitive/opaque intrinsic, enum, or union)
+    /// or the empty unit tuple <c>()</c>.
+    /// </summary>
+    public bool IsZeroSizedEmptyStruct(TypeRef type)
+    {
+        if (type.IsError || type.IsUnresolved || type.IsInferred || type.IsLiteral)
+            return false;
+
+        if (type.SpecialType is TupleSemanticType tuple)
+            return tuple.Elements.Count == 0;
+
+        if (type.SpecialType is not null and not GenericSemanticType)
+            return false;
+
+        if (type.Handle is not { } handle)
+            return false;
+
+        handle = context.UnwrapAlias(handle);
+        if (handle.Kind == SymbolKind.GenericParameter)
+            return false;
+
+        var sym = context.GetSymbol(handle);
+        TypeKind? typeKind = sym switch
+        {
+            TypeSymbol ts => ts.TypeKind,
+            NestedTypeSymbol nts => nts.TypeKind,
+            _ => null
+        };
+        if (typeKind != TypeKind.Struct)
+            return false;
+
+        if (context.DiscoveredIntrinsics.TryGetIntrinsicName(handle, out _))
+            return false;
+
+        if (GetAllStructFields(type).Count > 0)
+            return false;
+
+        IReadOnlyList<SymbolHandle> bases = sym switch
+        {
+            TypeSymbol ts => ts.LinearizedBases,
+            NestedTypeSymbol nts => nts.LinearizedBases,
+            _ => []
+        };
+        foreach (var bh in bases)
+        {
+            var baseUnwrapped = context.UnwrapAlias(bh);
+            var baseSym = context.GetSymbol(baseUnwrapped);
+            TypeKind? baseKind = baseSym switch
+            {
+                TypeSymbol bts => bts.TypeKind,
+                NestedTypeSymbol bnts => bnts.TypeKind,
+                _ => null
+            };
+            if (baseKind == TypeKind.Struct &&
+                context.DiscoveredIntrinsics.TryGetIntrinsicName(baseUnwrapped, out var baseIntr) &&
+                baseIntr is not (KnownIntrinsics.ValueType or KnownIntrinsics.Struct))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Collects all instance fields declared directly on or inherited by <paramref name="type"/>.
+    /// </summary>
+    public IReadOnlyList<SymbolHandle> GetAllStructFields(TypeRef type)
+    {
+        if (type.Handle is not { } h)
+            return [];
+
+        return GetAllStructFields(context, h);
+    }
+
+    /// <summary>
+    /// Collects all instance fields declared directly on or inherited by <paramref name="typeHandle"/>.
+    /// </summary>
+    public static IReadOnlyList<SymbolHandle> GetAllStructFields(ResolutionContext context, SymbolHandle typeHandle)
+    {
+        var unwrapped = context.UnwrapAlias(typeHandle);
+        var sym = context.GetSymbol(unwrapped);
+
+        var result = new List<SymbolHandle>();
+        var seenTypes = new HashSet<SymbolHandle>();
+
+        void AddFieldsFrom(SymbolHandle th)
+        {
+            if (!seenTypes.Add(th))
+                return;
+
+            IReadOnlyList<SymbolHandle> fields = context.GetSymbol(th) switch
+            {
+                ProductTypeSymbol p => p.Fields,
+                MemberProductTypeSymbol mp => mp.Fields,
+                _ => []
+            };
+            result.AddRange(fields);
+        }
+
+        IReadOnlyList<SymbolHandle> hierarchy = sym switch
+        {
+            TypeSymbol ts => ts.LinearizedBases,
+            NestedTypeSymbol nts => nts.LinearizedBases,
+            _ => []
+        };
+        foreach (var bh in hierarchy)
+            AddFieldsFrom(context.UnwrapAlias(bh));
+
+        AddFieldsFrom(unwrapped);
+        return result;
+    }
+
     private bool ComputeRequiresDrop(TypeRef type)
     {
         if (type.IsError || type.IsUnresolved || type.IsInferred || type.IsLiteral || type.IsNever())

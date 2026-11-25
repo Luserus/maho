@@ -224,6 +224,9 @@ internal sealed partial class SymbolDiscoveryPass
             case LocalAliasDeclaration declaration:
                 ResolveLocalAliasDeclaration(declaration.Alias, scope, containingSymbol);
                 break;
+            case LocalExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
+                break;
             case LocalUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);
                 break;

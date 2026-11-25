@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace Miryo.Build;
 
@@ -11,6 +12,10 @@ namespace Miryo.Build;
 public sealed class MahoProject
 {
     public string ProjectName { get; }
+    /// <summary> Canonical PascalCase module symbol identity passed to <c>mahoc --module-name</c>. </summary>
+    public string ModuleName { get; }
+    /// <summary> Output binary/artifact filename on disk handled by Miryo. </summary>
+    public string ArtifactName { get; }
     public string ProjectDirectory { get; }
     public string ProjectFilePath { get; }
     public MahoProjectConfiguration Configuration { get; }
@@ -31,9 +36,15 @@ public sealed class MahoProject
         bool implicitTopLevel,
         bool globalUnsafeEnabled,
         IReadOnlyList<string> projectsReferenced,
-        IReadOnlyDictionary<string, string> globalAliases)
+        IReadOnlyDictionary<string, string> globalAliases,
+        string? moduleName = null,
+        string? artifactName = null)
     {
         ProjectName = projectName;
+        ModuleName = NormalizeModuleIdentifier(moduleName ?? configuration.ModuleName ?? projectName);
+        ArtifactName = !string.IsNullOrWhiteSpace(artifactName ?? configuration.ArtifactName)
+            ? (artifactName ?? configuration.ArtifactName)!
+            : ToKebabCase(projectName);
         ProjectDirectory = projectDirectory;
         ProjectFilePath = projectFilePath;
         Configuration = configuration;
@@ -44,6 +55,41 @@ public sealed class MahoProject
         ProjectsReferenced = projectsReferenced;
         GlobalAliases = globalAliases;
     }
+
+    private static string NormalizeModuleIdentifier(string rawName)
+    {
+        var sb = new StringBuilder(rawName.Length);
+        bool capitalizeNext = true;
+        foreach (char c in rawName)
+        {
+            if (char.IsLetterOrDigit(c) || c == '_')
+            {
+                sb.Append(capitalizeNext ? char.ToUpperInvariant(c) : c);
+                capitalizeNext = false;
+            }
+            else
+            {
+                capitalizeNext = true;
+            }
+        }
+        if (sb.Length == 0)
+            return "App";
+        if (char.IsDigit(sb[0]))
+            sb.Insert(0, '_');
+        return sb.ToString();
+    }
+
+    private static string ToKebabCase(string value)
+    {
+        var output = new StringBuilder(value.Length + 8);
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
+                output.Append('-');
+            output.Append(char.ToLowerInvariant(value[i]));
+        }
+        return output.ToString();
+    }
 }
 
 /// <summary>
@@ -52,6 +98,22 @@ public sealed class MahoProject
 /// </summary>
 public static class MiryoBuildSystem
 {
+    public static void ParseReferenceSpec(string spec, out string? alias, out string path)
+    {
+        int eqIndex = spec.IndexOf('=');
+        if (eqIndex > 0)
+        {
+            string candidate = spec[..eqIndex].Trim();
+            if (candidate.Length > 0 && !candidate.Contains('/') && !candidate.Contains('\\'))
+            {
+                alias = candidate;
+                path = spec[(eqIndex + 1)..].Trim();
+                return;
+            }
+        }
+        alias = null;
+        path = spec;
+    }
     /// <summary>
     /// Resolves source files for compilation from a file or directory path.
     /// Filters for <c>*.mh</c> files in directories unless instructed otherwise by <paramref name="config"/>.

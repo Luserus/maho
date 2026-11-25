@@ -1202,6 +1202,112 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, "cannot re-throw outside a catch block", source)
             .Report();
 
+    /// <summary> Reports use of a definitely uninitialized variable or field before assignment. </summary>
+    public void ReportUseOfUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1000", $"use of uninitialized variable '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' is used before it has been initialized", source)
+            .WithHelp("initialize the variable via a constructor, direct initializer 'put T { ... }', 'default', or piecewise field assignment")
+            .Report();
+
+    /// <summary> Reports an attempt to piecewise initialize a struct containing inaccessible fields. </summary>
+    public void ReportStructCannotBePiecewiseInitialized(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0574", $"struct '{typeName}' cannot be piecewise initialized because it contains inaccessible fields; use a constructor or default expression", span, source)
+            .WithPrimaryLabel(span, $"field '{fieldName}' on '{typeName}' is inaccessible from this scope", source)
+            .WithHelp($"construct '{typeName}' using a constructor or assign 'default'")
+            .Report();
+
+    /// <summary> Reports that a direct struct initializer omitted one or more fields. </summary>
+    public void ReportDirectInitializerMissingField(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0578", $"direct initializer for struct '{typeName}' must initialize all fields; missing field '{fieldName}'", span, source)
+            .WithPrimaryLabel(span, $"missing initializer for field '{fieldName}'", source)
+            .Report();
+
+    /// <summary> Reports that a direct struct initializer assigned the same field multiple times. </summary>
+    public void ReportDuplicateInitializerField(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0578", $"field '{fieldName}' is initialized more than once in initializer for struct '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"duplicate initializer for field '{fieldName}'", source)
+            .Report();
+
+    /// <summary> Reports an ambiguous module-qualified reference across duplicate-named modules. </summary>
+    public void ReportAmbiguousModuleMember(
+        TextSpan span,
+        string moduleName,
+        string memberName,
+        SourceText? source = null) =>
+        BuildError("MH0575", $"ambiguous reference '{moduleName}::{memberName}' matches multiple imported modules named '{moduleName}'; assign an alias to the compiler reference and import it with 'extern using <Alias>;'", span, source)
+            .WithPrimaryLabel(span, $"multiple imported '{moduleName}' modules export '{memberName}'", source)
+            .WithHelp($"pass an alias when referencing the project and add 'extern using <Alias>;' then use '<Alias>::{memberName}'")
+            .Report();
+
+    /// <summary> Reports an <c>extern using</c> directive referencing an undefined compiler module alias. </summary>
+    public void ReportUndefinedExternModuleAlias(
+        TextSpan span,
+        string aliasName,
+        SourceText? source = null) =>
+        BuildError("MH0576", $"extern module alias '{aliasName}' is not defined by the compilation references", span, source)
+            .WithPrimaryLabel(span, $"'{aliasName}' is not a known compiler module alias", source)
+            .WithHelp($"pass '--reference-project {aliasName}=<path>' (or alias it in .mhpr ProjectsReferenced) before using 'extern using {aliasName};'")
+            .Report();
+
+    /// <summary> Reports conflicting interface conformances on the same type definition, base clause, or module. </summary>
+    public void ReportConflictingInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string reason,
+        SourceText? source = null) =>
+        BuildError("MH0565", $"conflicting conformance of '{typeName}' to '{interfaceName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports an interface conformance that exists but is inaccessible from the current scope. </summary>
+    public void ReportInaccessibleInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string visibility,
+        SourceText? source = null) =>
+        BuildError("MH0566", $"conformance of '{typeName}' to '{interfaceName}' is {visibility} and inaccessible in this context", span, source)
+            .WithPrimaryLabel(span, $"{visibility} conformance '{typeName} : {interfaceName}' cannot be used here", source)
+            .Report();
+
+    /// <summary> Reports an ambiguous interface conformance across multiple imported modules. </summary>
+    public void ReportAmbiguousInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        IReadOnlyList<string> candidateModules,
+        SourceText? source = null) =>
+        BuildError("MH0567", $"ambiguous conformance of '{typeName}' to '{interfaceName}'; multiple imported modules provide an implementation ({string.Join(", ", candidateModules)})", span, source)
+            .WithPrimaryLabel(span, $"multiple '{interfaceName}' implementations available for '{typeName}'", source)
+            .WithHelp($"disambiguate with '<expr> as <Module>::{interfaceName}' or '<{typeName} as <Module>::{interfaceName}>'")
+            .Report();
+
+    /// <summary> Reports returning a lower-visibility interface conformance from a higher-visibility callable without explicit <c>dyn</c>. </summary>
+    public void ReportLowerVisibilityConformanceEscape(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string conformanceVisibility,
+        string callableVisibility,
+        SourceText? source = null) =>
+        BuildError("MH0579", $"cannot return {conformanceVisibility} conformance of '{typeName}' to '{interfaceName}' from {callableVisibility} callable without explicit 'dyn'", span, source)
+            .WithPrimaryLabel(span, $"static interface return hides '{conformanceVisibility}' conformance behind a '{callableVisibility}' boundary", source)
+            .WithHelp($"use 'dyn &{interfaceName}' (or 'dyn {interfaceName}&') in the return type, or lower the callable's visibility to '{conformanceVisibility}'")
+            .Report();
+
     /// <summary> Reports an attempt to branch out of a finally block via return, break, or continue. </summary>
     public void ReportControlLeavesFinally(TextSpan span, string kind, SourceText? source = null) =>
         BuildError("MH2033", $"control cannot leave the body of a finally clause with '{kind}'", span, source)

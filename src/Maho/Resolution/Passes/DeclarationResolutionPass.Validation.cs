@@ -1057,6 +1057,29 @@ internal sealed partial class DeclarationResolutionPass
                             constraint.ToDisplayString(context),
                             gp.Syntax?.GetSource());
                     }
+                    else
+                    {
+                        var lookup = context.ResolveInterfaceConformance(def, constraint, null, gp.EnclosingScope, default);
+                        var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
+                        if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Inaccessible)
+                        {
+                            context.Diagnostics.ReportInaccessibleInterfaceConformance(
+                                span,
+                                def.ToDisplayString(context),
+                                lookup.Conformance!.InterfaceType.ToDisplayString(context),
+                                lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                                gp.Syntax?.GetSource());
+                        }
+                        else if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Ambiguous)
+                        {
+                            context.Diagnostics.ReportAmbiguousInterfaceConformance(
+                                span,
+                                def.ToDisplayString(context),
+                                constraint.ToDisplayString(context),
+                                lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList(),
+                                gp.Syntax?.GetSource());
+                        }
+                    }
                 }
             }
         }

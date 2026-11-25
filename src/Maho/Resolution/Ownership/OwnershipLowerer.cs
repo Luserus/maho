@@ -305,7 +305,7 @@ internal sealed class OwnershipLowerer
         while (expr is ParenthesizedExpression p)
             expr = p.Expression;
 
-        return expr is LiteralExpression or BinaryExpression or CallExpression or TupleExpression or ObjectCreationExpression;
+        return expr is LiteralExpression or BinaryExpression or CallExpression or TupleExpression or ObjectCreationExpression or DefaultExpression;
     }
 
     /// <summary>
@@ -394,6 +394,13 @@ internal sealed class OwnershipLowerer
         current.AddSuccessor(exit);
 
         current = loopBody;
+        if (expression.Declaration is not null)
+        {
+            foreach (var local in GetDeclaredLocals(expression.Declaration))
+            {
+                Emit(OwnershipStatementKind.Assign, new Place(local), expression.Declaration.GetSpan() ?? default, expression.GetSource(), origin: expression.Declaration);
+            }
+        }
         if (expression.VariableExpression is { } varExpr && TryGetPlace(varExpr, scope, out var place))
         {
             Emit(OwnershipStatementKind.Assign, place, varExpr.GetSpan() ?? default, varExpr.GetSource(), origin: varExpr);
@@ -433,6 +440,7 @@ internal sealed class OwnershipLowerer
                     body.RegisterPlace(local, local.Type);
                     scopes.Peek().Add(local);
                     Emit(OwnershipStatementKind.StorageLive, place, varId.Span, catchClause.GetSource());
+                    Emit(OwnershipStatementKind.Assign, place, varId.Span, catchClause.GetSource(), origin: catchClause);
                 }
             }
 
@@ -578,6 +586,31 @@ internal sealed class OwnershipLowerer
                     LowerValue(term, scope);
                 break;
 
+            case DefaultExpression:
+                // Default zero/identity initialization does not read or move any existing places.
+                break;
+
+            case ObjectInitializerExpression objInit:
+                if (objInit.AllocationArguments is { } objAllocArgs)
+                {
+                    foreach (var arg in objAllocArgs)
+                        LowerValue(arg, scope);
+                }
+                LowerInitializerEntries(objInit.Initializer, scope);
+                break;
+
+            case ConstructorCallExpression ctor:
+                if (ctor.AllocationArguments is { } ctorAllocArgs)
+                {
+                    foreach (var arg in ctorAllocArgs)
+                        LowerValue(arg, scope);
+                }
+                IReadOnlyList<ParameterSymbol> ctorParams = GetConstructorParameters(ctor);
+                LowerCallArguments(ctor.Arguments, ctorParams, scope);
+                if (ctor.WithClause is { } withClause)
+                    LowerInitializerEntries(withClause.Initializer, scope);
+                break;
+
             case BlockExpression block:
                 LowerBranchExpression(block, scope);
                 break;
@@ -694,9 +727,14 @@ internal sealed class OwnershipLowerer
         else if (call.Callee is not NamedExpression)
             LowerValue(call.Callee, scope);
 
-        for (int index = 0; index < call.Arguments.Count; index++)
+        LowerCallArguments(call.Arguments, parameters, scope);
+    }
+
+    private void LowerCallArguments(SeparatedSyntaxList<Expression> arguments, IReadOnlyList<ParameterSymbol> parameters, Scope scope)
+    {
+        for (int index = 0; index < arguments.Count; index++)
         {
-            var argument = call.Arguments[index];
+            var argument = arguments[index];
             var parameter = index < parameters.Count ? parameters[index] : null;
             if (parameter is not null && IsSafeBorrow(parameter.Type))
             {
@@ -725,6 +763,37 @@ internal sealed class OwnershipLowerer
                 LowerValueForDestination(argument, parameter?.Type ?? context.GetRequiredExpressionType(argument), scope);
             }
         }
+    }
+
+    private void LowerInitializerEntries(TypeInitializer initializer, Scope scope)
+    {
+        foreach (var entry in initializer.Expressions)
+        {
+            if (entry is AssignmentExpression assign && assign.EqualsOperator.Kind == TokenKind.Equals)
+            {
+                TypeRef fieldType = context.GetExpressionType(assign.LhsExpression)
+                    ?? (context.ResolvedTree.TryGetReference(assign.LhsExpression, out var fieldHandle) &&
+                        context.GetFieldSymbol(fieldHandle) is { } fs
+                        ? fs.Type
+                        : context.GetExpressionType(assign.RhsExpression) ?? TypeRef.Error);
+                LowerValueForDestination(assign.RhsExpression, fieldType, scope);
+            }
+            else
+            {
+                LowerValue(entry, scope);
+            }
+        }
+    }
+
+    private List<ParameterSymbol> GetConstructorParameters(ConstructorCallExpression ctor)
+    {
+        if (!context.ResolvedTree.TryGetReference(ctor, out var handle))
+            return [];
+
+        if (context.GetSymbol(handle) is MethodSymbol { Name.Text: "Construct" } ctorMethod)
+            return ctorMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+
+        return [];
     }
 
     private List<ParameterSymbol> GetCallParameters(CallExpression call)

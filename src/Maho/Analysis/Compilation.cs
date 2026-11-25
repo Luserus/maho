@@ -21,6 +21,9 @@ public sealed class Compilation
     /// <summary> Gets the project name or assembly identity for this compilation. </summary>
     public string ProjectName { get; }
 
+    /// <summary> Gets the canonical PascalCase symbolic module name for this compilation. </summary>
+    public string ModuleName => Context.ModuleName;
+
     /// <summary> Gets the ordered parsed syntax trees for all source files in this compilation. </summary>
     public IReadOnlyList<SyntaxTree> SyntaxTrees { get; }
 
@@ -271,6 +274,14 @@ public sealed class Compilation
     {
         options ??= CompilationOptions.Default;
 
+        string rawModuleBase = Path.GetFileNameWithoutExtension(filePath);
+        string resolvedModuleName = !string.IsNullOrWhiteSpace(options.ModuleName)
+            ? CompilationOptions.NormalizeModuleIdentifier(options.ModuleName)
+            : CompilationOptions.NormalizeModuleIdentifier(rawModuleBase);
+        options = string.Equals(options.ModuleName, resolvedModuleName, StringComparison.Ordinal)
+            ? options
+            : options with { ModuleName = resolvedModuleName };
+
         if (cachedCompilation != null &&
             !cachedCompilation.Options.RequiresReanalysis(options) &&
             cachedCompilation.SyntaxTrees.Count == 1 &&
@@ -286,7 +297,6 @@ public sealed class Compilation
             }
             return cachedCompilation;
         }
-        options ??= CompilationOptions.Default;
         var sourceText = new SourceText(source);
         var diagnosticsManager = new DiagnosticsManager(sourceText);
 
@@ -309,7 +319,7 @@ public sealed class Compilation
         var phaseTimers = new CompilationPhaseTimers(syntaxSw.Elapsed, semSw.Elapsed, TimeSpan.Zero);
 
         return new Compilation(
-            Path.GetFileNameWithoutExtension(filePath),
+            rawModuleBase,
             [syntaxTree],
             options,
             referencedCompilations ?? [],
@@ -339,6 +349,21 @@ public sealed class Compilation
         referencedCompilations ??= [];
         var pathsList = filePaths.Select(Path.GetFullPath).ToList();
 
+        string resolvedProjectName = projectName
+            ?? (!string.IsNullOrWhiteSpace(options.RootDirectory) ? Path.GetFileName(options.RootDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : null)
+            ?? (pathsList.Count > 0 ? Path.GetFileNameWithoutExtension(pathsList[0]) : null)
+            ?? "Project";
+
+        if (string.IsNullOrEmpty(resolvedProjectName))
+            resolvedProjectName = "Project";
+
+        string resolvedFileModuleName = !string.IsNullOrWhiteSpace(options.ModuleName)
+            ? CompilationOptions.NormalizeModuleIdentifier(options.ModuleName)
+            : CompilationOptions.NormalizeModuleIdentifier(resolvedProjectName);
+        options = string.Equals(options.ModuleName, resolvedFileModuleName, StringComparison.Ordinal)
+            ? options
+            : options with { ModuleName = resolvedFileModuleName };
+
         // 1. Full Reuse Short-Circuit:
         if (cachedCompilation != null &&
             !cachedCompilation.Options.RequiresReanalysis(options) &&
@@ -354,14 +379,6 @@ public sealed class Compilation
             }
             return cachedCompilation;
         }
-
-        string resolvedProjectName = projectName
-            ?? (!string.IsNullOrWhiteSpace(options.RootDirectory) ? Path.GetFileName(options.RootDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : null)
-            ?? (pathsList.Count > 0 ? Path.GetFileNameWithoutExtension(pathsList[0]) : null)
-            ?? "Project";
-
-        if (string.IsNullOrEmpty(resolvedProjectName))
-            resolvedProjectName = "Project";
 
         if (pathsList.Count == 0)
         {

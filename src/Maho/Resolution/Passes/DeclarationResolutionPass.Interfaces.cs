@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -18,6 +19,49 @@ internal sealed partial class DeclarationResolutionPass
         foreach (var type in context.NestedTypeSymbols)
         {
             ValidateTypeInterfaceImplementations(type, ResolutionContext.GetHandle(type), validatedTypes);
+        }
+
+        ValidateExtensionConformances();
+    }
+
+    private void ValidateExtensionConformances()
+    {
+        foreach (var conf in context.Conformances)
+        {
+            if (!conf.IsExtension)
+                continue;
+
+            var extSym = context.GetSymbol(conf.OwnerHandle) as ExtensionSymbol;
+            if (extSym is null || conf.TargetType.Handle is not { } targetH)
+                continue;
+
+            var unwrappedTargetH = context.UnwrapAlias(targetH);
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrappedTargetH, out _))
+                continue;
+
+            var targetSym = (Symbol?)context.GetTypeSymbol(unwrappedTargetH) ?? context.GetNestedTypeSymbol(unwrappedTargetH);
+            if (targetSym is null)
+                continue;
+
+            var typeSpan = extSym.Syntax?.TargetType.GetSpan() ?? extSym.Syntax?.GetSpan() ?? default;
+            var typeSource = extSym.Syntax?.GetSource();
+
+            var implemented = new List<(SymbolHandle IfaceHandle, Dictionary<SymbolHandle, TypeRef> TypeArgs)>();
+            CollectInterfaceChain(conf.InterfaceType, [], [], implemented);
+
+            foreach (var (ifaceHandle, typeArgs) in implemented)
+            {
+                ValidateConformanceMembers(
+                    targetSym,
+                    conf.OwnerHandle,
+                    extSym.Scope,
+                    conf,
+                    ifaceHandle,
+                    typeArgs,
+                    extSym.Name.Text,
+                    typeSpan,
+                    typeSource);
+            }
         }
     }
 
@@ -55,113 +99,165 @@ internal sealed partial class DeclarationResolutionPass
 
         foreach (var (ifaceHandle, typeArgs) in implementedInterfaces)
         {
-            var ifaceSym = context.GetTypeSymbol(ifaceHandle);
-            if (ifaceSym is null)
-                continue;
+            var matchingConf = context.Conformances.FirstOrDefault(c =>
+                !c.IsExtension &&
+                c.OwnerHandle == typeHandle &&
+                c.InterfaceHandle == ifaceHandle);
 
-            var ifaceScope = GetOwnedScope(ifaceSym);
+            ValidateConformanceMembers(
+                typeSymbol,
+                typeHandle,
+                extensionScope: null,
+                matchingConf,
+                ifaceHandle,
+                typeArgs,
+                typeSymbol.Name.ToString(),
+                typeSpan,
+                typeSource);
+        }
+    }
 
-            // 1. Validate Methods
-            foreach (var sym in ifaceScope.Symbols.Values)
+    private void ValidateConformanceMembers(
+        Symbol typeSymbol,
+        SymbolHandle ownerHandle,
+        Scope? extensionScope,
+        InterfaceConformance? conformance,
+        SymbolHandle ifaceHandle,
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        string ownerName,
+        TextSpan typeSpan,
+        SourceText? typeSource)
+    {
+        var ifaceSym = context.GetTypeSymbol(ifaceHandle);
+        if (ifaceSym is null)
+            return;
+
+        var ifaceScope = GetOwnedScope(ifaceSym);
+
+        // 1. Validate Methods
+        foreach (var sym in ifaceScope.Symbols.Values)
+        {
+            if (sym is MethodSymbol ifaceMethod)
             {
-                if (sym is MethodSymbol ifaceMethod)
+                // Skip if default implementation exists
+                if (ifaceMethod.Syntax?.Body is not null && ifaceMethod.Syntax.Body is not FunctionEmptyBody)
+                    continue;
+
+                // Abstract method: must be implemented
+                if (!IsInterfaceMethodImplemented(typeSymbol, ownerHandle, extensionScope, ifaceSym, ifaceMethod, typeArgs, out var implementingMethod))
                 {
-                    // Skip if default implementation exists
-                    if (ifaceMethod.Syntax?.Body is not null && ifaceMethod.Syntax.Body is not FunctionEmptyBody)
-                        continue;
+                    var ifaceMemberSpan = ifaceMethod.Syntax?.Signature.Identifier.GetSpan() ??
+                                          ifaceMethod.Syntax?.GetSpan() ?? default;
+                    var ifaceMemberSource = ifaceMethod.Syntax?.GetSource();
 
-                    // Abstract method: must be implemented
-                    if (!IsInterfaceMethodImplemented(typeSymbol, ifaceSym, ifaceMethod, typeArgs, out var implementingMethod))
-                    {
-                        var ifaceMemberSpan = ifaceMethod.Syntax?.Signature.Identifier.GetSpan() ??
-                                              ifaceMethod.Syntax?.GetSpan() ?? default;
-                        var ifaceMemberSource = ifaceMethod.Syntax?.GetSource();
+                    context.Diagnostics.ReportUnimplementedInterfaceMember(
+                        typeSpan,
+                        ownerName,
+                        ifaceSym.Name.ToString(),
+                        ifaceMethod.Name.ToString(),
+                        typeSource,
+                        ifaceMemberSpan,
+                        ifaceMemberSource);
+                }
+                else if (implementingMethod is not null)
+                {
+                    if (conformance is not null)
+                        conformance.MethodMap[ResolutionContext.GetHandle(ifaceMethod)] = ResolutionContext.GetHandle(implementingMethod);
 
-                        context.Diagnostics.ReportUnimplementedInterfaceMember(
-                            typeSpan,
-                            typeSymbol.Name.ToString(),
-                            ifaceSym.Name.ToString(),
-                            ifaceMethod.Name.ToString(),
-                            typeSource,
-                            ifaceMemberSpan,
-                            ifaceMemberSource);
-                    }
-                    else if (HasOperatorOnInterface(ifaceHandle, OperatorKind.StaticConstructor) && implementingMethod is not null)
+                    if (conformance is null || !conformance.IsExtension)
                     {
-                        var mHandle = ResolutionContext.GetHandle(implementingMethod);
-                        if (context.StaticConstructors.Any(existing => context.GetMethodSymbol(existing)?.Parent == typeHandle))
+                        if (HasOperatorOnInterface(ifaceHandle, OperatorKind.StaticConstructor))
                         {
-                            var span = implementingMethod.Syntax?.Signature.Identifier.GetSpan() ?? default;
-                            context.Diagnostics.ReportDuplicateStaticConstructor(span, typeSymbol.Name.ToString(), implementingMethod.Syntax?.GetSource());
-                        }
-                        else
-                        {
-                            context.StaticConstructors.Add(mHandle);
+                            var mHandle = ResolutionContext.GetHandle(implementingMethod);
+                            if (context.StaticConstructors.Any(existing => context.GetMethodSymbol(existing)?.Parent == ownerHandle))
+                            {
+                                var span = implementingMethod.Syntax?.Signature.Identifier.GetSpan() ?? default;
+                                context.Diagnostics.ReportDuplicateStaticConstructor(span, ownerName, implementingMethod.Syntax?.GetSource());
+                            }
+                            else
+                            {
+                                context.StaticConstructors.Add(mHandle);
+                            }
                         }
                     }
                 }
-                else if (sym is PropertySymbol ifaceProp)
-                {
-                    // 2. Validate Properties
-                    bool requiresGetter = false;
-                    bool requiresSetter = false;
+            }
+            else if (sym is PropertySymbol ifaceProp)
+            {
+                // 2. Validate Properties
+                bool requiresGetter = false;
+                bool requiresSetter = false;
 
-                    if (ifaceProp.Syntax is { } propSyntax)
+                if (ifaceProp.Syntax is { } propSyntax)
+                {
+                    foreach (var acc in propSyntax.Body.Accessors)
                     {
-                        foreach (var acc in propSyntax.Body.Accessors)
+                        if (acc.Kind == PropertyAccessorKind.Get)
                         {
-                            if (acc.Kind == PropertyAccessorKind.Get)
-                            {
-                                if (acc.Body is FunctionEmptyBody)
-                                    requiresGetter = true;
-                            }
-                            else if (acc.Kind == PropertyAccessorKind.Set)
-                            {
-                                if (acc.Body is FunctionEmptyBody)
-                                    requiresSetter = true;
-                            }
+                            if (acc.Body is FunctionEmptyBody)
+                                requiresGetter = true;
+                        }
+                        else if (acc.Kind == PropertyAccessorKind.Set)
+                        {
+                            if (acc.Body is FunctionEmptyBody)
+                                requiresSetter = true;
                         }
                     }
+                }
 
-                    // If neither getter nor setter is abstract (all have default implementations), skip
-                    if (!requiresGetter && !requiresSetter)
-                        continue;
+                // If neither getter nor setter is abstract (all have default implementations), skip
+                if (!requiresGetter && !requiresSetter)
+                    continue;
 
-                    var (isImplemented, detail) = CheckInterfacePropertyImplemented(typeSymbol, ifaceSym, ifaceProp, typeArgs, requiresGetter, requiresSetter);
-                    if (!isImplemented)
-                    {
-                        var ifaceMemberSpan = ifaceProp.Syntax?.Identifier.GetSpan() ??
-                                              ifaceProp.Syntax?.GetSpan() ?? default;
-                        var ifaceMemberSource = ifaceProp.Syntax?.GetSource();
+                var (isImplemented, detail) = CheckInterfacePropertyImplemented(typeSymbol, ownerHandle, extensionScope, ifaceSym, ifaceProp, typeArgs, requiresGetter, requiresSetter, out var matchedProp);
+                if (!isImplemented)
+                {
+                    var ifaceMemberSpan = ifaceProp.Syntax?.Identifier.GetSpan() ??
+                                          ifaceProp.Syntax?.GetSpan() ?? default;
+                    var ifaceMemberSource = ifaceProp.Syntax?.GetSource();
 
-                        context.Diagnostics.ReportUnimplementedInterfaceMember(
-                            typeSpan,
-                            typeSymbol.Name.ToString(),
-                            ifaceSym.Name.ToString(),
-                            ifaceProp.Name.ToString(),
-                            typeSource,
-                            ifaceMemberSpan,
-                            ifaceMemberSource,
-                            detail);
-                    }
+                    context.Diagnostics.ReportUnimplementedInterfaceMember(
+                        typeSpan,
+                        ownerName,
+                        ifaceSym.Name.ToString(),
+                        ifaceProp.Name.ToString(),
+                        typeSource,
+                        ifaceMemberSpan,
+                        ifaceMemberSource,
+                        detail);
+                }
+                else if (conformance is not null && matchedProp is not null)
+                {
+                    conformance.MethodMap[ResolutionContext.GetHandle(ifaceProp)] = ResolutionContext.GetHandle(matchedProp);
                 }
             }
         }
     }
 
-    private bool IsInterfaceMethodImplemented(
-        Symbol typeSymbol,
-        TypeSymbol ifaceSym,
-        MethodSymbol ifaceMethod,
-        Dictionary<SymbolHandle, TypeRef> typeArgs,
-        out MethodSymbol? implementingMethod)
+    private List<Scope> BuildCandidateImplementationScopes(Symbol typeSymbol, SymbolHandle ownerHandle, Scope? extensionScope, SymbolHandle ifaceHandle)
     {
-        implementingMethod = null;
-        var candidateScopes = new List<Scope> { GetOwnedScope(typeSymbol) };
+        var candidateScopes = new List<Scope>();
+        if (extensionScope is not null)
+            candidateScopes.Add(extensionScope);
+
+        candidateScopes.Add(GetOwnedScope(typeSymbol));
+
         var typeH = ResolutionContext.GetHandle(typeSymbol);
         foreach (var ext in context.ExtensionSymbols)
         {
-            if (ext.TargetTypeHandle == typeH)
+            if (ext.TargetTypeHandle != typeH)
+                continue;
+
+            var extH = ResolutionContext.GetHandle(ext);
+            if (extH == ownerHandle)
+                continue;
+
+            // Do not pull methods from extensions that declare their own separate conformance to this interface.
+            bool extHasOwnConf = context.Conformances.Any(c =>
+                c.IsExtension &&
+                c.OwnerHandle == extH &&
+                c.InterfaceHandle == ifaceHandle);
+            if (!extHasOwnConf)
                 candidateScopes.Add(ext.Scope);
         }
 
@@ -176,10 +272,24 @@ internal sealed partial class DeclarationResolutionPass
         {
             var baseSym = context.GetTypeSymbol(bh);
             if (baseSym is not null && baseSym.TypeKind != TypeKind.Interface)
-            {
                 candidateScopes.Add(GetOwnedScope(baseSym));
-            }
         }
+
+        return candidateScopes;
+    }
+
+    private bool IsInterfaceMethodImplemented(
+        Symbol typeSymbol,
+        SymbolHandle ownerHandle,
+        Scope? extensionScope,
+        TypeSymbol ifaceSym,
+        MethodSymbol ifaceMethod,
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        out MethodSymbol? implementingMethod)
+    {
+        implementingMethod = null;
+        var ifaceHandle = ResolutionContext.GetHandle(ifaceSym);
+        var candidateScopes = BuildCandidateImplementationScopes(typeSymbol, ownerHandle, extensionScope, ifaceHandle);
 
         bool isStatic = ifaceMethod.Flags.HasFlag(FunctionFlags.Static);
         var expectedReturn = ifaceMethod.ReturnType.Substitute(typeArgs);
@@ -307,38 +417,20 @@ internal sealed partial class DeclarationResolutionPass
 
     private (bool IsImplemented, string? Detail) CheckInterfacePropertyImplemented(
         Symbol typeSymbol,
+        SymbolHandle ownerHandle,
+        Scope? extensionScope,
         TypeSymbol ifaceSym,
         PropertySymbol ifaceProp,
         Dictionary<SymbolHandle, TypeRef> typeArgs,
         bool requiresGetter,
-        bool requiresSetter)
+        bool requiresSetter,
+        out PropertySymbol? matchedProp)
     {
-        var candidateScopes = new List<Scope> { GetOwnedScope(typeSymbol) };
-        var typeH = ResolutionContext.GetHandle(typeSymbol);
-        foreach (var ext in context.ExtensionSymbols)
-        {
-            if (ext.TargetTypeHandle == typeH)
-                candidateScopes.Add(ext.Scope);
-        }
-
-        IReadOnlyList<SymbolHandle> bases = typeSymbol switch
-        {
-            TypeSymbol ts => ts.LinearizedBases,
-            NestedTypeSymbol nts => nts.LinearizedBases,
-            _ => []
-        };
-
-        foreach (var bh in bases.Skip(1))
-        {
-            var baseSym = context.GetTypeSymbol(bh);
-            if (baseSym is not null && baseSym.TypeKind != TypeKind.Interface)
-            {
-                candidateScopes.Add(GetOwnedScope(baseSym));
-            }
-        }
+        var ifaceHandle = ResolutionContext.GetHandle(ifaceSym);
+        var candidateScopes = BuildCandidateImplementationScopes(typeSymbol, ownerHandle, extensionScope, ifaceHandle);
 
         var expectedType = ifaceProp.Type.Substitute(typeArgs);
-        PropertySymbol? matchedProp = null;
+        matchedProp = null;
 
         foreach (var scope in candidateScopes)
         {
@@ -411,76 +503,6 @@ internal sealed partial class DeclarationResolutionPass
         var result = new List<(SymbolHandle, Dictionary<SymbolHandle, TypeRef>)>();
         var visited = new HashSet<SymbolHandle>();
 
-        void CollectRecursive(TypeRef typeRef, Dictionary<SymbolHandle, TypeRef> parentTypeArgs)
-        {
-            if (typeRef.Handle is not { } h)
-                return;
-
-            var unwrappedH = context.UnwrapAlias(h);
-            var sym = (Symbol?)context.GetTypeSymbol(unwrappedH) ?? context.GetNestedTypeSymbol(unwrappedH);
-            if (sym is null || !visited.Add(unwrappedH))
-                return;
-
-            TypeKind? ifaceKind = sym switch
-            {
-                TypeSymbol ts => ts.TypeKind,
-                NestedTypeSymbol nts => nts.TypeKind,
-                _ => null
-            };
-
-            IReadOnlyList<SymbolHandle> genericParams = sym switch
-            {
-                TypeSymbol ts => ts.GenericParameters,
-                NestedTypeSymbol nts => nts.GenericParameters,
-                _ => []
-            };
-
-            var currentTypeArgs = new Dictionary<SymbolHandle, TypeRef>(parentTypeArgs);
-            if (typeRef.SpecialType is GenericSemanticType gen)
-            {
-                bool hasVariadic = genericParams.Count > 0 &&
-                    (context.GetSymbol(genericParams[^1]) as GenericParameterSymbol)?.IsVariadic == true;
-
-                if (genericParams.Count == gen.TypeArguments.Count)
-                {
-                    for (int i = 0; i < genericParams.Count; i++)
-                    {
-                        var substitutedArg = gen.TypeArguments[i].Substitute(parentTypeArgs);
-                        currentTypeArgs[genericParams[i]] = substitutedArg;
-                    }
-                }
-                else if (hasVariadic && gen.TypeArguments.Count >= genericParams.Count - 1)
-                {
-                    int fixedCount = genericParams.Count - 1;
-                    for (int i = 0; i < fixedCount; i++)
-                    {
-                        currentTypeArgs[genericParams[i]] = gen.TypeArguments[i].Substitute(parentTypeArgs);
-                    }
-                    var variadicArgs = gen.TypeArguments.Skip(fixedCount).Select(a => a.Substitute(parentTypeArgs)).ToList();
-                    context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupH);
-                    var tupleType = TypeRef.Tuple(variadicArgs.Select(a => new TupleElement(a, null)).ToList(), tupH != default ? tupH : null);
-                    currentTypeArgs[genericParams[^1]] = tupleType;
-                }
-            }
-
-            if (ifaceKind == TypeKind.Interface)
-            {
-                result.Add((unwrappedH, currentTypeArgs));
-            }
-
-            IReadOnlyList<TypeRef> baseTypes = sym switch
-            {
-                TypeSymbol ts => ts.BaseTypes,
-                NestedTypeSymbol nts => nts.BaseTypes,
-                _ => []
-            };
-
-            foreach (var bt in baseTypes)
-            {
-                CollectRecursive(bt, currentTypeArgs);
-            }
-        }
-
         IReadOnlyList<TypeRef> rootBases = typeSymbol switch
         {
             TypeSymbol ts => ts.BaseTypes,
@@ -489,11 +511,73 @@ internal sealed partial class DeclarationResolutionPass
         };
 
         foreach (var rb in rootBases)
-        {
-            CollectRecursive(rb, []);
-        }
+            CollectInterfaceChain(rb, [], visited, result);
 
         return result;
+    }
+
+    private void CollectInterfaceChain(
+        TypeRef typeRef,
+        Dictionary<SymbolHandle, TypeRef> parentTypeArgs,
+        HashSet<SymbolHandle> visited,
+        List<(SymbolHandle IfaceHandle, Dictionary<SymbolHandle, TypeRef> TypeArgs)> result)
+    {
+        if (typeRef.Handle is not { } h)
+            return;
+
+        var unwrappedH = context.UnwrapAlias(h);
+        var sym = (Symbol?)context.GetTypeSymbol(unwrappedH) ?? context.GetNestedTypeSymbol(unwrappedH);
+        if (sym is null || !visited.Add(unwrappedH))
+            return;
+
+        TypeKind? ifaceKind = sym switch
+        {
+            TypeSymbol ts => ts.TypeKind,
+            NestedTypeSymbol nts => nts.TypeKind,
+            _ => null
+        };
+
+        IReadOnlyList<SymbolHandle> genericParams = sym switch
+        {
+            TypeSymbol ts => ts.GenericParameters,
+            NestedTypeSymbol nts => nts.GenericParameters,
+            _ => []
+        };
+
+        var currentTypeArgs = new Dictionary<SymbolHandle, TypeRef>(parentTypeArgs);
+        if (typeRef.SpecialType is GenericSemanticType gen)
+        {
+            bool hasVariadic = genericParams.Count > 0 &&
+                (context.GetSymbol(genericParams[^1]) as GenericParameterSymbol)?.IsVariadic == true;
+
+            if (genericParams.Count == gen.TypeArguments.Count)
+            {
+                for (int i = 0; i < genericParams.Count; i++)
+                    currentTypeArgs[genericParams[i]] = gen.TypeArguments[i].Substitute(parentTypeArgs);
+            }
+            else if (hasVariadic && gen.TypeArguments.Count >= genericParams.Count - 1)
+            {
+                int fixedCount = genericParams.Count - 1;
+                for (int i = 0; i < fixedCount; i++)
+                    currentTypeArgs[genericParams[i]] = gen.TypeArguments[i].Substitute(parentTypeArgs);
+                var variadicArgs = gen.TypeArguments.Skip(fixedCount).Select(a => a.Substitute(parentTypeArgs)).ToList();
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupH);
+                currentTypeArgs[genericParams[^1]] = TypeRef.Tuple(variadicArgs.Select(a => new TupleElement(a, null)).ToList(), tupH != default ? tupH : null);
+            }
+        }
+
+        if (ifaceKind == TypeKind.Interface)
+            result.Add((unwrappedH, currentTypeArgs));
+
+        IReadOnlyList<TypeRef> baseTypes = sym switch
+        {
+            TypeSymbol ts => ts.BaseTypes,
+            NestedTypeSymbol nts => nts.BaseTypes,
+            _ => []
+        };
+
+        foreach (var bt in baseTypes)
+            CollectInterfaceChain(bt, currentTypeArgs, visited, result);
     }
 
     private bool IsTypeEquivalent(TypeRef a, TypeRef b)

@@ -1,9 +1,3 @@
-using System.Linq;
-using Maho;
-using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class ForLoopAndIteratorTests
@@ -154,7 +148,7 @@ public sealed class ForLoopAndIteratorTests
             {
                 public func Iterable.Iterate(&this) -> MyIter
                 {
-                    MyIter iter;
+                    MyIter iter = default;
                     return iter;
                 }
             }

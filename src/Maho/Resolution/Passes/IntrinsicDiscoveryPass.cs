@@ -59,26 +59,17 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             {
                 project.DiscoveredIntrinsics.TryGetDeclarationInfo(name, out var span, out var source);
 
-                if (context.DiscoveredIntrinsics.Contains(name))
+                if (context.DiscoveredIntrinsics.TryGet(name, out var existingHandle))
                 {
-                    context.DiscoveredIntrinsics.TryGetDeclarationInfo(name, out var existingSpan, out var existingSource);
-                    context.Diagnostics.ReportDuplicateIntrinsicType(name, span, existingSpan, source, existingSource);
+                    if (existingHandle != handle)
+                    {
+                        context.DiscoveredIntrinsics.TryGetDeclarationInfo(name, out var existingSpan, out var existingSource);
+                        context.Diagnostics.ReportDuplicateIntrinsicType(name, span, existingSpan, source, existingSource);
+                    }
                     continue;
                 }
 
                 context.DiscoveredIntrinsics.Register(name, handle, span, source);
-            }
-
-            if (context.DiscoveredOperators.OperatorFunctionAttribute is null && project.DiscoveredOperators.OperatorFunctionAttribute is not null)
-                context.DiscoveredOperators.OperatorFunctionAttribute = project.DiscoveredOperators.OperatorFunctionAttribute;
-
-            if (context.DiscoveredOperators.IntrinsicFunctionAttribute is null && project.DiscoveredOperators.IntrinsicFunctionAttribute is not null)
-                context.DiscoveredOperators.IntrinsicFunctionAttribute = project.DiscoveredOperators.IntrinsicFunctionAttribute;
-
-            foreach (var (opKind, list) in project.DiscoveredOperators.AllByKind)
-            {
-                foreach (var op in list)
-                    context.DiscoveredOperators.Register(op.Kind, op.InterfaceHandle, op.MethodHandle, op.Span, op.Source);
             }
 
             if (context.DiscoveredOperators.OperatorFunctionAttribute is null && project.DiscoveredOperators.OperatorFunctionAttribute is not null)

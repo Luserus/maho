@@ -85,6 +85,17 @@ internal sealed partial class Parser
                     lookaheadCurrent = saved;
                     return (false, LookaheadResultContext.FailedParseTypeSyntax);
                 }
+
+                if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.As)
+                {
+                    LookaheadConsume();
+                    var (_, ifaceSuccess, _) = LookaheadParseTypeSyntax();
+                    if (!ifaceSuccess)
+                    {
+                        lookaheadCurrent = saved;
+                        return (false, LookaheadResultContext.FailedParseTypeSyntax);
+                    }
+                }
             }
 
             if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
@@ -130,6 +141,17 @@ internal sealed partial class Parser
                 {
                     lookaheadCurrent = saved;
                     return (false, false);
+                }
+
+                if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.As)
+                {
+                    LookaheadConsume();
+                    var (_, ifaceSuccess, _) = LookaheadParseTypeSyntax();
+                    if (!ifaceSuccess)
+                    {
+                        lookaheadCurrent = saved;
+                        return (false, false);
+                    }
                 }
             }
 
@@ -377,13 +399,19 @@ internal sealed partial class Parser
                 nodesAndSeparators.Add(new NamedExpressionGenericArgument(new IdentifierNameExpression(LookaheadConsume())));
             else
             {
-                if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
-                    return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
-
                 var (type, success, _) = LookaheadParseTypeSyntax();
 
                 if (!success)
                     return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
+
+                if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.As)
+                {
+                    var asKeyword = LookaheadConsume();
+                    var (ifaceType, ifaceSuccess, _) = LookaheadParseTypeSyntax();
+                    if (!ifaceSuccess)
+                        return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
+                    type = new ConformanceQualifiedType(type, asKeyword, ifaceType);
+                }
 
                 nodesAndSeparators.Add(type);
             }
@@ -553,7 +581,7 @@ internal sealed partial class Parser
             }
         }
 
-        var (type, success) = LookaheadParsePrimaryType();
+        var (type, success) = LookaheadParseUnmodifiedType();
 
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
@@ -571,49 +599,90 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        if (LookaheadCurrentToken.Kind is TokenKind.Dot)
-            (type, success) = LookaheadParseQualifiedType(type);
-
-        if (!success)
-            return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
-
         return (type, true, LookaheadResultContext.Success);
     }
 
-    /// <summary> Speculatively parses the first segment of a type reference before modifiers or qualification. </summary>
-    private (TypeSyntax Type, bool Success) LookaheadParsePrimaryType()
+    private bool LookaheadLooksLikeColonColonAt(int offset = 0)
+    {
+        var first = LookaheadPeek(offset);
+        if (first.Kind is TokenKind.ColonColon)
+            return true;
+
+        var second = LookaheadPeek(offset + 1);
+        return first.Kind is TokenKind.Colon &&
+               second.Kind is TokenKind.Colon &&
+               first.Span.End == second.Span.Start &&
+               first.TrailingTrivia.Length == 0 &&
+               second.LeadingTrivia.Length == 0;
+    }
+
+    private Token LookaheadConsumeColonColon()
+    {
+        if (LookaheadCurrentToken.Kind is TokenKind.ColonColon)
+            return LookaheadConsume();
+
+        var first = LookaheadConsume();
+        var second = LookaheadConsume();
+        return new Token(text, new TextSpan(first.Span.Start, second.Span.End - first.Span.Start), TokenKind.ColonColon, first.LeadingTrivia, second.TrailingTrivia);
+    }
+
+    private (TypeSyntax Type, bool Success) LookaheadParseUnmodifiedType()
     {
         if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
             return LookaheadParseTupleType();
 
+        if ((LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Global ||
+            (LookaheadCurrentToken.Kind is TokenKind.Identifier && CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))) &&
+            LookaheadLooksLikeColonColonAt(1))
+        {
+            var qualifier = LookaheadConsume();
+            var colonColon = LookaheadConsumeColonColon();
+            var (member, success) = LookaheadParseQualifiedNamedType();
+            return (new ScopeQualifiedType(qualifier, colonColon, member), success);
+        }
+
+        return LookaheadParseQualifiedNamedType();
+    }
+
+    private (TypeSyntax Type, bool Success) LookaheadParseQualifiedNamedType()
+    {
+        var (baseType, success) = LookaheadParsePrimaryNamedTypeSegment();
+        if (!success)
+            return (baseType, false);
+
+        if (LookaheadCurrentToken.Kind is TokenKind.Dot && !(LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
+        {
+            var dot = LookaheadConsume();
+            var (next, nextSuccess) = LookaheadParseQualifiedNamedType();
+            return (new QualifiedType(baseType, dot, next), nextSuccess);
+        }
+
+        if (baseType is SimpleType simple &&
+            simple.Name.MatchingKind is not MatchingKeywordKind.Var &&
+            LookaheadCurrentToken.Kind is TokenKind.LeftParen &&
+            LooksLikeUniformTupleType(fromLookahead: true).Success)
+        {
+            var (uniformTuple, uniformSuccess) = LookaheadParseUniformTupleType(baseType);
+            return (uniformTuple, uniformSuccess);
+        }
+
+        return (baseType, true);
+    }
+
+    /// <summary> Speculatively parses one identifier/generic segment of a type name. </summary>
+    private (TypeSyntax Type, bool Success) LookaheadParsePrimaryNamedTypeSegment()
+    {
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(LookaheadCurrentToken.MatchingKind))
             return (new SimpleType(LookaheadCurrentToken), false);
 
         var identifier = LookaheadConsume();
-        TypeSyntax baseType;
-
         if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments(fromLookahead: true).Success)
         {
             var (genericType, success) = LookaheadParseGenericType(identifier);
-
-            if (!success)
-                return (genericType, false);
-
-            baseType = genericType;
-        }
-        else
-            baseType = new SimpleType(identifier);
-
-        if (identifier.MatchingKind is not MatchingKeywordKind.Var && LookaheadCurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType(fromLookahead: true).Success)
-        {
-            var (uniformTuple, success) = LookaheadParseUniformTupleType(baseType);
-            if (!success)
-                return (uniformTuple, false);
-
-            return (uniformTuple, true);
+            return (genericType, success);
         }
 
-        return (baseType, true);
+        return (new SimpleType(identifier), true);
     }
 
     /// <summary> Checks whether the upcoming tokens form a uniform tuple type, e.g. <c>Type (a, b, c)</c>. </summary>
@@ -779,18 +848,6 @@ internal sealed partial class Parser
 
         var closeParen = LookaheadConsume();
         return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), closeParen), true);
-    }
-
-    /// <summary> Speculatively parses a qualified type chain such as <c>A.B</c>. </summary>
-    private (QualifiedType Type, bool Success) LookaheadParseQualifiedType(TypeSyntax firstPart)
-    {
-        var dot = LookaheadConsume();
-        var (next, success, _) = LookaheadParseTypeSyntax();
-
-        if (!success)
-            return (new QualifiedType(firstPart, dot, next), false);
-
-        return (new QualifiedType(firstPart, dot, next), true);
     }
 
     /// <summary> Speculatively parses a generic type name after its identifier has already been consumed. </summary>
@@ -973,15 +1030,58 @@ internal sealed partial class Parser
         if (LookaheadCurrentToken.Kind is TokenKind.LeftParen)
             return LookaheadParseTupleName();
 
+        if ((LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Global || LookaheadCurrentToken.Kind is TokenKind.Identifier) &&
+            LookaheadLooksLikeColonColonAt(1))
+        {
+            Token qualifier = LookaheadConsume();
+            Token colonColon = LookaheadConsumeColonColon();
+            var (memberName, memberOk) = LookaheadParseDotQualifiedNamedSyntax();
+            return (new ScopeQualifiedName(qualifier, colonColon, memberName), memberOk);
+        }
+
+        return LookaheadParseDotQualifiedNamedSyntax();
+    }
+
+    private (NamedSyntax Type, bool Success) LookaheadParseDotQualifiedNamedSyntax()
+    {
         if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
             return (new SimpleName(LookaheadCurrentToken), false);
 
-        Token name = LookaheadConsume();
+        NamedSyntax ParsePart(out bool ok)
+        {
+            if (LookaheadCurrentToken.Kind is not TokenKind.Identifier)
+            {
+                ok = false;
+                return new SimpleName(LookaheadCurrentToken);
+            }
 
-        if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters(fromLookahead: true).Success)
-            return LookaheadParseGenericName(name);
-        else
-            return (new SimpleName(name), true);
+            Token n = LookaheadConsume();
+            if (LookaheadCurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericParameters(fromLookahead: true).Success)
+            {
+                var (g, gOk) = LookaheadParseGenericName(n);
+                ok = gOk;
+                return g;
+            }
+
+            ok = true;
+            return new SimpleName(n);
+        }
+
+        var first = ParsePart(out bool firstOk);
+        if (!firstOk || LookaheadCurrentToken.Kind is not TokenKind.Dot)
+            return (first, firstOk);
+
+        var nodesAndSeparators = new List<SyntaxNode> { first };
+        while (LookaheadCurrentToken.Kind is TokenKind.Dot)
+        {
+            nodesAndSeparators.Add(LookaheadConsume());
+            var part = ParsePart(out bool partOk);
+            nodesAndSeparators.Add(part);
+            if (!partOk)
+                return (new QualifiedName(new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators)), false);
+        }
+
+        return (new QualifiedName(new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators)), true);
     }
 
     private (NamedSyntax Type, bool Success) LookaheadParseTupleName()

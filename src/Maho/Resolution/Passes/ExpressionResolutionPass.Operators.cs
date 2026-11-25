@@ -725,6 +725,11 @@ internal sealed partial class ExpressionResolutionPass
                         source: assignment.GetSource());
                 }
             }
+            else if (!targetType.IsError && !targetType.IsUnresolved && !targetType.IsInferred &&
+                     !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred)
+            {
+                ValidateConformanceConversion(rhs, targetType, assignment.RhsExpression, scope, containingFunction);
+            }
 
             return targetType;
         }

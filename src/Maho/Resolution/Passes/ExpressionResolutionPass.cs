@@ -41,6 +41,9 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     /// <summary>Tracks visited variable declarations to avoid redundant evaluation across multiple traversal passes.</summary>
     private readonly HashSet<VariableDeclaration> visitedDeclarations = [];
 
+    /// <summary>Tracks intermediate module-rooted namespace chains (<c>ModA::Ns</c> or <c>ModA::Ns.Sub</c>) across member access steps.</summary>
+    private readonly Dictionary<Expression, List<(ResolutionContext Module, NamespaceTrieNode Node)>> scopedNamespaceChains = [];
+
     /// <summary>
     /// Tracks local variables declared with unconstrained literals (<c>var x = 10;</c>) mapped to their initializer AST node,
     /// enabling retroactive type propagation when an assignment or operator subsequently collapses the variable.
@@ -387,6 +390,9 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
 
         if (returnStmt.Statement.Expression is { } expr)
         {
+            if (!expectedReturnType.IsInferred && !expectedReturnType.IsUnresolved && !expectedReturnType.IsError && !expectedReturnType.IsLiteral)
+                expectedExpressionTypes[expr] = expectedReturnType;
+
             var returnedType = ResolveExpression(expr, scope, containingFunction);
             span = expr.GetSpan() ?? returnStmt.Statement.Keyword.Span;
 
@@ -444,6 +450,43 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                             exprLabel: returnedType.ToLabelString(context, scope),
                             returnLabel: expectedReturnType.ToLabelString(context, scope),
                             source: returnStmt.GetSource());
+                    }
+                }
+                else
+                {
+                    var unwrappedReturnExpr = UnwrapParentheses(returnStmt.Statement.Expression);
+                    InterfaceConformance? chosenConf = ValidateConformanceConversion(
+                        returnedType,
+                        expectedReturnType,
+                        returnStmt.Statement.Expression,
+                        scope,
+                        containingFunction);
+
+                    if (chosenConf is null &&
+                        context.ResolvedTree.TryGetConformance(unwrappedReturnExpr, out var existingConf) &&
+                        existingConf is not null)
+                    {
+                        chosenConf = existingConf;
+                    }
+
+                    if (chosenConf is not null)
+                    {
+                        context.ResolvedTree.AddConformance(returnStmt.Statement.Expression, chosenConf);
+
+                        // Clarification #5: Returning a lower-visibility conformance from a higher-visibility
+                        // callable without explicit 'dyn' leaks a static vtable outside its visibility scope.
+                        if (TryGetCallableEffectiveVisibility(containingFunction, out var callableVis) &&
+                            callableVis > chosenConf.Accessibility &&
+                            !TypeRef.HasExplicitDyn(expectedReturnType))
+                        {
+                            context.Diagnostics.ReportLowerVisibilityConformanceEscape(
+                                span,
+                                TypeRef.UnwrapConformance(chosenConf.TargetType).ToDisplayString(context),
+                                chosenConf.InterfaceType.ToDisplayString(context),
+                                chosenConf.Accessibility.ToString().ToLowerInvariant(),
+                                callableVis.ToString().ToLowerInvariant(),
+                                returnStmt.GetSource());
+                        }
                     }
                 }
             }
@@ -718,6 +761,10 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                                     source: declaration.GetSource());
                             }
                         }
+                        else
+                        {
+                            ValidateConformanceConversion(initType, st, initExpr, scope, containingFunction);
+                        }
                     }
                 }
             }
@@ -830,6 +877,116 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                 }
             }
         }
+    }
+
+    internal InterfaceConformance? ValidateConformanceConversion(
+        TypeRef srcType,
+        TypeRef destType,
+        SyntaxNode syntaxNode,
+        Scope scope,
+        SymbolHandle containingFunction,
+        Token? explicitModuleQualifier = null)
+    {
+        if (srcType.IsError || destType.IsError || srcType.IsUnresolved || destType.IsUnresolved ||
+            srcType.IsInferred || destType.IsInferred)
+        {
+            return null;
+        }
+
+        var lookup = context.ResolveInterfaceConformance(
+            srcType,
+            destType,
+            explicitModuleQualifier,
+            scope,
+            containingFunction);
+
+        switch (lookup.Status)
+        {
+            case ResolutionContext.ConformanceLookupStatus.Found:
+                context.ResolvedTree.AddConformance(syntaxNode, lookup.Conformance!);
+                return lookup.Conformance;
+
+            case ResolutionContext.ConformanceLookupStatus.Inaccessible:
+                context.Diagnostics.ReportInaccessibleInterfaceConformance(
+                    syntaxNode.GetSpan() ?? default,
+                    TypeRef.UnwrapConformance(srcType).ToDisplayString(context),
+                    lookup.Conformance!.InterfaceType.ToDisplayString(context),
+                    lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                    syntaxNode.GetSource());
+                return null;
+
+            case ResolutionContext.ConformanceLookupStatus.Ambiguous:
+                context.Diagnostics.ReportAmbiguousInterfaceConformance(
+                    syntaxNode.GetSpan() ?? default,
+                    TypeRef.UnwrapConformance(srcType).ToDisplayString(context),
+                    TypeRef.UnwrapConformance(destType).ToDisplayString(context),
+                    lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList(),
+                    syntaxNode.GetSource());
+                return null;
+
+            case ResolutionContext.ConformanceLookupStatus.AmbiguousModule:
+                context.Diagnostics.ReportAmbiguousModuleMember(
+                    syntaxNode.GetSpan() ?? default,
+                    lookup.AmbiguousModuleName!,
+                    TypeRef.UnwrapConformance(destType).ToDisplayString(context),
+                    syntaxNode.GetSource());
+                return null;
+
+            default:
+                return null;
+        }
+    }
+
+    private bool TryGetCallableEffectiveVisibility(SymbolHandle containingFunction, out Accessibility visibility)
+    {
+        visibility = Accessibility.Public;
+        if (containingFunction == default || context.GetSymbol(containingFunction) is not { } fnSym)
+            return false;
+
+        if (fnSym is FunctionSymbol topFn)
+        {
+            visibility = AccessibilityExtensions.FromFunctionFlags(topFn.Flags, isTopLevel: true);
+            return true;
+        }
+
+        Accessibility memberAcc;
+        SymbolHandle? parentH;
+        if (fnSym is MethodSymbol m)
+        {
+            memberAcc = AccessibilityExtensions.FromFunctionFlags(m.Flags, isTopLevel: false);
+            parentH = m.Parent;
+        }
+        else if (fnSym is PropertySymbol p)
+        {
+            memberAcc = AccessibilityExtensions.FromFunctionFlags(p.Flags, isTopLevel: false);
+            parentH = p.Parent;
+        }
+        else
+        {
+            return false;
+        }
+
+        Accessibility ownerAcc = Accessibility.Public;
+        if (parentH is { } pH && context.GetSymbol(pH) is { } parentSym)
+        {
+            ownerAcc = parentSym switch
+            {
+                TypeSymbol ts => AccessibilityExtensions.FromTypeFlags(ts.Flags, isTopLevel: true),
+                NestedTypeSymbol nts => AccessibilityExtensions.FromTypeFlags(nts.Flags, isTopLevel: false),
+                ExtensionSymbol ext => ext.Accessibility,
+                _ => Accessibility.Public
+            };
+        }
+
+        visibility = (Accessibility)System.Math.Min((int)ownerAcc, (int)memberAcc);
+        return true;
+    }
+
+    private static Expression UnwrapParentheses(Expression expr)
+    {
+        while (expr is ParenthesizedExpression paren)
+            expr = paren.Expression;
+        return expr;
     }
 
 }

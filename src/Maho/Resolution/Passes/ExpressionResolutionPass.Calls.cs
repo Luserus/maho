@@ -342,6 +342,11 @@ internal sealed partial class ExpressionResolutionPass
                         source: call.GetSource());
                 }
             }
+            else if (!argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
+                     !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsInferred)
+            {
+                ValidateConformanceConversion(argTypes[i], param.Type, call.Arguments[i], scope, containingFunction);
+            }
         }
 
         return returnType;
@@ -389,6 +394,11 @@ internal sealed partial class ExpressionResolutionPass
                         paramLabel: expectedType.ToLabelString(context, scope),
                         source: call.GetSource());
                 }
+            }
+            else if (!argTypes[i].IsError && !argTypes[i].IsUnresolved && !argTypes[i].IsInferred &&
+                     !expectedType.IsError && !expectedType.IsUnresolved && !expectedType.IsInferred)
+            {
+                ValidateConformanceConversion(argTypes[i], expectedType, call.Arguments[i], scope, containingFunction);
             }
         }
 

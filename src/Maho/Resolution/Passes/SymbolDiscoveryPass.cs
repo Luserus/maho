@@ -103,6 +103,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         var fileScope = context.CreateScope(context.GlobalScope);
         context.RegisterSyntaxScope(unit, fileScope);
 
+        foreach (var externUsing in unit.ExternUsings)
+            ResolveExternUsingDirective(externUsing, fileScope);
+
         foreach (var usingDirective in unit.Usings)
             ResolveUsingDirective(usingDirective, fileScope);
 
@@ -144,6 +147,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                     ResolveTopLevelScope(block.Members, blockScope, containingNamespace, HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
                     return containingNamespace;
                 }
+            case TopLevelExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
+                return containingNamespace;
             case TopLevelUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);
                 return containingNamespace;
@@ -190,8 +196,41 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
+    private void ResolveExternUsingDirective(ExternUsingDirective directive, Scope scope)
+    {
+        string alias = ResolutionContext.GetSymbolName(directive.AliasName).Last.Text;
+        if (context.ExternAliasesByName.TryGetValue(alias, out var moduleSym))
+        {
+            scope.ExternModuleAliases[alias] = moduleSym;
+        }
+        else
+        {
+            context.Diagnostics.ReportUndefinedExternModuleAlias(
+                directive.AliasName.GetSpan() ?? directive.GetSpan() ?? default,
+                alias,
+                directive.GetSource());
+        }
+    }
+
     private void ResolveUsingDirective(UsingDirective directive, Scope scope)
     {
+        if (directive.Namespace is ScopeQualifiedName scopeQualified)
+        {
+            var nsPath = context.GetScopedSymbolName(scopeQualified.MemberName);
+            var nodes = context.ResolveScopedNamespaces(
+                scopeQualified.Qualifier,
+                nsPath,
+                scope,
+                directive.Namespace.GetSpan() ?? default,
+                directive.GetSource(),
+                reportAmbiguity: true);
+
+            if (nodes.Count == 1 && !scope.UsingNamespaces.Contains(nodes[0].Node))
+                scope.UsingNamespaces.Add(nodes[0].Node);
+
+            return;
+        }
+
         var nsNode = GetOrDeclareNamespace(context.GlobalNamespace, directive.Namespace);
         if (!scope.UsingNamespaces.Contains(nsNode))
             scope.UsingNamespaces.Add(nsNode);
@@ -232,6 +271,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         var blockScope = context.CreateScope(scope);
         if (!blockScope.UsingNamespaces.Contains(declaredNamespace))
             blockScope.UsingNamespaces.Add(declaredNamespace);
+
+        foreach (var externUsing in body.ExternUsings)
+            ResolveExternUsingDirective(externUsing, blockScope);
 
         foreach (var usingDirective in body.Usings)
             ResolveUsingDirective(usingDirective, blockScope);
@@ -556,6 +598,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 break;
             case MemberMacroDeclaration declaration:
                 ResolveMemberMacroDeclaration(declaration.Macro, scope, containingType);
+                break;
+            case MemberExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
                 break;
             case MemberUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);

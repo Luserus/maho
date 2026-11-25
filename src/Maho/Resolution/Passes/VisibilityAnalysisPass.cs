@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Maho.Resolution.Ownership;
 using Maho.Syntax;
 using Maho.Text;
 
@@ -292,12 +293,71 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
                 CheckTypeSyntaxAccessibility(asExpr.Type);
                 break;
 
+            case ObjectInitializerExpression objInit:
+                CheckTypeSyntaxAccessibility(objInit.Type);
+                if (objInit.AllocationArguments is { } allocArgs)
+                {
+                    foreach (var a in allocArgs)
+                        CheckExpression(a, isAssignmentLhs: false);
+                }
+
+                TypeRef targetInitType = context.ResolvedTree.TryGetReference(objInit.Type, out var targetTypeHandle)
+                    ? TypeRef.Resolved(targetTypeHandle)
+                    : (context.GetExpressionType(objInit) ?? TypeRef.Unresolved);
+                if (TryFindInaccessibleField(context, targetInitType, currentType, currentExtension, out var badField))
+                {
+                    context.Diagnostics.ReportStructCannotBePiecewiseInitialized(
+                        objInit.Type.GetSpan() ?? objInit.GetSpan() ?? default,
+                        targetInitType.ToDisplayString(context),
+                        badField!.Name.Text,
+                        objInit.GetSource());
+                }
+
+                foreach (var entry in objInit.Initializer.Expressions)
+                {
+                    if (entry is AssignmentExpression assign && assign.EqualsOperator.Kind == TokenKind.Equals)
+                        CheckExpression(assign.RhsExpression, isAssignmentLhs: false);
+                    else
+                        CheckExpression(entry, isAssignmentLhs: false);
+                }
+                break;
+
+            case ConstructorCallExpression ctorCall:
+                CheckTypeSyntaxAccessibility(ctorCall.Type);
+                if (ctorCall.AllocationArguments is { } ctorAllocArgs)
+                {
+                    foreach (var a in ctorAllocArgs)
+                        CheckExpression(a, isAssignmentLhs: false);
+                }
+                foreach (var arg in ctorCall.Arguments)
+                    CheckExpression(arg, isAssignmentLhs: false);
+                if (ctorCall.WithClause is { } withClause)
+                {
+                    foreach (var entry in withClause.Initializer.Expressions)
+                        CheckExpression(entry is AssignmentExpression a ? a.RhsExpression : entry, isAssignmentLhs: false);
+                }
+                break;
+
+            case DefaultExpression defExpr:
+                if (defExpr.ExplicitType is not null)
+                    CheckTypeSyntaxAccessibility(defExpr.ExplicitType);
+                break;
+
             case NamedExpression named:
                 if (context.ResolvedTree.TryGetReference(named, out var namedH))
                 {
                     var sym = context.GetSymbol(namedH);
                     if (sym is FieldSymbol or GlobalVariableSymbol)
                         CheckSymbolAccessibility(sym, named.GetSpan() ?? default);
+                }
+                break;
+
+            case ScopeResolutionExpression scopeExpr:
+                if (context.ResolvedTree.TryGetReference(scopeExpr, out var scopeH))
+                {
+                    var sym = context.GetSymbol(scopeH);
+                    if (sym is not null)
+                        CheckSymbolAccessibility(sym, scopeExpr.GetSpan() ?? default);
                 }
                 break;
         }
@@ -330,24 +390,121 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
     {
         if (targetSymbol is FieldSymbol field)
         {
-            var declTypeHandle = GetDeclaringTypeHandle(field);
-            if (currentExtension is not null && declTypeHandle is not null && currentExtension.TargetTypeHandle == declTypeHandle)
-            {
-                CheckAccessibility(field, field.ExtensionAccessibility, span);
-                return;
-            }
-
-            if (currentType is not null && declTypeHandle is not null && currentType == declTypeHandle && currentExtension is null)
-            {
-                return;
-            }
-
-            CheckAccessibility(field, field.DirectAccessibility, span);
+            if (TryGetFieldEffectiveAccessibility(context, field, currentType, currentExtension, out var fieldAcc))
+                CheckAccessibility(field, fieldAcc, span);
             return;
         }
 
         var acc = GetAccessibility(targetSymbol, context);
         CheckAccessibility(targetSymbol, acc, span);
+    }
+
+    internal static void ResolveEnclosingContext(
+        ResolutionContext context,
+        SymbolHandle containingSymbol,
+        out SymbolHandle? currentType,
+        out ExtensionSymbol? currentExtension)
+    {
+        currentType = null;
+        currentExtension = null;
+
+        var sym = context.GetSymbol(containingSymbol);
+        SymbolHandle? parent = sym switch
+        {
+            MethodSymbol m => m.Parent,
+            PropertySymbol p => p.Parent,
+            TypeSymbol => containingSymbol,
+            NestedTypeSymbol => containingSymbol,
+            _ => null
+        };
+
+        if (parent is { } pH)
+        {
+            if (context.GetSymbol(pH) is ExtensionSymbol extSym)
+            {
+                currentExtension = extSym;
+                currentType = extSym.TargetTypeHandle;
+            }
+            else
+            {
+                currentType = pH;
+            }
+        }
+    }
+
+    internal static bool TryFindInaccessibleField(
+        ResolutionContext context,
+        TypeRef structType,
+        SymbolHandle? currentType,
+        ExtensionSymbol? currentExtension,
+        out FieldSymbol? inaccessibleField)
+    {
+        inaccessibleField = null;
+        if (structType.Handle is not { } typeH)
+            return false;
+
+        foreach (var fh in OwnershipTypeClassifier.GetAllStructFields(context, typeH))
+        {
+            if (context.GetFieldSymbol(fh) is { } fs &&
+                !IsFieldAccessibleFrom(context, fs, currentType, currentExtension))
+            {
+                inaccessibleField = fs;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    internal static bool IsFieldAccessibleFrom(
+        ResolutionContext context,
+        FieldSymbol field,
+        SymbolHandle? currentType,
+        ExtensionSymbol? currentExtension)
+    {
+        if (!TryGetFieldEffectiveAccessibility(context, field, currentType, currentExtension, out var acc))
+            return true;
+
+        if (acc == Accessibility.Public)
+            return true;
+
+        if (acc == Accessibility.Internal)
+            return context.IsDeclaredInCurrentProject(ResolutionContext.GetHandle(field));
+
+        var declTypeHandle = GetDeclaringTypeHandle(field);
+        if (declTypeHandle is null)
+            return true;
+
+        if (acc == Accessibility.Protected)
+            return currentType is not null && IsOrDerivesFrom(context, currentType.Value, declTypeHandle.Value);
+
+        if (acc == Accessibility.Private)
+            return currentType is not null && IsWithinTypeHierarchy(context, currentType.Value, declTypeHandle.Value);
+
+        return true;
+    }
+
+    private static bool TryGetFieldEffectiveAccessibility(
+        ResolutionContext context,
+        FieldSymbol field,
+        SymbolHandle? currentType,
+        ExtensionSymbol? currentExtension,
+        out Accessibility effectiveAccessibility)
+    {
+        var declTypeHandle = GetDeclaringTypeHandle(field);
+        if (currentExtension is not null && declTypeHandle is not null && currentExtension.TargetTypeHandle == declTypeHandle)
+        {
+            effectiveAccessibility = field.ExtensionAccessibility;
+            return true;
+        }
+
+        if (currentType is not null && declTypeHandle is not null && currentType == declTypeHandle && currentExtension is null)
+        {
+            effectiveAccessibility = Accessibility.Public;
+            return false;
+        }
+
+        effectiveAccessibility = field.DirectAccessibility;
+        return true;
     }
 
     private void CheckAccessibility(Symbol targetSymbol, Accessibility acc, TextSpan span, string? memberNameOverride = null)
@@ -374,7 +531,7 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             if (declTypeHandle is null)
                 return;
 
-            if (currentType is null || !IsOrDerivesFrom(currentType.Value, declTypeHandle.Value))
+            if (currentType is null || !IsOrDerivesFrom(context, currentType.Value, declTypeHandle.Value))
             {
                 var curTypeName = currentType is { } cth ? context.GetSymbol(cth)?.Name.Text ?? "<unknown>" : "<top-level>";
                 context.Diagnostics.ReportCannotAccessProtectedMember(span, memberName, declaringTypeName, curTypeName, currentSource);
@@ -388,7 +545,7 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             if (declTypeHandle is null)
                 return;
 
-            if (currentType is null || !IsWithinTypeHierarchy(currentType.Value, declTypeHandle.Value))
+            if (currentType is null || !IsWithinTypeHierarchy(context, currentType.Value, declTypeHandle.Value))
             {
                 context.Diagnostics.ReportCannotAccessPrivateMember(span, memberName, declaringTypeName, currentSource);
             }
@@ -413,13 +570,13 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
                     else if (acc == Accessibility.Protected)
                     {
                         var declTypeHandle = GetDeclaringTypeHandle(sym);
-                        if (declTypeHandle is not null && (currentType is null || !IsOrDerivesFrom(currentType.Value, declTypeHandle.Value)))
+                        if (declTypeHandle is not null && (currentType is null || !IsOrDerivesFrom(context, currentType.Value, declTypeHandle.Value)))
                             context.Diagnostics.ReportCannotAccessInaccessibleType(span, typeName, "protected", currentSource);
                     }
                     else if (acc == Accessibility.Private)
                     {
                         var declTypeHandle = GetDeclaringTypeHandle(sym);
-                        if (declTypeHandle is not null && (currentType is null || !IsWithinTypeHierarchy(currentType.Value, declTypeHandle.Value)))
+                        if (declTypeHandle is not null && (currentType is null || !IsWithinTypeHierarchy(context, currentType.Value, declTypeHandle.Value)))
                             context.Diagnostics.ReportCannotAccessInaccessibleType(span, typeName, "private", currentSource);
                     }
                 }
@@ -439,7 +596,7 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             CheckTypeRefAccessibility(TypeRef.Resolved(th), syntax.GetSpan() ?? default);
     }
 
-    private bool IsOrDerivesFrom(SymbolHandle typeH, SymbolHandle targetBaseH)
+    private static bool IsOrDerivesFrom(ResolutionContext context, SymbolHandle typeH, SymbolHandle targetBaseH)
     {
         if (typeH == targetBaseH)
             return true;
@@ -454,14 +611,14 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
         {
             if (nts.LinearizedBases.Contains(targetBaseH))
                 return true;
-            if (nts.Parent is { } pH && IsOrDerivesFrom(pH, targetBaseH))
+            if (nts.Parent is { } pH && IsOrDerivesFrom(context, pH, targetBaseH))
                 return true;
         }
 
         return false;
     }
 
-    private bool IsWithinTypeHierarchy(SymbolHandle currentH, SymbolHandle declaringH)
+    private static bool IsWithinTypeHierarchy(ResolutionContext context, SymbolHandle currentH, SymbolHandle declaringH)
     {
         if (currentH == declaringH)
             return true;
@@ -499,7 +656,7 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
         return false;
     }
 
-    private SymbolHandle? GetDeclaringTypeHandle(Symbol symbol) => symbol switch
+    private static SymbolHandle? GetDeclaringTypeHandle(Symbol symbol) => symbol switch
     {
         MethodSymbol m => m.Parent,
         FieldSymbol f => f.Parent,

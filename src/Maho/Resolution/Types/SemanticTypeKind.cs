@@ -17,5 +17,6 @@ internal enum SemanticTypeKind : byte
     Delegate,
     Literal,
     Generic,
-    Alias
+    Alias,
+    Conformance
 }

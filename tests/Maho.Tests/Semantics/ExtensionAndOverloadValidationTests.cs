@@ -22,7 +22,7 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public func Main() -> int32
             {
-                MyList<int32> list;
+                MyList<int32> list = default;
                 return list.SumElements();
             }
             """);
@@ -48,7 +48,7 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public func Main() -> int32
             {
-                Container<int32> c;
+                Container<int32> c = default;
                 return c.GetCount();
             }
             """);

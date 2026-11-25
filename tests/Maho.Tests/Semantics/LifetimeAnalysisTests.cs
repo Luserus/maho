@@ -477,7 +477,7 @@ public sealed class LifetimeAnalysisTests
 
             public func Test() -> ()
             {
-                Pair p;
+                Pair p = default;
                 mut &int32 refA = p.a;
                 mut &int32 refB = p.b;
                 refA = 10;
@@ -566,13 +566,13 @@ public sealed class LifetimeAnalysisTests
 
             public func MakeCounter() -> Counter
             {
-                Counter c;
+                Counter c = default;
                 return c;
             }
 
             public func Test() -> ()
             {
-                Counter c;
+                Counter c = default;
                 c.Increment();
                 MakeCounter().Increment();
             }

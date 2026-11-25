@@ -78,6 +78,11 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.RightBrace and not TokenKind.EndToken)
         {
+            if (IsExternUsingDirective())
+            {
+                directives.Add(ParseExternUsingDirective());
+                continue;
+            }
             if (IsUsingDirective())
             {
                 directives.Add(ParseUsingDirective());
@@ -204,6 +209,12 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon and not TokenKind.EndToken && CurrentToken.MatchingKind is not MatchingKeywordKind.Where)
         {
+            Token? visibilityModifier = null;
+            if (CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Protected)
+            {
+                visibilityModifier = Consume();
+            }
+
             if (CurrentToken.Kind is not TokenKind.Identifier)
             {
                 diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type");
@@ -211,7 +222,7 @@ internal sealed partial class Parser
             }
 
             TypeSyntax type = ParseTypeSyntax();
-            nodesAndSeparators.Add(type);
+            nodesAndSeparators.Add(new BaseTypeItemSyntax(visibilityModifier, type));
 
             if (CurrentToken.Kind is TokenKind.Comma)
                 nodesAndSeparators.Add(Consume());
@@ -219,7 +230,7 @@ internal sealed partial class Parser
                 break;
         }
 
-        var baseTypes = new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
+        var baseTypes = new SeparatedSyntaxList<BaseTypeItemSyntax>(nodesAndSeparators);
 
         return new TypeBaseClause(colon, baseTypes);
     }
@@ -1171,7 +1182,7 @@ internal sealed partial class Parser
             }
         }
 
-        var type = ParsePrimaryType();
+        var type = ParseUnmodifiedType();
 
         for (int i = prefixModifiers.Count - 1; i >= 0; i--)
         {
@@ -1183,17 +1194,51 @@ internal sealed partial class Parser
             (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
             type = ParseModifiedType(type);
 
-        if (CurrentToken.Kind is TokenKind.Dot)
-            type = ParseQualifiedType(type);
-
         return type;
     }
 
-    private TypeSyntax ParsePrimaryType()
+    private TypeSyntax ParseUnmodifiedType()
     {
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseParenthesizedType();
 
+        if ((CurrentToken.MatchingKind is MatchingKeywordKind.Global ||
+            (CurrentToken.Kind is TokenKind.Identifier && CanBeTypeIdentifier(CurrentToken.MatchingKind))) &&
+            LooksLikeColonColonAt(1))
+        {
+            var qualifier = Consume();
+            var colonColon = ConsumeColonColon();
+            var member = ParseQualifiedNamedType();
+            return new ScopeQualifiedType(qualifier, colonColon, member);
+        }
+
+        return ParseQualifiedNamedType();
+    }
+
+    private TypeSyntax ParseQualifiedNamedType()
+    {
+        var baseType = ParsePrimaryNamedTypeSegment();
+
+        if (CurrentToken.Kind is TokenKind.Dot && !(Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
+        {
+            var dot = Consume();
+            var next = ParseQualifiedNamedType();
+            return new QualifiedType(baseType, dot, next);
+        }
+
+        if (baseType is SimpleType simple &&
+            simple.Name.MatchingKind is not MatchingKeywordKind.Var &&
+            CurrentToken.Kind is TokenKind.LeftParen &&
+            LooksLikeUniformTupleType().Success)
+        {
+            return ParseUniformTupleType(baseType);
+        }
+
+        return baseType;
+    }
+
+    private TypeSyntax ParsePrimaryNamedTypeSegment()
+    {
         if (CurrentToken.Kind is not TokenKind.Identifier || !CanBeTypeIdentifier(CurrentToken.MatchingKind))
         {
             diagnostics.ReportExpectedType(CurrentToken.Span, GetTokenDisplay(CurrentToken), "for the type name");
@@ -1201,17 +1246,10 @@ internal sealed partial class Parser
         }
 
         var identifier = Consume();
-        TypeSyntax baseType;
-
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeGenericArguments().Success)
-            baseType = ParseGenericType(identifier);
-        else
-            baseType = new SimpleType(identifier);
+            return ParseGenericType(identifier);
 
-        if (identifier.MatchingKind is not MatchingKeywordKind.Var && CurrentToken.Kind is TokenKind.LeftParen && LooksLikeUniformTupleType().Success)
-            return ParseUniformTupleType(baseType);
-
-        return baseType;
+        return new SimpleType(identifier);
     }
 
     private UniformTupleType ParseUniformTupleType(TypeSyntax elementType)
@@ -1346,14 +1384,6 @@ internal sealed partial class Parser
         return new TupleName(tupleType.OpenParen, new SeparatedSyntaxList<NamedSyntax>(nodesAndSeparators), tupleType.CloseParen);
     }
 
-    private QualifiedType ParseQualifiedType(TypeSyntax firstPart)
-    {
-        var dot = Consume();
-        var next = ParseTypeSyntax();
-
-        return new QualifiedType(firstPart, dot, next);
-    }
-
     private GenericType ParseGenericType(Token identifier)
     {
         var (lessThan, genericArguments, GreaterThan) = ParseGenerics();
@@ -1485,6 +1515,23 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.LeftParen)
             return ParseTupleName();
 
+        if (allowQualified &&
+            (CurrentToken.MatchingKind is MatchingKeywordKind.Global || CurrentToken.Kind is TokenKind.Identifier) &&
+            LooksLikeColonColonAt(1))
+        {
+            Token qualifier = CurrentToken.MatchingKind is MatchingKeywordKind.Global
+                ? Consume()
+                : ExpectIdentifierToken("for the module qualifier");
+            Token colonColon = ConsumeColonColon();
+            NamedSyntax memberName = ParseDotQualifiedNamedSyntax(allowQualified, allowGenericName, allowGenericQualifiedParts);
+            return new ScopeQualifiedName(qualifier, colonColon, memberName);
+        }
+
+        return ParseDotQualifiedNamedSyntax(allowQualified, allowGenericName, allowGenericQualifiedParts);
+    }
+
+    private NamedSyntax ParseDotQualifiedNamedSyntax(bool allowQualified, bool allowGenericName, bool allowGenericQualifiedParts)
+    {
         NamedSyntax name = ParseNamedSyntaxPart();
 
         if (!allowQualified || CurrentToken.Kind is not TokenKind.Dot)

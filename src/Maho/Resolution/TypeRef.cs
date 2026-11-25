@@ -134,11 +134,38 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return new TypeRef(TypeRefKind.Untagged, null, new UntaggedSemanticType(inner));
     }
 
-    public static TypeRef Dyn(TypeRef targetType) =>
-        new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType));
+    public static TypeRef Dyn(TypeRef targetType, bool isExplicitDyn = false) =>
+        new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType, isExplicitDyn: isExplicitDyn));
 
     public static TypeRef Dyn(TypeRef targetType, IReadOnlyList<TypeRef> composed) =>
         new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType, composed));
+
+    public static TypeRef Conformance(TypeRef targetType, InterfaceConformance conformance) =>
+        new TypeRef(TypeRefKind.Resolved, targetType.Handle, new ConformanceSemanticType(targetType, conformance));
+
+    public static TypeRef UnwrapConformance(TypeRef type) =>
+        type.SpecialType is ConformanceSemanticType conf ? conf.TargetType : type;
+
+    public static bool TryGetExplicitConformance(TypeRef type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out InterfaceConformance? conformance)
+    {
+        if (type.SpecialType is ConformanceSemanticType conf)
+        {
+            conformance = conf.Conformance;
+            return true;
+        }
+        conformance = null;
+        return false;
+    }
+
+    public static bool HasExplicitDyn(TypeRef type) => type.SpecialType switch
+    {
+        DynSemanticType dyn => dyn.IsExplicitDyn || HasExplicitDyn(dyn.TargetType),
+        AliasSemanticType al => HasExplicitDyn(al.TargetType),
+        ReferenceSemanticType rf => HasExplicitDyn(rf.ElementType),
+        PointerSemanticType ptr => HasExplicitDyn(ptr.ElementType),
+        ConformanceSemanticType conf => HasExplicitDyn(conf.TargetType),
+        _ => false
+    };
 
     public static TypeRef Function(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
         new TypeRef(TypeRefKind.Function, null, new FunctionSemanticType(returnType, parameterTypes));
@@ -226,6 +253,26 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                 return sourceUnion.Variants.All(sv => targetUnion.Variants.Any(tv => tv.IsAssignableFrom(sv, context)));
 
             return targetUnion.Variants.Any(v => v.IsAssignableFrom(source, context));
+        }
+
+        if (SpecialType is ConformanceSemanticType targetConformance)
+        {
+            if (source.SpecialType is ConformanceSemanticType sourceConformance)
+                return Equals(source);
+
+            return targetConformance.TargetType.IsAssignableFrom(source, context);
+        }
+
+        if (source.SpecialType is ConformanceSemanticType srcConformance)
+        {
+            return IsAssignableFrom(srcConformance.TargetType, context);
+        }
+
+        if (SpecialType is DynSemanticType targetDynWrap &&
+            targetDynWrap.TargetType.SpecialType is AliasSemanticType or ReferenceSemanticType or PointerSemanticType &&
+            source.SpecialType is not DynSemanticType)
+        {
+            return targetDynWrap.TargetType.IsAssignableFrom(source, context);
         }
 
         if (SpecialType is DynSemanticType targetDyn)
@@ -383,6 +430,8 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                 }
 
                 if (IsSubtypeOf(unwrappedSrcH2, unwrappedTargetH, context, superGen: SpecialType as GenericSemanticType)) return true;
+
+                if (context.HasAnyConformance(unwrappedSrcH2, unwrappedTargetH, SpecialType as GenericSemanticType)) return true;
             }
         }
 
@@ -656,7 +705,10 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return FixedArray(f.ElementType.Substitute(typeArgs), f.Sizes, Handle);
 
         if (SpecialType is DynSemanticType dyn)
-            return Dyn(dyn.TargetType.Substitute(typeArgs));
+            return Dyn(dyn.TargetType.Substitute(typeArgs), dyn.IsExplicitDyn);
+
+        if (SpecialType is ConformanceSemanticType conf)
+            return Conformance(conf.TargetType.Substitute(typeArgs), conf.Conformance);
 
         if (SpecialType is TupleSemanticType t)
         {

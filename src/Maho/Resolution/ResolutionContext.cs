@@ -197,6 +197,20 @@ internal sealed class ResolutionContext
     /// <summary> Compilation options governing recursion limits and diagnostics. </summary>
     public CompilationOptions Options { get; }
 
+    /// <summary> Canonical PascalCase module symbol identity for this compilation. </summary>
+    public string ModuleName { get; }
+
+    /// <summary> Imported modules grouped by canonical module name (non-clashing with lexical/namespace tables). </summary>
+    public Dictionary<string, List<ModuleSymbol>> ModulesByName { get; } = new(StringComparer.Ordinal);
+
+    /// <summary> Imported modules keyed by explicit compiler reference alias for <c>extern using</c>. </summary>
+    public Dictionary<string, ModuleSymbol> ExternAliasesByName { get; } = new(StringComparer.Ordinal);
+
+    /// <summary> Scoped interface conformances declared within this compilation module. </summary>
+    public List<InterfaceConformance> Conformances { get; } = [];
+    private readonly Dictionary<SymbolHandle, List<InterfaceConformance>> conformancesByTarget = [];
+    private int nextConformanceSerial;
+
     private static int nextProjectId = 1;
     public int ProjectId { get; }
 
@@ -295,6 +309,18 @@ internal sealed class ResolutionContext
 
         ReferencedProjects = referencedProjects ?? baseContext?.ReferencedProjects ?? [];
         ProjectId = baseContext?.ProjectId ?? System.Threading.Interlocked.Increment(ref nextProjectId);
+        ModuleName = !string.IsNullOrWhiteSpace(Options.ModuleName)
+            ? CompilationOptions.NormalizeModuleIdentifier(Options.ModuleName)
+            : baseContext?.ModuleName ?? CompilationOptions.NormalizeModuleIdentifier(
+                SyntaxTrees.Count > 0 ? System.IO.Path.GetFileNameWithoutExtension(SyntaxTrees[0].FilePath) : null);
+
+        if (baseContext is not null)
+        {
+            foreach (var (k, v) in baseContext.ModulesByName)
+                ModulesByName[k] = [.. v];
+            foreach (var (k, v) in baseContext.ExternAliasesByName)
+                ExternAliasesByName[k] = v;
+        }
 
         attributeID = AttributeSymbols.Count;
         nestedAttributeID = NestedAttributeSymbols.Count;
@@ -333,13 +359,831 @@ internal sealed class ResolutionContext
 
     private void InitializeProjectReferences()
     {
-        foreach (var project in ReferencedProjects)
+        for (int i = 0; i < ReferencedProjects.Count; i++)
         {
+            var project = ReferencedProjects[i];
             MergeNamespaceTrie(GlobalNamespace, project.GlobalNamespace);
 
             if (!GlobalScope.ImportedScopes.Contains(project.GlobalScope))
                 GlobalScope.ImportedScopes.Add(project.GlobalScope);
+
+            string? alias = null;
+            if (Options.ReferencedAliases is { Count: > 0 } && i < Options.ReferencedAliases.Count &&
+                !string.IsNullOrWhiteSpace(Options.ReferencedAliases[i]))
+            {
+                alias = Options.ReferencedAliases[i];
+            }
+            else if (i < Options.ReferencedProjects.Count)
+            {
+                CompilationOptions.ParseProjectReferenceSpec(Options.ReferencedProjects[i], out alias, out _);
+            }
+
+            var moduleSym = new ModuleSymbol(new SymbolID(i), GlobalScope, project.ModuleName, alias, project);
+            if (!ModulesByName.TryGetValue(project.ModuleName, out var list))
+            {
+                list = [];
+                ModulesByName[project.ModuleName] = list;
+            }
+            list.Add(moduleSym);
+
+            if (!string.IsNullOrWhiteSpace(alias))
+                ExternAliasesByName[alias] = moduleSym;
         }
+    }
+
+    internal static bool IsTypeSymbol(Symbol s) =>
+        s is TypeSymbol or NestedTypeSymbol or GenericParameterSymbol or AliasSymbol;
+
+    internal IReadOnlyList<ResolutionContext> ResolveModuleTargets(Token qualifier, Scope scope, out bool isGlobalSelf)
+    {
+        if (qualifier.MatchingKind == MatchingKeywordKind.Global)
+        {
+            isGlobalSelf = true;
+            return [this];
+        }
+
+        isGlobalSelf = false;
+        if (scope.TryLookupExternAlias(qualifier.Value, out var aliasedModule))
+            return [aliasedModule.SourceContext];
+
+        if (ModulesByName.TryGetValue(qualifier.Value, out var matchingModules))
+        {
+            var list = new List<ResolutionContext>(matchingModules.Count);
+            foreach (var m in matchingModules)
+                list.Add(m.SourceContext);
+            return list;
+        }
+
+        return [];
+    }
+
+    internal IReadOnlyList<Symbol> ResolveScopedSymbols(
+        Token qualifier,
+        SymbolName memberPath,
+        Scope scope,
+        bool typesOnly,
+        Maho.Text.TextSpan diagnosticSpan,
+        Maho.Text.SourceText? diagnosticSource,
+        bool reportAmbiguity,
+        out bool isAmbiguousAcrossModules)
+    {
+        isAmbiguousAcrossModules = false;
+        var targets = ResolveModuleTargets(qualifier, scope, out _);
+        if (targets.Count == 0 || memberPath.Count == 0)
+            return [];
+
+        List<List<Symbol>> matchingGroups = [];
+        foreach (var targetMod in targets)
+        {
+            var matches = ResolveInModuleRoot(targetMod, memberPath, typesOnly);
+            if (matches.Count > 0)
+                matchingGroups.Add(matches);
+        }
+
+        if (matchingGroups.Count > 1)
+        {
+            isAmbiguousAcrossModules = true;
+            if (reportAmbiguity)
+                Diagnostics.ReportAmbiguousModuleMember(diagnosticSpan, qualifier.Value, memberPath.ToDisplayString(), diagnosticSource);
+            return [];
+        }
+
+        return matchingGroups.Count == 1 ? matchingGroups[0] : [];
+    }
+
+    internal List<(ResolutionContext Module, NamespaceTrieNode Node)> ResolveScopedNamespaces(
+        Token qualifier,
+        SymbolName nsPath,
+        Scope scope,
+        Maho.Text.TextSpan diagnosticSpan,
+        Maho.Text.SourceText? diagnosticSource,
+        bool reportAmbiguity)
+    {
+        var targets = ResolveModuleTargets(qualifier, scope, out _);
+        var result = new List<(ResolutionContext, NamespaceTrieNode)>();
+        if (targets.Count == 0 || nsPath.Count == 0)
+            return result;
+
+        foreach (var targetMod in targets)
+        {
+            var curr = targetMod.GlobalNamespace;
+            bool ok = true;
+            for (int i = 0; i < nsPath.Count; i++)
+            {
+                if (!curr.Next.TryGetValue(nsPath[i], out var next))
+                {
+                    ok = false;
+                    break;
+                }
+                curr = next;
+            }
+
+            if (ok && HasOwnedSymbolsInSubtree(curr, targetMod.ProjectId))
+                result.Add((targetMod, curr));
+        }
+
+        if (reportAmbiguity && result.Count > 1)
+            Diagnostics.ReportAmbiguousModuleMember(diagnosticSpan, qualifier.Value, nsPath.ToDisplayString(), diagnosticSource);
+
+        return result;
+    }
+
+    internal InterfaceConformance RegisterConformance(
+        TypeRef targetType,
+        TypeRef interfaceType,
+        SymbolHandle interfaceHandle,
+        Accessibility accessibility,
+        SymbolHandle ownerHandle,
+        bool isExtension,
+        BaseTypeItemSyntax? syntax)
+    {
+        var unwrappedTargetH = targetType.Handle is { } th ? UnwrapAlias(th) : default;
+        var unwrappedIfaceH = UnwrapAlias(interfaceHandle);
+        var conformance = new InterfaceConformance(
+            nextConformanceSerial++,
+            targetType,
+            interfaceType,
+            unwrappedIfaceH,
+            accessibility,
+            ownerHandle,
+            isExtension,
+            ModuleName,
+            ProjectId,
+            syntax);
+
+        Conformances.Add(conformance);
+        if (unwrappedTargetH != default)
+        {
+            if (!conformancesByTarget.TryGetValue(unwrappedTargetH, out var list))
+            {
+                list = [];
+                conformancesByTarget[unwrappedTargetH] = list;
+            }
+            list.Add(conformance);
+        }
+
+        return conformance;
+    }
+
+    internal void CollectConformancesForTarget(
+        SymbolHandle targetTypeHandle,
+        List<InterfaceConformance> destination)
+    {
+        var visitedProjects = new HashSet<int>();
+        CollectFromProject(this);
+
+        void CollectFromProject(ResolutionContext proj)
+        {
+            if (!visitedProjects.Add(proj.ProjectId))
+                return;
+
+            if (proj.conformancesByTarget.TryGetValue(targetTypeHandle, out var localList))
+                destination.AddRange(localList);
+
+            foreach (var dep in proj.ReferencedProjects)
+                CollectFromProject(dep);
+        }
+    }
+
+    internal bool HasAnyConformance(SymbolHandle sourceHandle, SymbolHandle interfaceHandle, GenericSemanticType? superGen = null)
+    {
+        var visited = new HashSet<SymbolHandle>();
+        return CheckRecursive(UnwrapAlias(sourceHandle));
+
+        bool CheckRecursive(SymbolHandle h)
+        {
+            if (!visited.Add(h))
+                return false;
+
+            var list = new List<InterfaceConformance>();
+            CollectConformancesForTarget(h, list);
+            foreach (var conf in list)
+            {
+                if (conf.InterfaceHandle == interfaceHandle || TypeRef.IsSubtypeOf(conf.InterfaceHandle, interfaceHandle, this))
+                {
+                    if (superGen is not null && conf.InterfaceType.SpecialType is GenericSemanticType confGen)
+                    {
+                        if (!confGen.Equals(superGen))
+                            continue;
+                    }
+                    return true;
+                }
+            }
+
+            IReadOnlyList<TypeRef> bases = (GetSymbol(h)) switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+            foreach (var b in bases)
+            {
+                if (b.Handle is { } bh && CheckRecursive(UnwrapAlias(bh)))
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    internal enum ConformanceLookupStatus
+    {
+        NotApplicable,
+        Found,
+        Inaccessible,
+        Ambiguous,
+        AmbiguousModule,
+        NotFound
+    }
+
+    internal readonly record struct ConformanceLookupResult(
+        ConformanceLookupStatus Status,
+        InterfaceConformance? Conformance,
+        IReadOnlyList<InterfaceConformance>? AmbiguousCandidates = null,
+        string? AmbiguousModuleName = null);
+
+    internal SymbolHandle? GetEnclosingOwnerHandle(SymbolHandle containingFunction, Scope? scope)
+    {
+        if (containingFunction != default && GetSymbol(containingFunction) is { } fnSym)
+        {
+            if (fnSym is MethodSymbol m && m.Parent is { } mParent)
+                return mParent;
+            if (fnSym is PropertySymbol p && p.Parent is { } pParent)
+                return pParent;
+        }
+
+        for (var cur = scope; cur is not null; cur = cur.Parent)
+        {
+            if (cur.Parent is { } parentScope)
+            {
+                foreach (var (assoc, childScope) in parentScope.ChildScopes)
+                {
+                    if (!ReferenceEquals(childScope, cur))
+                        continue;
+
+                    if (GetSymbol(assoc) is { } sym)
+                    {
+                        if (sym is ExtensionSymbol or TypeSymbol or NestedTypeSymbol)
+                            return assoc;
+                        if (sym is MethodSymbol m && m.Parent is { } mp)
+                            return mp;
+                        if (sym is PropertySymbol p && p.Parent is { } pp)
+                            return pp;
+                    }
+                }
+            }
+
+            foreach (var ext in ExtensionSymbols)
+            {
+                if (ReferenceEquals(ext.Scope, cur))
+                    return GetHandle(ext);
+            }
+        }
+
+        return null;
+    }
+
+    internal ConformanceLookupResult ResolveInterfaceConformance(
+        TypeRef sourceType,
+        TypeRef expectedInterfaceType,
+        Token? explicitModuleQualifier,
+        Scope? scope,
+        SymbolHandle containingFunction)
+    {
+        var ifaceUnwrapped = UnwrapInterfaceRef(expectedInterfaceType);
+        if (ifaceUnwrapped.Handle is not { } rawIfaceH)
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        var ifaceH = UnwrapAlias(rawIfaceH);
+        var ifaceSym = GetSymbol(ifaceH);
+        bool isIfaceTarget = ifaceSym switch
+        {
+            TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
+            NestedTypeSymbol nts => nts.TypeKind == TypeKind.Interface,
+            _ => false
+        };
+        if (!isIfaceTarget)
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        var enclosingOwner = GetEnclosingOwnerHandle(containingFunction, scope);
+
+        if (TypeRef.TryGetExplicitConformance(sourceType, out var explicitConf))
+        {
+            if (explicitConf.InterfaceHandle == ifaceH || TypeRef.IsSubtypeOf(explicitConf.InterfaceHandle, ifaceH, this))
+            {
+                if (!IsConformanceAccessible(explicitConf, enclosingOwner))
+                    return new(ConformanceLookupStatus.Inaccessible, explicitConf);
+                return new(ConformanceLookupStatus.Found, explicitConf);
+            }
+        }
+
+        var concreteTarget = UnwrapConcreteTarget(sourceType);
+        if (concreteTarget.Handle is not { } rawTargetH)
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        var targetH = UnwrapAlias(rawTargetH);
+        if (targetH == ifaceH)
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        if (GetSymbol(targetH) is GenericParameterSymbol)
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        if (GetTypeSymbol(targetH) is { TypeKind: TypeKind.Interface })
+            return new(ConformanceLookupStatus.NotApplicable, null);
+
+        // Gather candidates on targetH (and non-interface linearized superclasses if targetH inherits them)
+        var candidates = new List<InterfaceConformance>();
+        var rawCandidates = new List<InterfaceConformance>();
+        CollectConformancesForTypeHierarchy(targetH, rawCandidates);
+
+        var expectedGen = ifaceUnwrapped.SpecialType as GenericSemanticType;
+        foreach (var c in rawCandidates)
+        {
+            if (c.InterfaceHandle != ifaceH && !TypeRef.IsSubtypeOf(c.InterfaceHandle, ifaceH, this))
+                continue;
+
+            if (expectedGen is not null && c.InterfaceType.SpecialType is GenericSemanticType confGen && !confGen.Equals(expectedGen))
+                continue;
+
+            candidates.Add(c);
+        }
+
+        if (candidates.Count == 0)
+            return new(ConformanceLookupStatus.NotFound, null);
+
+        // Explicit module qualifier: ModA::Bar / Disamb::Bar / global::Bar
+        if (explicitModuleQualifier is { } qualifierTok)
+        {
+            var targets = ResolveModuleTargets(qualifierTok, scope ?? GlobalScope, out _);
+            var targetIds = new HashSet<int>(targets.Select(t => t.ProjectId));
+            var modFiltered = candidates.Where(c => targetIds.Contains(c.ModuleProjectId)).ToList();
+            if (modFiltered.Count == 0)
+                return new(ConformanceLookupStatus.NotFound, null);
+
+            // Group by module and prefer owner private shadow over non-private within each target module
+            var accessiblePerModule = new List<InterfaceConformance>();
+            InterfaceConformance? inaccessibleInMod = null;
+            foreach (var targetMod in targets)
+            {
+                var inMod = modFiltered.Where(c => c.ModuleProjectId == targetMod.ProjectId).ToList();
+                if (inMod.Count == 0) continue;
+
+                var ownerPrivate = inMod.FirstOrDefault(c => c.Accessibility == Accessibility.Private && IsOwnerMatch(enclosingOwner, c));
+                if (ownerPrivate is not null)
+                {
+                    accessiblePerModule.Add(ownerPrivate);
+                    continue;
+                }
+
+                var acc = inMod.FirstOrDefault(c => IsConformanceAccessible(c, enclosingOwner));
+                if (acc is not null)
+                    accessiblePerModule.Add(acc);
+                else
+                    inaccessibleInMod ??= inMod[0];
+            }
+
+            if (accessiblePerModule.Count > 1)
+                return new(ConformanceLookupStatus.AmbiguousModule, null, accessiblePerModule, qualifierTok.Value);
+            if (accessiblePerModule.Count == 1)
+                return new(ConformanceLookupStatus.Found, accessiblePerModule[0]);
+            return new(ConformanceLookupStatus.Inaccessible, inaccessibleInMod);
+        }
+
+        // Tier 1: Strictly body-local private conformance (shadows higher-visibility conformances outside)
+        if (enclosingOwner is not null)
+        {
+            var tier1 = candidates.FirstOrDefault(c =>
+                c.ModuleProjectId == ProjectId &&
+                c.Accessibility == Accessibility.Private &&
+                IsOwnerMatch(enclosingOwner, c));
+            if (tier1 is not null)
+                return new(ConformanceLookupStatus.Found, tier1);
+        }
+
+        // Tier 2: Current module's non-private conformance (Internal / Protected / Public)
+        InterfaceConformance? inaccessibleFallback = null;
+        foreach (var c in candidates)
+        {
+            if (c.ModuleProjectId == ProjectId && c.Accessibility != Accessibility.Private)
+            {
+                if (IsConformanceAccessible(c, enclosingOwner))
+                    return new(ConformanceLookupStatus.Found, c);
+                inaccessibleFallback ??= c;
+            }
+        }
+
+        // Tier 3: Imported modules' accessible conformances (Public or inherited Protected)
+        var tier3 = new List<InterfaceConformance>();
+        foreach (var c in candidates)
+        {
+            if (c.ModuleProjectId != ProjectId)
+            {
+                if (IsConformanceAccessible(c, enclosingOwner))
+                    tier3.Add(c);
+                else
+                    inaccessibleFallback ??= c;
+            }
+        }
+
+        if (tier3.Count == 1)
+            return new(ConformanceLookupStatus.Found, tier3[0]);
+
+        if (tier3.Count > 1)
+            return new(ConformanceLookupStatus.Ambiguous, null, tier3);
+
+        // Tier 4: An inaccessible conformance existed (e.g. private or foreign internal)
+        inaccessibleFallback ??= candidates[0];
+        return new(ConformanceLookupStatus.Inaccessible, inaccessibleFallback);
+    }
+
+    private void CollectConformancesForTypeHierarchy(SymbolHandle targetH, List<InterfaceConformance> results)
+    {
+        CollectConformancesForTarget(targetH, results);
+        var sym = GetSymbol(targetH);
+        IReadOnlyList<SymbolHandle> bases = sym switch
+        {
+            TypeSymbol ts => ts.LinearizedBases,
+            NestedTypeSymbol nts => nts.LinearizedBases,
+            _ => []
+        };
+        foreach (var bh in bases.Skip(1))
+        {
+            if (GetTypeSymbol(bh) is { TypeKind: not TypeKind.Interface })
+                CollectConformancesForTarget(bh, results);
+        }
+    }
+
+    private bool IsConformanceAccessible(InterfaceConformance c, SymbolHandle? enclosingOwner)
+    {
+        return c.Accessibility switch
+        {
+            Accessibility.Public => true,
+            Accessibility.Internal => c.ModuleProjectId == ProjectId,
+            Accessibility.Private => c.ModuleProjectId == ProjectId && IsOwnerMatch(enclosingOwner, c),
+            Accessibility.Protected => IsOwnerWithinOrDerivedFrom(enclosingOwner, c),
+            _ => false
+        };
+    }
+
+    private bool IsOwnerMatch(SymbolHandle? enclosingOwner, InterfaceConformance c)
+    {
+        if (enclosingOwner is null)
+            return false;
+        if (enclosingOwner.Value == c.OwnerHandle)
+            return true;
+        if (c.IsExtension)
+            return false;
+
+        // Nested types inside a struct/class share private access with the enclosing type declaration,
+        // whereas extensions have distinct OwnerHandles and do NOT match unless c.OwnerHandle == enclosingOwner.
+        for (var cur = enclosingOwner.Value; ;)
+        {
+            if (GetSymbol(cur) is NestedTypeSymbol nts && nts.Parent is { } pH)
+            {
+                if (pH == c.OwnerHandle)
+                    return true;
+                cur = pH;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsOwnerWithinOrDerivedFrom(SymbolHandle? enclosingOwner, InterfaceConformance c)
+    {
+        if (IsOwnerMatch(enclosingOwner, c))
+            return true;
+        if (enclosingOwner is not { } ownerH)
+            return false;
+        var ownerTargetH = GetSymbol(ownerH) is ExtensionSymbol ext ? ext.TargetTypeHandle : ownerH;
+        if (ownerTargetH is not { } srcH || c.TargetType.Handle is not { } confTargetH)
+            return false;
+        var unwrappedSrc = UnwrapAlias(srcH);
+        var unwrappedTarget = UnwrapAlias(confTargetH);
+        return unwrappedSrc == unwrappedTarget || TypeRef.IsSubtypeOf(unwrappedSrc, unwrappedTarget, this);
+    }
+
+    private static TypeRef UnwrapInterfaceRef(TypeRef t)
+    {
+        while (true)
+        {
+            if (t.SpecialType is DynSemanticType d) { t = d.TargetType; continue; }
+            if (t.SpecialType is AliasSemanticType a) { t = a.TargetType; continue; }
+            if (t.SpecialType is ReferenceSemanticType r) { t = r.ElementType; continue; }
+            if (t.SpecialType is PointerSemanticType p) { t = p.ElementType; continue; }
+            if (t.SpecialType is ConformanceSemanticType c) { t = c.InterfaceType; continue; }
+            return t;
+        }
+    }
+
+    private static TypeRef UnwrapConcreteTarget(TypeRef t)
+    {
+        while (true)
+        {
+            if (t.SpecialType is ConformanceSemanticType c) { t = c.TargetType; continue; }
+            if (t.SpecialType is AliasSemanticType a) { t = a.TargetType; continue; }
+            if (t.SpecialType is ReferenceSemanticType r) { t = r.ElementType; continue; }
+            if (t.SpecialType is PointerSemanticType p) { t = p.ElementType; continue; }
+            return t;
+        }
+    }
+
+    internal static Token? ExtractModuleQualifier(TypeSyntax syntax) => syntax switch
+    {
+        ScopeQualifiedType sq => sq.Qualifier,
+        ModifiedType m => ExtractModuleQualifier(m.Type),
+        PrefixModifiedType pm => ExtractModuleQualifier(pm.Type),
+        _ => null
+    };
+
+    internal void TryPrebindConformanceInterface(TypeSyntax typeSyntax, Scope scope)
+    {
+        var inner = typeSyntax;
+        while (inner is ModifiedType m) inner = m.Type;
+        while (inner is PrefixModifiedType pm) inner = pm.Type;
+        if (inner is not ScopeQualifiedType sq)
+            return;
+
+        if (ResolvedTree.TryGetReference(sq, out _))
+            return;
+
+        var memberPath = GetSymbolName(sq.MemberType);
+        var strictSyms = ResolveScopedSymbols(
+            sq.Qualifier,
+            memberPath,
+            scope,
+            typesOnly: true,
+            sq.GetSpan() ?? default,
+            sq.GetSource(),
+            reportAmbiguity: false,
+            out _);
+
+        if (strictSyms.Count > 0)
+            return;
+
+        var targets = ResolveModuleTargets(sq.Qualifier, scope, out bool isGlobalSelf);
+        if (isGlobalSelf || targets.Count == 0)
+            return;
+
+        SymbolHandle? resolvedHandle = null;
+        foreach (var targetMod in targets)
+        {
+            var found = targetMod.GlobalScope.ResolveType(memberPath);
+            if (found.Count == 0)
+                continue;
+
+            var h = GetHandle(found[0]);
+            if (resolvedHandle is null)
+                resolvedHandle = h;
+            else if (resolvedHandle.Value != h)
+                return;
+        }
+
+        if (resolvedHandle is not { } symH)
+            return;
+
+        ResolvedTree.AddReference(sq, symH);
+        ResolvedTree.AddReference(sq.MemberType, symH);
+        if (sq.MemberType is QualifiedType qt)
+            ResolvedTree.AddReference(qt.Right, symH);
+        for (TypeSyntax? cur = sq.MemberType; cur != null;)
+        {
+            if (cur is GenericType gt)
+            {
+                ResolvedTree.AddReference(gt, symH);
+                break;
+            }
+            cur = cur is QualifiedType q ? q.Right : null;
+        }
+    }
+
+    internal TypeRef ResolveConformanceQualifiedType(
+        ConformanceQualifiedType confQualified,
+        Scope scope,
+        SymbolHandle containingFunction,
+        Func<TypeSyntax, Scope, TypeRef> resolveInterfaceType,
+        Func<TypeSyntax, Scope, TypeRef> resolveTargetType,
+        bool reportDiagnostics)
+    {
+        TryPrebindConformanceInterface(confQualified.InterfaceType, scope);
+        var ifaceType = resolveInterfaceType(confQualified.InterfaceType, scope);
+        var targetType = resolveTargetType(confQualified.TargetType, scope);
+
+        if (targetType.IsError || ifaceType.IsError || targetType.IsUnresolved || ifaceType.IsUnresolved)
+            return targetType;
+
+        var qualifier = ExtractModuleQualifier(confQualified.InterfaceType);
+        var lookup = ResolveInterfaceConformance(targetType, ifaceType, qualifier, scope, containingFunction);
+
+        switch (lookup.Status)
+        {
+            case ConformanceLookupStatus.Found:
+                ResolvedTree.AddConformance(confQualified, lookup.Conformance!);
+                return TypeRef.Conformance(targetType, lookup.Conformance!);
+
+            case ConformanceLookupStatus.Inaccessible:
+                if (reportDiagnostics)
+                {
+                    Diagnostics.ReportInaccessibleInterfaceConformance(
+                        confQualified.GetSpan() ?? default,
+                        targetType.ToDisplayString(this),
+                        lookup.Conformance!.InterfaceType.ToDisplayString(this),
+                        lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                        confQualified.GetSource());
+                }
+                return targetType;
+
+            case ConformanceLookupStatus.Ambiguous:
+                if (reportDiagnostics)
+                {
+                    var mods = lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList();
+                    Diagnostics.ReportAmbiguousInterfaceConformance(
+                        confQualified.GetSpan() ?? default,
+                        targetType.ToDisplayString(this),
+                        ifaceType.ToDisplayString(this),
+                        mods,
+                        confQualified.GetSource());
+                }
+                return targetType;
+
+            case ConformanceLookupStatus.AmbiguousModule:
+                if (reportDiagnostics)
+                {
+                    Diagnostics.ReportAmbiguousModuleMember(
+                        confQualified.GetSpan() ?? default,
+                        lookup.AmbiguousModuleName!,
+                        ifaceType.ToDisplayString(this),
+                        confQualified.GetSource());
+                }
+                return targetType;
+
+            default:
+                return targetType;
+        }
+    }
+
+    internal void ValidateGenericTypeArgumentConformances(
+        SymbolHandle targetHandle,
+        IReadOnlyList<TypeSyntax> argSyntaxes,
+        IReadOnlyList<TypeRef> resolvedArgs,
+        Scope scope,
+        SymbolHandle containingFunction,
+        bool reportDiagnostics)
+    {
+        IReadOnlyList<SymbolHandle> genericParams = GetSymbol(targetHandle) switch
+        {
+            TypeSymbol ts => ts.GenericParameters,
+            NestedTypeSymbol nts => nts.GenericParameters,
+            FunctionSymbol fn => fn.GenericParameters,
+            MethodSymbol ms => ms.GenericParameters,
+            AliasSymbol al => al.GenericParameters,
+            _ => []
+        };
+
+        int count = Math.Min(genericParams.Count, Math.Min(argSyntaxes.Count, resolvedArgs.Count));
+        for (int i = 0; i < count; i++)
+        {
+            var gp = GetGenericParameterSymbol(genericParams[i]);
+            if (gp is null || gp.Constraints.Count == 0)
+                continue;
+
+            var argType = resolvedArgs[i];
+            if (argType.IsError || argType.IsUnresolved)
+                continue;
+
+            foreach (var constraint in gp.Constraints)
+            {
+                if (constraint.IsError || constraint.IsUnresolved)
+                    continue;
+
+                var lookup = ResolveInterfaceConformance(argType, constraint, explicitModuleQualifier: null, scope, containingFunction);
+                if (lookup.Status == ConformanceLookupStatus.Found)
+                {
+                    ResolvedTree.AddConformance(argSyntaxes[i], lookup.Conformance!);
+                }
+                else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.Inaccessible)
+                {
+                    Diagnostics.ReportInaccessibleInterfaceConformance(
+                        argSyntaxes[i].GetSpan() ?? default,
+                        TypeRef.UnwrapConformance(argType).ToDisplayString(this),
+                        lookup.Conformance!.InterfaceType.ToDisplayString(this),
+                        lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                        argSyntaxes[i].GetSource());
+                }
+                else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.Ambiguous)
+                {
+                    var mods = lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList();
+                    Diagnostics.ReportAmbiguousInterfaceConformance(
+                        argSyntaxes[i].GetSpan() ?? default,
+                        TypeRef.UnwrapConformance(argType).ToDisplayString(this),
+                        constraint.ToDisplayString(this),
+                        mods,
+                        argSyntaxes[i].GetSource());
+                }
+            }
+        }
+    }
+
+    internal static bool HasOwnedSymbolsInSubtree(NamespaceTrieNode node, int projectId)
+    {
+        foreach (var sym in node.Symbols)
+        {
+            if (sym.ProjectId == projectId)
+                return true;
+        }
+        foreach (var child in node.Next.Values)
+        {
+            if (HasOwnedSymbolsInSubtree(child, projectId))
+                return true;
+        }
+        return false;
+    }
+
+    private static List<Symbol> ResolveInModuleRoot(ResolutionContext targetMod, SymbolName path, bool typesOnly)
+    {
+        int projectId = targetMod.ProjectId;
+
+        // 1. Check module's own root GlobalScope (filtered strictly to targetMod.ProjectId so external imports are bypassed!)
+        var rootMatches = new List<Symbol>();
+        foreach (var s in targetMod.GlobalScope.GetLocalSymbols(path[0]))
+        {
+            if (s.ProjectId == projectId && (path.Count > 1 || !typesOnly || IsTypeSymbol(s)))
+                rootMatches.Add(s);
+        }
+
+        if (rootMatches.Count > 0)
+        {
+            if (path.Count == 1)
+                return rootMatches;
+
+            return TraverseNestedTypesInModule(targetMod, rootMatches[0], path, 1, typesOnly);
+        }
+
+        // 2. Traverse module's own GlobalNamespace filtered strictly to targetMod.ProjectId
+        var nsNode = targetMod.GlobalNamespace;
+        for (int index = 0; index < path.Count; index++)
+        {
+            var part = path[index];
+            if (index < path.Count - 1 && nsNode.Next.TryGetValue(part, out var nextNs))
+            {
+                nsNode = nextNs;
+                continue;
+            }
+
+            var nsMatches = new List<Symbol>();
+            foreach (var s in nsNode.GetSymbols(part))
+            {
+                if (s.ProjectId == projectId && (index < path.Count - 1 || !typesOnly || IsTypeSymbol(s)))
+                    nsMatches.Add(s);
+            }
+
+            if (nsMatches.Count == 0)
+                return [];
+
+            if (index == path.Count - 1)
+                return nsMatches;
+
+            return TraverseNestedTypesInModule(targetMod, nsMatches[0], path, index + 1, typesOnly);
+        }
+
+        return [];
+    }
+
+    private static List<Symbol> TraverseNestedTypesInModule(
+        ResolutionContext targetMod,
+        Symbol current,
+        SymbolName path,
+        int startIndex,
+        bool typesOnly)
+    {
+        var matches = new List<Symbol> { current };
+        int projectId = targetMod.ProjectId;
+        var currScope = targetMod.GlobalScope;
+
+        for (int i = startIndex; i < path.Count; i++)
+        {
+            var sym = matches[0];
+            var handle = GetHandle(sym);
+            var child = currScope.GetChildScope(handle) ?? sym.EnclosingScope?.GetChildScope(handle);
+            if (child is null)
+                return [];
+
+            currScope = child;
+            matches.Clear();
+            bool isLast = i == path.Count - 1;
+            foreach (var s in currScope.GetLocalSymbols(path[i]))
+            {
+                if (s.ProjectId == projectId && (!isLast || !typesOnly || IsTypeSymbol(s)))
+                    matches.Add(s);
+            }
+            if (matches.Count == 0)
+                return [];
+        }
+
+        return matches;
     }
 
     private static void MergeNamespaceTrie(NamespaceTrieNode target, NamespaceTrieNode source)
@@ -1688,9 +2532,12 @@ internal sealed class ResolutionContext
     {
         var parts = new List<string>();
         var curr = node;
-        while (curr != null && curr != globalNs && !string.IsNullOrEmpty(curr.Name.Text))
+        while (curr != null && curr != globalNs && curr.Parent != null)
         {
-            parts.Add(curr.Name.Text);
+            var text = curr.Name.Text;
+            if (string.IsNullOrEmpty(text))
+                break;
+            parts.Add(text);
             curr = curr.Parent;
         }
         parts.Reverse();
@@ -1707,6 +2554,7 @@ internal sealed class ResolutionContext
         SimpleName simpleName => new SymbolName(new SymbolPart(simpleName.Name, 0, hygiene)),
         GenericName genericName => new SymbolName(new SymbolPart(genericName.Name, genericName.GenericParameters.Count, hygiene)),
         QualifiedName qualifiedName => GetQualifiedName(qualifiedName, hygiene),
+        ScopeQualifiedName scopeQualifiedName => GetSymbolName(scopeQualifiedName.MemberName, hygiene),
         TupleName => new SymbolName(new SymbolPart(string.Empty, 0, hygiene)),
         _ => throw new ArgumentOutOfRangeException(nameof(name))
     };
@@ -1744,6 +2592,14 @@ internal sealed class ResolutionContext
             case QualifiedType qualified:
                 AddTypeNameParts(qualified.Left, parts);
                 AddTypeNameParts(qualified.Right, parts);
+                break;
+
+            case ScopeQualifiedType scopeQualified:
+                AddTypeNameParts(scopeQualified.MemberType, parts);
+                break;
+
+            case ConformanceQualifiedType confQualified:
+                AddTypeNameParts(confQualified.TargetType, parts);
                 break;
 
             case ModifiedType modified:

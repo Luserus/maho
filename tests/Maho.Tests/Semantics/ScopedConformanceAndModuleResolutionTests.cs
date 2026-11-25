@@ -1,0 +1,495 @@
+using System.Linq;
+using Maho.Resolution;
+using Miryo.Build;
+using Xunit;
+
+namespace Maho.Tests.Semantics;
+
+public sealed class ScopedConformanceAndModuleResolutionTests
+{
+    private const string SharedIfaceModule = CompilerTestBed.FullPrelude + """
+        public interface Bar
+        {
+            public func Baz(&this) -> int32;
+        }
+
+        public struct Foo
+        {
+            public int32 v;
+        }
+
+        public struct Holder<T : Bar>
+        {
+            public int32 tag;
+        }
+        """;
+
+    [Fact]
+    public void DefaultBaseListVisibility_IsPublic_AcrossModules()
+    {
+        var modA = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Greetable
+            {
+                public func Greet(&this) -> int32;
+            }
+
+            public struct Person : Greetable
+            {
+                public int32 id;
+                public func Greet(&this) -> int32 { return this.id; }
+            }
+            """,
+            "ModA.mh",
+            new CompilationOptions { ModuleName = "ModA" });
+
+        Assert.True(!modA.HasErrors, string.Join("\n", modA.Diagnostics));
+
+        var modB = Compilation.FromSource("""
+            public func ReadGreeting(&Greetable g) -> int32
+            {
+                return g.Greet();
+            }
+
+            public func Run() -> int32
+            {
+                Person p = put Person { id = 42 };
+                return ReadGreeting(p);
+            }
+            """,
+            "ModB.mh",
+            new CompilationOptions { ModuleName = "ModB" },
+            referencedCompilations: [modA]);
+
+        Assert.True(!modB.HasErrors, string.Join("\n", modB.Diagnostics));
+    }
+
+    [Fact]
+    public void SingleDefinitionDuplicateInterface_ReportsMH0565()
+    {
+        var onStruct = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { public func Baz(&this) -> int32; }
+
+            public struct Foo : private Bar, public Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+            """);
+
+        Assert.True(onStruct.HasErrors);
+        Assert.Contains(onStruct.Diagnostics, d => d.Code == "MH0565");
+
+        var onExt = Compilation.FromSource(SharedIfaceModule + """
+            public extension Foo : private Bar, Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+            """);
+
+        Assert.True(onExt.HasErrors);
+        Assert.Contains(onExt.Diagnostics, d => d.Code == "MH0565");
+    }
+
+    [Fact]
+    public void MultipleNonPrivateConformancesInSameModule_ReportMH0565()
+    {
+        var structAndExt = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { public func Baz(&this) -> int32; }
+
+            public struct Foo : Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+
+            public extension Foo : internal Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+            }
+            """);
+
+        Assert.True(structAndExt.HasErrors);
+        Assert.Contains(structAndExt.Diagnostics, d => d.Code == "MH0565");
+
+        var twoExts = Compilation.FromSource(SharedIfaceModule + """
+            public extension Foo : Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+
+            public extension Foo : internal Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+            }
+            """);
+
+        Assert.True(twoExts.HasErrors);
+        Assert.Contains(twoExts.Diagnostics, d => d.Code == "MH0565");
+    }
+
+    [Fact]
+    public void MultipleSeparatePrivateExtensions_CoexistWithDistinctMangledIds()
+    {
+        var compilation = Compilation.FromSource(SharedIfaceModule + """
+            public func Consume(&Bar b) -> int32 { return b.Baz(); }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 10; }
+                private func RunA(&this) -> int32 { return Consume(this); }
+                private func CallBazA(&this) -> int32 { return Baz(); }
+            }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 20; }
+                private func RunB(&this) -> int32 { return Consume(this); }
+                private func CallBazB(&this) -> int32 { return this.Baz(); }
+            }
+            """,
+            "MyMod.mh",
+            new CompilationOptions { ModuleName = "MyMod" });
+
+        Assert.False(compilation.HasErrors);
+        var fooConfs = compilation.Context.Conformances
+            .Where(c => c.TargetType.ToDisplayString(compilation.Context) == "Foo")
+            .ToList();
+        Assert.Equal(2, fooConfs.Count);
+        Assert.NotEqual(
+            fooConfs[0].MangledConformanceId,
+            fooConfs[1].MangledConformanceId);
+        Assert.All(fooConfs, c => Assert.StartsWith("MyMod_private_", c.MangledConformanceId));
+    }
+
+    [Fact]
+    public void PrivateConformance_StrictlyBodyScoped_ShadowsOuterAndRejectsOutside_MH0566()
+    {
+        var shadowsOuter = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { public func Baz(&this) -> int32; }
+
+            public struct Foo : Bar
+            {
+                public int32 v;
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+
+            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+                public func InsideShadow(&this) -> int32
+                {
+                    return TakeBar(this);
+                }
+            }
+
+            public func OutsidePublic() -> int32
+            {
+                Foo f = put Foo { v = 0 };
+                return TakeBar(f);
+            }
+            """,
+            "ModShadow.mh",
+            new CompilationOptions { ModuleName = "ModShadow" });
+
+        Assert.True(!shadowsOuter.HasErrors, string.Join("\n", shadowsOuter.Diagnostics));
+        var fooConfs = shadowsOuter.Context.Conformances
+            .Where(c => c.TargetType.ToDisplayString(shadowsOuter.Context) == "Foo")
+            .ToList();
+        Assert.Equal(2, fooConfs.Count);
+        var publicConf = fooConfs.Single(c => c.Accessibility == Accessibility.Public);
+        var privateConf = fooConfs.Single(c => c.Accessibility == Accessibility.Private);
+
+        var boundIds = shadowsOuter.Context.ResolvedTree.Conformances.Values.Select(c => c.MangledConformanceId).ToList();
+        Assert.Contains(privateConf.MangledConformanceId, boundIds);
+        Assert.Contains(publicConf.MangledConformanceId, boundIds);
+
+        var outsideInaccessible = Compilation.FromSource(SharedIfaceModule + """
+            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+            }
+
+            public func Run() -> int32
+            {
+                Foo f = put Foo { v = 0 };
+                return TakeBar(f);
+            }
+            """);
+
+        Assert.True(outsideInaccessible.HasErrors);
+        Assert.Contains(outsideInaccessible.Diagnostics, d => d.Code == "MH0566");
+    }
+
+    [Fact]
+    public void LowerVisibilityConformanceReturn_WithoutDyn_ReportsMH0579_WithDyn_Succeeds()
+    {
+        var badAliasReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { public func Baz(&this) -> int32; }
+
+            public struct Foo : Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+                public func Escape(&this) -> &Bar
+                {
+                    return this;
+                }
+            }
+            """);
+
+        Assert.True(badAliasReturn.HasErrors);
+        Assert.Contains(badAliasReturn.Diagnostics, d => d.Code == "MH0579");
+
+        var validDynReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { public func Baz(&this) -> int32; }
+
+            public struct Foo : Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 1; }
+            }
+
+            public extension Foo : private Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 2; }
+
+                public func EscapeDynAlias(&this) -> dyn &Bar
+                {
+                    return this;
+                }
+
+                private func StayPrivate(&this) -> &Bar
+                {
+                    return this;
+                }
+            }
+            """);
+
+        Assert.True(!validDynReturn.HasErrors, string.Join("\n", validDynReturn.Diagnostics));
+    }
+
+    [Fact]
+    public void CrossModuleConformances_InternalIsolated_AndPublicDisambiguatedWithModuleQualifier()
+    {
+        var baseTypes = Compilation.FromSource(SharedIfaceModule + """
+            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+            public func Pick<T : Bar>(&T item) -> int32 { return 1; }
+            """,
+            "Core.mh",
+            new CompilationOptions { ModuleName = "Core" });
+        Assert.True(!baseTypes.HasErrors, string.Join("\n", baseTypes.Diagnostics));
+
+        var modInternalA = Compilation.FromSource("""
+            public extension Foo : internal Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 100; }
+            }
+
+            public func RunA() -> int32
+            {
+                Foo f = put Foo { v = 1 };
+                return TakeBar(f);
+            }
+            """,
+            "ModInternalA.mh",
+            new CompilationOptions { ModuleName = "ModInternalA" },
+            referencedCompilations: [baseTypes]);
+        Assert.True(!modInternalA.HasErrors, string.Join("\n", modInternalA.Diagnostics));
+
+        var modInternalB = Compilation.FromSource("""
+            public extension Foo : internal Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 200; }
+            }
+
+            public func RunB() -> int32
+            {
+                Foo f = put Foo { v = 2 };
+                return TakeBar(f);
+            }
+            """,
+            "ModInternalB.mh",
+            new CompilationOptions { ModuleName = "ModInternalB" },
+            referencedCompilations: [baseTypes]);
+        Assert.True(!modInternalB.HasErrors, string.Join("\n", modInternalB.Diagnostics));
+
+        var modPubA = Compilation.FromSource("""
+            public extension Foo : public Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 10; }
+            }
+            """,
+            "ModPubA.mh",
+            new CompilationOptions { ModuleName = "ModPubA" },
+            referencedCompilations: [baseTypes]);
+        Assert.True(!modPubA.HasErrors, string.Join("\n", modPubA.Diagnostics));
+
+        var modPubB = Compilation.FromSource("""
+            public extension Foo : public Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 20; }
+            }
+            """,
+            "ModPubB.mh",
+            new CompilationOptions { ModuleName = "ModPubB" },
+            referencedCompilations: [baseTypes]);
+        Assert.True(!modPubB.HasErrors, string.Join("\n", modPubB.Diagnostics));
+
+        var modCAmbiguous = Compilation.FromSource("""
+            public func Run() -> int32
+            {
+                Foo f = put Foo { v = 0 };
+                return TakeBar(f);
+            }
+            """,
+            "ModC.mh",
+            new CompilationOptions { ModuleName = "ModC" },
+            referencedCompilations: [baseTypes, modPubA, modPubB]);
+
+        Assert.True(modCAmbiguous.HasErrors);
+        Assert.Contains(modCAmbiguous.Diagnostics, d => d.Code == "MH0567");
+
+        var modCDisambig = Compilation.FromSource("""
+            public struct PairHolders
+            {
+                public Holder<Foo as ModPubA::Bar> first;
+                public Holder<Foo as ModPubB::Bar> second;
+            }
+
+            public func Run() -> int32
+            {
+                Foo f = put Foo { v = 0 };
+                int32 a = (f as ModPubA::Bar).Baz();
+                int32 b = TakeBar(f as ModPubB::Bar);
+                int32 c = Pick<Foo as ModPubA::Bar>(f);
+                return a;
+            }
+            """,
+            "ModC.mh",
+            new CompilationOptions { ModuleName = "ModC" },
+            referencedCompilations: [baseTypes, modPubA, modPubB]);
+
+        Assert.True(!modCDisambig.HasErrors, string.Join("\n", modCDisambig.Diagnostics));
+
+        var pairSym = modCDisambig.Context.TypeSymbols.Single(t => t.Name.Text == "PairHolders");
+        var pairScope = pairSym.EnclosingScope.GetChildScope(ResolutionContext.GetHandle(pairSym))!;
+        var firstField = pairScope.Symbols.Values.OfType<FieldSymbol>().Single(f => f.Name.Text == "first");
+        var secondField = pairScope.Symbols.Values.OfType<FieldSymbol>().Single(f => f.Name.Text == "second");
+        Assert.NotEqual(firstField.Type, secondField.Type);
+
+        var modCLocalOverride = Compilation.FromSource("""
+            public extension Foo : internal Bar
+            {
+                public func Bar.Baz(&this) -> int32 { return 30; }
+            }
+
+            public func Run() -> int32
+            {
+                Foo f = put Foo { v = 0 };
+                return TakeBar(f);
+            }
+            """,
+            "ModCOverride.mh",
+            new CompilationOptions { ModuleName = "ModCOverride" },
+            referencedCompilations: [baseTypes, modPubA, modPubB]);
+
+        Assert.True(!modCLocalOverride.HasErrors, string.Join("\n", modCLocalOverride.Diagnostics));
+    }
+
+    [Fact]
+    public void SymbolicModules_DuplicateNamesWithExternUsing_AndGlobalSelfLookup()
+    {
+        var stdMod = Compilation.FromSource(CompilerTestBed.FullPrelude,
+            "Std.mh",
+            new CompilationOptions { ModuleName = "Std" });
+
+        var modDupOne = Compilation.FromSource("""
+            public func OnlyOne() -> int32 { return 1; }
+            public func Shared() -> int32 { return 10; }
+            """,
+            "DupOne.mh",
+            new CompilationOptions { ModuleName = "SameMod" },
+            referencedCompilations: [stdMod]);
+
+        var modDupTwo = Compilation.FromSource("""
+            public func OnlyTwo() -> int32 { return 2; }
+            public func Shared() -> int32 { return 20; }
+            """,
+            "DupTwo.mh",
+            new CompilationOptions { ModuleName = "SameMod" },
+            referencedCompilations: [stdMod]);
+
+        var clash = Compilation.FromSource("""
+            public func Test() -> int32
+            {
+                return SameMod::Shared();
+            }
+            """,
+            "Consumer.mh",
+            new CompilationOptions { ModuleName = "Consumer" },
+            referencedCompilations: [stdMod, modDupOne, modDupTwo]);
+
+        Assert.True(clash.HasErrors);
+        Assert.Contains(clash.Diagnostics, d => d.Code == "MH0575");
+
+        var aliased = Compilation.FromSource("""
+            extern using LibOne;
+            extern using LibTwo;
+
+            public struct SameMod
+            {
+                public int32 localField;
+            }
+
+            public func LocalHelper() -> int32 { return 99; }
+
+            public func Test() -> int32
+            {
+                SameMod local = put SameMod { localField = 3 };
+                int32 LocalHelper = 1;
+                int32 a = SameMod::OnlyOne();
+                int32 b = SameMod::OnlyTwo();
+                int32 s1 = LibOne::Shared();
+                int32 s2 = LibTwo::Shared();
+                int32 g = global::LocalHelper();
+                return LocalHelper;
+            }
+            """,
+            "Consumer.mh",
+            new CompilationOptions
+            {
+                ModuleName = "Consumer",
+                ReferencedAliases = [null, "LibOne", "LibTwo"]
+            },
+            referencedCompilations: [stdMod, modDupOne, modDupTwo]);
+
+        Assert.True(!aliased.HasErrors, string.Join("\n", aliased.Diagnostics));
+
+        var badExternUsing = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            extern using NonExistent;
+            public func Test() -> () {}
+            """);
+
+        Assert.True(badExternUsing.HasErrors);
+        Assert.Contains(badExternUsing.Diagnostics, d => d.Code == "MH0576");
+    }
+
+    [Fact]
+    public void MiryoProjectParser_SeparatesModuleNameAndArtifactName()
+    {
+        string mhpr = """
+            ModuleName : "MySymbolicModule";
+            ArtifactName : "my-custom-binary";
+            """;
+
+        MahoProjectConfiguration config = MahoProjectFileParser.Parse(mhpr);
+
+        Assert.Equal("MySymbolicModule", config.ModuleName);
+        Assert.Equal("my-custom-binary", config.ArtifactName);
+    }
+}

@@ -61,6 +61,7 @@ internal enum MatchingKeywordKind : byte
     True,
     False,
     Null,
+    Default,
     This,
     Func,
     Delegate,

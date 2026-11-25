@@ -17,6 +17,20 @@ internal sealed class Scope
     /// <summary> Namespaces imported into this scope via using directives. </summary>
     public List<NamespaceTrieNode> UsingNamespaces { get; } = [];
 
+    /// <summary> External module aliases brought into this lexical scope via <c>extern using &lt;Alias&gt;;</c>. </summary>
+    public Dictionary<string, ModuleSymbol> ExternModuleAliases { get; } = new(System.StringComparer.Ordinal);
+
+    public bool TryLookupExternAlias(string alias, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ModuleSymbol? module)
+    {
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.ExternModuleAliases.TryGetValue(alias, out module))
+                return true;
+        }
+        module = null;
+        return false;
+    }
+
     private NamespaceTrieNode? globalNamespace;
 
     /// <summary> Root namespace trie node for namespace navigation. </summary>
@@ -177,7 +191,8 @@ internal sealed class Scope
                         if (IsTypeSymbol(matches[j]))
                         {
                             imported ??= [];
-                            imported.Add(matches[j]);
+                            if (!imported.Contains(matches[j]))
+                                imported.Add(matches[j]);
                         }
                     }
                 }
@@ -283,7 +298,10 @@ internal sealed class Scope
                         imported ??= [];
 
                         for (int j = 0; j < matches.Count; j++)
-                            imported.Add(matches[j]);
+                        {
+                            if (!imported.Contains(matches[j]))
+                                imported.Add(matches[j]);
+                        }
                     }
                 }
 

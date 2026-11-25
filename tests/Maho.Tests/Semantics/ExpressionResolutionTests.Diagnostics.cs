@@ -355,7 +355,7 @@ public sealed partial class ExpressionResolutionTests
 
                 public func New.New(Arena pool) -> Point
                 {
-                    Point p;
+                    Point p = default;
                     return p;
                 }
 

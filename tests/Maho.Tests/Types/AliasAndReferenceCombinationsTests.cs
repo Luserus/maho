@@ -162,7 +162,7 @@ public sealed class AliasAndReferenceCombinationsTests
 
             public func Addr.AddressOf(&this) -> Point*
             {
-                Point* p;
+                Point* p = default;
                 return p;
             }
         }
@@ -387,8 +387,8 @@ public sealed class AliasAndReferenceCombinationsTests
 
             public func Test()
             {
-                Container c;
-                Entity e;
+                Container c = default;
+                Entity e = default;
                 c.GetMut() = e;
             }
             """;
@@ -439,7 +439,7 @@ public sealed class AliasAndReferenceCombinationsTests
 
                 public func Inspect(this mut*) -> nuint
                 {
-                    nuint addr;
+                    nuint addr = 0;
                     return addr;
                 }
             }
@@ -468,7 +468,7 @@ public sealed class AliasAndReferenceCombinationsTests
 
                 public literal u8(int8 b)
                 {
-                    ByteChar bc;
+                    ByteChar bc = default;
                     return bc;
                 }
             }
@@ -614,13 +614,13 @@ public sealed class AliasAndReferenceCombinationsTests
             {
                 public func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
-                    Bool b;
+                    Bool b = default;
                     return b;
                 }
 
                 public func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
-                    Bool b;
+                    Bool b = default;
                     return b;
                 }
             }

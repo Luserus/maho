@@ -53,7 +53,7 @@ public sealed partial class DeclarationResolutionTests
         TopLevelFunctionDeclaration function = Assert.IsType<TopLevelFunctionDeclaration>(root.Members[2]);
         TopLevelVariableDeclaration global = Assert.IsType<TopLevelVariableDeclaration>(root.Members[3]);
 
-        AssertReference(context, Assert.Single(containerSyntax.Type.Base!.BaseTypes), valueHandle);
+        AssertReference(context, Assert.Single(containerSyntax.Type.Base!.BaseTypes).Type, valueHandle);
         AssertReference(context, field.Declaration.Type, valueHandle);
         AssertReference(context, property.Type, valueHandle);
         AssertReference(context, method.Function.Signature.ReturnType, valueHandle);
@@ -470,22 +470,22 @@ public sealed partial class DeclarationResolutionTests
 
         // Verify syntax references in ResolvedTree
         TopLevelTypeDeclaration derivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[7]);
-        AssertReference(context, Assert.Single(derivedSyntax.Type.Base!.BaseTypes), baseAliasHandle);
+        AssertReference(context, Assert.Single(derivedSyntax.Type.Base!.BaseTypes).Type, baseAliasHandle);
 
         TopLevelTypeDeclaration multiDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[8]);
-        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[0], baseAliasHandle);
-        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[1], secondaryAliasHandle);
+        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[0].Type, baseAliasHandle);
+        AssertReference(context, multiDerivedSyntax.Type.Base!.BaseTypes[1].Type, secondaryAliasHandle);
 
         TopLevelTypeDeclaration genericDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[9]);
-        AssertReference(context, Assert.Single(genericDerivedSyntax.Type.Base!.BaseTypes), concreteAliasHandle);
+        AssertReference(context, Assert.Single(genericDerivedSyntax.Type.Base!.BaseTypes).Type, concreteAliasHandle);
 
         TopLevelTypeDeclaration chainedDerivedSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[11]);
-        AssertReference(context, Assert.Single(chainedDerivedSyntax.Type.Base!.BaseTypes), chainedAliasHandle);
+        AssertReference(context, Assert.Single(chainedDerivedSyntax.Type.Base!.BaseTypes).Type, chainedAliasHandle);
 
         TopLevelTypeDeclaration outerSyntax = Assert.IsType<TopLevelTypeDeclaration>(root.Members[12]);
         TypeBlockBody outerBody = Assert.IsType<TypeBlockBody>(outerSyntax.Type.Body);
         MemberTypeDeclaration nestedSyntax = Assert.IsType<MemberTypeDeclaration>(outerBody.Members[0]);
-        AssertReference(context, Assert.Single(nestedSyntax.Type.Base!.BaseTypes), baseAliasHandle);
+        AssertReference(context, Assert.Single(nestedSyntax.Type.Base!.BaseTypes).Type, baseAliasHandle);
     }
 
     [Fact]
