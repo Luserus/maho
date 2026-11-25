@@ -1,7 +1,5 @@
-using System.Linq;
 using Maho.Resolution;
 using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 

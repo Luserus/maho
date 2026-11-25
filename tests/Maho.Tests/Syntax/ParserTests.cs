@@ -1,7 +1,3 @@
-using System.Collections;
-using System.Reflection;
-using Maho;
-using Maho.Diagnostics;
 using Maho.Syntax;
 
 namespace Maho.Tests;

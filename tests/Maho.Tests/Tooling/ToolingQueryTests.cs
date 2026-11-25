@@ -27,6 +27,8 @@ public class ToolingQueryTests : IDisposable
                 Directory.Delete(testDir, recursive: true);
         }
         catch { }
+
+        GC.SuppressFinalize(this);
     }
 
     private (Compilation Compilation, SemanticModel Model, string FilePath) Compile(string code)

@@ -347,7 +347,7 @@ public sealed class FunctionPointerAndDelegateTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -370,7 +370,7 @@ public sealed class FunctionPointerAndDelegateTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]

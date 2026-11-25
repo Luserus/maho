@@ -42,7 +42,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModA.mh",
             new CompilationOptions { ModuleName = "ModA" });
 
-        Assert.True(!modA.HasErrors, string.Join("\n", modA.Diagnostics));
+        Assert.False(modA.HasErrors);
 
         var modB = Compilation.FromSource("""
             public func ReadGreeting(&Greetable g) -> int32
@@ -60,7 +60,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             new CompilationOptions { ModuleName = "ModB" },
             referencedCompilations: [modA]);
 
-        Assert.True(!modB.HasErrors, string.Join("\n", modB.Diagnostics));
+        Assert.False(modB.HasErrors);
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModShadow.mh",
             new CompilationOptions { ModuleName = "ModShadow" });
 
-        Assert.True(!shadowsOuter.HasErrors, string.Join("\n", shadowsOuter.Diagnostics));
+        Assert.False(shadowsOuter.HasErrors);
         var fooConfs = shadowsOuter.Context.Conformances
             .Where(c => c.TargetType.ToDisplayString(shadowsOuter.Context) == "Foo")
             .ToList();
@@ -270,7 +270,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             }
             """);
 
-        Assert.True(!validDynReturn.HasErrors, string.Join("\n", validDynReturn.Diagnostics));
+        Assert.False(validDynReturn.HasErrors);
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             """,
             "Core.mh",
             new CompilationOptions { ModuleName = "Core" });
-        Assert.True(!baseTypes.HasErrors, string.Join("\n", baseTypes.Diagnostics));
+        Assert.False(baseTypes.HasErrors);
 
         var modInternalA = Compilation.FromSource("""
             public extension Foo : internal Bar
@@ -299,7 +299,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModInternalA.mh",
             new CompilationOptions { ModuleName = "ModInternalA" },
             referencedCompilations: [baseTypes]);
-        Assert.True(!modInternalA.HasErrors, string.Join("\n", modInternalA.Diagnostics));
+        Assert.False(modInternalA.HasErrors);
 
         var modInternalB = Compilation.FromSource("""
             public extension Foo : internal Bar
@@ -316,7 +316,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModInternalB.mh",
             new CompilationOptions { ModuleName = "ModInternalB" },
             referencedCompilations: [baseTypes]);
-        Assert.True(!modInternalB.HasErrors, string.Join("\n", modInternalB.Diagnostics));
+        Assert.False(modInternalB.HasErrors);
 
         var modPubA = Compilation.FromSource("""
             public extension Foo : public Bar
@@ -327,7 +327,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModPubA.mh",
             new CompilationOptions { ModuleName = "ModPubA" },
             referencedCompilations: [baseTypes]);
-        Assert.True(!modPubA.HasErrors, string.Join("\n", modPubA.Diagnostics));
+        Assert.False(modPubA.HasErrors);
 
         var modPubB = Compilation.FromSource("""
             public extension Foo : public Bar
@@ -338,7 +338,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             "ModPubB.mh",
             new CompilationOptions { ModuleName = "ModPubB" },
             referencedCompilations: [baseTypes]);
-        Assert.True(!modPubB.HasErrors, string.Join("\n", modPubB.Diagnostics));
+        Assert.False(modPubB.HasErrors);
 
         var modCAmbiguous = Compilation.FromSource("""
             public func Run() -> int32
@@ -374,7 +374,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             new CompilationOptions { ModuleName = "ModC" },
             referencedCompilations: [baseTypes, modPubA, modPubB]);
 
-        Assert.True(!modCDisambig.HasErrors, string.Join("\n", modCDisambig.Diagnostics));
+        Assert.False(modCDisambig.HasErrors);
 
         var pairSym = modCDisambig.Context.TypeSymbols.Single(t => t.Name.Text == "PairHolders");
         var pairScope = pairSym.EnclosingScope.GetChildScope(ResolutionContext.GetHandle(pairSym))!;
@@ -398,7 +398,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             new CompilationOptions { ModuleName = "ModCOverride" },
             referencedCompilations: [baseTypes, modPubA, modPubB]);
 
-        Assert.True(!modCLocalOverride.HasErrors, string.Join("\n", modCLocalOverride.Diagnostics));
+        Assert.False(modCLocalOverride.HasErrors);
     }
 
     [Fact]
@@ -468,7 +468,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             },
             referencedCompilations: [stdMod, modDupOne, modDupTwo]);
 
-        Assert.True(!aliased.HasErrors, string.Join("\n", aliased.Diagnostics));
+        Assert.False(aliased.HasErrors);
 
         var badExternUsing = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             extern using NonExistent;

@@ -1,7 +1,3 @@
-using System.Linq;
-using Maho.Resolution;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class ExplicitThisAndArrowTests

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Maho.Syntax;
 using Miryo.Build;
 

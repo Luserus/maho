@@ -94,7 +94,7 @@ public sealed class DefiniteInitializationTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("\n", compilation.Diagnostics));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class DefiniteInitializationTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("\n", compilation.Diagnostics));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class DefiniteInitializationTests
             }
             """);
 
-        Assert.True(!valid.HasErrors, string.Join("\n", valid.Diagnostics));
+        Assert.False(valid.HasErrors);
 
         var missing = Compilation.FromSource(StructPrelude + """
             public func Test() -> Pair
@@ -178,7 +178,7 @@ public sealed class DefiniteInitializationTests
             }
             """);
 
-        Assert.True(!validInside.HasErrors, string.Join("\n", validInside.Diagnostics));
+        Assert.False(validInside.HasErrors);
 
         var piecewiseOutside = Compilation.FromSource(sourceWithSecret + """
             public func BadPiecewise() -> int32
@@ -237,7 +237,7 @@ public sealed class DefiniteInitializationTests
             }
             """);
 
-        Assert.True(!bothBranches.HasErrors, string.Join("\n", bothBranches.Diagnostics));
+        Assert.False(bothBranches.HasErrors);
 
         var conditionalMove = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Move<T>

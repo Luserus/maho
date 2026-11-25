@@ -1,9 +1,3 @@
-using System.IO;
-using System.Linq;
-using Maho;
-using Maho.Resolution;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class ExceptionsStaticConstructorsAndEntryPointTests
@@ -113,7 +107,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -133,7 +127,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
         Assert.Single(compilation.Context.StaticConstructors);
     }
 
@@ -320,7 +314,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             var options = new CompilationOptions { EntryFile = "Prog2.mh" };
             var compilation = MahoCompiler.AnalyzeFiles([preludeFile, file1, file2], "EntryFileTest", options);
 
-            Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+            Assert.False(compilation.HasErrors);
             Assert.NotNull(compilation.Context.EntryPoint);
 
             var entryFn = compilation.Context.GetFunctionSymbol(compilation.Context.EntryPoint.Value);
@@ -358,7 +352,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -385,7 +379,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -412,7 +406,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -448,7 +442,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -497,7 +491,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
@@ -529,7 +523,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             }
             """);
 
-        Assert.True(!compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.False(compilation.HasErrors);
     }
 
     [Fact]
