@@ -12,19 +12,28 @@ internal sealed partial class ExpressionResolutionPass
 
         // 1. Resolve the collection expression
         var colType = ResolveExpression(forExpr.Collection, scope, containingFunction);
+        var unwrappedCol = colType;
+        while (unwrappedCol.SpecialType is AliasSemanticType or ReferenceSemanticType or DynSemanticType)
+        {
+            unwrappedCol = unwrappedCol.SpecialType switch
+            {
+                AliasSemanticType al => al.TargetType,
+                ReferenceSemanticType rf => rf.ElementType,
+                DynSemanticType d => d.TargetType,
+                _ => unwrappedCol
+            };
+        }
 
         // 2. Determine element/item type
         TypeRef itemType = TypeRef.Unresolved;
 
-        var handle = colType.Handle;
+        var handle = unwrappedCol.Handle;
         if (!handle.HasValue)
         {
-            if (colType.SpecialType is ArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+            if (unwrappedCol.SpecialType is SliceSemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
+                handle = hSlice;
+            else if (unwrappedCol.SpecialType is ArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
                 handle = hArr;
-            else if (colType.SpecialType is FixedArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
-                handle = hFix;
-            else if (colType.SpecialType is SpanSemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
-                handle = hSpan;
         }
 
         var colSym = handle.HasValue ? context.GetSymbol(handle.Value) : null;
@@ -39,19 +48,15 @@ internal sealed partial class ExpressionResolutionPass
         Dictionary<SymbolHandle, TypeRef> typeArgs = [];
         if (colSym is TypeSymbol typeSymbol)
         {
-            if (colType.SpecialType is FixedArraySemanticType fix && typeSymbol.GenericParameters.Count >= 1)
-            {
-                typeArgs[typeSymbol.GenericParameters[0]] = fix.ElementType;
-            }
-            else if (colType.SpecialType is ArraySemanticType arr && typeSymbol.GenericParameters.Count >= 1)
+            if (unwrappedCol.SpecialType is ArraySemanticType arr && typeSymbol.GenericParameters.Count >= 1)
             {
                 typeArgs[typeSymbol.GenericParameters[0]] = arr.ElementType;
             }
-            else if (colType.SpecialType is SpanSemanticType sp && typeSymbol.GenericParameters.Count >= 1)
+            else if (unwrappedCol.SpecialType is SliceSemanticType slice && typeSymbol.GenericParameters.Count >= 1)
             {
-                typeArgs[typeSymbol.GenericParameters[0]] = sp.ElementType;
+                typeArgs[typeSymbol.GenericParameters[0]] = slice.ElementType;
             }
-            else if (colType.SpecialType is GenericSemanticType gstCol)
+            else if (unwrappedCol.SpecialType is GenericSemanticType gstCol)
             {
                 for (int i = 0; i < typeSymbol.GenericParameters.Count && i < gstCol.TypeArguments.Count; i++)
                 {

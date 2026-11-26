@@ -35,13 +35,13 @@ internal sealed partial class DeclarationResolutionPass
                 break;
             case AsExpression asExpr:
                 context.TryPrebindConformanceInterface(asExpr.Type, scope);
-                ResolveType(asExpr.Type, scope);
+                ResolveType(asExpr.Type, scope, isTraitBoundContext: IsNonIndirectionTypeSyntax(asExpr.Type));
                 ResolveExpression(asExpr.Expression, scope, containingSymbol);
                 break;
             case TypeAsExpression typeAs:
                 ResolveType(typeAs.TargetType, scope);
                 context.TryPrebindConformanceInterface(typeAs.InterfaceType, scope);
-                ResolveType(typeAs.InterfaceType, scope);
+                ResolveType(typeAs.InterfaceType, scope, isTraitBoundContext: true);
                 break;
             case TupleExpression tuple:
                 foreach (var argument in tuple.Arguments)
@@ -265,6 +265,14 @@ internal sealed partial class DeclarationResolutionPass
         }
 
         return null;
+    }
+
+    private static bool IsNonIndirectionTypeSyntax(TypeSyntax syntax)
+    {
+        while (syntax is GroupedType g)
+            syntax = g.InnerType;
+
+        return syntax is SimpleType or QualifiedType or GenericType or ScopeQualifiedType;
     }
 
     private void ResolveMemberAccess(MemberAccessExpression access, Scope scope, SymbolHandle containingSymbol)

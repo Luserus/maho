@@ -31,8 +31,8 @@ These types separate the existence of a declaration from the shape of its body.
 - **Postfix Modifiers**:
   - `ReferenceTypeModifier`: `Type&` (safe immutable reference) or `Type mut&` (mutable reference).
   - `PointerTypeModifier`: `Type*` (immutable pointer) or `Type mut*` (mutable pointer).
-  - `SpanTypeModifier`: `Type[&]` (contiguous safe memory span).
-  - `ArrayTypeModifier`: `Type[]` (dynamic array) or `Type[size]` (fixed-size array).
+  - `SliceTypeModifier`: `Type[]` (unsized contiguous slice `Slice<T, D>`).
+  - `ArrayTypeModifier`: `Type[size]` (fixed-size inline array `Array<T, N, D>`).
   - `OptionalTypeModifier`: `Type?` (nullable / optional value).
   - `PostfixTypeModifierKind`: enumerates postfix modifier kinds.
 

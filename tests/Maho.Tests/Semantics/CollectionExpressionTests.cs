@@ -6,10 +6,19 @@ namespace Maho.Tests;
 public sealed class CollectionExpressionTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -21,23 +30,30 @@ public sealed class CollectionExpressionTests
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -46,8 +62,8 @@ public sealed class CollectionExpressionTests
         [IntrinsicType("Struct")]
         public struct Struct : ValType;
 
-        [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N : int32> : ValType;
+        [IntrinsicType("Array")]
+        public struct Array<T, N : int, D : int = 1> : ValType;
 
         public interface Callable<TReturn, TParams...>
         {
@@ -86,21 +102,30 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        Assert.Equal(TypeRefKind.FixedArray, local.Type.Kind);
+        Assert.Equal(TypeRefKind.Array, local.Type.Kind);
         Assert.NotNull(local.Type.SpecialType);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        var lit = Assert.IsType<LiteralExpression>(fixedArr.Size);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        var lit = Assert.IsType<LiteralExpression>(arrSem.Size);
         Assert.Equal("3", lit.Literal.Value);
     }
 
     [Fact]
-    public void CollectionExpression_MissingFixedArrayIntrinsic_ReportsDiagnostic()
+    public void CollectionExpression_MissingArrayIntrinsic_ReportsDiagnostic()
     {
-        const string PreludeWithoutFixedArray = """
-            intrinsic attribute IntrinsicType(Str name);
-            intrinsic attribute IntrinsicFunction(Str signature);
-            intrinsic attribute OperatorFunction(Str name);
+        const string PreludeWithoutArray = """
+            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicFunction(&Str signature);
+            intrinsic attribute OperatorFunction(&Str name);
 
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
+
+            [IntrinsicType("UInt8")]
+            public struct uint8;
             [IntrinsicType("Int8")]
             public struct int8;
             [IntrinsicType("Int32")]
@@ -110,23 +135,30 @@ public sealed class CollectionExpressionTests
             [IntrinsicType("Bool")]
             public struct bool;
 
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T>
+            public struct Reference<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
+
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                int8& buffer;
-                nuint length;
+                uint8[] data;
             }
 
             [IntrinsicType("Pointer")]
-            public struct Pointer<T>
+            public struct Pointer<T> where T : Layout
             {
                 nuint addr;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("ValueType")]
@@ -136,7 +168,7 @@ public sealed class CollectionExpressionTests
             public struct Struct : ValType;
             """;
 
-        var compilation = Compilation.FromSource(PreludeWithoutFixedArray + """
+        var compilation = Compilation.FromSource(PreludeWithoutArray + """
             public func Test() -> ()
             {
                 var arr = [1, 2, 3];
@@ -183,10 +215,10 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        Assert.Equal(TypeRefKind.FixedArray, local.Type.Kind);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        Assert.Equal(TypeRefKind.Tuple, fixedArr.ElementType.Kind);
-        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        Assert.Equal(TypeRefKind.Array, local.Type.Kind);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Tuple, arrSem.ElementType.Kind);
+        var tupleSem = Assert.IsType<TupleSemanticType>(arrSem.ElementType.SpecialType);
         Assert.Equal(2, tupleSem.Elements.Count);
     }
 
@@ -203,8 +235,8 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        var tupleSem = Assert.IsType<TupleSemanticType>(arrSem.ElementType.SpecialType);
         Assert.Equal(4, tupleSem.Elements.Count);
     }
 
@@ -325,17 +357,10 @@ public sealed class CollectionExpressionTests
     }
 
     [Fact]
-    public void MultidimensionalArray_RankAndIndexer_Succeeds()
+    public void MultidimensionalSlice_RankAndIndexer_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            [IntrinsicType("Array")]
-            public struct Array<T, D : int32>
-            {
-                T* data;
-                nuint len;
-            }
-
-            public func Test(int32[,] grid, int32[,,] cube) -> int32
+            public func Test(&int32[,] grid, int32[,,]& cube) -> int32
             {
                 int32 x = grid[1, 2];
                 return x;
@@ -345,13 +370,15 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var gridParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
-        Assert.Equal(TypeRefKind.Array, gridParam.Type.Kind);
-        var arrSem = Assert.IsType<ArraySemanticType>(gridParam.Type.SpecialType);
-        Assert.Equal(2, arrSem.Dimension);
+        var gridAlias = Assert.IsType<AliasSemanticType>(gridParam.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, gridAlias.TargetType.Kind);
+        var gridSlice = Assert.IsType<SliceSemanticType>(gridAlias.TargetType.SpecialType);
+        Assert.Equal(2, gridSlice.Dimension);
 
         var cubeParam = compilation.Context.GetParameterSymbol(fn.Parameters[1])!;
-        Assert.Equal(TypeRefKind.Array, cubeParam.Type.Kind);
-        var cubeSem = Assert.IsType<ArraySemanticType>(cubeParam.Type.SpecialType);
-        Assert.Equal(3, cubeSem.Dimension);
+        var cubeRef = Assert.IsType<ReferenceSemanticType>(cubeParam.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, cubeRef.ElementType.Kind);
+        var cubeSlice = Assert.IsType<SliceSemanticType>(cubeRef.ElementType.SpecialType);
+        Assert.Equal(3, cubeSlice.Dimension);
     }
 }

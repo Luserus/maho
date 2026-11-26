@@ -543,7 +543,7 @@ internal sealed partial class ExpressionResolutionPass
         }
         else if (lit.Literal.Kind is TokenKind.String)
         {
-            if (hStr is { } hs && targetType.Handle == hs) return true;
+            if (IsStringAliasOrRefTarget(targetType)) return true;
         }
         else if (lit.Literal.Kind is TokenKind.Char)
         {
@@ -567,6 +567,27 @@ internal sealed partial class ExpressionResolutionPass
         return false;
     }
 
+    private bool IsStringAliasOrRefTarget(TypeRef targetType)
+    {
+        if (hStr is not { } hs)
+            return false;
+
+        if (targetType.Handle is { } dh && context.UnwrapAlias(dh) == hs)
+            return true;
+
+        if (targetType.SpecialType is AliasSemanticType { IsMutable: false } al &&
+            al.TargetType.Handle is { } ah &&
+            context.UnwrapAlias(ah) == hs)
+            return true;
+
+        if (targetType.SpecialType is ReferenceSemanticType { IsMutable: false } rf &&
+            rf.ElementType.Handle is { } rh &&
+            context.UnwrapAlias(rh) == hs)
+            return true;
+
+        return false;
+    }
+
     /// <summary>
     /// Checks whether an uncollapsed compile-time literal semantic type is compatible with a destination target type.
     /// </summary>
@@ -582,7 +603,7 @@ internal sealed partial class ExpressionResolutionPass
         {
             if (lit.LiteralKind is CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
             if (lit.LiteralKind is CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
-            if (lit.LiteralKind is CompileTimeLiteralKind.Str && hStr is { } hs && targetType.Handle == hs) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Str && IsStringAliasOrRefTarget(targetType)) return true;
             if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
         }
 

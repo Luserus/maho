@@ -95,7 +95,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void UseSite_UnsuffixedStringLiteral_WithoutStr_EmitsMH0021()
     {
         var lines = UseSitePrelude.Split(["\r\n", "\n"], StringSplitOptions.None);
-        var preludeWithoutStr = string.Join("\n", lines.Where(l => !l.Contains("\"Str\"") && !l.Contains("struct Str") && !l.Contains("Int8& data") && !l.Contains("Int64 length")));
+        var preludeWithoutStr = string.Join("\n", lines.Where(l => !l.Contains("\"Str\"") && !l.Contains("struct Str") && !l.Contains("UInt8[] data") && !l.Contains("uint8[] data")));
 
         var compilation = Compilation.FromSource(preludeWithoutStr + """
             public struct Host
@@ -153,34 +153,46 @@ public sealed partial class IntrinsicDiscoveryTests
         var compilation = Compilation.FromSource("""
             namespace Std
             {
-                intrinsic attribute IntrinsicType(MyStr name);
+                [IntrinsicType("Layout")] public interface Layout;
+                [IntrinsicType("Sized")] public interface Sized : Layout;
+                [IntrinsicType("Unsized")] public interface Unsized : Layout;
+
+                intrinsic attribute IntrinsicType(&MyStr name);
 
                 [IntrinsicType("ValueType")] public struct ValType;
                 [IntrinsicType("Struct")] public struct Struct : ValType;
 
+                [IntrinsicType("UInt8")] public struct UInt8;
                 [IntrinsicType("Int8")] public struct Int8;
                 [IntrinsicType("Int64")] public struct Int64;
                 [IntrinsicType("NUInt")] public struct NUInt;
 
                 using usize = NUInt;
 
+                [IntrinsicType("Slice")]
+                public struct Slice<T, D : int = 1>;
+
+                [IntrinsicType("Metadata")]
+                public struct Metadata<T> where T : Layout;
+
                 [IntrinsicType("Reference")]
-                public struct Reference<T>
+                public struct Reference<T> where T : Layout
                 {
                     usize addr;
+                    Metadata<T> metadata;
                 }
 
                 [IntrinsicType("Pointer")]
-                public struct Pointer<T>
+                public struct Pointer<T> where T : Layout
                 {
                     usize addr;
+                    Metadata<T> metadata;
                 }
 
                 [IntrinsicType("Str")]
                 public struct MyStr
                 {
-                    Int8& data;
-                    usize len;
+                    UInt8[] data;
                 }
             }
             """);
@@ -196,9 +208,7 @@ public sealed partial class IntrinsicDiscoveryTests
     {
         var libCompilation = Compilation.FromSource(UseSitePrelude + """
             [IntrinsicType("Int32")] public struct Int32;
-            [IntrinsicType("Array")] public struct Array<T> { T* data; NUInt len; }
-            [IntrinsicType("Span")] public struct Span<T> { T& data; NUInt len; }
-            [IntrinsicType("FixedArray")] public struct FixedArray<T, N>;
+            [IntrinsicType("Array")] public struct Array<T, N : int, D : int = 1>;
             """, "Lib.mh");
 
         Assert.False(libCompilation.HasErrors);
@@ -208,9 +218,8 @@ public sealed partial class IntrinsicDiscoveryTests
             {
                 public Int32* p;
                 public Int32& r;
-                public Int32[] a;
-                public Int32[&] s;
                 public Int32[5] fa;
+                public Int32[] a;
             }
 
             public struct Host
@@ -255,7 +264,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_ValidSignatures_RegisterSuccessfully()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface Add<TLhs, TRhs, TResult>
             {
@@ -313,7 +322,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_BinaryWithThreeParameters_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface BadAdd<TLhs, TRhs, TResult>
             {
@@ -330,7 +339,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_IndirectMemberAccessReturningVoid_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface BadDeref
             {
@@ -347,7 +356,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_ConstructorStatic_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface BadCtor
             {
@@ -364,7 +373,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_IndexerGetterWithZeroParams_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface BadIndex<TResult>
             {
@@ -381,7 +390,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_DeclaredInStruct_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public struct MyStruct
             {
@@ -398,7 +407,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_UnknownOperatorName_ReportsMH0560()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str fullName);
+            public attribute OperatorFunction(&Str fullName);
 
             public interface BadOp
             {
@@ -415,7 +424,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_DuplicateAcrossInterfaces_ReportsMH0563()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute OperatorFunction(&Str name);
 
             public interface FirstCallable
             {
@@ -439,7 +448,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void IntrinsicFunction_InIntrinsicType_TagsFunctionFlagsIntrinsic()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute IntrinsicFunction(Str target);
+            intrinsic attribute IntrinsicFunction(&Str target);
 
             [IntrinsicType("Int32")]
             public struct Int32
@@ -462,7 +471,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void IntrinsicFunction_InNonIntrinsicType_ReportsMH0541()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute IntrinsicFunction(Str target);
+            intrinsic attribute IntrinsicFunction(&Str target);
 
             public struct UserType
             {
@@ -502,7 +511,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void IntrinsicFunction_ApplicationWithoutArgument_ReportsMH0541()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute IntrinsicFunction(Str target);
+            intrinsic attribute IntrinsicFunction(&Str target);
 
             [IntrinsicType("Int32")]
             public struct Int32
@@ -520,7 +529,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void IntrinsicFunction_ApplicationNonStringLiteral_ReportsMH0541()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute IntrinsicFunction(Str target);
+            intrinsic attribute IntrinsicFunction(&Str target);
 
             [IntrinsicType("Int32")]
             public struct Int32
@@ -538,7 +547,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_New_ValidAndInvalidSignatures()
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface New<TTarget, TReturn>
             {
@@ -551,7 +560,7 @@ public sealed partial class IntrinsicDiscoveryTests
         Assert.Single(newOps);
 
         var nonStatic = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface BadNew<TTarget, TReturn>
             {
@@ -563,7 +572,7 @@ public sealed partial class IntrinsicDiscoveryTests
         Assert.Contains(nonStatic.Diagnostics, d => d.Code == "MH0560" && d.Message.Contains("must be declared static"));
 
         var voidReturn = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface BadNew<TTarget>
             {
@@ -580,7 +589,7 @@ public sealed partial class IntrinsicDiscoveryTests
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface Put<TTarget>
             {
@@ -594,7 +603,7 @@ public sealed partial class IntrinsicDiscoveryTests
 
         var nonVoid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface BadPut<TTarget>
             {
@@ -611,7 +620,7 @@ public sealed partial class IntrinsicDiscoveryTests
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface Copy<T>
             {
@@ -633,7 +642,7 @@ public sealed partial class IntrinsicDiscoveryTests
 
         var badParamCount = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface BadCopy<T>
             {
@@ -649,7 +658,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void OperatorFunction_Callable_ValidSignature()
     {
         var valid = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface Callable<TReturn, TArg>
             {
@@ -667,7 +676,7 @@ public sealed partial class IntrinsicDiscoveryTests
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface Destructor
             {
@@ -697,7 +706,7 @@ public sealed partial class IntrinsicDiscoveryTests
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            public attribute OperatorFunction(Str name);
+            public attribute OperatorFunction(&Str name);
 
             public interface Copy<T>
             {
@@ -726,8 +735,8 @@ public sealed partial class IntrinsicDiscoveryTests
     public void Delegate_ValidABI_WithReference_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-            intrinsic attribute IntrinsicFunction(Str signature);
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute IntrinsicFunction(&Str signature);
+            intrinsic attribute OperatorFunction(&Str name);
 
 
             public interface Callable<TReturn, TParams...>

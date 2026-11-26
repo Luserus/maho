@@ -9,10 +9,19 @@ namespace Maho.Tests;
 public class ExplicitInterfaceTests
 {
     private const string StandardPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
 
+        intrinsic attribute OperatorFunction(&Str name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("NUInt")]
         public struct nuint;
@@ -26,24 +35,31 @@ public class ExplicitInterfaceTests
         [IntrinsicType("Int64")]
         public struct int64;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicFunction(&Str signature);
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -80,9 +96,16 @@ public class ExplicitInterfaceTests
     public void CustomVoidType_RecognizedAsVoidReturn_ForOperatorFunctions()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
 
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute IntrinsicType(&Str name);
+
+            intrinsic attribute OperatorFunction(&Str name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -93,23 +116,32 @@ public class ExplicitInterfaceTests
             [IntrinsicType("NUInt")]
             public struct nuint;
 
+            [IntrinsicType("UInt8")]
+            public struct uint8;
+
             [IntrinsicType("Int8")]
             public struct int8;
 
             [IntrinsicType("Int64")]
             public struct int64;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T>
+            public struct Reference<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                int8& buffer;
-                nuint length;
+                uint8[] data;
             }
 
             // Custom void type name: Unit
@@ -139,9 +171,16 @@ public class ExplicitInterfaceTests
     public void CustomReferenceType_RecognizedAsReferenceReturn_ForDereference()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
 
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute IntrinsicType(&Str name);
+
+            intrinsic attribute OperatorFunction(&Str name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -153,24 +192,33 @@ public class ExplicitInterfaceTests
             [IntrinsicType("NUInt")]
             public struct nuint;
 
+            [IntrinsicType("UInt8")]
+            public struct uint8;
+
             [IntrinsicType("Int8")]
             public struct int8;
 
             [IntrinsicType("Int64")]
             public struct int64;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             // Custom reference type name: MyRef<T>
             [IntrinsicType("Reference")]
-            public struct MyRef<T>
+            public struct MyRef<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                MyRef<int8> buffer;
-                nuint length;
+                uint8[] data;
             }
 
             public interface Deref<TTarget>

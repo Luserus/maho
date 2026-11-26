@@ -5,8 +5,7 @@ namespace Maho.Resolution;
 
 /// <summary>
 /// Represents a single scoped interface implementation attached to a type declaration or
-/// <c>extension</c> block, carrying visibility, defining module, concrete member bindings,
-/// and a unique mangled identity for linker symbol generation and vtable dispatch.
+/// <c>extension</c> block, carrying visibility, defining module, and concrete member bindings.
 /// </summary>
 internal sealed class InterfaceConformance
 {
@@ -20,7 +19,6 @@ internal sealed class InterfaceConformance
     public string ModuleName { get; }
     public int ModuleProjectId { get; }
     public BaseTypeItemSyntax? Syntax { get; }
-    public string MangledConformanceId { get; }
 
     /// <summary>
     /// Maps each interface member handle (method or property) to the concrete implementing
@@ -50,15 +48,6 @@ internal sealed class InterfaceConformance
         ModuleName = moduleName;
         ModuleProjectId = moduleProjectId;
         Syntax = syntax;
-
-        string visTag = accessibility switch
-        {
-            Accessibility.Public => "public",
-            Accessibility.Internal => "internal",
-            Accessibility.Protected => "protected",
-            _ => "private"
-        };
-        MangledConformanceId = $"{moduleName}_{visTag}_{serialId}";
     }
 }
 

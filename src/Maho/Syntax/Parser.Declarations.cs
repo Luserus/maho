@@ -1184,15 +1184,15 @@ internal sealed partial class Parser
 
         var type = ParseUnmodifiedType();
 
-        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
-        {
-            type = new PrefixModifiedType(prefixModifiers[i], type);
-        }
-
         if (CurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
             (CurrentToken.MatchingKind is MatchingKeywordKind.Mut && (Peek().Kind is TokenKind.Ampersand || Peek().Kind is TokenKind.Asterisk)) ||
             (CurrentToken.Kind is TokenKind.Dot && Peek(1).Kind is TokenKind.Dot && Peek(2).Kind is TokenKind.Dot))
             type = ParseModifiedType(type);
+
+        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
+        {
+            type = new PrefixModifiedType(prefixModifiers[i], type);
+        }
 
         return type;
     }
@@ -1306,6 +1306,12 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Kind is not TokenKind.Comma && CurrentToken.Kind is not TokenKind.RightParen)
             firstName = Consume();
 
+        if (firstName is null && CurrentToken.Kind is not TokenKind.Comma)
+        {
+            var groupedCloseParen = ExpectToken(TokenKind.RightParen, "')'", "to close the grouped type");
+            return new GroupedType(openParen, firstType, groupedCloseParen);
+        }
+
         nodesAndSeparators.Add(new TupleTypeElement(firstType, firstName));
 
         if (CurrentToken.Kind is TokenKind.Comma)
@@ -1401,7 +1407,7 @@ internal sealed partial class Parser
         {
             PostfixTypeModifier modifier = CurrentToken.Kind switch
             {
-                TokenKind.LeftBracket => ParseArrayOrFixedArrayTypeModifier(),
+                TokenKind.LeftBracket => ParseSliceOrArrayTypeModifier(),
                 TokenKind.QuestionMark => ParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ParsePointerTypeModifier(),
                 TokenKind.Ampersand => ParseReferenceTypeModifier(),
@@ -1425,16 +1431,9 @@ internal sealed partial class Parser
         return new VariadicTypeModifier([dot1, dot2, dot3]);
     }
 
-    private PostfixTypeModifier ParseArrayOrFixedArrayTypeModifier()
+    private PostfixTypeModifier ParseSliceOrArrayTypeModifier()
     {
         var openBracket = Consume();
-
-        if (CurrentToken.Kind is TokenKind.Ampersand && Peek().Kind is TokenKind.RightBracket)
-        {
-            var ampersand = Consume();
-            var closeBracket = Consume();
-            return new SpanTypeModifier(openBracket, ampersand, closeBracket);
-        }
 
         if (CurrentToken.Kind is TokenKind.Comma)
         {
@@ -1444,8 +1443,8 @@ internal sealed partial class Parser
                 Consume();
                 dimension++;
             }
-            var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the multidimensional array type modifier");
-            return new ArrayTypeModifier(openBracket, closeBracket, dimension);
+            var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the multidimensional slice type modifier");
+            return new SliceTypeModifier(openBracket, closeBracket, dimension);
         }
 
         if (CurrentToken.Kind is not TokenKind.RightBracket)
@@ -1459,11 +1458,11 @@ internal sealed partial class Parser
                 nodes.Add(ParseExpectedExpression("for the array size", MissingTokenAnchor.AfterPrevious));
             }
             var closeBracket = ExpectToken(TokenKind.RightBracket, "']'", "to close the array type modifier");
-            return new FixedArrayTypeModifier(openBracket, new SeparatedSyntaxList<Expression>(nodes), closeBracket);
+            return new ArrayTypeModifier(openBracket, new SeparatedSyntaxList<Expression>(nodes), closeBracket);
         }
 
         var rightBracket = Consume();
-        return new ArrayTypeModifier(openBracket, rightBracket);
+        return new SliceTypeModifier(openBracket, rightBracket);
     }
 
     private PointerTypeModifier ParsePointerTypeModifier()
@@ -1626,7 +1625,10 @@ internal sealed partial class Parser
             if (CurrentToken.Kind is TokenKind.Equals)
             {
                 equals = Consume();
-                defaultType = ParseTypeSyntax();
+                if (kind is not GenericParameterKind.Type && IsLiteralTokenKind(CurrentToken.Kind))
+                    defaultType = new LiteralGenericArgument(new LiteralExpression(Consume()));
+                else
+                    defaultType = ParseTypeSyntax();
             }
 
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind, equals, defaultType));

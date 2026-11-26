@@ -7,11 +7,23 @@ namespace Maho.Tests;
 internal static class CompilerTestBed
 {
     public const string FullPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
 
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicFunction(&Str signature);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(&Str name);
+
+        [IntrinsicType("Layout")]
+        public interface Layout;
+
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -32,6 +44,9 @@ internal static class CompilerTestBed
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
@@ -39,34 +54,42 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Deref<T&>
+        public struct Reference<T> : Deref<T&> where T : Layout
         {
             public nuint raw;
+            public Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
             public func Deref.Deref(&this) -> T&;
         }
 
         [IntrinsicType("MutableReference")]
-        public struct MutableReference<T> : Deref<T mut&>
+        public struct MutableReference<T> : Deref<T mut&> where T : Layout
         {
             public nuint raw;
+            public Metadata<T> metadata;
 
             [IntrinsicFunction("MutableReference.Deref()")]
             public func Deref.Deref(&this) -> T mut&;
         }
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Array")]
+        public struct Array<T, N : int, D : int = 1> : Iterator<T>;
+
         [IntrinsicType("Str")]
         public struct Str
         {
-            public int8& buffer;
-            public nuint length;
+            public uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Deref<T&>
+        public struct Pointer<T> : Deref<T&> where T : Layout
         {
             public nuint addr;
+            public Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
             public func Deref.Deref(&this) -> T&;
@@ -113,23 +136,6 @@ internal static class CompilerTestBed
         {
             [OperatorFunction("Iterable")]
             public func Iterate(&this) -> TIterator;
-        }
-
-        [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N : int32> : Iterator<T>;
-
-        [IntrinsicType("Array")]
-        public struct Array<T> : Iterator<T>
-        {
-            Pointer<T> data;
-            nuint length;
-        }
-
-        [IntrinsicType("Span")]
-        public struct Span<T>
-        {
-            public Pointer<T> data;
-            public nuint length;
         }
 
         public interface Callable<TReturn, TParams...>
@@ -182,7 +188,7 @@ internal static class CompilerTestBed
         }
 
         [IntrinsicType("Box")]
-        public struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where A : Allocator
+        public struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where T : Layout where A : Allocator
         {
             public T* pointer;
             public A allocator;

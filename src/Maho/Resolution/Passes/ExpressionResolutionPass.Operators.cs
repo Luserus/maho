@@ -291,6 +291,8 @@ internal sealed partial class ExpressionResolutionPass
         if (opKind == OperatorKind.None)
             return TypeRef.Error;
 
+        bool wasDyn = operand.SpecialType is DynSemanticType;
+        operand = TypeRef.UnwrapDyn(operand);
         if (operand.SpecialType is AliasSemanticType operandAlias)
             operand = operandAlias.TargetType;
 
@@ -298,20 +300,27 @@ internal sealed partial class ExpressionResolutionPass
         if (opKind == OperatorKind.AddressOf)
         {
             if (TryResolveUnaryOverload(OperatorKind.AddressOf, operand, unary, out var addrResult))
-                return addrResult;
+                return wasDyn ? TypeRef.Dyn(addrResult, isExplicitDyn: true) : addrResult;
 
-            return TypeRef.Reference(operand);
+            var refType = TypeRef.Reference(operand);
+            return wasDyn ? TypeRef.Dyn(refType, isExplicitDyn: true) : refType;
         }
 
         if (opKind == OperatorKind.Dereference)
         {
             if (TryResolveUnaryOverload(OperatorKind.Dereference, operand, unary, out var derefResult))
-                return derefResult;
+                return wasDyn ? TypeRef.Dyn(derefResult, isExplicitDyn: true) : derefResult;
 
             if (operand.SpecialType is ReferenceSemanticType refType)
-                return TypeRef.Alias(refType.ElementType, isMutable: refType.IsMutable);
+            {
+                var alias = TypeRef.Alias(refType.ElementType, isMutable: refType.IsMutable);
+                return wasDyn ? TypeRef.Dyn(alias, isExplicitDyn: true) : alias;
+            }
             if (operand.SpecialType is PointerSemanticType ptrType)
-                return TypeRef.Alias(ptrType.ElementType, isMutable: ptrType.IsMutable);
+            {
+                var alias = TypeRef.Alias(ptrType.ElementType, isMutable: ptrType.IsMutable);
+                return wasDyn ? TypeRef.Dyn(alias, isExplicitDyn: true) : alias;
+            }
             return TypeRef.Error;
         }
 
@@ -425,6 +434,7 @@ internal sealed partial class ExpressionResolutionPass
             return false;
 
         var opHandle = operand.Handle;
+        operand = TypeRef.UnwrapDyn(operand);
         if (opHandle is null)
         {
             if (operand.SpecialType is ReferenceSemanticType refSem)
@@ -441,12 +451,10 @@ internal sealed partial class ExpressionResolutionPass
             }
             else if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
                 opHandle = hOpt;
-            else if (operand.Kind == TypeRefKind.FixedArray && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
-                opHandle = hFix;
             else if (operand.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
                 opHandle = hArr;
-            else if (operand.Kind == TypeRefKind.Span && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
-                opHandle = hSpan;
+            else if (operand.Kind == TypeRefKind.Slice && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
+                opHandle = hSlice;
             else if (operand.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
                 opHandle = hTup;
         }
@@ -581,14 +589,14 @@ internal sealed partial class ExpressionResolutionPass
     {
         var lhs = ResolveExpression(assignment.LhsExpression, scope, containingFunction);
         var targetType = lhs;
-        if (lhs.SpecialType is AliasSemanticType lhsAlias)
+        if (TypeRef.UnwrapDyn(lhs).SpecialType is AliasSemanticType lhsAlias)
         {
             if (!lhsAlias.IsMutable)
             {
                 context.Diagnostics.ReportCannotAssignToNonLValue(assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource());
                 return TypeRef.Error;
             }
-            targetType = lhsAlias.TargetType;
+            targetType = lhs.SpecialType is DynSemanticType ? TypeRef.Dyn(lhsAlias.TargetType, isExplicitDyn: true) : lhsAlias.TargetType;
         }
 
         if (!targetType.IsInferred && !targetType.IsUnresolved && !targetType.IsError && !targetType.IsLiteral)
@@ -760,7 +768,7 @@ internal sealed partial class ExpressionResolutionPass
         while (expr is ParenthesizedExpression p)
             expr = p.Expression;
 
-        if (resolvedType.SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType)
+        if (TypeRef.UnwrapDyn(resolvedType).SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType)
             return true;
 
         if (expr is TupleExpression tupleExpr)

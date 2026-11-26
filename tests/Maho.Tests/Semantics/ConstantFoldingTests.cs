@@ -5,9 +5,13 @@ namespace Maho.Tests;
 public sealed class ConstantFoldingTests
 {
     private const string ConstantFoldingPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")] public interface Layout;
+        [IntrinsicType("Sized")] public interface Sized : Layout;
+        [IntrinsicType("Unsized")] public interface Unsized : Layout;
+
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
 
         [IntrinsicType("ValueType")]
         public struct ValType;
@@ -46,16 +50,24 @@ public sealed class ConstantFoldingTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             public nuint addr;
+            public Metadata<T> metadata;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Deref<T&>
+        public struct Reference<T> : Deref<T&> where T : Layout
         {
             public nuint raw;
+            public Metadata<T> metadata;
             [IntrinsicFunction("Reference.Deref()")]
             public func Deref.Deref(&this) -> T&;
         }
@@ -85,12 +97,11 @@ public sealed class ConstantFoldingTests
         public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public func Ge(T l, T r) -> bool; }
 
         [IntrinsicType("Str")]
-        public struct Str : Add<Str>, Eq<Str>
+        public struct Str : Add<&Str>, Eq<&Str>
         {
-            public int8& buffer;
-            public nuint length;
-            [IntrinsicFunction("Str.Add(Str, Str)")] public func Add.Add(Str l, Str r) -> Str;
-            [IntrinsicFunction("Str.Eq(Str, Str)")] public func Eq.Eq(Str l, Str r) -> bool;
+            public uint8[] data;
+            [IntrinsicFunction("Str.Add(&Str, &Str)")] public func Add.Add(&Str l, &Str r) -> &Str;
+            [IntrinsicFunction("Str.Eq(&Str, &Str)")] public func Eq.Eq(&Str l, &Str r) -> bool;
         }
 
         public interface Callable<TReturn, TParams...>

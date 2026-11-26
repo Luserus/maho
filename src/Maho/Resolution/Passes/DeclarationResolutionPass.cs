@@ -219,6 +219,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckCyclicTypeHierarchies();
         LinearizeAndDeduplicateAllBases();
         ValidateConstructorBaseInitializers();
+        ValidateTypeLayoutsAndSizedness();
         CheckDuplicateAndPartialFunctions();
         CheckDuplicateVariables();
         CheckDuplicateProperties();
@@ -506,8 +507,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
         bool isNever = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverH) && handle == neverH;
         bool isStruct = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH) && handle == structH;
+        bool isSlice = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH) && handle == sliceH;
         bool isArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayH) && handle == arrayH;
-        bool isFixedArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrH) && handle == fixedArrH;
         bool isMetadata = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Metadata, out var metaH) && handle == metaH;
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
@@ -518,7 +519,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) && handle == refH;
         bool isMutReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefH) && handle == mutRefH;
 
-        if (isValueType || isNever || isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isTuple || isPointer || isMutPointer || isReference || isMutReference)
+        if (isValueType || isNever || isStruct || isSlice || isArray || isMetadata || isEnum || isFunction || isDelegate || isTuple || isPointer || isMutPointer || isReference || isMutReference)
             return;
 
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
@@ -798,6 +799,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 return GetGenericArguments(modified.Type);
             case PrefixModifiedType prefixModified:
                 return GetGenericArguments(prefixModified.Type);
+            case GroupedType grouped:
+                return GetGenericArguments(grouped.InnerType);
             default:
                 return [];
         }
@@ -819,6 +822,39 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
     internal static bool SatisfiesConstraint(ResolutionContext context, SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
     {
+        var unwrappedCandidate = candidate.Kind == SymbolKind.GenericParameter ? candidate : context.UnwrapAlias(candidate);
+        var unwrappedRequired = required.Kind == SymbolKind.GenericParameter ? required : context.UnwrapAlias(required);
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && unwrappedRequired == layoutH)
+            return true;
+
+        var candidateSym = context.GetSymbol(unwrappedCandidate);
+        bool candidateIsInterface = candidateSym is TypeSymbol { TypeKind: TypeKind.Interface }
+            or NestedTypeSymbol { TypeKind: TypeKind.Interface };
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedH) && unwrappedRequired == sizedH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+                return context.GetGenericParameterSymbol(unwrappedCandidate)?.RequiresSized(context) ?? true;
+            if (!candidateIsInterface)
+                return TypeRef.Resolved(unwrappedCandidate).IsSized(context);
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out var unsizedH) && unwrappedRequired == unsizedH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+            {
+                var gpUnsized = context.GetGenericParameterSymbol(unwrappedCandidate);
+                if (gpUnsized is null || gpUnsized.RequiresSized(context))
+                    return false;
+                if (gpUnsized.HasExplicitUnsized)
+                    return true;
+            }
+            else if (!candidateIsInterface)
+            {
+                return TypeRef.Resolved(unwrappedCandidate).IsKnownUnsized(context);
+            }
+        }
+
         if (candidate == required)
             return true;
 

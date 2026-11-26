@@ -22,8 +22,9 @@ These model identifier-like structures and name composition.
 - `SimpleType`
 - `QualifiedType`
 - `GenericType`
-- `ModifiedType` (postfix-modified types, e.g. `T?`, `T*`, `T mut*`, `T&`, `T mut&`, `T[&]`, `T[]`, `T[N]`)
-- `PrefixModifiedType` (prefix-modified alias types, e.g. `&T`, `*T`, `mut &T`, `mut *T`)
+- `ModifiedType` (postfix-modified types, e.g. `T?`, `T*`, `T mut*`, `T&`, `T mut&`, `T[]`, `T[N]`)
+- `GroupedType` (explicit parenthesized type grouping `(Type)` for modifier precedence, e.g. `(&T)[]`, `(dyn &I)[]`)
+- `PrefixModifiedType` (prefix-modified alias/modifier types, e.g. `&T`, `*T`, `mut &T`, `mut *T`, `dyn &T`)
 - `TupleType`
 - `TupleTypeElement`
 - `UniformTupleType`

@@ -1295,17 +1295,53 @@ internal sealed class DiagnosticsManager
             .WithHelp($"disambiguate with '<expr> as <Module>::{interfaceName}' or '<{typeName} as <Module>::{interfaceName}>'")
             .Report();
 
-    /// <summary> Reports returning a lower-visibility interface conformance from a higher-visibility callable without explicit <c>dyn</c>. </summary>
-    public void ReportLowerVisibilityConformanceEscape(
+    /// <summary> Reports that an unsized (DST) type is used in a position requiring a statically sized type. </summary>
+    public void ReportUnsizedTypeNotAllowed(
         TextSpan span,
         string typeName,
-        string interfaceName,
-        string conformanceVisibility,
-        string callableVisibility,
+        string contextDescription,
         SourceText? source = null) =>
-        BuildError("MH0579", $"cannot return {conformanceVisibility} conformance of '{typeName}' to '{interfaceName}' from {callableVisibility} callable without explicit 'dyn'", span, source)
-            .WithPrimaryLabel(span, $"static interface return hides '{conformanceVisibility}' conformance behind a '{callableVisibility}' boundary", source)
-            .WithHelp($"use 'dyn &{interfaceName}' (or 'dyn {interfaceName}&') in the return type, or lower the callable's visibility to '{conformanceVisibility}'")
+        BuildError("MH0580", $"unsized type '{typeName}' cannot be used {contextDescription}", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' is unsized and requires a statically sized type {contextDescription}", source)
+            .WithHelp($"wrap it behind an indirection ('&{typeName}', '{typeName}&', '{typeName}*') or 'Box<{typeName}>'")
+            .Report();
+
+    /// <summary> Reports a generic type argument or conformance violating a <c>Sized</c> / <c>Unsized</c> / <c>Layout</c> constraint. </summary>
+    public void ReportGenericConstraintNotSized(
+        TextSpan span,
+        string typeName,
+        string paramName,
+        string targetName,
+        string requiredBound,
+        SourceText? source = null) =>
+        BuildError("MH0581", $"type '{typeName}' does not satisfy the '{requiredBound}' constraint on '{paramName}' of '{targetName}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{requiredBound}', got '{typeName}'", source)
+            .WithHelp(requiredBound == "Sized"
+                ? $"add ': Layout' or ': Unsized' to '{paramName}' if dynamically sized types should be accepted, or pass a reference/Box"
+                : $"provide an unsized type for '{paramName}'")
+            .Report();
+
+    /// <summary> Reports a derived struct/class adding fields after an unsized base or inheriting multiple unsized bases. </summary>
+    public void ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+        TextSpan span,
+        string derivedName,
+        string unsizedBaseName,
+        string reason,
+        SourceText? source = null) =>
+        BuildError("MH0582", $"type '{derivedName}' cannot inherit unsized base '{unsizedBaseName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports raw interface usage without <c>dyn</c> or an invalid indirection prefix before <c>dyn</c>. </summary>
+    public void ReportInvalidInterfaceOrDynUsage(
+        TextSpan span,
+        string message,
+        string label,
+        string help,
+        SourceText? source = null) =>
+        BuildError("MH0583", message, span, source)
+            .WithPrimaryLabel(span, label, source)
+            .WithHelp(help)
             .Report();
 
     /// <summary> Reports an attempt to branch out of a finally block via return, break, or continue. </summary>

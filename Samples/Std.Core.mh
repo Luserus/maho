@@ -1,10 +1,19 @@
 namespace Std;
 
-intrinsic attribute IntrinsicType(Str name);
+intrinsic attribute IntrinsicType(&Str name);
 
-intrinsic attribute IntrinsicFunction(Str name);
+intrinsic attribute IntrinsicFunction(&Str name);
 
-intrinsic attribute OperatorFunction(Str name);
+intrinsic attribute OperatorFunction(&Str name);
+
+[IntrinsicType("Layout")]
+interface Layout;
+
+[IntrinsicType("Sized")]
+interface Sized : Layout;
+
+[IntrinsicType("Unsized")]
+interface Unsized : Layout;
 
 [IntrinsicType("ValueType")]
 struct ValType;
@@ -71,7 +80,7 @@ struct Float64;
 struct Float128;
 
 [IntrinsicType("Metadata")]
-struct Metadata<T>;
+struct Metadata<T> where T : Layout;
 
 interface Deref<TReturn>
 {
@@ -86,7 +95,7 @@ interface Arrow<TReturn>
 }
 
 [IntrinsicType("Reference")]
-struct Reference<T> : Arrow<&T>, Deref<&T>
+struct Reference<T> : Arrow<&T>, Deref<&T> where T : Layout
 {
     NUInt address;
     Metadata<T> metadata;
@@ -101,7 +110,7 @@ struct Reference<T> : Arrow<&T>, Deref<&T>
 }
 
 [IntrinsicType("MutableReference")]
-struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>
+struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
 {
     NUInt address;
     Metadata<T> metadata;
@@ -116,7 +125,7 @@ struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>
 }
 
 [IntrinsicType("Pointer")]
-struct Pointer<T> : Arrow<&T>, Deref<&T>
+struct Pointer<T> : Arrow<&T>, Deref<&T> where T : Layout
 {
     NUInt address;
     Metadata<T> metadata;
@@ -131,7 +140,7 @@ struct Pointer<T> : Arrow<&T>, Deref<&T>
 }
 
 [IntrinsicType("MutablePointer")]
-struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T>
+struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
 {
     NUInt address;
     Metadata<T> metadata;
@@ -145,29 +154,17 @@ struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T>
     }
 }
 
+[IntrinsicType("Slice")]
+struct Slice<T, D : int = 1>;
+
+[IntrinsicType("Array")]
+struct Array<T, N : int, D : int = 1>;
+
 [IntrinsicType("Str")]
 struct Str
 {
-    Int8& buffer;
-    NUInt length;
+    UInt8[] data;
 }
-
-[IntrinsicType("Array")]
-struct Array<T>
-{
-    T* data;
-    NUInt length;
-}
-
-[IntrinsicType("Span")]
-struct Span<T>
-{
-    T& reference;
-    NUInt length;
-}
-
-[IntrinsicType("FixedArray")]
-struct FixedArray<T, N : int>;
 
 [IntrinsicType("Tuple")]
 struct Tuple;
@@ -432,7 +429,7 @@ struct GlobalAllocator : Allocator
 }
 
 [IntrinsicType("Box")]
-struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where A : Allocator
+struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where T : Layout where A : Allocator
 {
     T* pointer;
     A allocator;

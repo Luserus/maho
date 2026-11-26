@@ -208,9 +208,9 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
         Assert.False(c2.HasErrors);
         Assert.NotNull(c2.Context.EntryPoint);
 
-        // 3. Array<Str> -> int32
+        // 3. Slice<&Str> -> int32
         var c3 = Compilation.FromSource(Prelude + """
-            public func Main(Array<Str> args) -> int32
+            public func Main(&Slice<&Str> args) -> int32
             {
                 return 0;
             }
@@ -218,9 +218,9 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
         Assert.False(c3.HasErrors);
         Assert.NotNull(c3.Context.EntryPoint);
 
-        // 4. Str[&] -> int32
+        // 4. (&Str)[] -> int32
         var c4 = Compilation.FromSource(Prelude + """
-            public func Main(Str[&] args) -> int32
+            public func Main(&(&Str)[] args) -> int32
             {
                 return 0;
             }

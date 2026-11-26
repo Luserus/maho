@@ -110,10 +110,9 @@ internal sealed partial class ExpressionResolutionPass
                     return opReturnType;
                 }
 
-                if (opReturnType.SpecialType is AliasSemanticType alias)
-                    receiverType = alias.TargetType;
-                else
-                    receiverType = opReturnType;
+                while (opReturnType.SpecialType is AliasSemanticType or DynSemanticType)
+                    opReturnType = opReturnType.SpecialType is AliasSemanticType al ? al.TargetType : ((DynSemanticType)opReturnType.SpecialType!).TargetType;
+                receiverType = opReturnType;
             }
             else
             {
@@ -128,15 +127,12 @@ internal sealed partial class ExpressionResolutionPass
         }
         else
         {
-            if (receiverType.SpecialType is AliasSemanticType alias)
+            while (receiverType.SpecialType is AliasSemanticType or DynSemanticType)
             {
-                receiverType = alias.TargetType;
+                receiverType = receiverType.SpecialType is AliasSemanticType alias
+                    ? alias.TargetType
+                    : ((DynSemanticType)receiverType.SpecialType!).TargetType;
             }
-        }
-
-        if (receiverType.SpecialType is DynSemanticType dynReceiver)
-        {
-            receiverType = dynReceiver.TargetType;
         }
 
         // Check if access.Expression is a TypeSymbol (static access / enum variant)
@@ -273,6 +269,40 @@ internal sealed partial class ExpressionResolutionPass
                         access.GetSource());
                 }
             }
+        }
+
+        if (TypeRef.TryGetExplicitConformance(receiverType, out var explicitConf))
+        {
+            if (explicitConf.InterfaceType.Handle is { } confIfaceH)
+            {
+                var (ifaceMember, ifaceAmbiguous, _) = FindMemberInTypeHierarchy(confIfaceH, memberName, isExplicitInterfaceAccess: true);
+                if (!ifaceAmbiguous && ifaceMember is not null)
+                {
+                    var ifaceMemberHandle = ResolutionContext.GetHandle(ifaceMember);
+                    Symbol targetMember = ifaceMember;
+                    if (explicitConf.MethodMap.TryGetValue(ifaceMemberHandle, out var mappedImplH) &&
+                        context.GetSymbol(mappedImplH) is { } mappedImpl)
+                    {
+                        targetMember = mappedImpl;
+                    }
+
+                    context.ResolvedTree.AddConformance(access, explicitConf);
+                    context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(targetMember));
+                    var retType = GetTypeFromSymbol(targetMember);
+                    if (explicitConf.InterfaceType.SpecialType is GenericSemanticType ifaceGst &&
+                        context.GetSymbol(confIfaceH) is TypeSymbol ifaceTs &&
+                        ifaceTs.GenericParameters.Count == ifaceGst.TypeArguments.Count)
+                    {
+                        Dictionary<SymbolHandle, TypeRef> subst = [];
+                        for (int i = 0; i < ifaceTs.GenericParameters.Count; i++)
+                            subst[ifaceTs.GenericParameters[i]] = ifaceGst.TypeArguments[i];
+                        retType = SubstituteTypeRef(retType, subst);
+                    }
+                    return retType;
+                }
+            }
+
+            receiverType = TypeRef.UnwrapConformance(receiverType);
         }
 
         // Look up member on receiver type (filtering out InterfaceScoped methods)
@@ -426,7 +456,17 @@ internal sealed partial class ExpressionResolutionPass
                 }
 
                 context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(member));
-                return GetTypeFromSymbol(member);
+                var memberResultType = GetTypeFromSymbol(member);
+                if (receiverType.SpecialType is GenericSemanticType recvGst &&
+                    context.GetSymbol(recvHandle.Value) is TypeSymbol recvTs &&
+                    recvTs.GenericParameters.Count == recvGst.TypeArguments.Count)
+                {
+                    Dictionary<SymbolHandle, TypeRef> subst = [];
+                    for (int i = 0; i < recvTs.GenericParameters.Count; i++)
+                        subst[recvTs.GenericParameters[i]] = recvGst.TypeArguments[i];
+                    memberResultType = SubstituteTypeRef(memberResultType, subst);
+                }
+                return memberResultType;
             }
 
             if (!isStaticAccessOnType)
@@ -678,6 +718,7 @@ internal sealed partial class ExpressionResolutionPass
     private bool TryResolveIndirectMemberAccessOperator(TypeRef type, out TypeRef elemType)
     {
         elemType = TypeRef.Unresolved;
+        type = TypeRef.UnwrapDyn(type);
         var handle = type.Handle;
         if (handle is null)
         {
@@ -952,14 +993,29 @@ internal sealed partial class ExpressionResolutionPass
         foreach (var arg in index.Arguments)
             ResolveExpression(arg, scope, containingFunction);
 
-        if (targetType.SpecialType is ArraySemanticType arraySemantic)
+        var unwrapped = targetType;
+        while (unwrapped.SpecialType is AliasSemanticType or ReferenceSemanticType or DynSemanticType)
+        {
+            unwrapped = unwrapped.SpecialType switch
+            {
+                AliasSemanticType al => al.TargetType,
+                ReferenceSemanticType rf => rf.ElementType,
+                DynSemanticType d => d.TargetType,
+                _ => unwrapped
+            };
+        }
+
+        if (unwrapped.SpecialType is SliceSemanticType sliceSemantic)
+            return sliceSemantic.ElementType;
+        if (unwrapped.SpecialType is ArraySemanticType arraySemantic)
             return arraySemantic.ElementType;
-        if (targetType.SpecialType is FixedArraySemanticType fixedArraySemantic)
-            return fixedArraySemantic.ElementType;
-        if (targetType.SpecialType is SpanSemanticType spanSemantic)
-            return spanSemantic.ElementType;
-        if (targetType.SpecialType is PointerSemanticType ptrSemantic)
+        if (unwrapped.SpecialType is PointerSemanticType ptrSemantic)
             return ptrSemantic.ElementType;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Str, out var strH) && unwrapped.Handle is { } th && context.UnwrapAlias(th) == strH)
+        {
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt8, out var u8H))
+                return TypeRef.Resolved(u8H);
+        }
 
         // User-defined indexer
         if (TryResolveIndexer(targetType, index, out var indexerResult))

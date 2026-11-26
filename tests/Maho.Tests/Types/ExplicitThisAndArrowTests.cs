@@ -3,10 +3,19 @@ namespace Maho.Tests;
 public sealed class ExplicitThisAndArrowTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -14,8 +23,11 @@ public sealed class ExplicitThisAndArrowTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
         [IntrinsicType("Metadata")]
-        public struct Metadata<T>;
+        public struct Metadata<T> where T : Layout;
 
         public interface Arrow<TReturn>
         {
@@ -23,14 +35,14 @@ public sealed class ExplicitThisAndArrowTests
             public func Arrow(&this) -> TReturn;
         }
 
-        public interface Deref<T>
+        public interface Deref<T> where T : Layout
         {
             [OperatorFunction("Dereference")]
             public func Deref(&this) -> &T;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<&T>, Deref<T>
+        public struct Reference<T> : Arrow<&T>, Deref<T> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
@@ -50,7 +62,7 @@ public sealed class ExplicitThisAndArrowTests
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T*>, Deref<T>
+        public struct Pointer<T> : Arrow<T*>, Deref<T> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
@@ -67,8 +79,7 @@ public sealed class ExplicitThisAndArrowTests
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("ValueType")]

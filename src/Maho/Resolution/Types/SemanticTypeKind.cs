@@ -5,9 +5,8 @@ internal enum SemanticTypeKind : byte
 {
     Pointer,
     Reference,
+    Slice,
     Array,
-    FixedArray,
-    Span,
     Optional,
     Tuple,
     Union,

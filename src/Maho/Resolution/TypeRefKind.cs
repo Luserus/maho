@@ -15,12 +15,10 @@ internal enum TypeRefKind : byte
     Pointer,
     /// <summary>Reference type (<c>T&amp;</c>).</summary>
     Reference,
-    /// <summary>Dynamic array type (<c>T[]</c>).</summary>
-    Array,
+    /// <summary>Dynamically sized slice type (<c>T[]</c>, <c>T[,]</c>).</summary>
+    Slice,
     /// <summary>Fixed-size inline array type (<c>T[size]</c>).</summary>
-    FixedArray,
-    /// <summary>Span type (<c>&amp;T</c>).</summary>
-    Span,
+    Array,
     /// <summary>Optional type (<c>T?</c>).</summary>
     Optional,
     /// <summary>Tuple type (<c>(T1, T2)</c>).</summary>

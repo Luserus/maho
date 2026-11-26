@@ -607,7 +607,10 @@ internal sealed partial class IntrinsicDiscoveryPass
 
     private bool IsReferenceType(TypeSyntax type, Scope scope)
     {
-        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier or SpanTypeModifier)
+        while (type is GroupedType grouped)
+            type = grouped.InnerType;
+
+        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier)
             return true;
 
         if (type is PrefixModifiedType prefix && prefix.Modifier is SafeAliasTypeModifier or UnsafeAliasTypeModifier)

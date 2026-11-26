@@ -5,34 +5,46 @@ namespace Maho.Tests;
 public sealed class LambdaExpressionTests
 {
     private const string StdPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")] public interface Layout;
+        [IntrinsicType("Sized")] public interface Sized : Layout;
+        [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicType(&Str name);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
 
+        intrinsic attribute OperatorFunction(&Str name);
+
+        [IntrinsicType("UInt8")] public struct uint8;
         [IntrinsicType("Int8")] public struct int8;
         [IntrinsicType("Int64")] public struct int64;
         [IntrinsicType("NUInt")] public struct nuint;
         [IntrinsicType("Int32")] public struct int32;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]

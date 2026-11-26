@@ -6,10 +6,19 @@ namespace Maho.Tests;
 public sealed class AliasAndReferenceCombinationsTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -20,7 +29,7 @@ public sealed class AliasAndReferenceCombinationsTests
         public struct Never;
 
         [IntrinsicType("Metadata")]
-        public struct Metadata<T>;
+        public struct Metadata<T> where T : Layout;
 
         public interface Arrow<TReturn>
         {
@@ -40,8 +49,20 @@ public sealed class AliasAndReferenceCombinationsTests
             public func AddressOf(&this) -> T*;
         }
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Array")]
+        public struct Array<T, N : int, D : int = 1>;
+
+        [IntrinsicType("Str")]
+        public struct Str
+        {
+            uint8[] data;
+        }
+
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<&T>, Deref<&T>
+        public struct Reference<T> : Arrow<&T>, Deref<&T> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
@@ -56,7 +77,7 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutableReference")]
-        public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>
+        public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
@@ -71,7 +92,7 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<&T>, Deref<&T>
+        public struct Pointer<T> : Arrow<&T>, Deref<&T> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
@@ -86,7 +107,7 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("MutablePointer")]
-        public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T>
+        public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
@@ -98,30 +119,6 @@ public sealed class AliasAndReferenceCombinationsTests
             {
                 return *this;
             }
-        }
-
-        [IntrinsicType("Span")]
-        public struct Span<T>
-        {
-            T& data;
-            nuint len;
-        }
-
-        [IntrinsicType("Array")]
-        public struct Array<T>
-        {
-            T* data;
-            nuint len;
-        }
-
-        [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N>;
-
-        [IntrinsicType("Str")]
-        public struct Str
-        {
-            int8& buffer;
-            nuint length;
         }
 
         [IntrinsicType("ValueType")]
@@ -319,13 +316,13 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void SpanTypeModifier_PostfixAmpersandBracket_ResolvesToSpan()
+    public void SliceAndArrayModifiers_ResolveToSliceAliasReferenceAndArray()
     {
         var source = Prelude + """
+            public func Accept(&Int32[] s, Int32[]& r) -> () {}
+
             public struct Container
             {
-                public Int32[&] s;
-                public Int32[] a;
                 public Int32[10] fa;
             }
             """;
@@ -333,19 +330,20 @@ public sealed class AliasAndReferenceCombinationsTests
         var compilation = Compilation.FromSource(source);
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
+        var fn = Assert.Single(compilation.Context.FunctionSymbols, f => f.Name.Text == "Accept");
+        var sParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
+        var rParam = compilation.Context.GetParameterSymbol(fn.Parameters[1])!;
         var container = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Container");
         var containerHandle = ResolutionContext.GetHandle(container);
-        var fields = compilation.Context.FieldSymbols.Where(f => f.Parent == containerHandle).ToList();
-        var sField = Assert.Single(fields, f => f.Name.ToString() == "s");
-        var aField = Assert.Single(fields, f => f.Name.ToString() == "a");
-        var faField = Assert.Single(fields, f => f.Name.ToString() == "fa");
+        var faField = Assert.Single(compilation.Context.FieldSymbols, f => f.Parent == containerHandle && f.Name.ToString() == "fa");
 
-        Assert.Equal(TypeRefKind.Span, sField.Type.Kind);
-        Assert.Equal(TypeRefKind.Array, aField.Type.Kind);
-        Assert.Equal(TypeRefKind.FixedArray, faField.Type.Kind);
-        Assert.Equal("Int32[&]", sField.Type.ToDisplayString(compilation.Context));
-        Assert.Equal("Int32[]", aField.Type.ToDisplayString(compilation.Context));
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(faField.Type.SpecialType);
+        var sAlias = Assert.IsType<AliasSemanticType>(sParam.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, sAlias.TargetType.Kind);
+        var rRef = Assert.IsType<ReferenceSemanticType>(rParam.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, rRef.ElementType.Kind);
+        Assert.Equal(TypeRefKind.Array, faField.Type.Kind);
+        Assert.Equal("Int32[]", sAlias.TargetType.ToDisplayString(compilation.Context));
+        var fixedArr = Assert.IsType<ArraySemanticType>(faField.Type.SpecialType);
         Assert.Equal("10", Assert.IsType<LiteralExpression>(fixedArr.Size).Literal.Value);
     }
 
@@ -488,7 +486,7 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void StrAndSpan_DeriveFromStruct_AndOptional_DerivesFromEnum()
+    public void StrSliceAndArray_DeriveFromStruct_AndOptional_DerivesFromEnum()
     {
         var source = Prelude + """
             [IntrinsicType("Enum")]
@@ -506,7 +504,8 @@ public sealed class AliasAndReferenceCombinationsTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         var strSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Str");
-        var spanSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Span");
+        var sliceSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Slice");
+        var arraySym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Array");
         var optSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Optional");
         var structSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Struct");
         var enumSym = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Enum");
@@ -515,7 +514,8 @@ public sealed class AliasAndReferenceCombinationsTests
         var enumHandle = ResolutionContext.GetHandle(enumSym);
 
         Assert.Contains(strSym.BaseTypes, b => b.Handle == structHandle);
-        Assert.Contains(spanSym.BaseTypes, b => b.Handle == structHandle);
+        Assert.NotNull(sliceSym);
+        Assert.NotNull(arraySym);
         Assert.Contains(optSym.BaseTypes, b => b.Handle == enumHandle);
     }
 

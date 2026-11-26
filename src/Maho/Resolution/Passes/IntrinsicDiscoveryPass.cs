@@ -213,19 +213,18 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
         var candidateStr = strCandidates[0];
         var candidateStrHandle = ResolutionContext.GetHandle(candidateStr.Symbol);
 
-        // Retroactively verify candidateAttr's parameter type matches candidateStr
+        // Retroactively verify candidateAttr's parameter type is &Str (Alias<Str>)
         if (candidateAttr.Parameters.Count == 1)
         {
             var paramSymbol = context.GetParameterSymbol(candidateAttr.Parameters[0]);
             var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-            var resolvedParamHandle = ResolveTypeSymbol(paramTypeSyntax, candidateAttr.EnclosingScope);
 
-            if (resolvedParamHandle != candidateStrHandle)
+            if (!IsAliasToType(paramTypeSyntax, candidateAttr.EnclosingScope, candidateStrHandle))
             {
                 var span = candidateAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? candidateAttr.Syntax?.GetSpan() ?? default;
                 context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                     span,
-                    $"parameter type must match the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                    "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
                     candidateAttr.Syntax?.GetSource());
 
                 return null;
@@ -236,14 +235,13 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
         {
             var paramSymbol = context.GetParameterSymbol(opAttr.Parameters[0]);
             var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-            var resolvedParamHandle = ResolveTypeSymbol(paramTypeSyntax, opAttr.EnclosingScope);
 
-            if (resolvedParamHandle != candidateStrHandle)
+            if (!IsAliasToType(paramTypeSyntax, opAttr.EnclosingScope, candidateStrHandle))
             {
                 var span = opAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? opAttr.Syntax?.GetSpan() ?? default;
                 context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                     span,
-                    $"parameter type must match the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                    "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
                     opAttr.Syntax?.GetSource(),
                     KnownIntrinsics.OperatorFunctionAttribute);
             }
@@ -264,14 +262,13 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             {
                 var paramSymbol = context.GetParameterSymbol(ifnAttr.Parameters[0]);
                 var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-                var resolvedParamHandle = ResolveTypeSymbol(paramTypeSyntax, ifnAttr.EnclosingScope);
 
-                if (resolvedParamHandle != candidateStrHandle)
+                if (!IsAliasToType(paramTypeSyntax, ifnAttr.EnclosingScope, candidateStrHandle))
                 {
                     var span = ifnAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? ifnAttr.Syntax?.GetSpan() ?? default;
                     context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                         span,
-                        $"parameter type must match the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                        "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
                         ifnAttr.Syntax?.GetSource(),
                         KnownIntrinsics.IntrinsicFunctionAttribute);
                 }
@@ -335,7 +332,9 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             }
         }
 
-        // Topological ABI verification:
+        // Group 0: Layout / Sized / Unsized marker interfaces
+        ValidateLayoutInterfaces(typesByIntrinsic);
+
         // Group 1: Zero-instance-field primitives
         foreach (var name in KnownIntrinsics.ZeroInstanceFieldPrimitives)
         {
@@ -348,19 +347,18 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             }
         }
 
-        // Group 2: Pointer and Reference (requires NUInt)
+        // Group 2: Slice and Array (zero instance fields; Slice required before Str)
+        ValidateSlice(typesByIntrinsic);
+        ValidateArray(typesByIntrinsic);
+
+        // Group 3: Pointer and Reference (requires NUInt)
         ValidatePointerLike(KnownIntrinsics.Pointer, typesByIntrinsic);
         ValidatePointerLike(KnownIntrinsics.MutablePointer, typesByIntrinsic);
         ValidatePointerLike(KnownIntrinsics.Reference, typesByIntrinsic);
         ValidatePointerLike(KnownIntrinsics.MutableReference, typesByIntrinsic);
 
-        // Group 3: Str (requires Int8, Reference, NUInt)
+        // Group 4: Str (requires UInt8 and Slice) and Box
         ValidateStr(typesByIntrinsic);
-
-        // Group 4: Array (requires Pointer, NUInt) and Span (requires Reference, NUInt)
-        ValidateArray(typesByIntrinsic);
-        ValidateFixedArray(typesByIntrinsic);
-        ValidateSpan(typesByIntrinsic);
         ValidateBox(typesByIntrinsic);
 
         // Group 5: Function (requires NUInt) and Delegate (requires NUInt, Pointer)

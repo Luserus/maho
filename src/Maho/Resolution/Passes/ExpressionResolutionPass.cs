@@ -472,21 +472,6 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                     if (chosenConf is not null)
                     {
                         context.ResolvedTree.AddConformance(returnStmt.Statement.Expression, chosenConf);
-
-                        // Clarification #5: Returning a lower-visibility conformance from a higher-visibility
-                        // callable without explicit 'dyn' leaks a static vtable outside its visibility scope.
-                        if (TryGetCallableEffectiveVisibility(containingFunction, out var callableVis) &&
-                            callableVis > chosenConf.Accessibility &&
-                            !TypeRef.HasExplicitDyn(expectedReturnType))
-                        {
-                            context.Diagnostics.ReportLowerVisibilityConformanceEscape(
-                                span,
-                                TypeRef.UnwrapConformance(chosenConf.TargetType).ToDisplayString(context),
-                                chosenConf.InterfaceType.ToDisplayString(context),
-                                chosenConf.Accessibility.ToString().ToLowerInvariant(),
-                                callableVis.ToString().ToLowerInvariant(),
-                                returnStmt.GetSource());
-                        }
                     }
                 }
             }
@@ -566,7 +551,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         if (thrownType.Kind == TypeRefKind.Error)
             return;
 
-        bool isRefOrPointer = thrownType.SpecialType is ReferenceSemanticType or PointerSemanticType or AliasSemanticType;
+        bool isRefOrPointer = TypeRef.UnwrapDyn(thrownType).SpecialType is ReferenceSemanticType or PointerSemanticType or AliasSemanticType;
         if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refHandle) && thrownType.Handle == refHandle)
             isRefOrPointer = true;
         if (!isRefOrPointer && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefHandle) && thrownType.Handle == mutRefHandle)
@@ -610,7 +595,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
     /// <list type="bullet">
     ///   <item><description><see cref="CompileTimeLiteralKind.Int"/> -> <c>int32</c></description></item>
     ///   <item><description><see cref="CompileTimeLiteralKind.Float"/> -> <c>float64</c></description></item>
-    ///   <item><description><see cref="CompileTimeLiteralKind.Str"/> -> <c>Str</c></description></item>
+    ///   <item><description><see cref="CompileTimeLiteralKind.Str"/> -> <c>&amp;Str</c></description></item>
     ///   <item><description><see cref="CompileTimeLiteralKind.Char"/> -> <c>char</c></description></item>
     /// </list>
     /// </summary>
@@ -622,7 +607,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             {
                 CompileTimeLiteralKind.Int => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
-                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Alias(TypeRef.Resolved(h)) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 _ => TypeRef.Inferred
             };
@@ -710,10 +695,27 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                     else if (initType.IsResolved || initType.IsSpecial)
                     {
                         SetVariableSymbolType(sym, initType);
+                        if (sym is LocalVariableSymbol && !initType.IsError && !initType.IsSized(context))
+                        {
+                            context.Diagnostics.ReportUnsizedTypeNotAllowed(
+                                declarator.Identifier.GetSpan() ?? declarator.GetSpan() ?? default,
+                                initType.ToDisplayString(context),
+                                "as a local variable",
+                                declaration.GetSource());
+                        }
                     }
                 }
                 else if (sym is not null && symType is { } st && !st.IsInferred && !st.IsUnresolved && !st.IsError)
                 {
+                    if (sym is LocalVariableSymbol && !st.IsSized(context))
+                    {
+                        context.Diagnostics.ReportUnsizedTypeNotAllowed(
+                            declaration.Type.GetSpan() ?? declarator.GetSpan() ?? default,
+                            st.ToDisplayString(context),
+                            "as a local variable",
+                            declaration.GetSource());
+                    }
+
                     if (initExpr is CollectionExpression colExpr)
                     {
                         TypeCheckCollectionExpression(colExpr, st, scope, containingFunction, declarator);
@@ -768,6 +770,14 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
                     }
                 }
             }
+            }
+            else if (sym is LocalVariableSymbol && symType is { IsInferred: false, IsUnresolved: false, IsError: false } uninitType && !uninitType.IsSized(context))
+            {
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(
+                    declaration.Type.GetSpan() ?? declarator.GetSpan() ?? default,
+                    uninitType.ToDisplayString(context),
+                    "as a local variable",
+                    declaration.GetSource());
             }
             else if (sym is not null && symType?.IsInferred == true)
             {

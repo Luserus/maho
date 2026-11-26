@@ -676,13 +676,12 @@ internal sealed partial class DeclarationResolutionPass
                     pA.IsMutable == pB.IsMutable && ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
                 (ReferenceSemanticType rA, ReferenceSemanticType rB) =>
                     rA.IsMutable == rB.IsMutable && ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
-                (SpanSemanticType sA, SpanSemanticType sB) =>
-                    ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
+                (SliceSemanticType sA, SliceSemanticType sB) =>
+                    sA.Dimension == sB.Dimension && ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
                 (ArraySemanticType aA, ArraySemanticType aB) =>
-                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null),
-                (FixedArraySemanticType fA, FixedArraySemanticType fB) =>
-                    ParameterTypesMatch(fA.ElementType, genericParamsA, fB.ElementType, genericParamsB, null, null) &&
-                    (fA.Size == fB.Size || Nullable.Equals(fA.Size.GetSpan(), fB.Size.GetSpan())),
+                    aA.Dimension == aB.Dimension &&
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null) &&
+                    (aA.Size == aB.Size || Nullable.Equals(aA.Size.GetSpan(), aB.Size.GetSpan())),
                 (OptionalSemanticType oA, OptionalSemanticType oB) =>
                     ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
                 (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>
@@ -987,32 +986,32 @@ internal sealed partial class DeclarationResolutionPass
 
     private bool IsValidStringCollectionParam(TypeRef paramType)
     {
-        if (paramType.SpecialType is ArraySemanticType arr)
-        {
-            return IsStrType(arr.ElementType);
-        }
+        TypeRef inner = paramType.SpecialType is DynSemanticType d ? d.TargetType : paramType;
 
-        if (paramType.SpecialType is SpanSemanticType sp)
+        TypeRef? collectionTarget = inner.SpecialType switch
         {
-            return IsStrType(sp.ElementType);
-        }
+            AliasSemanticType al => al.TargetType,
+            ReferenceSemanticType rf => rf.ElementType,
+            _ => null
+        };
 
-        if (paramType.SpecialType is GenericSemanticType gen)
-        {
-            bool isArrayOrSpan = false;
-            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrH) && context.UnwrapAlias(gen.TargetHandle) == arrH)
-                isArrayOrSpan = true;
-            else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var spanH) && context.UnwrapAlias(gen.TargetHandle) == spanH)
-                isArrayOrSpan = true;
-            else if (context.GetTypeSymbol(gen.TargetHandle) is { } ts && (ts.Name.Text == "Array" || ts.Name.Text == "Span"))
-                isArrayOrSpan = true;
+        if (collectionTarget is not { } target)
+            return false;
 
-            if (isArrayOrSpan && gen.TypeArguments.Count == 1 && IsStrType(gen.TypeArguments[0]))
-                return true;
-        }
+        if (target.SpecialType is SliceSemanticType { Dimension: 1 } slice)
+            return IsStrAliasType(slice.ElementType);
+
+        if (target.SpecialType is GenericSemanticType gen &&
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH) &&
+            context.UnwrapAlias(gen.TargetHandle) == sliceH &&
+            gen.TypeArguments.Count >= 1)
+            return IsStrAliasType(gen.TypeArguments[0]);
 
         return false;
     }
+
+    private bool IsStrAliasType(TypeRef type) =>
+        type.SpecialType is AliasSemanticType al && IsStrType(al.TargetType);
 
     private bool IsStrType(TypeRef t)
     {
@@ -1043,45 +1042,299 @@ internal sealed partial class DeclarationResolutionPass
     {
         foreach (var gp in context.GenericParameterSymbols)
         {
-            if (gp.DefaultType is { } def && def.IsResolved && gp.Constraints.Count > 0)
+            if (gp.DefaultType is not { } def || !def.IsResolved)
+                continue;
+
+            var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
+            if (gp.ParameterKind is GenericParameterKind.Type && gp.RequiresSized(context) && !def.IsSized(context))
             {
-                foreach (var constraint in gp.Constraints)
+                context.Diagnostics.ReportGenericConstraintNotSized(
+                    span,
+                    def.ToDisplayString(context),
+                    gp.Name.ToString(),
+                    gp.GenericSymbol.Name.ToString(),
+                    "Sized",
+                    gp.Syntax?.GetSource());
+            }
+
+            if (gp.ParameterKind is GenericParameterKind.Type && gp.RequiresUnsized(context) && !def.IsKnownUnsized(context))
+            {
+                context.Diagnostics.ReportGenericConstraintNotSized(
+                    span,
+                    def.ToDisplayString(context),
+                    gp.Name.ToString(),
+                    gp.GenericSymbol.Name.ToString(),
+                    "Unsized",
+                    gp.Syntax?.GetSource());
+            }
+
+            foreach (var constraint in gp.Constraints)
+            {
+                if (constraint.Handle is { } ch && context.IsBuiltInLayoutInterface(ch))
+                    continue;
+
+                if (!constraint.IsAssignableFrom(def, context))
                 {
-                    if (!constraint.IsAssignableFrom(def, context))
+                    context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                        span,
+                        gp.Name.ToString(),
+                        def.ToDisplayString(context),
+                        constraint.ToDisplayString(context),
+                        gp.Syntax?.GetSource());
+                }
+                else
+                {
+                    var lookup = context.ResolveInterfaceConformance(def, constraint, null, gp.EnclosingScope, default);
+                    if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Inaccessible)
                     {
-                        var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
-                        context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                        context.Diagnostics.ReportInaccessibleInterfaceConformance(
                             span,
-                            gp.Name.ToString(),
                             def.ToDisplayString(context),
-                            constraint.ToDisplayString(context),
+                            lookup.Conformance!.InterfaceType.ToDisplayString(context),
+                            lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
                             gp.Syntax?.GetSource());
                     }
-                    else
+                    else if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Ambiguous)
                     {
-                        var lookup = context.ResolveInterfaceConformance(def, constraint, null, gp.EnclosingScope, default);
-                        var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
-                        if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Inaccessible)
+                        context.Diagnostics.ReportAmbiguousInterfaceConformance(
+                            span,
+                            def.ToDisplayString(context),
+                            constraint.ToDisplayString(context),
+                            lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList(),
+                            gp.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+    }
+
+    private void ValidateTypeLayoutsAndSizedness()
+    {
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedHandle);
+
+        foreach (var type in context.TypeSymbols)
+        {
+            ValidateTypeSymbolLayout(type, ResolutionContext.GetHandle(type), sizedHandle);
+        }
+
+        foreach (var nested in context.NestedTypeSymbols)
+        {
+            ValidateTypeSymbolLayout(nested, ResolutionContext.GetHandle(nested), sizedHandle);
+        }
+
+        foreach (var global in context.GlobalVariableSymbols)
+        {
+            if (!global.Type.IsError && !global.Type.IsUnresolved && !global.Type.IsSized(context))
+            {
+                var span = global.Syntax?.Type.GetSpan() ?? global.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, global.Type.ToDisplayString(context), "as a global variable", global.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var constant in context.ConstantSymbols)
+        {
+            if (!constant.Type.IsError && !constant.Type.IsUnresolved && !constant.Type.IsInferred && !constant.Type.IsSized(context))
+            {
+                var span = constant.Syntax?.Type?.GetSpan() ?? constant.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, constant.Type.ToDisplayString(context), "as a constant", constant.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var fn in context.FunctionSymbols)
+        {
+            ValidateCallableSizedness(fn.Parameters, fn.ReturnType, fn.Syntax?.Signature.ReturnType, fn.Syntax?.GetSource());
+        }
+
+        foreach (var method in context.MethodSymbols)
+        {
+            ValidateCallableSizedness(method.Parameters, method.ReturnType, method.Syntax?.Signature.ReturnType, method.Syntax?.GetSource());
+        }
+
+        foreach (var prop in context.PropertySymbols)
+        {
+            if (!prop.Type.IsError && !prop.Type.IsUnresolved && !prop.Type.IsSized(context))
+            {
+                var span = prop.Syntax?.Type.GetSpan() ?? prop.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, prop.Type.ToDisplayString(context), "as a property type", prop.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var attr in context.AttributeSymbols)
+            ValidateParameterListSizedness(attr.Parameters, "as an attribute parameter", attr.Syntax?.GetSource());
+
+        foreach (var nestedAttr in context.NestedAttributeSymbols)
+            ValidateParameterListSizedness(nestedAttr.Parameters, "as an attribute parameter", nestedAttr.Syntax?.GetSource());
+    }
+
+    private void ValidateCallableSizedness(
+        IReadOnlyList<SymbolHandle> paramHandles,
+        TypeRef returnType,
+        TypeSyntax? returnSyntax,
+        SourceText? source)
+    {
+        ValidateParameterListSizedness(paramHandles, "as a parameter", source);
+
+        if (!returnType.IsError && !returnType.IsUnresolved && !returnType.IsSized(context))
+        {
+            var span = returnSyntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, returnType.ToDisplayString(context), "as a return type", returnSyntax?.GetSource() ?? source);
+        }
+    }
+
+    private void ValidateParameterListSizedness(
+        IReadOnlyList<SymbolHandle> paramHandles,
+        string contextDescription,
+        SourceText? fallbackSource)
+    {
+        foreach (var ph in paramHandles)
+        {
+            var param = context.GetParameterSymbol(ph);
+            if (param is not null && !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsSized(context))
+            {
+                var span = param.Syntax?.Declarator.Type.GetSpan() ?? param.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, param.Type.ToDisplayString(context), contextDescription, param.Syntax?.GetSource() ?? fallbackSource);
+            }
+        }
+    }
+
+    private void ValidateTypeSymbolLayout(Symbol typeSym, SymbolHandle handle, SymbolHandle sizedHandle)
+    {
+        TypeKind kind = typeSym switch
+        {
+            TypeSymbol ts => ts.TypeKind,
+            NestedTypeSymbol nts => nts.TypeKind,
+            _ => TypeKind.Struct
+        };
+
+        if (typeSym is ISumTypeSymbol sumType)
+        {
+            foreach (var vh in sumType.EnumVariants)
+            {
+                if (context.GetSymbol(vh) is EnumVariantSymbol ev)
+                {
+                    foreach (var ph in ev.Parameters)
+                    {
+                        var param = context.GetParameterSymbol(ph);
+                        if (param is not null && !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsSized(context))
                         {
-                            context.Diagnostics.ReportInaccessibleInterfaceConformance(
-                                span,
-                                def.ToDisplayString(context),
-                                lookup.Conformance!.InterfaceType.ToDisplayString(context),
-                                lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
-                                gp.Syntax?.GetSource());
+                            var span = param.Syntax?.Declarator.Type.GetSpan() ?? param.Syntax?.GetSpan() ?? ev.Syntax?.GetSpan() ?? default;
+                            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, param.Type.ToDisplayString(context), "as an enum variant payload", param.Syntax?.GetSource() ?? ev.Syntax?.GetSource());
                         }
-                        else if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Ambiguous)
+                    }
+                    foreach (var fh in ev.Fields)
+                    {
+                        var f = context.GetFieldSymbol(fh);
+                        if (f is not null && !f.Type.IsError && !f.Type.IsUnresolved && !f.Type.IsSized(context))
                         {
-                            context.Diagnostics.ReportAmbiguousInterfaceConformance(
-                                span,
-                                def.ToDisplayString(context),
-                                constraint.ToDisplayString(context),
-                                lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList(),
-                                gp.Syntax?.GetSource());
+                            var span = f.Syntax?.Type.GetSpan() ?? f.Syntax?.GetSpan() ?? ev.Syntax?.GetSpan() ?? default;
+                            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, f.Type.ToDisplayString(context), "as an enum variant payload", f.Syntax?.GetSource() ?? ev.Syntax?.GetSource());
                         }
                     }
                 }
             }
+            return;
+        }
+
+        if (kind is not (TypeKind.Struct or TypeKind.Class))
+            return;
+
+        IReadOnlyList<TypeRef> baseTypes = typeSym switch
+        {
+            TypeSymbol ts => ts.BaseTypes,
+            NestedTypeSymbol nts => nts.BaseTypes,
+            _ => []
+        };
+
+        IReadOnlyList<SymbolHandle> fieldHandles = typeSym switch
+        {
+            ProductTypeSymbol p => p.Fields,
+            MemberProductTypeSymbol mp => mp.Fields,
+            _ => []
+        };
+
+        var syntax = (typeSym as TypeSymbol)?.Syntax ?? (typeSym as NestedTypeSymbol)?.Syntax;
+        var source = syntax?.GetSource();
+
+        var instanceFields = new List<FieldSymbol>();
+        foreach (var fh in fieldHandles)
+        {
+            var field = context.GetFieldSymbol(fh);
+            if (field is null) continue;
+
+            if (field.Flags.HasFlag(VariableFlags.Static))
+            {
+                if (!field.Type.IsError && !field.Type.IsUnresolved && !field.Type.IsSized(context))
+                {
+                    var span = field.Syntax?.Type.GetSpan() ?? field.Syntax?.GetSpan() ?? default;
+                    context.Diagnostics.ReportUnsizedTypeNotAllowed(span, field.Type.ToDisplayString(context), "as a static field", field.Syntax?.GetSource());
+                }
+            }
+            else
+            {
+                instanceFields.Add(field);
+            }
+        }
+
+        for (int i = 0; i < instanceFields.Count - 1; i++)
+        {
+            var field = instanceFields[i];
+            if (!field.Type.IsError && !field.Type.IsUnresolved && !field.Type.IsSized(context))
+            {
+                var span = field.Syntax?.Type.GetSpan() ?? field.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, field.Type.ToDisplayString(context), "as a non-tail field (only the final field of a struct may be unsized)", field.Syntax?.GetSource());
+            }
+        }
+
+        var unsizedBases = new List<TypeRef>();
+        foreach (var b in baseTypes)
+        {
+            if (b.IsError || b.IsUnresolved || b.Handle is not { } bh)
+                continue;
+
+            var unwrappedB = context.UnwrapAlias(bh);
+            var bSym = context.GetSymbol(unwrappedB);
+            TypeKind bKind = bSym switch
+            {
+                TypeSymbol bts => bts.TypeKind,
+                NestedTypeSymbol bnts => bnts.TypeKind,
+                _ => TypeKind.Struct
+            };
+
+            if (bKind is TypeKind.Interface)
+            {
+                if (sizedHandle != default &&
+                    !TypeRef.Resolved(handle).IsSized(context) &&
+                    DeclarationResolutionPass.SatisfiesConstraint(context, unwrappedB, sizedHandle, []))
+                {
+                    var span = syntax?.Base?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+                    context.Diagnostics.ReportGenericConstraintNotSized(span, typeSym.Name.ToString(), "Self", b.ToDisplayString(context), "Sized", source);
+                }
+            }
+            else if (!b.IsSized(context))
+            {
+                unsizedBases.Add(b);
+            }
+        }
+
+        if (unsizedBases.Count > 1)
+        {
+            var span = syntax?.Base?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+                span,
+                typeSym.Name.ToString(),
+                unsizedBases[1].ToDisplayString(context),
+                "a type cannot inherit from multiple unsized base types",
+                source);
+        }
+        else if (unsizedBases.Count == 1 && instanceFields.Count > 0)
+        {
+            var span = instanceFields[0].Syntax?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+                span,
+                typeSym.Name.ToString(),
+                unsizedBases[0].ToDisplayString(context),
+                "derived types cannot declare additional instance fields after an unsized base",
+                instanceFields[0].Syntax?.GetSource() ?? source);
         }
     }
 }

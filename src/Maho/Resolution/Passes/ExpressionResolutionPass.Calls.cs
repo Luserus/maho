@@ -147,12 +147,10 @@ internal sealed partial class ExpressionResolutionPass
         var typeHandle = calleeType.Handle;
         if (typeHandle is null)
         {
-            if (calleeType.Kind == TypeRefKind.FixedArray && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
-                typeHandle = hFix;
-            else if (calleeType.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+            if (calleeType.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
                 typeHandle = hArr;
-            else if (calleeType.Kind == TypeRefKind.Span && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
-                typeHandle = hSpan;
+            else if (calleeType.Kind == TypeRefKind.Slice && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
+                typeHandle = hSlice;
             else if (calleeType.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
                 typeHandle = hTup;
             else if (calleeType.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
@@ -169,15 +167,19 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out var candidates))
             return false;
 
-        // Build generic mapping if calleeType is generic (e.g. Optional<T>, FixedArray<T, N>)
+        // Build generic mapping if calleeType is generic (e.g. Optional<T>, Array<T, N>, Slice<T>)
         Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
         if (calleeType.SpecialType is OptionalSemanticType optSem && typeSym is TypeSymbol ts1 && ts1.GenericParameters.Count >= 1)
         {
             typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts1.GenericParameters[0]] = optSem.ElementType };
         }
-        else if (calleeType.SpecialType is FixedArraySemanticType fixSem && typeSym is TypeSymbol ts2 && ts2.GenericParameters.Count >= 1)
+        else if (calleeType.SpecialType is ArraySemanticType arrSem && typeSym is TypeSymbol ts2 && ts2.GenericParameters.Count >= 1)
         {
-            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts2.GenericParameters[0]] = fixSem.ElementType };
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts2.GenericParameters[0]] = arrSem.ElementType };
+        }
+        else if (calleeType.SpecialType is SliceSemanticType sliceSem && typeSym is TypeSymbol ts3 && ts3.GenericParameters.Count >= 1)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts3.GenericParameters[0]] = sliceSem.ElementType };
         }
 
         var typeScope = GetOwnedScope(typeSym);

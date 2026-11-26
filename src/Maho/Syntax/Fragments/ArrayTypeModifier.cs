@@ -1,20 +1,32 @@
 namespace Maho.Syntax;
 
-/// <summary> Array postfix type modifier for dynamic arrays (<c>[]</c>, <c>[,]</c>, etc.). </summary>
+/// <summary> Fixed-size inline array postfix type modifier (<c>[size1, size2, ...]</c>). </summary>
 internal sealed class ArrayTypeModifier : PostfixTypeModifier
 {
     /// <summary> Opening bracket token. </summary>
     public Token LeftBracket { get; }
+    /// <summary> Array size expressions. </summary>
+    public SeparatedSyntaxList<Expression> Sizes { get; }
+    /// <summary> Primary array size expression. </summary>
+    public Expression Size => Sizes[0];
+    /// <summary> Dimension / rank of the fixed array. </summary>
+    public int Dimension => Sizes.Count;
     /// <summary> Closing bracket token. </summary>
     public Token RightBracket { get; }
-    /// <summary> Array dimension / rank count (e.g. 1 for [], 2 for [,], 3 for [,,]). </summary>
-    public int Dimension { get; }
 
-    /// <summary> Creates one array modifier node. </summary>
-    public ArrayTypeModifier(Token leftBracket, Token rightBracket, int dimension = 1) : base(PostfixTypeModifierKind.Array)
+    /// <summary> Creates one fixed-size array modifier node with comma-separated sizes. </summary>
+    public ArrayTypeModifier(Token leftBracket, SeparatedSyntaxList<Expression> sizes, Token rightBracket) : base(PostfixTypeModifierKind.Array)
     {
         LeftBracket = leftBracket;
+        Sizes = sizes;
         RightBracket = rightBracket;
-        Dimension = dimension;
+    }
+
+    /// <summary> Creates one 1D fixed-size array modifier node. </summary>
+    public ArrayTypeModifier(Token leftBracket, Expression size, Token rightBracket) : base(PostfixTypeModifierKind.Array)
+    {
+        LeftBracket = leftBracket;
+        Sizes = new SeparatedSyntaxList<Expression>(new SyntaxNode[] { size });
+        RightBracket = rightBracket;
     }
 }

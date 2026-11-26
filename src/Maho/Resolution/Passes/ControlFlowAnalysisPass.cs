@@ -667,7 +667,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
     /// <summary>
     /// Collapses an unconstrained scalar literal type into its canonical default intrinsic type
-    /// (Int -> int32, Float -> float64, Str -> Str, Char -> char).
+    /// (Int -> int32, Float -> float64, Str -> &amp;Str, Char -> char).
     /// </summary>
     private TypeRef CollapseToDefault(TypeRef type)
     {
@@ -677,7 +677,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             {
                 CompileTimeLiteralKind.Int => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
-                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Alias(TypeRef.Resolved(h)) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 _ => TypeRef.Inferred
             };

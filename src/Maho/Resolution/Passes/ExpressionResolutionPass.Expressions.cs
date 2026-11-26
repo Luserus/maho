@@ -126,9 +126,7 @@ internal sealed partial class ExpressionResolutionPass
                 break;
 
             case ArrayCreationExpression arrayCreation:
-                var elemType = ResolveTypeSyntax(arrayCreation.Type, scope);
-                ResolveExpression(arrayCreation.Size, scope, containingFunction);
-                result = TypeRef.Array(elemType);
+                result = ResolveArrayCreation(arrayCreation, scope, containingFunction);
                 break;
 
             case CollectionExpression collection:
@@ -152,7 +150,7 @@ internal sealed partial class ExpressionResolutionPass
 
             case NameofExpression nameofExpr:
                 ResolveExpression(nameofExpr.Argument, scope, containingFunction);
-                result = hStr is { } hs ? TypeRef.Resolved(hs) : TypeRef.Unresolved;
+                result = hStr is { } hs ? TypeRef.Alias(TypeRef.Resolved(hs)) : TypeRef.Unresolved;
                 break;
 
             case LambdaExpression lambda:
@@ -345,18 +343,20 @@ internal sealed partial class ExpressionResolutionPass
             var symHandle = ResolutionContext.GetHandle(sym);
             context.ResolvedTree.AddReference(named, symHandle);
 
+            var resType = GetTypeFromSymbol(sym);
             if (named is GenericNameExpression genericExpr)
             {
                 var resolvedArgs = new List<TypeRef>(genericExpr.GenericArguments.Count);
                 foreach (var arg in genericExpr.GenericArguments)
                     resolvedArgs.Add(ResolveTypeSyntax(arg, scope));
-                context.ValidateGenericTypeArgumentConformances(
+                resType = ValidateAndInstantiateGenericSymbol(
                     symHandle,
+                    sym,
                     [.. genericExpr.GenericArguments],
                     resolvedArgs,
+                    resType,
                     scope,
-                    containingFunction,
-                    reportDiagnostics: true);
+                    containingFunction);
             }
 
             if (sym is MethodSymbol ifaceImplMethod &&
@@ -373,7 +373,6 @@ internal sealed partial class ExpressionResolutionPass
                 }
             }
 
-            var resType = GetTypeFromSymbol(sym);
             if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
                 context.SetConstantValue(named, c.Value);
             return resType;
@@ -422,20 +421,22 @@ internal sealed partial class ExpressionResolutionPass
             context.ResolvedTree.AddReference(scopeExpr, h);
             context.ResolvedTree.AddReference(scopeExpr.Member, h);
 
+            var resType = GetTypeFromSymbol(sym);
             if (scopeExpr.Member is GenericNameExpression gExpr && resolvedGenericArgs is not null)
             {
-                context.ValidateGenericTypeArgumentConformances(
+                resType = ValidateAndInstantiateGenericSymbol(
                     h,
+                    sym,
                     [.. gExpr.GenericArguments],
                     resolvedGenericArgs,
+                    resType,
                     scope,
-                    containingFunction,
-                    reportDiagnostics: true);
+                    containingFunction);
             }
 
             if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
                 context.SetConstantValue(scopeExpr, c.Value);
-            return GetTypeFromSymbol(sym);
+            return resType;
         }
 
         if (!isAmbiguousAcrossModules && scopeExpr.Member is IdentifierNameExpression)
@@ -452,6 +453,43 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         return TypeRef.Unresolved;
+    }
+
+    /// <summary>
+    /// Validates generic type argument constraints for a resolved generic symbol and substitutes its generic parameters into its signature type.
+    /// </summary>
+    private TypeRef ValidateAndInstantiateGenericSymbol(
+        SymbolHandle symHandle,
+        Symbol sym,
+        IReadOnlyList<TypeSyntax> argSyntaxes,
+        IReadOnlyList<TypeRef> resolvedArgs,
+        TypeRef symbolType,
+        Scope scope,
+        SymbolHandle containingFunction)
+    {
+        context.ValidateGenericTypeArgumentConformances(
+            symHandle,
+            argSyntaxes,
+            resolvedArgs,
+            scope,
+            containingFunction,
+            reportDiagnostics: true);
+
+        IReadOnlyList<SymbolHandle> genericParams = sym switch
+        {
+            FunctionSymbol fn => fn.GenericParameters,
+            MethodSymbol ms => ms.GenericParameters,
+            _ => []
+        };
+        if (genericParams.Count == 0 || resolvedArgs.Count == 0)
+            return symbolType;
+
+        var subs = new Dictionary<SymbolHandle, TypeRef>(genericParams.Count);
+        int count = Math.Min(genericParams.Count, resolvedArgs.Count);
+        for (int i = 0; i < count; i++)
+            subs[genericParams[i]] = resolvedArgs[i];
+
+        return symbolType.Substitute(subs);
     }
 
     /// <summary>
@@ -490,6 +528,60 @@ internal sealed partial class ExpressionResolutionPass
     /// </summary>
     /// <param name="handle">The symbol handle to inspect.</param>
     /// <returns>The resolved semantic type, or a resolved reference type to the handle.</returns>
+    private TypeRef ResolveArrayCreation(ArrayCreationExpression arrayCreation, Scope scope, SymbolHandle containingFunction)
+    {
+        var elemType = ResolveTypeSyntax(arrayCreation.Type, scope);
+        if (!elemType.IsError && !elemType.IsSized(context))
+        {
+            context.Diagnostics.ReportGenericConstraintNotSized(
+                arrayCreation.Type.GetSpan() ?? arrayCreation.GetSpan() ?? default,
+                elemType.ToDisplayString(context),
+                "T",
+                arrayCreation.Size is null || arrayCreation.Kind == ObjectCreationKind.New ? KnownIntrinsics.Slice : KnownIntrinsics.Array,
+                "Sized",
+                arrayCreation.GetSource());
+        }
+
+        if (arrayCreation.Size is not null)
+            ResolveExpression(arrayCreation.Size, scope, containingFunction);
+
+        if (arrayCreation.Initializer is { } init)
+        {
+            foreach (var item in init.Expressions)
+                ResolveExpression(item, scope, containingFunction);
+        }
+
+        if (arrayCreation.WithClause?.Initializer is { } withInit)
+        {
+            foreach (var item in withInit.Expressions)
+                ResolveExpression(item, scope, containingFunction);
+        }
+
+        bool isPut = arrayCreation.Kind == ObjectCreationKind.Put;
+        TypeRef targetType;
+        if (isPut && arrayCreation.Size is not null)
+        {
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrH);
+            targetType = TypeRef.Array(elemType, arrayCreation.Size, arrH != default ? arrH : null);
+        }
+        else
+        {
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH);
+            targetType = TypeRef.Slice(elemType, 1, sliceH != default ? sliceH : null);
+        }
+
+        MethodSymbol? boundNewOperator = ResolveAllocationOperator(
+            isPut,
+            null,
+            null,
+            [],
+            arrayCreation,
+            scope,
+            containingFunction);
+
+        return ResolveObjectCreationReturnType(isPut, false, targetType, boundNewOperator, arrayCreation);
+    }
+
     private TypeRef GetTypeFromHandle(SymbolHandle handle)
     {
         var sym = context.GetSymbol(handle);

@@ -686,7 +686,7 @@ internal sealed partial class Parser
 
         if (type is ModifiedType modified && CurrentToken.Kind is not TokenKind.LeftParen)
         {
-            if (modified.Modifier is ArrayTypeModifier arrayModifier)
+            if (modified.Modifier is SliceTypeModifier sliceModifier)
             {
                 var elementType = modified.Type;
                 TypeInitializer? initializer = null;
@@ -699,9 +699,9 @@ internal sealed partial class Parser
                 if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
                     withClause = ParseObjectWithClause();
 
-                return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, null, arrayModifier.RightBracket, initializer, withClause);
+                return new ArrayCreationExpression(keyword, kind, elementType, sliceModifier.LeftBracket, null, sliceModifier.RightBracket, initializer, withClause);
             }
-            else if (modified.Modifier is FixedArrayTypeModifier fixedModifier)
+            else if (modified.Modifier is ArrayTypeModifier arrayModifier)
             {
                 var elementType = modified.Type;
                 TypeInitializer? initializer = null;
@@ -714,7 +714,7 @@ internal sealed partial class Parser
                 if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
                     withClause = ParseObjectWithClause();
 
-                return new ArrayCreationExpression(keyword, kind, elementType, fixedModifier.LeftBracket, fixedModifier.Size, fixedModifier.RightBracket, initializer, withClause);
+                return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer, withClause);
             }
         }
         if (CurrentToken.Kind is TokenKind.LeftBrace)

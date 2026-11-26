@@ -380,7 +380,7 @@ public sealed partial class ParserTests
                 public T Value;
                 public struct Nested;
 
-                public static func Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, int[&] spanParam, &int aliasParam, *int unsafeAliasParam, untagged int untaggedParam, Extra.Nested nested, TInput input) -> int where TInput: Extra.Nested
+                public static func Transform<TInput>(int[] items, int* pointer, int? maybe, int& reference, (&int)[] groupedSliceParam, &int aliasParam, *int unsafeAliasParam, untagged int untaggedParam, Extra.Nested nested, TInput input) -> int where TInput: Extra.Nested
                 {
                     using Extra;
                     using LocalAlias = Extra.Nested;
@@ -523,12 +523,12 @@ public sealed partial class ParserTests
             typeof(TypeBaseClause),
             typeof(TypeConstraintClause),
             typeof(TypeTypeConstraint),
+            typeof(SliceTypeModifier),
             typeof(ArrayTypeModifier),
-            typeof(FixedArrayTypeModifier),
             typeof(PointerTypeModifier),
             typeof(OptionalTypeModifier),
             typeof(ReferenceTypeModifier),
-            typeof(SpanTypeModifier),
+            typeof(GroupedType),
             typeof(SafeAliasTypeModifier),
             typeof(UnsafeAliasTypeModifier),
             typeof(LiteralExpression),
@@ -1201,14 +1201,16 @@ public sealed partial class ParserTests
     }
 
     [Fact]
-    public void Parse_SpanDeclarationInDeclarationContext_ParsesAsVariableDeclaration()
+    public void Parse_GroupedTypeSliceInDeclarationContext_ParsesAsVariableDeclaration()
     {
-        Local local = ParseSingleLocal("int32[&] x;", typeof(LocalVariableDeclarationStatement));
+        Local local = ParseSingleLocal("(&int32)[] x;", typeof(LocalVariableDeclarationStatement));
         var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
         var modified = Assert.IsType<ModifiedType>(variable.Declaration.Type);
-        Assert.IsType<SpanTypeModifier>(modified.Modifier);
-        var simple = Assert.IsType<SimpleType>(modified.Type);
-        Assert.Equal("int32", simple.Name.Value);
+        Assert.IsType<SliceTypeModifier>(modified.Modifier);
+        var grouped = Assert.IsType<GroupedType>(modified.Type);
+        var prefix = Assert.IsType<PrefixModifiedType>(grouped.InnerType);
+        Assert.IsType<SafeAliasTypeModifier>(prefix.Modifier);
+        Assert.Equal("int32", Assert.IsType<SimpleType>(prefix.Type).Name.Value);
         Assert.Equal("x", Assert.IsType<SimpleName>(variable.Declaration.Declarator.Identifier).Name.Value);
     }
 
@@ -1248,17 +1250,17 @@ public sealed partial class ParserTests
     }
 
     [Fact]
-    public void Parse_ArrayTypeModifier_Vs_FixedArrayTypeModifier()
+    public void Parse_SliceTypeModifier_Vs_ArrayTypeModifier()
     {
         Local dynamicArr = ParseSingleLocal("int32[] x;", typeof(LocalVariableDeclarationStatement));
         var dynamicVar = Assert.IsType<LocalVariableDeclarationStatement>(dynamicArr);
         var dynamicMod = Assert.IsType<ModifiedType>(dynamicVar.Declaration.Type);
-        Assert.IsType<ArrayTypeModifier>(dynamicMod.Modifier);
+        Assert.IsType<SliceTypeModifier>(dynamicMod.Modifier);
 
         Local fixedArr = ParseSingleLocal("int32[10] y;", typeof(LocalVariableDeclarationStatement));
         var fixedVar = Assert.IsType<LocalVariableDeclarationStatement>(fixedArr);
         var fixedMod = Assert.IsType<ModifiedType>(fixedVar.Declaration.Type);
-        var fixedArrMod = Assert.IsType<FixedArrayTypeModifier>(fixedMod.Modifier);
+        var fixedArrMod = Assert.IsType<ArrayTypeModifier>(fixedMod.Modifier);
         var sizeLit = Assert.IsType<LiteralExpression>(fixedArrMod.Size);
         Assert.Equal("10", sizeLit.Literal.Value);
     }

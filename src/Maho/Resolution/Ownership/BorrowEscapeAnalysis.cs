@@ -91,7 +91,7 @@ internal sealed class BorrowEscapeAnalysis
         }
     }
 
-    private bool ReturnsSafeBorrow() => GetReturnType().SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };
+    private bool ReturnsSafeBorrow() => TypeRef.UnwrapDyn(GetReturnType()).SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };
 
     private TypeRef GetReturnType() => context.GetSymbol(body.ContainingSymbol) switch
     {

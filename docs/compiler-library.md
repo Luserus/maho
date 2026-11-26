@@ -76,22 +76,23 @@ The discovery pass builds the initial symbol graph and lexical scope hierarchy:
 ### 2.3 Intrinsic Discovery Pass (`IntrinsicDiscoveryPass`)
 The intrinsic discovery pass validates compiler intrinsic types and catalogs operator interfaces:
 - **Attribute Verification**: Discovers and validates compiler-recognized attribute declarations:
-  - `[IntrinsicType("...")]`: must accept exactly one `Str` parameter.
-  - `[OperatorFunction("...")]`: must accept one `Str` parameter naming the operator kind.
+  - `[IntrinsicType("...")]`: must accept exactly one `&Str` parameter.
+  - `[OperatorFunction("...")]`: must accept one `&Str` parameter naming the operator kind.
   - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions with canonical signature contracts (e.g. `"Int32.LessThanOrEqual(Int32, Int32)"`).
 - **Intrinsic Hierarchy & Implicit Deriving**:
   - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations; has zero base types.
-  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Array`, `FixedArray`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
-  - *Implicit Struct Deriving*: User-defined structs, primitive scalars (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`), `Str`, and `Span<T>` implicitly inherit `Struct` (and transitively `ValType`) without explicit base declarations.
+  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Slice`, `Array`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
+  - *Layout Markers*: `Layout`, `Sized : Layout`, and `Unsized : Layout` govern compile-time sizedness; generic type parameters default to `Sized` unless relaxed via `where T : Layout` or `where T : Unsized`.
+  - *Implicit Struct Deriving*: User-defined structs, primitive scalars (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`), and `Str` implicitly inherit `Struct` (and transitively `ValType`) without explicit base declarations.
   - *Implicit Enum Deriving*: User-defined enums and `Optional<T>` implicitly inherit `Enum` (and transitively `ValType`).
   - *Never* (`Never`, `[IntrinsicType("Never")]`): bottom type assignable to any type; has zero base types and implements no constructors or operations.
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
-  - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0544`). `Char` represents a 4-byte Unicode scalar value.
-  - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0544`).
-  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `Pointer<ValType>` environment pointer (`MH0544`).
-  - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` to be declared; must have exactly 1 generic parameter and 1 instance field of type `nuint`.
-  - *Str*: requires `Int8`, `Reference`, and `Int64`; must have 2 instance fields (`Int8&` buffer reference and `Int64` byte length).
-  - *Array & Span*: verified against their element types and length fields.
+  - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0020`). `Char` represents a 4-byte Unicode scalar value.
+  - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0020`).
+  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `Pointer<ValType>` environment pointer (`MH0020`).
+  - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` and `Metadata<T>` (constrained by `where T : Layout`) to represent thin/fat pointer metadata uniformly for `Sized` and `Unsized` pointees.
+  - *Str*: unsized struct requiring `UInt8` and `Slice`; must have 1 instance field of type `UInt8[]` (or `Slice<UInt8>`).
+  - *Slice & Array*: zero-field intrinsic structs parameterized by `<T, D : int = 1>` (`Slice`) and `<T, N : int, D : int = 1>` (`Array`).
 - **Lazy Intrinsic Requirement (`MH0240`)**: Intrinsics are lazily required. Minimal or empty compilations do not fail verification; `MH0240` is reported only when a syntactic construct requiring an intrinsic is used without declaration.
 - **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
   - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `&this` for immutable access, while `MutDeref<TReturn>` / `MutArrow<TReturn>` declare `mut &this` for mutable access.

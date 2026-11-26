@@ -894,6 +894,7 @@ internal sealed class ResolutionContext
     internal static Token? ExtractModuleQualifier(TypeSyntax syntax) => syntax switch
     {
         ScopeQualifiedType sq => sq.Qualifier,
+        GroupedType g => ExtractModuleQualifier(g.InnerType),
         ModifiedType m => ExtractModuleQualifier(m.Type),
         PrefixModifiedType pm => ExtractModuleQualifier(pm.Type),
         _ => null
@@ -902,8 +903,16 @@ internal sealed class ResolutionContext
     internal void TryPrebindConformanceInterface(TypeSyntax typeSyntax, Scope scope)
     {
         var inner = typeSyntax;
-        while (inner is ModifiedType m) inner = m.Type;
-        while (inner is PrefixModifiedType pm) inner = pm.Type;
+        while (inner is ModifiedType or PrefixModifiedType or GroupedType)
+        {
+            inner = inner switch
+            {
+                ModifiedType m => m.Type,
+                PrefixModifiedType pm => pm.Type,
+                GroupedType g => g.InnerType,
+                _ => inner
+            };
+        }
         if (inner is not ScopeQualifiedType sq)
             return;
 
@@ -1025,6 +1034,17 @@ internal sealed class ResolutionContext
         }
     }
 
+    internal bool IsBuiltInLayoutInterface(SymbolHandle handle)
+    {
+        handle = UnwrapAlias(handle);
+        return (DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && handle == layoutH) ||
+               (DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedH) && handle == sizedH) ||
+               (DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out var unsizedH) && handle == unsizedH);
+    }
+
+    internal static string GetTargetDisplayName(ResolutionContext context, SymbolHandle targetHandle) =>
+        context.GetSymbol(targetHandle)?.Name.ToString() ?? "generic type";
+
     internal void ValidateGenericTypeArgumentConformances(
         SymbolHandle targetHandle,
         IReadOnlyList<TypeSyntax> argSyntaxes,
@@ -1043,20 +1063,57 @@ internal sealed class ResolutionContext
             _ => []
         };
 
+        string targetName = GetTargetDisplayName(this, targetHandle);
         int count = Math.Min(genericParams.Count, Math.Min(argSyntaxes.Count, resolvedArgs.Count));
         for (int i = 0; i < count; i++)
         {
             var gp = GetGenericParameterSymbol(genericParams[i]);
-            if (gp is null || gp.Constraints.Count == 0)
+            if (gp is null || gp.ParameterKind is not GenericParameterKind.Type)
                 continue;
 
             var argType = resolvedArgs[i];
             if (argType.IsError || argType.IsUnresolved)
                 continue;
 
+            if (gp.RequiresSized(this) && !argType.IsSized(this))
+            {
+                if (reportDiagnostics)
+                {
+                    Diagnostics.ReportGenericConstraintNotSized(
+                        argSyntaxes[i].GetSpan() ?? default,
+                        argType.ToDisplayString(this),
+                        gp.Name.ToString(),
+                        targetName,
+                        "Sized",
+                        argSyntaxes[i].GetSource());
+                }
+                continue;
+            }
+
+            if (gp.RequiresUnsized(this) && !argType.IsKnownUnsized(this))
+            {
+                if (reportDiagnostics)
+                {
+                    Diagnostics.ReportGenericConstraintNotSized(
+                        argSyntaxes[i].GetSpan() ?? default,
+                        argType.ToDisplayString(this),
+                        gp.Name.ToString(),
+                        targetName,
+                        "Unsized",
+                        argSyntaxes[i].GetSource());
+                }
+                continue;
+            }
+
+            if (gp.Constraints.Count == 0)
+                continue;
+
             foreach (var constraint in gp.Constraints)
             {
                 if (constraint.IsError || constraint.IsUnresolved)
+                    continue;
+
+                if (constraint.Handle is { } ch && IsBuiltInLayoutInterface(ch))
                     continue;
 
                 var lookup = ResolveInterfaceConformance(argType, constraint, explicitModuleQualifier: null, scope, containingFunction);
@@ -2608,6 +2665,10 @@ internal sealed class ResolutionContext
 
             case PrefixModifiedType prefixModified:
                 AddTypeNameParts(prefixModified.Type, parts);
+                break;
+
+            case GroupedType grouped:
+                AddTypeNameParts(grouped.InnerType, parts);
                 break;
 
             case TupleType:

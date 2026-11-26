@@ -229,11 +229,11 @@ public sealed partial class DeclarationResolutionTests
             public struct Int32;
             public Int32* ptr;
             public Int32& refVal;
-            public Int32[&] spanVal;
-            public Int32[] arrVal;
+            public &Int32[] sliceAliasVal;
+            public Int32[]& sliceRefVal;
             public Int32[42] fixedArrVal;
             public Int32? optVal;
-            public Int32*[] nestedVal;
+            public (&Int32)[] nestedVal;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -244,8 +244,8 @@ public sealed partial class DeclarationResolutionTests
 
         var ptr = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "ptr");
         var refVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "refVal");
-        var spanVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "spanVal");
-        var arrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "arrVal");
+        var sliceAliasVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "sliceAliasVal");
+        var sliceRefVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "sliceRefVal");
         var fixedArrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "fixedArrVal");
         var optVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "optVal");
         var nestedVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVal");
@@ -260,19 +260,18 @@ public sealed partial class DeclarationResolutionTests
         var refSem = Assert.IsType<ReferenceSemanticType>(refVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), refSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Span, spanVal.Type.Kind);
-        Assert.True(spanVal.Type.IsResolved);
-        var spanSem = Assert.IsType<SpanSemanticType>(spanVal.Type.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), spanSem.ElementType);
+        Assert.Equal(TypeRefKind.Alias, sliceAliasVal.Type.Kind);
+        var aliasSem = Assert.IsType<AliasSemanticType>(sliceAliasVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, aliasSem.TargetType.Kind);
+        Assert.Equal(TypeRef.Resolved(int32Handle), Assert.IsType<SliceSemanticType>(aliasSem.TargetType.SpecialType).ElementType);
 
-        Assert.Equal(TypeRefKind.Array, arrVal.Type.Kind);
-        Assert.True(arrVal.Type.IsResolved);
-        var arrSem = Assert.IsType<ArraySemanticType>(arrVal.Type.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), arrSem.ElementType);
+        Assert.Equal(TypeRefKind.Reference, sliceRefVal.Type.Kind);
+        var sliceRefSem = Assert.IsType<ReferenceSemanticType>(sliceRefVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, sliceRefSem.ElementType.Kind);
 
-        Assert.Equal(TypeRefKind.FixedArray, fixedArrVal.Type.Kind);
+        Assert.Equal(TypeRefKind.Array, fixedArrVal.Type.Kind);
         Assert.True(fixedArrVal.Type.IsResolved);
-        var fixedArrSem = Assert.IsType<FixedArraySemanticType>(fixedArrVal.Type.SpecialType);
+        var fixedArrSem = Assert.IsType<ArraySemanticType>(fixedArrVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), fixedArrSem.ElementType);
 
         Assert.Equal(TypeRefKind.Optional, optVal.Type.Kind);
@@ -280,12 +279,12 @@ public sealed partial class DeclarationResolutionTests
         var optSem = Assert.IsType<OptionalSemanticType>(optVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), optSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Array, nestedVal.Type.Kind);
+        Assert.Equal(TypeRefKind.Slice, nestedVal.Type.Kind);
         Assert.True(nestedVal.Type.IsResolved);
-        var nestedSem = Assert.IsType<ArraySemanticType>(nestedVal.Type.SpecialType);
-        Assert.Equal(TypeRefKind.Pointer, nestedSem.ElementType.Kind);
-        var innerPtrSem = Assert.IsType<PointerSemanticType>(nestedSem.ElementType.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), innerPtrSem.ElementType);
+        var nestedSem = Assert.IsType<SliceSemanticType>(nestedVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Alias, nestedSem.ElementType.Kind);
+        var innerAliasSem = Assert.IsType<AliasSemanticType>(nestedSem.ElementType.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), innerAliasSem.TargetType);
 
         // Verify that the inner SimpleType node was recorded in ResolvedTree
         var ptrDecl = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
@@ -340,8 +339,8 @@ public sealed partial class DeclarationResolutionTests
             public struct Int32;
             public func Process(Int32 value) -> () { }
             public func Process(Int32* value) -> () { }
-            public func Process(Int32[&] value) -> () { }
-            public func Process(Int32[] value) -> () { }
+            public func Process(Int32[]& value) -> () { }
+            public func Process((&Int32)[]& value) -> () { }
             public func Process(Int32[10] value) -> () { }
             """);
 
@@ -355,9 +354,15 @@ public sealed partial class DeclarationResolutionTests
 
         var fnPlain = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type == TypeRef.Resolved(int32Handle));
         var fnPtr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Pointer);
-        var fnSpan = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Span);
+        var fnSliceRef = Assert.Single(context.FunctionSymbols, f =>
+            context.ParameterSymbols[f.Parameters[0].ID].Type.SpecialType is ReferenceSemanticType rf &&
+            rf.ElementType.SpecialType is SliceSemanticType sl &&
+            sl.ElementType == TypeRef.Resolved(int32Handle));
+        var fnGroupedSliceRef = Assert.Single(context.FunctionSymbols, f =>
+            context.ParameterSymbols[f.Parameters[0].ID].Type.SpecialType is ReferenceSemanticType rf &&
+            rf.ElementType.SpecialType is SliceSemanticType sl &&
+            sl.ElementType.Kind == TypeRefKind.Alias);
         var fnArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Array);
-        var fnFixedArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.FixedArray);
     }
 
     [Fact]

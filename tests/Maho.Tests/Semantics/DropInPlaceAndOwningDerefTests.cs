@@ -52,12 +52,12 @@ public sealed class DropInPlaceAndOwningDerefTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context.FunctionSymbols, f => f.Name.Text == "Test");
         var var2D = Assert.Single(fn.LocalVariables, v => v.Name.Text == "grid2D");
-        var fix2D = Assert.IsType<FixedArraySemanticType>(var2D.Type.SpecialType);
+        var fix2D = Assert.IsType<ArraySemanticType>(var2D.Type.SpecialType);
         Assert.Equal(2, fix2D.Dimension);
         Assert.Equal(2, fix2D.Sizes.Count);
 
         var var3D = Assert.Single(fn.LocalVariables, v => v.Name.Text == "grid3D");
-        var fix3D = Assert.IsType<FixedArraySemanticType>(var3D.Type.SpecialType);
+        var fix3D = Assert.IsType<ArraySemanticType>(var3D.Type.SpecialType);
         Assert.Equal(3, fix3D.Dimension);
         Assert.Equal(3, fix3D.Sizes.Count);
     }

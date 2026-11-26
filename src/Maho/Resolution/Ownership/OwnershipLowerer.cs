@@ -265,8 +265,12 @@ internal sealed class OwnershipLowerer
         borrowed = default;
         borrowKind = BorrowKind.Shared;
 
-        if (targetType.SpecialType is AliasSemanticType { IsUnsafe: false } alias)
+        var unwrappedTarget = TypeRef.UnwrapDyn(targetType);
+        if (unwrappedTarget.SpecialType is AliasSemanticType { IsUnsafe: false } alias)
         {
+            if (IsStaticStorageExpression(initializer))
+                return false;
+
             if (TryGetPlace(initializer, scope, out borrowed))
             {
                 borrowKind = alias.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared;
@@ -281,7 +285,7 @@ internal sealed class OwnershipLowerer
             return false;
         }
 
-        if (targetType.SpecialType is ReferenceSemanticType reference && initializer is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } address)
+        if (unwrappedTarget.SpecialType is ReferenceSemanticType reference && initializer is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } address)
         {
             if (TryGetPlace(address.Operand, scope, out borrowed))
             {
@@ -298,6 +302,14 @@ internal sealed class OwnershipLowerer
         }
 
         return false;
+    }
+
+    private static bool IsStaticStorageExpression(Expression expr)
+    {
+        while (expr is ParenthesizedExpression p)
+            expr = p.Expression;
+
+        return expr is NameofExpression || (expr is LiteralExpression lit && lit.Literal.Kind == TokenKind.String);
     }
 
     private static bool IsTemporaryExpression(Expression expr)
@@ -531,7 +543,7 @@ internal sealed class OwnershipLowerer
                 break;
 
             case UnaryExpression unary when unary.OperatorToken.Kind == TokenKind.Ampersand:
-                bool mutable = context.GetRequiredExpressionType(unary).SpecialType is ReferenceSemanticType reference && reference.IsMutable;
+                bool mutable = TypeRef.UnwrapDyn(context.GetRequiredExpressionType(unary)).SpecialType is ReferenceSemanticType reference && reference.IsMutable;
                 if (TryGetPlace(unary.Operand, scope, out var borrowed))
                 {
                     Emit(OwnershipStatementKind.Borrow, borrowed, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
@@ -650,7 +662,7 @@ internal sealed class OwnershipLowerer
         {
             place = ResolveKnownReferent(place);
             TypeRef sourceType = context.GetRequiredExpressionType(expression);
-            bool isAliasMaterialization = sourceType.SpecialType is AliasSemanticType or ReferenceSemanticType;
+            bool isAliasMaterialization = TypeRef.UnwrapDyn(sourceType).SpecialType is AliasSemanticType or ReferenceSemanticType;
             OwnershipUseKind useKind;
             if (isAliasMaterialization)
             {
@@ -682,7 +694,7 @@ internal sealed class OwnershipLowerer
     /// Reference, alias, and pointer destinations retain their handle semantics. Their declarations
     /// are handled by <see cref="TryGetDeclarationBorrow"/> or ordinary handle assignment instead.
     /// </remarks>
-    private static bool IsOwnedValueDestination(TypeRef type) => type.SpecialType is not (AliasSemanticType or ReferenceSemanticType or PointerSemanticType);
+    private static bool IsOwnedValueDestination(TypeRef type) => TypeRef.UnwrapDyn(type).SpecialType is not (AliasSemanticType or ReferenceSemanticType or PointerSemanticType);
 
     /// <summary>
     /// Lowers assignment while avoiding a false read of a directly assigned field/place.
@@ -736,9 +748,9 @@ internal sealed class OwnershipLowerer
         {
             var argument = arguments[index];
             var parameter = index < parameters.Count ? parameters[index] : null;
-            if (parameter is not null && IsSafeBorrow(parameter.Type))
+            if (parameter is not null && IsSafeBorrow(parameter.Type) && !IsStaticStorageExpression(argument))
             {
-                bool mutable = parameter.Type.SpecialType switch
+                bool mutable = TypeRef.UnwrapDyn(parameter.Type).SpecialType switch
                 {
                     ReferenceSemanticType reference => reference.IsMutable,
                     AliasSemanticType alias => alias.IsMutable && !alias.IsUnsafe,
@@ -810,7 +822,7 @@ internal sealed class OwnershipLowerer
         return handles.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
     }
 
-    private static bool IsSafeBorrow(TypeRef type) => type.SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };
+    private static bool IsSafeBorrow(TypeRef type) => TypeRef.UnwrapDyn(type).SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };
 
     /// <summary>
     /// Evaluates a place strictly as a read, for example the receiver needed to reach a member.
@@ -868,7 +880,7 @@ internal sealed class OwnershipLowerer
             case UnaryExpression unary when unary.OperatorToken.Kind == TokenKind.Asterisk:
                 // A raw pointer dereference deliberately crosses the safe lifetime boundary.
                 // Do not manufacture a tracked place from it; unsafe code owns that risk.
-                if (context.GetRequiredExpressionType(unary.Operand).SpecialType is PointerSemanticType)
+                if (TypeRef.UnwrapDyn(context.GetRequiredExpressionType(unary.Operand)).SpecialType is PointerSemanticType)
                     break;
                 if (TryGetPlace(unary.Operand, scope, out var pointer))
                 {
@@ -930,7 +942,7 @@ internal sealed class OwnershipLowerer
         // `this` is a source alias to the implicit/explicit receiver storage.  It is never
         // silently consumed merely because expression resolution presents its underlying Self
         // type; a consuming receiver will be represented explicitly in a later lowering slice.
-        if (ReferenceEquals(place.Root, receiverParameter) && receiverParameter?.Type.SpecialType is AliasSemanticType or ReferenceSemanticType or PointerSemanticType)
+        if (ReferenceEquals(place.Root, receiverParameter) && receiverParameter is not null && TypeRef.UnwrapDyn(receiverParameter.Type).SpecialType is AliasSemanticType or ReferenceSemanticType or PointerSemanticType)
             return OwnershipUseKind.Read;
 
         TypeRef type = context.GetRequiredExpressionType(expression);

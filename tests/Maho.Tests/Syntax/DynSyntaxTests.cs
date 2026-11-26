@@ -6,7 +6,7 @@ namespace Maho.Tests;
 public sealed class DynSyntaxTests
 {
     [Fact]
-    public void DynTypeModifier_LeftToRightParsing_DynReference()
+    public void DynTypeModifier_PostfixBeforePrefix_DynReference()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Widget
@@ -21,17 +21,16 @@ public sealed class DynSyntaxTests
         var block = Assert.IsType<TypeBlockBody>(typeDecl.Body);
         var field = Assert.IsType<MemberFieldDeclaration>(Assert.Single(block.Members));
 
-        var modified = Assert.IsType<ModifiedType>(field.Declaration.Type);
-        Assert.IsType<ReferenceTypeModifier>(modified.Modifier);
-
-        var prefix = Assert.IsType<PrefixModifiedType>(modified.Type);
+        var prefix = Assert.IsType<PrefixModifiedType>(field.Declaration.Type);
         Assert.IsType<DynTypeModifier>(prefix.Modifier);
-        var target = Assert.IsType<SimpleType>(prefix.Type);
+        var modified = Assert.IsType<ModifiedType>(prefix.Type);
+        Assert.IsType<ReferenceTypeModifier>(modified.Modifier);
+        var target = Assert.IsType<SimpleType>(modified.Type);
         Assert.Equal("Target", target.Name.Value);
     }
 
     [Fact]
-    public void DynTypeModifier_LeftToRightParsing_DynPointer()
+    public void DynTypeModifier_PostfixBeforePrefix_DynPointer()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Widget
@@ -46,22 +45,21 @@ public sealed class DynSyntaxTests
         var block = Assert.IsType<TypeBlockBody>(typeDecl.Body);
         var field = Assert.IsType<MemberFieldDeclaration>(Assert.Single(block.Members));
 
-        var modified = Assert.IsType<ModifiedType>(field.Declaration.Type);
-        Assert.IsType<PointerTypeModifier>(modified.Modifier);
-
-        var prefix = Assert.IsType<PrefixModifiedType>(modified.Type);
+        var prefix = Assert.IsType<PrefixModifiedType>(field.Declaration.Type);
         Assert.IsType<DynTypeModifier>(prefix.Modifier);
-        var target = Assert.IsType<SimpleType>(prefix.Type);
+        var modified = Assert.IsType<ModifiedType>(prefix.Type);
+        Assert.IsType<PointerTypeModifier>(modified.Modifier);
+        var target = Assert.IsType<SimpleType>(modified.Type);
         Assert.Equal("Target", target.Name.Value);
     }
 
     [Fact]
-    public void DynTypeModifier_LeftToRightParsing_DynArrayAndOptional()
+    public void DynTypeModifier_PostfixBeforePrefix_SliceAndOptional_WithGrouping()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Widget
             {
-                dyn Item[] arrayField;
+                (dyn Item&)[] sliceField;
                 dyn Option? optField;
             }
             """);
@@ -74,24 +72,25 @@ public sealed class DynSyntaxTests
 
         var field1 = Assert.IsType<MemberFieldDeclaration>(block.Members[0]);
         var modified1 = Assert.IsType<ModifiedType>(field1.Declaration.Type);
-        Assert.IsType<ArrayTypeModifier>(modified1.Modifier);
-        var prefix1 = Assert.IsType<PrefixModifiedType>(modified1.Type);
+        Assert.IsType<SliceTypeModifier>(modified1.Modifier);
+        var grouped1 = Assert.IsType<GroupedType>(modified1.Type);
+        var prefix1 = Assert.IsType<PrefixModifiedType>(grouped1.InnerType);
         Assert.IsType<DynTypeModifier>(prefix1.Modifier);
 
         var field2 = Assert.IsType<MemberFieldDeclaration>(block.Members[1]);
-        var modified2 = Assert.IsType<ModifiedType>(field2.Declaration.Type);
-        Assert.IsType<OptionalTypeModifier>(modified2.Modifier);
-        var prefix2 = Assert.IsType<PrefixModifiedType>(modified2.Type);
+        var prefix2 = Assert.IsType<PrefixModifiedType>(field2.Declaration.Type);
         Assert.IsType<DynTypeModifier>(prefix2.Modifier);
+        var modified2 = Assert.IsType<ModifiedType>(prefix2.Type);
+        Assert.IsType<OptionalTypeModifier>(modified2.Modifier);
     }
 
     [Fact]
-    public void UntaggedModifier_LeftToRightParsing_UntaggedPointer()
+    public void UntaggedModifier_PostfixBeforePrefix_AndGroupedPointer()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Widget
             {
-                Box<untagged Target*> field;
+                Box<(untagged Target)*> field;
             }
             """);
 
@@ -107,7 +106,8 @@ public sealed class DynSyntaxTests
         var modified = Assert.IsType<ModifiedType>(arg);
         Assert.IsType<PointerTypeModifier>(modified.Modifier);
 
-        var prefix = Assert.IsType<PrefixModifiedType>(modified.Type);
+        var grouped = Assert.IsType<GroupedType>(modified.Type);
+        var prefix = Assert.IsType<PrefixModifiedType>(grouped.InnerType);
         Assert.IsType<UntaggedTypeModifier>(prefix.Modifier);
     }
 
@@ -167,20 +167,21 @@ public sealed class DynSyntaxTests
     [Fact]
     public void DynTypeRef_PropertiesAndSizedness()
     {
+        var ctx = Compilation.FromSource("").Context;
         var targetType = TypeRef.Resolved((SymbolKind.Type, new SymbolID(42)));
         var dynRef = TypeRef.Dyn(targetType);
 
         Assert.True(dynRef.IsDyn);
-        Assert.False(dynRef.IsSized);
+        Assert.False(dynRef.IsSized(ctx));
         Assert.NotNull(dynRef.AsDyn);
         Assert.Equal(targetType, dynRef.AsDyn.TargetType);
         Assert.Equal("dyn (Type, 42)", dynRef.ToString());
 
-        var dynPtr = TypeRef.Pointer(dynRef);
-        Assert.True(dynPtr.IsSized);
-        Assert.False(dynPtr.IsDyn);
+        var dynPtr = TypeRef.Dyn(TypeRef.Pointer(targetType));
+        Assert.True(dynPtr.IsSized(ctx));
+        Assert.True(dynPtr.IsDyn);
 
-        var dynRefType = TypeRef.Reference(dynRef);
-        Assert.True(dynRefType.IsSized);
+        var dynRefType = TypeRef.Dyn(TypeRef.Reference(targetType));
+        Assert.True(dynRefType.IsSized(ctx));
     }
 }

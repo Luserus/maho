@@ -6,11 +6,21 @@ namespace Maho.Tests;
 public sealed class FunctionPointerAndDelegateTests
 {
     private const string StdPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicType(&Str name);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+
+        intrinsic attribute OperatorFunction(&Str name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -25,23 +35,30 @@ public sealed class FunctionPointerAndDelegateTests
         [IntrinsicType("Int32")]
         public struct int32;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -134,11 +151,17 @@ public sealed class FunctionPointerAndDelegateTests
     public void Resolve_FunctionType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("Int32")] public struct int32;
 
@@ -153,11 +176,17 @@ public sealed class FunctionPointerAndDelegateTests
     public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("Int32")] public struct int32;
 
@@ -226,12 +255,18 @@ public sealed class FunctionPointerAndDelegateTests
     public void Function_WithoutCallableImplementation_ReportsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
 
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("ValueType")] public struct ValType;
 
@@ -250,12 +285,18 @@ public sealed class FunctionPointerAndDelegateTests
     public void StructMethod_WithSemicolonWithoutIntrinsicFunction_ReportsMH0124()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
 
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
@@ -274,12 +315,18 @@ public sealed class FunctionPointerAndDelegateTests
     public void Call_WithoutCallableInPrelude_ReportsMH0021()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
 
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
             [IntrinsicType("NUInt")] public struct nuint;
             [IntrinsicType("Int32")] public struct int32;
             [IntrinsicType("ValueType")] public struct ValType;

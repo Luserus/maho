@@ -5,9 +5,7 @@ namespace Maho.Tests;
 
 public sealed class SumTypesTests
 {
-    private static readonly string Prelude = CompilerTestBed.FullPrelude + """
-        public struct uint8;
-        """;
+    private static readonly string Prelude = CompilerTestBed.FullPrelude;
 
     // ==========================================
     // 1. Enum Declaration & Symbol Discovery

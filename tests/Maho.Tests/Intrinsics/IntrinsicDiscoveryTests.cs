@@ -5,13 +5,25 @@ namespace Maho.Tests;
 public sealed partial class IntrinsicDiscoveryTests
 {
     private const string IntrinsicBootstrapPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
+
+        [IntrinsicType("Layout")]
+        public interface Layout;
+
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
         [IntrinsicType("ValueType")]
         public struct ValType;
 
         [IntrinsicType("Struct")]
         public struct Struct : ValType;
+
+        [IntrinsicType("UInt8")]
+        public struct UInt8;
 
         [IntrinsicType("Int8")]
         public struct Int8;
@@ -22,30 +34,37 @@ public sealed partial class IntrinsicDiscoveryTests
         [IntrinsicType("NUInt")]
         public struct NUInt;
 
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             NUInt address;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             NUInt address;
+            Metadata<T> metadata;
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            Int8& data;
-            NUInt length;
+            UInt8[] data;
         }
         """;
 
     private const string UseSitePrelude = IntrinsicBootstrapPrelude + """
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicFunction(&Str signature);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute OperatorFunction(&Str name);
 
 
         public interface Callable<TReturn, TParams...>
@@ -153,18 +172,17 @@ public sealed partial class IntrinsicDiscoveryTests
         var compilation = Compilation.FromSource("""
             intrinsic attribute IntrinsicType(Int32 name);
 
-            [IntrinsicType("Int8")] public struct Int8;
-            [IntrinsicType("Int64")] public struct Int64;
-            [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Reference")] public struct Reference<T> { NUInt addr; }
-            [IntrinsicType("Pointer")] public struct Pointer<T> { NUInt addr; }
+            [IntrinsicType("ValueType")] public struct ValType;
+            [IntrinsicType("Struct")] public struct Struct : ValType;
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int32")] public struct Int32;
-            [IntrinsicType("Str")] public struct Str { Int8& ptr; Int64 len; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Str")] public struct Str { UInt8[] data; }
             """);
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0541");
-        Assert.Contains("must match the primitive 'Str' type", diag.Message);
+        Assert.Contains("must be '&Str'", diag.Message);
     }
 
     [Fact]
@@ -253,10 +271,15 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_PointerWithoutNUIntField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
             [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
 
             [IntrinsicType("Pointer")]
@@ -268,8 +291,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& ptr;
-                Int64 len;
+                UInt8[] data;
             }
             """);
 
@@ -281,9 +303,14 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_PointerWithoutNUIntDeclared_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Pointer")]
             public struct Pointer<T>
@@ -294,8 +321,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& ptr;
-                Int64 len;
+                UInt8[] data;
             }
             """);
 
@@ -307,10 +333,15 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_PointerWrongGenericCount_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
             [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
 
             [IntrinsicType("Pointer")]
@@ -322,8 +353,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& ptr;
-                Int64 len;
+                UInt8[] data;
             }
             """);
 
@@ -335,10 +365,15 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_PointerWrongFieldCount_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
             [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
 
             [IntrinsicType("Pointer")]
@@ -351,8 +386,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& ptr;
-                Int64 len;
+                UInt8[] data;
             }
             """);
 
@@ -364,10 +398,15 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_ReferenceRequiresNUIntField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Reference")]
             public struct Reference<T>
@@ -384,8 +423,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& ptr;
-                Int64 len;
+                UInt8[] data;
             }
             """);
 
@@ -397,138 +435,78 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_StrWrongFirstField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
-            [IntrinsicType("Int8")] public struct Int8;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int64")] public struct Int64;
-            [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int64 wrongPtr;
-                Int64 length;
+                Int64 wrongField;
             }
             """);
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
-        Assert.Contains("first field must be a pointer or reference type", diag.Message);
+        Assert.Contains("UInt8[]", diag.Message);
     }
 
     [Fact]
-    public void Str_ValidABI_WithRawPointer_Succeeds()
+    public void Str_ValidContract_WithByteSlice_Succeeds()
     {
-        var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
-            [IntrinsicType("ValueType")] public struct ValType;
-            [IntrinsicType("Struct")] public struct Struct : ValType;
-            [IntrinsicType("Int8")] public struct Int8;
-            [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Pointer")] public struct Pointer<T> { NUInt address; }
-
-            [IntrinsicType("Str")]
-            public struct Str
-            {
-                Int8* data;
-                NUInt length;
-            }
-            """);
+        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude);
 
         Assert.False(compilation.HasErrors);
         Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Str));
     }
 
     [Fact]
-    public void AbiMismatch_StrWrongSecondField_EmitsMH0020()
+    public void AbiMismatch_StrTwoFields_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
-            [IntrinsicType("Int8")] public struct Int8;
-            [IntrinsicType("Int64")] public struct Int64;
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Reference")] public struct Reference<T> { NUInt address; }
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                Int8& data;
-                Int8 wrongSecond;
+                UInt8[] data;
+                NUInt extraLength;
             }
             """);
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
-        Assert.Contains("second field must be of type 'NUInt'", diag.Message);
+        Assert.Contains("exactly 1 instance field", diag.Message);
     }
 
     [Fact]
-    public void AbiMismatch_ArrayWrongFields_EmitsMH0020()
+    public void AbiMismatch_SliceWithFields_EmitsMH0020()
     {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
+        var compilation = Compilation.FromSource("""
+            intrinsic attribute IntrinsicType(&Str name);
+            [IntrinsicType("Int64")] public struct Int64;
+            [IntrinsicType("UInt8")] public struct UInt8;
 
-            [IntrinsicType("Array")]
-            public struct Array<T>
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>
             {
                 Int64 data;
-                Int64 length;
+            }
+
+            [IntrinsicType("Str")]
+            public struct Str
+            {
+                UInt8[] data;
             }
             """);
 
         Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
-        Assert.Contains("first field must be a pointer or reference type", diag.Message);
-    }
-
-    [Fact]
-    public void Array_ValidABI_WithReference_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("Array")]
-            public struct Array<T>
-            {
-                T& data;
-                NUInt length;
-            }
-            """);
-
-        Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
-    }
-
-    [Fact]
-    public void Array_ValidABI_WithPointerAndNUInt_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("Array")]
-            public struct Array<T>
-            {
-                T* data;
-                NUInt length;
-            }
-            """);
-
-        Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
-    }
-
-    [Fact]
-    public void Array_ValidABI_WithPointerGenericSyntax_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("Array")]
-            public struct Array<T>
-            {
-                Pointer<T> data;
-                NUInt length;
-            }
-            """);
-
-        Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
+        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020" && d.Message.Contains("type 'Slice'"));
+        Assert.Contains("zero instance fields", diag.Message);
     }
 
     [Fact]
@@ -541,110 +519,41 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void Span_ValidABI_WithReferenceAndNUInt_Succeeds()
+    public void Array_ValidContract_ZeroFields_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            [IntrinsicType("Span")]
-            public struct Span<T>
-            {
-                T& data;
-                NUInt length;
-            }
-            """);
-
-        Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
-    }
-
-    [Fact]
-    public void Span_ValidABI_WithReferenceGenericSyntax_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("Span")]
-            public struct Span<T>
-            {
-                Reference<T> data;
-                NUInt length;
-            }
-            """);
-
-        Assert.Empty(compilation.Diagnostics);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
-    }
-
-    [Fact]
-    public void Span_ValidABI_WithRawPointer_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("Span")]
-            public struct Span<T>
-            {
-                T* data;
-                NUInt length;
-            }
+            [IntrinsicType("Array")]
+            public struct Array<T, N : int>;
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
     }
 
     [Fact]
-    public void AbiMismatch_SpanWrongFirstField_EmitsMH0020()
+    public void Array_ValidContract_Multidimensional_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            [IntrinsicType("Span")]
-            public struct Span<T>
-            {
-                Int64 wrongField;
-                NUInt length;
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0020");
-        Assert.Contains("first field must be a reference or pointer type", diag.Message);
-    }
-
-    [Fact]
-    public void FixedArray_ValidABI_ZeroFields_Succeeds()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("FixedArray")]
-            public struct FixedArray<T, N>;
+            [IntrinsicType("Array")]
+            public struct Array<T, N : int, D : int = 1>;
             """);
 
         Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray));
+        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array));
     }
 
     [Fact]
-    public void FixedArray_ValidABI_MultidimensionalContract_Succeeds()
+    public void Array_DuplicateIntrinsic_ReportsMH0543()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
-            [IntrinsicType("FixedArray")]
-            public struct FixedArray<T, N, D>;
-            """);
+            [IntrinsicType("Array")]
+            public struct Array1D<T, N : int>;
 
-        Assert.False(compilation.HasErrors);
-        Assert.True(compilation.Context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray));
-    }
-
-    [Fact]
-    public void FixedArray_DuplicateIntrinsic_ReportsMH0543()
-    {
-        var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
-
-            [IntrinsicType("FixedArray")]
-            public struct FixedArray1D<T, N>;
-
-            [IntrinsicType("FixedArray")]
-            public struct FixedArrayND<T, N, D>;
+            [IntrinsicType("Array")]
+            public struct ArrayND<T, N : int, D : int>;
             """);
 
         Assert.True(compilation.HasErrors);
@@ -684,7 +593,7 @@ public sealed partial class IntrinsicDiscoveryTests
     }
 
     [Fact]
-    public void UseSite_ArrayWithoutArrayIntrinsic_EmitsMH0021()
+    public void UseSite_SliceWithoutSliceIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Dummy;
@@ -696,11 +605,11 @@ public sealed partial class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
-        Assert.Contains("Array", diag.Message);
+        Assert.Contains("Slice", diag.Message);
     }
 
     [Fact]
-    public void UseSite_FixedArrayWithoutFixedArrayIntrinsic_EmitsMH0021()
+    public void UseSite_ArrayWithoutArrayIntrinsic_EmitsMH0021()
     {
         var compilation = Compilation.FromSource("""
             public struct Dummy;
@@ -712,43 +621,20 @@ public sealed partial class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
-        Assert.Contains("FixedArray", diag.Message);
+        Assert.Contains("Array", diag.Message);
     }
 
     [Fact]
-    public void UseSite_SpanWithoutSpanIntrinsic_EmitsMH0021()
-    {
-        var compilation = Compilation.FromSource("""
-            public struct Dummy;
-            public struct Foo
-            {
-                Dummy[&] span;
-            }
-            """);
-
-        Assert.True(compilation.HasErrors);
-        var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0021");
-        Assert.Contains("Span", diag.Message);
-    }
-
-    [Fact]
-    public void UseSite_SpanWithSpanIntrinsic_Succeeds()
+    public void UseSite_SliceSpanAliasWithIntrinsic_Succeeds()
     {
         var compilation = Compilation.FromSource(IntrinsicBootstrapPrelude + """
 
             [IntrinsicType("Int32")]
             public struct Int32;
 
-            [IntrinsicType("Span")]
-            public struct Span<T>
-            {
-                T& data;
-                NUInt length;
-            }
-
             public struct Container
             {
-                Int32[&] span;
+                Int32[]& sliceRef;
             }
             """);
 

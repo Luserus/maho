@@ -45,7 +45,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         Assert.False(modA.HasErrors);
 
         var modB = Compilation.FromSource("""
-            public func ReadGreeting(&Greetable g) -> int32
+            public func ReadGreeting(dyn &Greetable g) -> int32
             {
                 return g.Greet();
             }
@@ -126,10 +126,10 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     }
 
     [Fact]
-    public void MultipleSeparatePrivateExtensions_CoexistWithDistinctMangledIds()
+    public void MultipleSeparatePrivateExtensions_CoexistWithDistinctSemanticConformances()
     {
         var compilation = Compilation.FromSource(SharedIfaceModule + """
-            public func Consume(&Bar b) -> int32 { return b.Baz(); }
+            public func Consume(dyn &Bar b) -> int32 { return b.Baz(); }
 
             public extension Foo : private Bar
             {
@@ -153,10 +153,10 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             .Where(c => c.TargetType.ToDisplayString(compilation.Context) == "Foo")
             .ToList();
         Assert.Equal(2, fooConfs.Count);
-        Assert.NotEqual(
-            fooConfs[0].MangledConformanceId,
-            fooConfs[1].MangledConformanceId);
-        Assert.All(fooConfs, c => Assert.StartsWith("MyMod_private_", c.MangledConformanceId));
+        Assert.NotSame(fooConfs[0], fooConfs[1]);
+        Assert.NotEqual(fooConfs[0].OwnerHandle, fooConfs[1].OwnerHandle);
+        Assert.All(fooConfs, c => Assert.Equal(Accessibility.Private, c.Accessibility));
+        Assert.Equal(2, fooConfs.SelectMany(c => c.MethodMap.Values).Distinct().Count());
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
                 public func Bar.Baz(&this) -> int32 { return 1; }
             }
 
-            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
 
             public extension Foo : private Bar
             {
@@ -199,12 +199,12 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var publicConf = fooConfs.Single(c => c.Accessibility == Accessibility.Public);
         var privateConf = fooConfs.Single(c => c.Accessibility == Accessibility.Private);
 
-        var boundIds = shadowsOuter.Context.ResolvedTree.Conformances.Values.Select(c => c.MangledConformanceId).ToList();
-        Assert.Contains(privateConf.MangledConformanceId, boundIds);
-        Assert.Contains(publicConf.MangledConformanceId, boundIds);
+        var boundConfs = shadowsOuter.Context.ResolvedTree.Conformances.Values.ToList();
+        Assert.Contains(privateConf, boundConfs);
+        Assert.Contains(publicConf, boundConfs);
 
         var outsideInaccessible = Compilation.FromSource(SharedIfaceModule + """
-            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
 
             public extension Foo : private Bar
             {
@@ -223,7 +223,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     }
 
     [Fact]
-    public void LowerVisibilityConformanceReturn_WithoutDyn_ReportsMH0579_WithDyn_Succeeds()
+    public void LowerVisibilityConformanceReturn_WithoutDyn_ReportsMH0583_WithDyn_Succeeds()
     {
         var badAliasReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Bar { public func Baz(&this) -> int32; }
@@ -244,7 +244,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             """);
 
         Assert.True(badAliasReturn.HasErrors);
-        Assert.Contains(badAliasReturn.Diagnostics, d => d.Code == "MH0579");
+        Assert.Contains(badAliasReturn.Diagnostics, d => d.Code == "MH0583");
 
         var validDynReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Bar { public func Baz(&this) -> int32; }
@@ -262,11 +262,6 @@ public sealed class ScopedConformanceAndModuleResolutionTests
                 {
                     return this;
                 }
-
-                private func StayPrivate(&this) -> &Bar
-                {
-                    return this;
-                }
             }
             """);
 
@@ -277,7 +272,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     public void CrossModuleConformances_InternalIsolated_AndPublicDisambiguatedWithModuleQualifier()
     {
         var baseTypes = Compilation.FromSource(SharedIfaceModule + """
-            public func TakeBar(&Bar b) -> int32 { return b.Baz(); }
+            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
             public func Pick<T : Bar>(&T item) -> int32 { return 1; }
             """,
             "Core.mh",
@@ -374,7 +369,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
             new CompilationOptions { ModuleName = "ModC" },
             referencedCompilations: [baseTypes, modPubA, modPubB]);
 
-        Assert.False(modCDisambig.HasErrors);
+        Assert.False(modCDisambig.HasErrors, string.Join("\n", modCDisambig.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         var pairSym = modCDisambig.Context.TypeSymbols.Single(t => t.Name.Text == "PairHolders");
         var pairScope = pairSym.EnclosingScope.GetChildScope(ResolutionContext.GetHandle(pairSym))!;

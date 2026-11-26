@@ -54,10 +54,14 @@ internal static class KnownIntrinsics
     public const string MutableReference = "MutableReference";
     public const string Metadata = "Metadata";
 
-    // Arrays and Spans
-    public const string FixedArray = "FixedArray";
+    // Layout constraints
+    public const string Layout = "Layout";
+    public const string Sized = "Sized";
+    public const string Unsized = "Unsized";
+
+    // Slices and Arrays
+    public const string Slice = "Slice";
     public const string Array = "Array";
-    public const string Span = "Span";
     public const string Optional = "Optional";
 
     // Operator Full Names
@@ -170,9 +174,10 @@ internal static class KnownIntrinsics
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
         Bool, Char, Str, Box, Never,
+        Layout, Sized, Unsized,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
         Pointer, MutablePointer, Reference, MutableReference, Metadata,
-        FixedArray, Array, Span, Optional, Throwable
+        Slice, Array, Optional, Throwable
     ];
 
     public static readonly HashSet<string> IntegerTypes =

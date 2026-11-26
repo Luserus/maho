@@ -160,7 +160,7 @@ internal sealed class OwnershipTypeClassifier
     /// </summary>
     public bool IsZeroSizedEmptyStruct(TypeRef type)
     {
-        if (type.IsError || type.IsUnresolved || type.IsInferred || type.IsLiteral)
+        if (type.IsError || type.IsUnresolved || type.IsInferred || type.IsLiteral || !type.IsSized(context))
             return false;
 
         if (type.SpecialType is TupleSemanticType tuple)
@@ -282,14 +282,16 @@ internal sealed class OwnershipTypeClassifier
                 return false;
             case TupleSemanticType tuple:
                 return tuple.Elements.Any(element => RequiresDrop(element.Type));
-            case FixedArraySemanticType fixedArray:
+            case ArraySemanticType fixedArray:
                 return RequiresDrop(fixedArray.ElementType);
             case UnionSemanticType union:
                 return union.Variants.Any(RequiresDrop);
-            case ArraySemanticType:
+            case SliceSemanticType slice:
+                return RequiresDrop(slice.ElementType);
             case DelegateSemanticType:
-            case DynSemanticType:
                 return true;
+            case DynSemanticType dyn:
+                return dyn.TargetType.SpecialType is not (ReferenceSemanticType or AliasSemanticType or PointerSemanticType);
         }
 
         if (type.Handle is not { } handle)
@@ -332,25 +334,28 @@ internal sealed class OwnershipTypeClassifier
             case FunctionSemanticType:
                 return OwnershipKind.Copy;
 
-            case DynSemanticType:
-                // A bare dyn value is rejected by type/layout checking.  Any supported dyn
-                // form is behind one of the pointer-like cases above.
-                return OwnershipKind.Move;
+            case DynSemanticType dyn:
+                // Any supported dyn indirection inherits Copy/Move from its underlying pointer-like wrapper.
+                return dyn.TargetType.SpecialType is ReferenceSemanticType or AliasSemanticType or PointerSemanticType
+                    ? Classify(dyn.TargetType)
+                    : OwnershipKind.Move;
 
             case TupleSemanticType tuple:
                 return tuple.Elements.All(e => Classify(e.Type) == OwnershipKind.Copy)
                     ? OwnershipKind.Copy : OwnershipKind.Move;
 
-            case FixedArraySemanticType fixedArray:
+            case ArraySemanticType fixedArray:
                 return Classify(fixedArray.ElementType);
 
             case UnionSemanticType union:
                 return union.Variants.All(v => Classify(v) == OwnershipKind.Copy)
                     ? OwnershipKind.Copy : OwnershipKind.Move;
 
-            case ArraySemanticType:
+            case SliceSemanticType slice:
+                return Classify(slice.ElementType);
+
             case DelegateSemanticType:
-                // Arrays and closure environments may own an allocation/captured Drop value.
+                // Closure environments may own an allocation/captured Drop value.
                 // Treat them conservatively until their intrinsic ownership contracts exist.
                 return OwnershipKind.Move;
         }

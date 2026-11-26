@@ -243,6 +243,24 @@ internal sealed partial class Parser
                 LookaheadConsume();
             }
 
+            if (LookaheadCurrentToken.Kind is TokenKind.Equals)
+            {
+                LookaheadConsume();
+                if (IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                {
+                    LookaheadConsume();
+                }
+                else
+                {
+                    var (_, dtOk, _) = LookaheadParseTypeSyntax();
+                    if (!dtOk)
+                    {
+                        lookaheadCurrent = saved;
+                        return (false, LookaheadResultContext.FailedParseTypeSyntax);
+                    }
+                }
+            }
+
             if (LookaheadCurrentToken.Kind is TokenKind.GreaterThanSign)
                 break;
 
@@ -288,6 +306,12 @@ internal sealed partial class Parser
             if (LookaheadCurrentToken.Kind is not TokenKind.Equals)
                 return (false, LookaheadResultContext.FailedParseNamedSyntax);
         }
+
+        // Disambiguate '(a) * b;' and '(a) & b;' expression statements from GroupedType pointers/references.
+        if (type is ModifiedType { Type: GroupedType grouped, Modifier: PointerTypeModifier or ReferenceTypeModifier } &&
+            grouped.InnerType is SimpleType or QualifiedType or ScopeQualifiedType &&
+            LookaheadCurrentToken.Kind is not TokenKind.Equals)
+            return (false, LookaheadResultContext.FailedParseNamedSyntax);
 
         if (LookaheadCurrentToken.Kind is TokenKind.Equals or TokenKind.Semicolon or TokenKind.Comma)
             return (true, LookaheadResultContext.Success);
@@ -586,11 +610,6 @@ internal sealed partial class Parser
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
 
-        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
-        {
-            type = new PrefixModifiedType(prefixModifiers[i], type);
-        }
-
         if (LookaheadCurrentToken.Kind is TokenKind.LeftBracket or TokenKind.QuestionMark or TokenKind.Asterisk or TokenKind.Ampersand ||
             (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Mut && (LookaheadPeek().Kind is TokenKind.Ampersand || LookaheadPeek().Kind is TokenKind.Asterisk)) ||
             (LookaheadCurrentToken.Kind is TokenKind.Dot && LookaheadPeek(1).Kind is TokenKind.Dot && LookaheadPeek(2).Kind is TokenKind.Dot))
@@ -598,6 +617,11 @@ internal sealed partial class Parser
 
         if (!success)
             return (type, false, LookaheadResultContext.FailedParseTypeSyntax);
+
+        for (int i = prefixModifiers.Count - 1; i >= 0; i--)
+        {
+            type = new PrefixModifiedType(prefixModifiers[i], type);
+        }
 
         return (type, true, LookaheadResultContext.Success);
     }
@@ -777,7 +801,10 @@ internal sealed partial class Parser
 
             var (kind, length) = LookaheadGetCombinedOperatorData();
 
-            if (length > 0 && operatorTable.TryGetValue(kind, out var entry) && entry.IsPrefix)
+            if (length > 0 &&
+                kind is not TokenKind.Ampersand and not TokenKind.Asterisk &&
+                operatorTable.TryGetValue(kind, out var entry) &&
+                entry.IsPrefix)
             {
                 lookaheadCurrent = saved;
                 return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>([]), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
@@ -840,8 +867,22 @@ internal sealed partial class Parser
                 break;
         }
 
-        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen || !hasComma)
+        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
         {
+            lookaheadCurrent = saved;
+            return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+        }
+
+        if (!hasComma)
+        {
+            if (nodesAndSeparators.Count == 1 &&
+                nodesAndSeparators[0] is TupleTypeElement singleElement &&
+                singleElement.Name is null)
+            {
+                var groupedCloseParen = LookaheadConsume();
+                return (new GroupedType(openParen, singleElement.Type, groupedCloseParen), true);
+            }
+
             lookaheadCurrent = saved;
             return (new TupleType(openParen, new SeparatedSyntaxList<TupleTypeElement>(nodesAndSeparators), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
         }
@@ -872,7 +913,7 @@ internal sealed partial class Parser
         {
             var (modifier, success) = LookaheadCurrentToken.Kind switch
             {
-                TokenKind.LeftBracket => LookaheadParseArrayOrFixedArrayTypeModifier(),
+                TokenKind.LeftBracket => LookaheadParseSliceOrArrayTypeModifier(),
                 TokenKind.QuestionMark => ((PostfixTypeModifier, bool))LookaheadParseOptionalTypeModifier(),
                 TokenKind.Asterisk => ((PostfixTypeModifier, bool))LookaheadParsePointerTypeModifier(),
                 TokenKind.Ampersand => ((PostfixTypeModifier, bool))LookaheadParseReferenceTypeModifier(),
@@ -898,17 +939,10 @@ internal sealed partial class Parser
         return (new ReferenceTypeModifier(ampersand, mutToken), true);
     }
 
-    /// <summary> Speculatively parses an array or fixed-size array type modifier. </summary>
-    private (PostfixTypeModifier Type, bool Success) LookaheadParseArrayOrFixedArrayTypeModifier()
+    /// <summary> Speculatively parses a slice or fixed-size array type modifier. </summary>
+    private (PostfixTypeModifier Type, bool Success) LookaheadParseSliceOrArrayTypeModifier()
     {
         var openBracket = LookaheadConsume();
-
-        if (LookaheadCurrentToken.Kind is TokenKind.Ampersand && LookaheadPeek().Kind is TokenKind.RightBracket)
-        {
-            var ampersand = LookaheadConsume();
-            var closeBracket = LookaheadConsume();
-            return (new SpanTypeModifier(openBracket, ampersand, closeBracket), true);
-        }
 
         if (LookaheadCurrentToken.Kind is TokenKind.Comma)
         {
@@ -919,10 +953,10 @@ internal sealed partial class Parser
                 dimension++;
             }
             if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
-                return (new ArrayTypeModifier(openBracket, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), dimension), false);
+                return (new SliceTypeModifier(openBracket, new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], []), dimension), false);
 
             var closeBracket = LookaheadConsume();
-            return (new ArrayTypeModifier(openBracket, closeBracket, dimension), true);
+            return (new SliceTypeModifier(openBracket, closeBracket, dimension), true);
         }
 
         if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
@@ -943,14 +977,14 @@ internal sealed partial class Parser
             }
 
             if (LookaheadCurrentToken.Kind is not TokenKind.RightBracket)
-                return (new FixedArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
+                return (new ArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.MissingToken, [], [])), false);
 
             var closeBracket = LookaheadConsume();
-            return (new FixedArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), closeBracket), true);
+            return (new ArrayTypeModifier(openBracket, new LiteralExpression(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Integer, [], [])), closeBracket), true);
         }
 
         var rightBracket = LookaheadConsume();
-        return (new ArrayTypeModifier(openBracket, rightBracket), true);
+        return (new SliceTypeModifier(openBracket, rightBracket), true);
     }
 
     /// <summary> Speculatively parses a pointer type modifier. </summary>
@@ -1186,10 +1220,17 @@ internal sealed partial class Parser
             if (LookaheadCurrentToken.Kind is TokenKind.Equals)
             {
                 equals = LookaheadConsume();
-                var (dt, ok, _) = LookaheadParseTypeSyntax();
-                if (!ok)
-                    return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
-                defaultType = dt;
+                if (kind is not GenericParameterKind.Type && IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                {
+                    defaultType = new LiteralGenericArgument(new LiteralExpression(LookaheadConsume()));
+                }
+                else
+                {
+                    var (dt, ok, _) = LookaheadParseTypeSyntax();
+                    if (!ok)
+                        return (new SeparatedSyntaxList<GenericParameterSyntax>(nodesAndSeparators), false);
+                    defaultType = dt;
+                }
             }
 
             nodesAndSeparators.Add(new GenericParameterSyntax(identifier, ellipsis, colon, valueKindToken, kind, equals, defaultType));

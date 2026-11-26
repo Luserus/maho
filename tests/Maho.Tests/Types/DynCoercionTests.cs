@@ -5,10 +5,19 @@ namespace Maho.Tests;
 public sealed class DynCoercionTests
 {
     private const string PreludeAndHierarchy = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -16,23 +25,50 @@ public sealed class DynCoercionTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            public func Arrow(&this) -> TReturn;
+        }
+
+        public interface Deref<TReturn>
+        {
+            [OperatorFunction("Dereference")]
+            public func Deref(&this) -> TReturn;
+        }
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> : Arrow<&T>, Deref<&T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
+
+            [IntrinsicFunction("Reference.Deref()")]
+            public func Deref.Deref(&this) -> &T;
+
+            public func Arrow.Arrow(&this) -> &T
+            {
+                return *this;
+            }
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -185,9 +221,25 @@ public sealed class DynCoercionTests
     }
 
     [Fact]
-    public void ImplicitDyn_Interface_ResolvesAsDynSemanticType_OutsideGenerics()
+    public void BareInterface_AndIndirection_WithoutDyn_FailsWithMH0583_DynAliasAndRefSucceed()
     {
-        var source = PreludeAndHierarchy + """
+        var bareSource = PreludeAndHierarchy + """
+            public interface IGreetable
+            {
+                public func Greet(&this) -> Int32;
+            }
+
+            public func TestAlias(&IGreetable g) -> Int32
+            {
+                return g.Greet();
+            }
+            """;
+
+        var bareComp = Compilation.FromSource(bareSource);
+        Assert.True(bareComp.HasErrors);
+        Assert.Contains(bareComp.Diagnostics, d => d.Code == "MH0583");
+
+        var dynSource = PreludeAndHierarchy + """
             public interface IGreetable
             {
                 public func Greet(&this) -> Int32;
@@ -198,32 +250,39 @@ public sealed class DynCoercionTests
                 public func Greet(&this) -> Int32 { return 42; }
             }
 
-            public func TestAlias(&IGreetable g) -> Int32
+            public func TestDynAlias(dyn &IGreetable g) -> Int32
             {
                 return g.Greet();
             }
 
-            public func TestOwned(IGreetable g) -> Int32
+            public func TestDynRef(dyn IGreetable& g) -> Int32
             {
-                return g.Greet();
+                return g->Greet();
+            }
+
+            public func TestDynRefDeref(dyn IGreetable& g) -> Int32
+            {
+                return (*g).Greet();
             }
             """;
 
-        var comp = Compilation.FromSource(source);
+        var comp = Compilation.FromSource(dynSource);
         Assert.False(comp.HasErrors, string.Join("\n", comp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         var greetableSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "IGreetable");
-        var testAliasSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestAlias");
+        var testAliasSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestDynAlias");
         var paramAlias = comp.Context.GetParameterSymbol(testAliasSym.Parameters[0])!;
-        Assert.True(paramAlias.Type.SpecialType is AliasSemanticType);
-        var aliasInner = ((AliasSemanticType)paramAlias.Type.SpecialType).TargetType;
-        Assert.True(aliasInner.SpecialType is DynSemanticType);
+        var dynAlias = Assert.IsType<DynSemanticType>(paramAlias.Type.SpecialType);
+        Assert.IsType<AliasSemanticType>(dynAlias.TargetType.SpecialType);
+        Assert.True(paramAlias.Type.IsSized(comp.Context));
 
-        var testOwnedSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestOwned");
-        var paramOwned = comp.Context.GetParameterSymbol(testOwnedSym.Parameters[0])!;
-        Assert.True(paramOwned.Type.SpecialType is DynSemanticType);
+        var testRefSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestDynRef");
+        var paramRef = comp.Context.GetParameterSymbol(testRefSym.Parameters[0])!;
+        var dynRef = Assert.IsType<DynSemanticType>(paramRef.Type.SpecialType);
+        Assert.IsType<ReferenceSemanticType>(dynRef.TargetType.SpecialType);
+        Assert.True(paramRef.Type.IsSized(comp.Context));
 
-        // Verify struct base types is trait bound, NOT dyn
+        // Verify struct base type is trait bound, NOT dyn
         var greeterSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "Greeter");
         var ifaceBase = greeterSym.BaseTypes.First(b => b.Handle == ResolutionContext.GetHandle(greetableSym));
         Assert.False(ifaceBase.SpecialType is DynSemanticType);

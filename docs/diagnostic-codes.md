@@ -123,7 +123,7 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0542` | `UnknownIntrinsicType` | Unknown intrinsic type literal specified in `[IntrinsicType("...")]`. |
 | `MH0543` | `DuplicateIntrinsicType` | Intrinsic type declared more than once across compilation and referenced libraries. |
 
-### 3.3 Interface Conformance, Inheritance & Member Access (`MH0550` - `MH0579`)
+### 3.3 Interface Conformance, Inheritance, Layout & Member Access (`MH0550` - `MH0583`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0550` | `UnimplementedInterfaceMember` | Concrete type does not implement a required abstract interface method or property. |
@@ -136,6 +136,24 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0560` | `InvalidOperatorFunctionSignature` | Invalid signature for operator function declaration. |
 | `MH0561` | `DestructorNandCopy` | Type cannot implement both `Destructor` and `Copy`; types with destructors must use move semantics. |
 | `MH0562` | `CopyNandMove` | Type cannot implement both `Copy` and `Move`; a type must be exclusively Copy or exclusively Move. |
+| `MH0563` | `DuplicateOperatorFunction` | Duplicate `[OperatorFunction]` declaration for the same operator across interfaces. |
+| `MH0565` | `ConflictingInterfaceConformance` | Conflicting or duplicate interface conformances across visibility levels, definitions, or extensions. |
+| `MH0566` | `InaccessibleInterfaceConformance` | Scoped (`private` or `internal`) interface conformance is inaccessible in the referencing context. |
+| `MH0567` | `AmbiguousInterfaceConformance` | Ambiguous interface conformance across multiple imported modules; disambiguate via module qualifier. |
+| `MH0568` | `InconsistentCollectionTermCount` | Inconsistent term count across elements in a collection expression. |
+| `MH0569` | `MissingCollectionWithContract` | Collection type does not implement the `CollectionWith` contract required for `with(...)` initialization. |
+| `MH0570` | `MissingCollectionContract` | Target type does not implement the `Collection` contract for the given element term count. |
+| `MH0571` | `TypeNotIterable` | Expression in a `for-in` loop does not implement `Iterable`. |
+| `MH0572` | `InvalidYieldContext` | `yield` used outside a generator returning an `Iterator` or `Iterable` type. |
+| `MH0573` | `YieldTypeMismatch` | Yielded expression type does not match the iterator item type. |
+| `MH0574` | `StructCannotBePiecewiseInitialized` | Struct contains inaccessible fields and cannot be piecewise initialized. |
+| `MH0575` | `AmbiguousModuleMember` | Module-qualified reference `Mod::Member` matches multiple imported modules of the same name. |
+| `MH0576` | `UndefinedExternModuleAlias` | `extern using` alias references an undefined compiler module alias. |
+| `MH0578` | `DirectInitializerFieldError` | Direct struct initializer (`put T { ... }`) is missing a required field or initializes a field more than once. |
+| `MH0580` | `UnsizedTypeNotAllowed` | Unsized (DST) type used in a position requiring a statically sized (`Sized`) type. |
+| `MH0581` | `GenericConstraintNotSized` | Type argument does not satisfy the `Sized` or `Unsized` constraint on a generic parameter or `Self` bound. |
+| `MH0582` | `DerivedTypeAddsFieldsAfterUnsizedBase` | Derived type inherits multiple unsized bases or declares additional instance fields after an unsized base. |
+| `MH0583` | `InvalidInterfaceOrDynUsage` | Bare interface used outside constraint/conformance/`dyn`, or invalid `&dyn T` / `mut &dyn T` / `*dyn T` / `(dyn T)&` ordering. |
 
 ### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |

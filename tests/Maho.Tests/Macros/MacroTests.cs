@@ -5,15 +5,25 @@ namespace Maho.Tests;
 public sealed partial class MacroTests
 {
     private const string MacroPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicType(&Str name);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+
+        intrinsic attribute OperatorFunction(&Str name);
 
 
         [IntrinsicType("NUInt")]
         public struct nuint;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -27,10 +37,17 @@ public sealed partial class MacroTests
             public func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Int64")]
@@ -39,14 +56,14 @@ public sealed partial class MacroTests
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]

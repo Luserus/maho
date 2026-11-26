@@ -3,10 +3,19 @@ namespace Maho.Tests;
 public sealed class ForLoopAndIteratorTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute OperatorFunction(&Str name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -18,23 +27,30 @@ public sealed class ForLoopAndIteratorTests
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -43,8 +59,8 @@ public sealed class ForLoopAndIteratorTests
         [IntrinsicType("Struct")]
         public struct Struct : ValType;
 
-        [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N : int32> : ValType, Iterator<T>;
+        [IntrinsicType("Array")]
+        public struct Array<T, N : int, D : int = 1> : ValType, Iterator<T>;
 
         public interface Callable<TReturn, TParams...>
         {
@@ -253,7 +269,7 @@ public sealed class ForLoopAndIteratorTests
                 }
             }
 
-            public func Generate(Str s) -> SimpleGen
+            public func Generate(&Str s) -> SimpleGen
             {
                 yield s;
             }

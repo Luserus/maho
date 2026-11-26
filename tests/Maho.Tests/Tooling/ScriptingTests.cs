@@ -12,13 +12,19 @@ public sealed class ScriptingTests
         {
             string scriptFile = Path.Combine(tempDir, "Script.mh");
             File.WriteAllText(scriptFile, """
-                attribute IntrinsicType(Str name);
+                [IntrinsicType("Layout")] interface Layout;
+                [IntrinsicType("Sized")] interface Sized : Layout;
+                [IntrinsicType("Unsized")] interface Unsized : Layout;
+                attribute IntrinsicType(&Str name);
+                [IntrinsicType("UInt8")] struct UInt8;
                 [IntrinsicType("Int8")] struct Int8;
                 [IntrinsicType("Int64")] struct Int64;
                 [IntrinsicType("NUInt")] struct NUInt;
-                [IntrinsicType("Reference")] struct Reference<T> { NUInt p; }
-                [IntrinsicType("Pointer")] struct Pointer<T> { NUInt p; }
-                [IntrinsicType("Str")] struct Str { Int8& p; NUInt l; }
+                [IntrinsicType("Slice")] struct Slice<T, D : int = 1>;
+                [IntrinsicType("Metadata")] struct Metadata<T> where T : Layout;
+                [IntrinsicType("Reference")] struct Reference<T> where T : Layout { NUInt p; Metadata<T> metadata; }
+                [IntrinsicType("Pointer")] struct Pointer<T> where T : Layout { NUInt p; Metadata<T> metadata; }
+                [IntrinsicType("Str")] struct Str { UInt8[] data; }
                 [IntrinsicType("Int32")] struct Int32;
                 [IntrinsicType("ValueType")] struct ValType;
                 [IntrinsicType("Struct")] struct Struct : ValType;
