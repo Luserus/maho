@@ -140,7 +140,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             public interface BadStaticConstructor
             {
                 [OperatorFunction("StaticConstructor")]
-                public func Init(int32 x) -> ();
+                func Init(int32 x) -> ();
             }
             """);
 
@@ -157,7 +157,7 @@ public sealed class ExceptionsStaticConstructorsAndEntryPointTests
             public interface BadStaticConstructor
             {
                 [OperatorFunction("StaticConstructor")]
-                public func Init(&this) -> ();
+                func Init(&this) -> ();
             }
             """);
 

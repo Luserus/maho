@@ -37,6 +37,12 @@ internal sealed class LifetimeAnalysisPass : ResolutionPass
                 AnalyzeBody(context, body, context.GetSyntaxScope(body, method.EnclosingScope), ResolutionContext.GetHandle(method));
         }
 
+        for (int i = 0; i < context.ResolvedTree.ResolvedLambdas.Count; i++)
+        {
+            var entry = context.ResolvedTree.ResolvedLambdas[i];
+            AnalyzeLambdaBody(context, entry.Lambda, entry.Scope, entry.ContainingFunction);
+        }
+
         // Property accessors need synthetic receiver/value storage roots.  Those are not yet
         // symbols in the resolved model, so they intentionally wait for the receiver lowering
         // slice rather than being analysed with guessed identities.
@@ -54,10 +60,22 @@ internal sealed class LifetimeAnalysisPass : ResolutionPass
     private static void AnalyzeBody(ResolutionContext context, FunctionBody bodySyntax, Scope scope, SymbolHandle containingSymbol)
     {
         var body = new OwnershipLowerer(context).Lower(bodySyntax, scope, containingSymbol);
+        AnalyzeOwnershipBody(context, body, containingSymbol);
+    }
+
+    private static void AnalyzeLambdaBody(ResolutionContext context, LambdaExpression lambda, Scope scope, SymbolHandle containingFunction)
+    {
+        var body = new OwnershipLowerer(context).LowerLambda(lambda, scope, containingFunction);
+        AnalyzeOwnershipBody(context, body, storeFactsFor: null);
+    }
+
+    private static void AnalyzeOwnershipBody(ResolutionContext context, Ownership.OwnershipBody body, SymbolHandle? storeFactsFor)
+    {
         var facts = new MoveAnalysis(context, body).Analyze();
         new BorrowAnalysis(context, body).Analyze();
         new BorrowEscapeAnalysis(context, body).Analyze();
         new DropElaborator(context, facts).Elaborate();
-        context.SetOwnershipFacts(containingSymbol, facts);
+        if (storeFactsFor is { } symHandle)
+            context.SetOwnershipFacts(symHandle, facts);
     }
 }

@@ -5,6 +5,7 @@ public sealed class ForLoopAndIteratorTests
     private const string Prelude = """
         intrinsic attribute IntrinsicType(&Str name);
         intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicProperty(&Str signature);
         intrinsic attribute OperatorFunction(&Str name);
 
         [IntrinsicType("Layout")]
@@ -30,15 +31,44 @@ public sealed class ForLoopAndIteratorTests
         [IntrinsicType("Metadata")]
         public struct Metadata<T> where T : Layout;
 
-        [IntrinsicType("Reference")]
-        public struct Reference<T> where T : Layout
+        public interface Deref<TReturn>
         {
-            nuint raw;
-            Metadata<T> metadata;
+            [OperatorFunction("Dereference")]
+            func Deref(&this) -> TReturn;
+        }
+
+        [IntrinsicType("Reference")]
+        public struct Reference<T> : Deref<T&> where T : Layout
+        {
+            public nuint raw;
+            public Metadata<T> metadata;
+
+            [IntrinsicFunction("Reference.Deref()")]
+            func Deref.Deref(&this) -> T&;
+        }
+
+        public struct SliceIterator<T, D : int = 1> : Iterator<T>
+        {
+            public T[]& data;
+            public nuint index;
+
+            func Iterator.Next(mut &this) -> T
+            {
+                return (*this.data)[this.index];
+            }
         }
 
         [IntrinsicType("Slice")]
-        public struct Slice<T, D : int = 1>;
+        public struct Slice<T, D : int = 1> : Iterable<T, SliceIterator<T, D>>
+        {
+            [IntrinsicProperty("Slice.Length")]
+            public nuint Length { get; }
+
+            func Iterable.Iterate(&this) -> SliceIterator<T, D>
+            {
+                return put SliceIterator<T, D> { data = &this, index = 0 };
+            }
+        }
 
         [IntrinsicType("Str")]
         public struct Str
@@ -60,12 +90,21 @@ public sealed class ForLoopAndIteratorTests
         public struct Struct : ValType;
 
         [IntrinsicType("Array")]
-        public struct Array<T, N : int, D : int = 1> : ValType, Iterator<T>;
+        public struct Array<T, N : int, D : int = 1> : ValType, Iterable<T, SliceIterator<T, D>>
+        {
+            [IntrinsicFunction("Array.AsSlice()")]
+            public func AsSlice(&this) -> T[]&;
+
+            func Iterable.Iterate(&this) -> SliceIterator<T, D>
+            {
+                return put SliceIterator<T, D> { data = this.AsSlice(), index = 0 };
+            }
+        }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -73,7 +112,7 @@ public sealed class ForLoopAndIteratorTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -82,7 +121,7 @@ public sealed class ForLoopAndIteratorTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public interface Deconstruct<T...>
@@ -95,7 +134,7 @@ public sealed class ForLoopAndIteratorTests
         public struct Tuple<T...> : ValType, Deconstruct<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            public func Deconstruct.Deconstruct(&this) -> (T...);
+            func Deconstruct.Deconstruct(&this) -> (T...);
         }
 
         public interface Iterable<TItem, TIterator>
@@ -154,7 +193,7 @@ public sealed class ForLoopAndIteratorTests
             {
                 public int32 current;
 
-                public func Iterator.Next(mut &this) -> int32
+                func Iterator.Next(mut &this) -> int32
                 {
                     return this.current;
                 }
@@ -162,7 +201,7 @@ public sealed class ForLoopAndIteratorTests
 
             public struct MyCollection : Iterable<int32, MyIter>
             {
-                public func Iterable.Iterate(&this) -> MyIter
+                func Iterable.Iterate(&this) -> MyIter
                 {
                     MyIter iter = default;
                     return iter;
@@ -226,7 +265,7 @@ public sealed class ForLoopAndIteratorTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct SimpleGen : Iterator<int32>
             {
-                public func Iterator.Next(mut &this) -> int32
+                func Iterator.Next(mut &this) -> int32
                 {
                     return 0;
                 }
@@ -263,7 +302,7 @@ public sealed class ForLoopAndIteratorTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct SimpleGen : Iterator<int32>
             {
-                public func Iterator.Next(mut &this) -> int32
+                func Iterator.Next(mut &this) -> int32
                 {
                     return 0;
                 }

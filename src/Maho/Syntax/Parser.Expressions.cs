@@ -57,7 +57,10 @@ internal sealed partial class Parser
             {
                 var dot = Consume();
                 var identifier = ExpectIdentifierToken("after '.'");
-                left = new MemberAccessExpression(left, dot, identifier);
+                if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+                    left = new MemberAccessExpression(left, dot, identifier, colonColon, lessThan, genericArguments, greaterThan);
+                else
+                    left = new MemberAccessExpression(left, dot, identifier);
 
                 continue;
             }
@@ -398,20 +401,43 @@ internal sealed partial class Parser
     {
         var identifier = Consume();
 
+        if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+        {
+            return colonColon is not null
+                ? new GenericNameExpression(identifier, colonColon, lessThan!, genericArguments!.Value, greaterThan!)
+                : new GenericNameExpression(identifier, lessThan!, genericArguments!.Value, greaterThan!);
+        }
+
+        return new IdentifierNameExpression(identifier);
+    }
+
+    private bool TryParseOptionalExpressionGenerics(
+        out Token? colonColon,
+        out Token? lessThan,
+        out SeparatedSyntaxList<TypeSyntax>? genericArguments,
+        out Token? greaterThan)
+    {
         if (LooksLikeTurbofish())
         {
-            var colonColon = ConsumeColonColon();
-            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, colonColon, lessThan, genericArguments, greaterThan);
+            colonColon = ConsumeColonColon();
+            (lessThan, var args, greaterThan) = ParseGenerics();
+            genericArguments = args;
+            return true;
         }
 
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeExpressionGenerics().ShouldParseAsGenerics)
         {
-            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);
+            colonColon = null;
+            (lessThan, var args, greaterThan) = ParseGenerics();
+            genericArguments = args;
+            return true;
         }
 
-        return new IdentifierNameExpression(identifier);
+        colonColon = null;
+        lessThan = null;
+        genericArguments = null;
+        greaterThan = null;
+        return false;
     }
 
     private Expression ParseParenthesizedOrTupleExpression()

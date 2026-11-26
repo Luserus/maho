@@ -32,13 +32,13 @@ public sealed class ExplicitThisAndArrowTests
         public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> TReturn;
+            func Arrow(&this) -> TReturn;
         }
 
         public interface Deref<T> where T : Layout
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> &T;
+            func Deref(&this) -> &T;
         }
 
         [IntrinsicType("Reference")]
@@ -48,9 +48,9 @@ public sealed class ExplicitThisAndArrowTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -62,15 +62,15 @@ public sealed class ExplicitThisAndArrowTests
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T*>, Deref<T> where T : Layout
+        public struct Pointer<T> : Arrow<&T>, Deref<T> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -91,7 +91,7 @@ public sealed class ExplicitThisAndArrowTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -99,7 +99,7 @@ public sealed class ExplicitThisAndArrowTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -108,7 +108,7 @@ public sealed class ExplicitThisAndArrowTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Point
@@ -284,7 +284,7 @@ public sealed class ExplicitThisAndArrowTests
             {
                 T value;
 
-                public func Arrow.Arrow(&this) -> &T
+                func Arrow.Arrow(&this) -> &T
                 {
                     return this.value;
                 }
@@ -308,7 +308,7 @@ public sealed class ExplicitThisAndArrowTests
             {
                 T& target;
 
-                public func Arrow.Arrow(&this) -> T&
+                func Arrow.Arrow(&this) -> T&
                 {
                     return this.target;
                 }
@@ -337,7 +337,7 @@ public sealed class ExplicitThisAndArrowTests
             {
                 T& target;
 
-                public func Arrow.Arrow(&this) -> T&
+                func Arrow.Arrow(&this) -> T&
                 {
                     return this.target;
                 }

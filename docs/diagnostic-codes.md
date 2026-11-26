@@ -123,7 +123,7 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0542` | `UnknownIntrinsicType` | Unknown intrinsic type literal specified in `[IntrinsicType("...")]`. |
 | `MH0543` | `DuplicateIntrinsicType` | Intrinsic type declared more than once across compilation and referenced libraries. |
 
-### 3.3 Interface Conformance, Inheritance, Layout & Member Access (`MH0550` - `MH0583`)
+### 3.3 Interface Conformance, Inheritance, Layout & Member Access (`MH0550` - `MH0590`)
 | Code | Name | Description |
 | :--- | :--- | :--- |
 | `MH0550` | `UnimplementedInterfaceMember` | Concrete type does not implement a required abstract interface method or property. |
@@ -154,6 +154,13 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0581` | `GenericConstraintNotSized` | Type argument does not satisfy the `Sized` or `Unsized` constraint on a generic parameter or `Self` bound. |
 | `MH0582` | `DerivedTypeAddsFieldsAfterUnsizedBase` | Derived type inherits multiple unsized bases or declares additional instance fields after an unsized base. |
 | `MH0583` | `InvalidInterfaceOrDynUsage` | Bare interface used outside constraint/conformance/`dyn`, or invalid `&dyn T` / `mut &dyn T` / `*dyn T` / `(dyn T)&` ordering. |
+| `MH0584` | `InvalidThisGenericParameterPlacement` | `': this'` generic parameter can only be declared on an interface or method, not on non-interface types or standalone functions. |
+| `MH0585` | `ThisGenericArgumentMismatch` | Type argument for a `': this'` generic parameter does not exactly match the implementing or constrained type. |
+| `MH0586` | `MissingExplicitThisTypeArgument` | Interface with a `': this'` generic parameter and no `= this` default requires an explicit concrete type argument. |
+| `MH0587` | `DynThisGenericMethodCallNotAllowed` | Cannot call a method requiring a `': this'` generic parameter on type-erased `dyn Interface`. |
+| `MH0589` | `ObjectCreationNotSupported` | Type does not derive from `ValType` and does not implement `New` or `Put` for `new`/`put` object creation. |
+| `MH0590` | `GenericConstraintViolation` | Type argument fails a lifecycle constraint (`Copy` or `Move`) required by a generic parameter. |
+| `MH0591` | `NoMatchingAllocationOperator` | No matching `[OperatorFunction("New")]` or `[OperatorFunction("Put")]` overload exists for the supplied allocation arguments or type arguments. |
 
 ### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |
@@ -187,10 +194,11 @@ These diagnostics are emitted by `LifetimeAnalysisPass` (move, borrow, partial-m
 | `MH1001` | `UseOfMovedValue` | Use of moved value or partially moved field. |
 | `MH1002` | `UseOfUninitializedValue` | Use of uninitialized or possibly uninitialized variable or field. |
 | `MH1003` | `BorrowConflict` | Cannot borrow or mutate value because an existing conflicting loan is active. |
-| `MH1004` | `ReturnReferenceToLocal` | Cannot return a reference to a local variable or temporary. |
+| `MH1004` | `ReturnReferenceToLocal` | Borrow or capture escapes the enclosing function (via `return` or `throw`) or outlives its local storage scope. |
 | `MH1005` | `CopyMoveOnlyThroughAlias` | Cannot copy a move-only value through a safe alias or reference. |
 | `MH1006` | `PartialMoveDisallowed` | Cannot move a field out of a type that implements explicit `Move` or `Destructor`. |
 | `MH1007` | `CannotMovePartiallyMoved` | Cannot move partially moved struct; all fields must be initialized to move whole value. |
+| `MH1008` | `BorrowEscapesTemporary` | Safe borrow of a temporary value does not outlive the enclosing statement or binding. |
 
 ### 4.2 Control Flow Graph & Returns (`MH1010` - `MH1029`)
 | Code | Name | Description |

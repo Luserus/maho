@@ -67,7 +67,7 @@ public sealed class OptionalAndPostfixOperatorTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -75,7 +75,7 @@ public sealed class OptionalAndPostfixOperatorTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -84,25 +84,25 @@ public sealed class OptionalAndPostfixOperatorTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public interface Unwrap<TReturn>
         {
             [OperatorFunction("Unwrap")]
-            public func Unwrap(&this) -> TReturn;
+            func Unwrap(&this) -> TReturn;
         }
 
         public interface Try<TReturn, TFail>
         {
             [OperatorFunction("Try")]
-            public func Try(&this) -> (TReturn | TFail);
+            func Try(&this) -> (TReturn | TFail);
         }
 
         public interface Implicit<TFrom, TTo>
         {
             [OperatorFunction("ImplicitCast")]
-            public func Implicit(TFrom from) -> TTo;
+            func Implicit(TFrom from) -> TTo;
         }
 
         [IntrinsicType("Optional")]
@@ -112,13 +112,13 @@ public sealed class OptionalAndPostfixOperatorTests
             None,
 
             [IntrinsicFunction("Optional.Unwrap")]
-            public func Unwrap.Unwrap(&this) -> T;
+            func Unwrap.Unwrap(&this) -> T;
 
             [IntrinsicFunction("Optional.Try")]
-            public func Try.Try(&this) -> (T | Optional<T>);
+            func Try.Try(&this) -> (T | Optional<T>);
 
             [IntrinsicFunction("Optional.Implicit")]
-            public func Implicit.Implicit(T from) -> Optional<T>;
+            func Implicit.Implicit(T from) -> Optional<T>;
         }
         """;
 

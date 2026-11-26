@@ -231,7 +231,27 @@ internal sealed partial class DeclarationResolutionPass
                         NestedTypeSymbol nts => nts.GenericParameters,
                         _ => null
                     };
-                    if (genParams is not null && genParams.Count > 0)
+                    bool isInterfaceWithThisGp = false;
+                    TypeKind parentKind = parentSym switch
+                    {
+                        TypeSymbol tsKind => tsKind.TypeKind,
+                        NestedTypeSymbol ntsKind => ntsKind.TypeKind,
+                        _ => TypeKind.Struct
+                    };
+                    if (parentKind == TypeKind.Interface && genParams is not null)
+                    {
+                        foreach (var gpH in genParams)
+                        {
+                            if (context.GetGenericParameterSymbol(gpH) is { ParameterKind: GenericParameterKind.This })
+                            {
+                                baseType = TypeRef.Resolved(gpH);
+                                isInterfaceWithThisGp = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!isInterfaceWithThisGp && genParams is not null && genParams.Count > 0)
                     {
                         baseType = TypeRef.Generic(parentHandle.Value, parentSym?.Name.Text ?? "", genParams.Select(TypeRef.Resolved).ToList());
                     }
@@ -263,7 +283,14 @@ internal sealed partial class DeclarationResolutionPass
         bool isUntagged = symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Untagged);
 
         var paramType = ResolveType(symbol.Syntax.Declarator.Type, symbol.EnclosingScope, isUntaggedContext: isUntagged);
-        symbol.Type = isUntagged ? TypeRef.Untagged(paramType) : paramType;
+        if (isUntagged)
+            paramType = TypeRef.Untagged(paramType);
+        if (paramType.SpecialType is AliasSemanticType aliasParam &&
+            symbol.Syntax.Declarator.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Mut))
+        {
+            paramType = TypeRef.Alias(aliasParam.TargetType, isMutable: true, isUnsafe: aliasParam.IsUnsafe);
+        }
+        symbol.Type = paramType;
 
         ResolveExpression(symbol.Syntax.Initializer?.Initializer, symbol.EnclosingScope, symbol.ContainingSymbol ?? default);
     }

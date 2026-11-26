@@ -28,13 +28,13 @@ public sealed class DynCoercionTests
         public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> TReturn;
+            func Arrow(&this) -> TReturn;
         }
 
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> TReturn;
+            func Deref(&this) -> TReturn;
         }
 
         [IntrinsicType("Metadata")]
@@ -47,9 +47,9 @@ public sealed class DynCoercionTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -80,7 +80,7 @@ public sealed class DynCoercionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -88,7 +88,7 @@ public sealed class DynCoercionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -97,7 +97,7 @@ public sealed class DynCoercionTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Base
@@ -226,7 +226,7 @@ public sealed class DynCoercionTests
         var bareSource = PreludeAndHierarchy + """
             public interface IGreetable
             {
-                public func Greet(&this) -> Int32;
+                func Greet(&this) -> Int32;
             }
 
             public func TestAlias(&IGreetable g) -> Int32
@@ -242,7 +242,7 @@ public sealed class DynCoercionTests
         var dynSource = PreludeAndHierarchy + """
             public interface IGreetable
             {
-                public func Greet(&this) -> Int32;
+                func Greet(&this) -> Int32;
             }
 
             public struct Greeter : IGreetable
@@ -294,7 +294,7 @@ public sealed class DynCoercionTests
         var source = PreludeAndHierarchy + """
             public interface IWorker
             {
-                public func Work(&this) -> Int32;
+                func Work(&this) -> Int32;
             }
 
             public func Execute<T>(T item) -> Int32 where T : IWorker

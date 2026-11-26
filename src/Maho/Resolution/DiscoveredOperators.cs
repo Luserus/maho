@@ -36,6 +36,9 @@ internal sealed class DiscoveredOperators
     /// <summary>The symbol handle of the <c>[IntrinsicFunction]</c> attribute.</summary>
     public AttributeSymbol? IntrinsicFunctionAttribute { get; internal set; }
 
+    /// <summary>The symbol handle of the <c>[IntrinsicProperty]</c> attribute.</summary>
+    public AttributeSymbol? IntrinsicPropertyAttribute { get; internal set; }
+
     private readonly Dictionary<OperatorKind, List<DiscoveredOperatorMethod>> operatorsByKind = [];
 
     /// <summary>
@@ -110,7 +113,8 @@ internal sealed class DiscoveredOperators
         var clone = new DiscoveredOperators
         {
             OperatorFunctionAttribute = OperatorFunctionAttribute,
-            IntrinsicFunctionAttribute = IntrinsicFunctionAttribute
+            IntrinsicFunctionAttribute = IntrinsicFunctionAttribute,
+            IntrinsicPropertyAttribute = IntrinsicPropertyAttribute
         };
 
         foreach (var (key, value) in operatorsByKind)

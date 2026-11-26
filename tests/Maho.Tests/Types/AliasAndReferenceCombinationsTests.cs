@@ -34,19 +34,19 @@ public sealed class AliasAndReferenceCombinationsTests
         public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> TReturn;
+            func Arrow(&this) -> TReturn;
         }
 
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> TReturn;
+            func Deref(&this) -> TReturn;
         }
 
         public interface Addr<T>
         {
             [OperatorFunction("AddressOf")]
-            public func AddressOf(&this) -> T*;
+            func AddressOf(&this) -> T*;
         }
 
         [IntrinsicType("Slice")]
@@ -68,9 +68,9 @@ public sealed class AliasAndReferenceCombinationsTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -83,9 +83,9 @@ public sealed class AliasAndReferenceCombinationsTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutableReference.Deref()")]
-            public func Deref.Deref(&this) -> mut &T;
+            func Deref.Deref(&this) -> mut &T;
 
-            public func Arrow.Arrow(&this) -> mut &T
+            func Arrow.Arrow(&this) -> mut &T
             {
                 return *this;
             }
@@ -98,9 +98,9 @@ public sealed class AliasAndReferenceCombinationsTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -113,9 +113,9 @@ public sealed class AliasAndReferenceCombinationsTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutablePointer.Deref()")]
-            public func Deref.Deref(&this) -> mut &T;
+            func Deref.Deref(&this) -> mut &T;
 
-            public func Arrow.Arrow(&this) -> mut &T
+            func Arrow.Arrow(&this) -> mut &T
             {
                 return *this;
             }
@@ -130,7 +130,7 @@ public sealed class AliasAndReferenceCombinationsTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -138,7 +138,7 @@ public sealed class AliasAndReferenceCombinationsTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -147,7 +147,7 @@ public sealed class AliasAndReferenceCombinationsTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public struct Point : Addr<Point>
@@ -155,7 +155,7 @@ public sealed class AliasAndReferenceCombinationsTests
             public Int32 x;
             public Int32 y;
 
-            public func Addr.AddressOf(&this) -> Point*
+            func Addr.AddressOf(&this) -> Point*
             {
                 Point* p = default;
                 return p;
@@ -399,13 +399,13 @@ public sealed class AliasAndReferenceCombinationsTests
         var source = Prelude + """
             public interface Getter<T>
             {
-                public func Get() -> T;
+                func Get() -> T;
             }
 
             public struct EntityProvider : Getter<mut &Point>
             {
                 public Point pt;
-                public func Getter.Get() -> mut &Point
+                func Getter.Get() -> mut &Point
                 {
                     return pt;
                 }
@@ -414,7 +414,7 @@ public sealed class AliasAndReferenceCombinationsTests
             public struct UnsafeProvider : Getter<mut *Point>
             {
                 public Point pt;
-                public func Getter.Get() -> mut *Point
+                func Getter.Get() -> mut *Point
                 {
                     return pt;
                 }
@@ -570,7 +570,7 @@ public sealed class AliasAndReferenceCombinationsTests
         var source = Prelude + """
             public interface IFoo
             {
-                public func Bar(&this) -> Int32;
+                func Bar(&this) -> Int32;
             }
 
             public struct MyFoo : IFoo
@@ -598,25 +598,25 @@ public sealed class AliasAndReferenceCombinationsTests
             public interface LessThanOrEqual<TResult, TLeft, TRight>
             {
                 [OperatorFunction("LessThanOrEqual")]
-                public func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+                func LessThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
             }
 
             public interface GreaterThanOrEqual<TResult, TLeft, TRight>
             {
                 [OperatorFunction("GreaterThanOrEqual")]
-                public func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
+                func GreaterThanOrEqual(TLeft lhs, TRight rhs) -> TResult;
             }
 
             public struct Number : LessThanOrEqual<Bool, Number, Number>,
                                   GreaterThanOrEqual<Bool, Number, Number>
             {
-                public func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
+                func LessThanOrEqual.LessThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
                     Bool b = default;
                     return b;
                 }
 
-                public func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
+                func GreaterThanOrEqual.GreaterThanOrEqual(Number lhs, Number rhs) -> Bool
                 {
                     Bool b = default;
                     return b;

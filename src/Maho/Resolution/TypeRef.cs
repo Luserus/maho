@@ -151,22 +151,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return true;
         }
 
-        if (IsIntrinsicHandle(handle, context, KnownIntrinsics.Reference) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.MutableReference) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Pointer) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.MutablePointer) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Box) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Optional) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Function) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Delegate) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Tuple) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Metadata) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.ValueType) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Struct) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Enum) ||
-            IsIntrinsicHandle(handle, context, KnownIntrinsics.Never))
-            return true;
-
         var typeSym = context.GetTypeSymbol(handle);
         if (typeSym is not null && typeSym.TypeKind == TypeKind.Enum)
             return true;
@@ -469,6 +453,11 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         {
             if (targetAlias.TargetType.SpecialType is DynSemanticType targetInnerDyn)
             {
+                if (targetAlias.IsMutable &&
+                    ((source.SpecialType is DynSemanticType srcDynMut && TryUnwrapIndirectionMutability(srcDynMut.TargetType, out bool srcDynMutFlag) && !srcDynMutFlag) ||
+                     (source.SpecialType is not DynSemanticType && TryUnwrapIndirectionMutability(source, out bool srcMutFlag) && !srcMutFlag)))
+                    return false;
+
                 if (source.SpecialType is DynSemanticType srcDyn &&
                     TryUnwrapIndirection(srcDyn.TargetType, out var srcDynInner, out bool srcIsPtr) && !srcIsPtr)
                     return targetInnerDyn.TargetType.IsAssignableFrom(srcDynInner, context);
@@ -478,10 +467,18 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             }
 
             if (source.SpecialType is AliasSemanticType sourceAlias)
+            {
+                if (targetAlias.IsMutable && !sourceAlias.IsMutable)
+                    return false;
                 return IsElementAssignableWithUnsizing(targetAlias.TargetType, sourceAlias.TargetType, context);
+            }
 
             if (source.SpecialType is ReferenceSemanticType sourceRefAsAlias)
+            {
+                if (targetAlias.IsMutable && !sourceRefAsAlias.IsMutable)
+                    return false;
                 return IsElementAssignableWithUnsizing(targetAlias.TargetType, sourceRefAsAlias.ElementType, context);
+            }
 
             return IsElementAssignableWithUnsizing(targetAlias.TargetType, source, context);
         }
@@ -493,6 +490,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         {
             if (source.SpecialType is ReferenceSemanticType sourceRef)
             {
+                if (targetRef.IsMutable && !sourceRef.IsMutable)
+                    return false;
+
                 if (targetRef.ElementType.SpecialType is DynSemanticType targetDynElem)
                     return targetDynElem.TargetType.IsAssignableFrom(sourceRef.ElementType, context);
 
@@ -507,6 +507,9 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         {
             if (source.SpecialType is PointerSemanticType sourcePtr)
             {
+                if (targetPtr.IsMutable && !sourcePtr.IsMutable)
+                    return false;
+
                 if (targetPtr.ElementType.SpecialType is DynSemanticType targetDynElem)
                     return targetDynElem.TargetType.IsAssignableFrom(sourcePtr.ElementType, context);
 
@@ -852,6 +855,27 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         element = default;
         isPointer = false;
+        return false;
+    }
+
+    private static bool TryUnwrapIndirectionMutability(TypeRef type, out bool isMutable)
+    {
+        if (type.SpecialType is AliasSemanticType al)
+        {
+            isMutable = al.IsMutable;
+            return true;
+        }
+        if (type.SpecialType is ReferenceSemanticType rf)
+        {
+            isMutable = rf.IsMutable;
+            return true;
+        }
+        if (type.SpecialType is PointerSemanticType pt)
+        {
+            isMutable = pt.IsMutable;
+            return true;
+        }
+        isMutable = false;
         return false;
     }
 

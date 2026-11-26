@@ -257,4 +257,52 @@ public sealed class ModifierValidationTests
         var errors = compilation.Diagnostics.Where(d => d.Code == "MH0128" && d.Message.Contains("untagged")).ToList();
         Assert.Equal(2, errors.Count);
     }
+
+    [Fact]
+    public void InterfaceAndExplicitImplVisibilityModifiers_ReportMH0128_WhileSignatureImplAllowsThem()
+    {
+        var invalid = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface IService
+            {
+                public func Run(&this) -> ();
+                internal func Helper(&this) -> ();
+                public int32 Value { public get; }
+            }
+
+            public struct Impl : IService
+            {
+                private int32 raw;
+
+                public func IService.Run(&this) -> () { }
+                internal func IService.Helper(&this) -> () { }
+                public int32 IService.Value { protected get { return this.raw; } }
+            }
+            """);
+
+        Assert.True(invalid.HasErrors);
+        var mh0128 = invalid.Diagnostics.Where(d => d.Code == "MH0128").ToList();
+        Assert.Equal(8, mh0128.Count);
+
+        var validSignatureImpl = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface IService
+            {
+                func Run(&this) -> ();
+                int32 Value { get; }
+            }
+
+            public struct Impl : IService
+            {
+                private int32 raw;
+
+                public func Run(&this) -> () { }
+                public int32 Value { public get { return this.raw; } }
+            }
+            """);
+
+        Assert.False(validSignatureImpl.HasErrors, string.Join("\n", validSignatureImpl.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
 }

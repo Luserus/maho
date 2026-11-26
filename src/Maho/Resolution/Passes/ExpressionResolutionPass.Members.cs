@@ -273,9 +273,10 @@ internal sealed partial class ExpressionResolutionPass
 
         if (TypeRef.TryGetExplicitConformance(receiverType, out var explicitConf))
         {
+            int memberGenericArity = access.GenericArguments?.Count ?? 0;
             if (explicitConf.InterfaceType.Handle is { } confIfaceH)
             {
-                var (ifaceMember, ifaceAmbiguous, _) = FindMemberInTypeHierarchy(confIfaceH, memberName, isExplicitInterfaceAccess: true);
+                var (ifaceMember, ifaceAmbiguous, _) = FindMemberInTypeHierarchy(confIfaceH, memberName, isExplicitInterfaceAccess: true, genericArity: memberGenericArity);
                 if (!ifaceAmbiguous && ifaceMember is not null)
                 {
                     var ifaceMemberHandle = ResolutionContext.GetHandle(ifaceMember);
@@ -297,6 +298,20 @@ internal sealed partial class ExpressionResolutionPass
                         for (int i = 0; i < ifaceTs.GenericParameters.Count; i++)
                             subst[ifaceTs.GenericParameters[i]] = ifaceGst.TypeArguments[i];
                         retType = SubstituteTypeRef(retType, subst);
+                    }
+                    if (access.GenericArguments is { Count: > 0 } expGenArgs)
+                    {
+                        var resolvedArgs = new List<TypeRef>(expGenArgs.Count);
+                        foreach (var arg in expGenArgs)
+                            resolvedArgs.Add(ResolveTypeSyntax(arg, scope));
+                        retType = ValidateAndInstantiateGenericSymbol(
+                            ResolutionContext.GetHandle(targetMember),
+                            targetMember,
+                            [.. expGenArgs],
+                            resolvedArgs,
+                            retType,
+                            scope,
+                            containingFunction);
                     }
                     return retType;
                 }
@@ -338,47 +353,8 @@ internal sealed partial class ExpressionResolutionPass
         if (recvHandle is not null)
         {
             bool isExplicitInterfaceAccess = access.Expression is TypeAsExpression;
-            var (member, isAmbiguous, _) = FindMemberInTypeHierarchy(recvHandle.Value, memberName, isExplicitInterfaceAccess);
-
-            if (member is null && !isAmbiguous && !isExplicitInterfaceAccess &&
-                context.GetEnclosingOwnerHandle(containingFunction, scope) is { } ownerH)
-            {
-                var unwrappedRecv = context.UnwrapAlias(recvHandle.Value);
-                InterfaceConformance? matchedTier1Conf = null;
-                Symbol? matchedIfaceMember = null;
-
-                foreach (var conf in context.Conformances)
-                {
-                    if (conf.OwnerHandle != ownerH || conf.TargetType.Handle is not { } confTargetH)
-                        continue;
-                    if (context.UnwrapAlias(confTargetH) != unwrappedRecv)
-                        continue;
-
-                    foreach (var implHandle in conf.MethodMap.Values)
-                    {
-                        if (context.GetSymbol(implHandle) is { } implSym && implSym.Name.Text == memberName)
-                        {
-                            bool implStatic = implSym is MethodSymbol im && im.Flags.HasFlag(FunctionFlags.Static) ||
-                                              implSym is PropertySymbol ip && ip.Flags.HasFlag(FunctionFlags.Static);
-                            if (implStatic == isStaticAccessOnType)
-                            {
-                                matchedTier1Conf = conf;
-                                matchedIfaceMember = implSym;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (matchedIfaceMember is not null)
-                        break;
-                }
-
-                if (matchedIfaceMember is not null && matchedTier1Conf is not null)
-                {
-                    member = matchedIfaceMember;
-                    context.ResolvedTree.AddConformance(access, matchedTier1Conf);
-                }
-            }
+            int genericArity = access.GenericArguments?.Count ?? 0;
+            var (member, isAmbiguous, _) = FindMemberInTypeHierarchy(recvHandle.Value, memberName, isExplicitInterfaceAccess, genericArity);
 
             if (isAmbiguous)
             {
@@ -395,45 +371,36 @@ internal sealed partial class ExpressionResolutionPass
             {
                 if (member is MethodSymbol method)
                 {
+                    if (originalReceiverType.SpecialType is DynSemanticType dynRecv &&
+                        method.GenericParameters.Any(gpH => context.GetGenericParameterSymbol(gpH)?.ParameterKind == GenericParameterKind.This))
+                    {
+                        var ifaceSym = dynRecv.TargetType.Handle is { } ih ? context.GetSymbol(context.UnwrapAlias(ih)) : null;
+                        context.Diagnostics.ReportDynThisGenericMethodCallNotAllowed(
+                            access.Identifier.Span,
+                            memberName,
+                            ifaceSym?.Name.Text ?? dynRecv.ToDisplayString(context),
+                            access.GetSource());
+                        return TypeRef.Error;
+                    }
+
                     bool isMethodStatic = method.Flags.HasFlag(FunctionFlags.Static);
-                    if (isStaticAccessOnType && !isMethodStatic)
-                    {
-                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
-                        context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
-                            access.Identifier.Span,
-                            memberName,
-                            typeSymObj?.Name.Text ?? receiverType.ToString(),
-                            access.GetSource());
+                    if (!ValidateStaticAccess(isMethodStatic))
                         return TypeRef.Error;
-                    }
-                    else if (!isStaticAccessOnType && isMethodStatic)
-                    {
-                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
-                        context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
-                            access.Identifier.Span,
-                            memberName,
-                            typeSymObj?.Name.Text ?? receiverType.ToString(),
-                            access.GetSource());
-                        return TypeRef.Error;
-                    }
                 }
-                else if (member is FieldSymbol)
+                else if (member is FieldSymbol field)
                 {
-                    if (isStaticAccessOnType)
-                    {
-                        var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
-                        context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
-                            access.Identifier.Span,
-                            memberName,
-                            typeSymObj?.Name.Text ?? receiverType.ToString(),
-                            access.GetSource());
+                    if (!ValidateStaticAccess(field.Flags.HasFlag(VariableFlags.Static)))
                         return TypeRef.Error;
-                    }
                 }
                 else if (member is PropertySymbol prop)
                 {
-                    bool isPropStatic = prop.Flags.HasFlag(FunctionFlags.Static);
-                    if (isStaticAccessOnType && !isPropStatic)
+                    if (!ValidateStaticAccess(prop.Flags.HasFlag(FunctionFlags.Static)))
+                        return TypeRef.Error;
+                }
+
+                bool ValidateStaticAccess(bool isMemberStatic)
+                {
+                    if (isStaticAccessOnType && !isMemberStatic)
                     {
                         var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
                         context.Diagnostics.ReportCannotAccessInstanceMemberOnType(
@@ -441,9 +408,9 @@ internal sealed partial class ExpressionResolutionPass
                             memberName,
                             typeSymObj?.Name.Text ?? receiverType.ToString(),
                             access.GetSource());
-                        return TypeRef.Error;
+                        return false;
                     }
-                    else if (!isStaticAccessOnType && isPropStatic)
+                    if (!isStaticAccessOnType && isMemberStatic)
                     {
                         var typeSymObj = (Symbol?)context.GetTypeSymbol(recvHandle.Value) ?? context.GetSymbol(recvHandle.Value);
                         context.Diagnostics.ReportCannotAccessStaticMemberOnInstance(
@@ -451,8 +418,9 @@ internal sealed partial class ExpressionResolutionPass
                             memberName,
                             typeSymObj?.Name.Text ?? receiverType.ToString(),
                             access.GetSource());
-                        return TypeRef.Error;
+                        return false;
                     }
+                    return true;
                 }
 
                 context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(member));
@@ -465,6 +433,26 @@ internal sealed partial class ExpressionResolutionPass
                     for (int i = 0; i < recvTs.GenericParameters.Count; i++)
                         subst[recvTs.GenericParameters[i]] = recvGst.TypeArguments[i];
                     memberResultType = SubstituteTypeRef(memberResultType, subst);
+                }
+                else if (context.GetGenericParameterSymbol(recvHandle.Value) is { } gpRecv)
+                {
+                    var subst = BuildConstraintMemberSubstitutions(gpRecv);
+                    if (subst.Count > 0)
+                        memberResultType = SubstituteTypeRef(memberResultType, subst);
+                }
+                if (access.GenericArguments is { Count: > 0 } memGenArgs)
+                {
+                    var resolvedArgs = new List<TypeRef>(memGenArgs.Count);
+                    foreach (var arg in memGenArgs)
+                        resolvedArgs.Add(ResolveTypeSyntax(arg, scope));
+                    memberResultType = ValidateAndInstantiateGenericSymbol(
+                        ResolutionContext.GetHandle(member),
+                        member,
+                        [.. memGenArgs],
+                        resolvedArgs,
+                        memberResultType,
+                        scope,
+                        containingFunction);
                 }
                 return memberResultType;
             }
@@ -863,7 +851,8 @@ internal sealed partial class ExpressionResolutionPass
     private (Symbol? Member, bool IsAmbiguous, List<Symbol>? Ambiguities) FindMemberInTypeHierarchy(
         SymbolHandle typeHandle,
         string memberName,
-        bool isExplicitInterfaceAccess)
+        bool isExplicitInterfaceAccess,
+        int genericArity = 0)
     {
         typeHandle = context.UnwrapAlias(typeHandle);
         var typeSymObj = (Symbol?)context.GetTypeSymbol(typeHandle) ?? context.GetSymbol(typeHandle);
@@ -871,7 +860,9 @@ internal sealed partial class ExpressionResolutionPass
             return (null, false, null);
 
         var recvScope = GetOwnedScope(typeSymObj);
-        var directSyms = recvScope[new SymbolName(new SymbolPart(memberName))];
+        var directSyms = recvScope.GetLocalSymbols(new SymbolPart(memberName, genericArity));
+        if (directSyms.Count == 0 && genericArity > 0)
+            directSyms = recvScope.GetLocalSymbols(new SymbolPart(memberName));
         var directAccessible = directSyms.Where(cand =>
         {
             if (cand is MethodSymbol m)
@@ -920,8 +911,48 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
+        if (bases.Count <= 1 && typeSymObj is GenericParameterSymbol gpSym)
+        {
+            var gpBases = new List<SymbolHandle> { typeHandle };
+            void AddInterfaceAndLinearBases(SymbolHandle ifaceH)
+            {
+                var unwrapped = context.UnwrapAlias(ifaceH);
+                if (!gpBases.Contains(unwrapped))
+                    gpBases.Add(unwrapped);
+                IReadOnlyList<SymbolHandle> lin = context.GetSymbol(unwrapped) switch
+                {
+                    TypeSymbol ts => ts.LinearizedBases,
+                    NestedTypeSymbol nts => nts.LinearizedBases,
+                    _ => []
+                };
+                foreach (var lb in lin)
+                {
+                    var uLb = context.UnwrapAlias(lb);
+                    if (!gpBases.Contains(uLb))
+                        gpBases.Add(uLb);
+                }
+            }
+
+            if (gpSym.ParameterKind == GenericParameterKind.This &&
+                gpSym.GenericSymbol is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+            {
+                AddInterfaceAndLinearBases(ResolutionContext.GetHandle(gpSym.GenericSymbol));
+            }
+            foreach (var c in gpSym.Constraints)
+            {
+                if (c.Handle is { } ch)
+                    AddInterfaceAndLinearBases(ch);
+            }
+            bases = gpBases;
+        }
+
         if (bases.Count <= 1)
             return (null, false, null);
+
+        bool allowInterfaceBaseLookup = isExplicitInterfaceAccess ||
+            typeSymObj is GenericParameterSymbol ||
+            typeSymObj is TypeSymbol { TypeKind: TypeKind.Interface } ||
+            typeSymObj is NestedTypeSymbol { TypeKind: TypeKind.Interface };
 
         var candidateBases = new List<(SymbolHandle BaseHandle, Symbol Member)>();
         foreach (var bh in bases.Skip(1))
@@ -931,8 +962,15 @@ internal sealed partial class ExpressionResolutionPass
             if (bSym is null)
                 continue;
 
+            bool isInterfaceBase = bSym is TypeSymbol { TypeKind: TypeKind.Interface } ||
+                                   bSym is NestedTypeSymbol { TypeKind: TypeKind.Interface };
+            if (isInterfaceBase && !allowInterfaceBaseLookup)
+                continue;
+
             var bScope = GetOwnedScope(bSym);
-            var bSyms = bScope[new SymbolName(new SymbolPart(memberName))];
+            var bSyms = bScope.GetLocalSymbols(new SymbolPart(memberName, genericArity));
+            if (bSyms.Count == 0 && genericArity > 0)
+                bSyms = bScope.GetLocalSymbols(new SymbolPart(memberName));
             var bAccessible = bSyms.Where(cand =>
             {
                 if (cand is MethodSymbol m)
@@ -979,6 +1017,26 @@ internal sealed partial class ExpressionResolutionPass
         return (null, true, uniqueMembers.Select(c => c.Member).ToList());
     }
 
+    private Dictionary<SymbolHandle, TypeRef> BuildConstraintMemberSubstitutions(GenericParameterSymbol gp)
+    {
+        var subst = new Dictionary<SymbolHandle, TypeRef>();
+        foreach (var c in gp.Constraints)
+        {
+            if (c.SpecialType is GenericSemanticType gst && c.Handle is { } ch)
+            {
+                IReadOnlyList<SymbolHandle> gps = context.GetSymbol(context.UnwrapAlias(ch)) switch
+                {
+                    TypeSymbol ts => ts.GenericParameters,
+                    NestedTypeSymbol nts => nts.GenericParameters,
+                    _ => []
+                };
+                for (int i = 0; i < gps.Count && i < gst.TypeArguments.Count; i++)
+                    subst[gps[i]] = gst.TypeArguments[i];
+            }
+        }
+        return subst;
+    }
+
     /// <summary>
     /// Resolves the semantic type of an indexer expression (<c>target[index]</c>).
     /// Supports built-in indexing for arrays, spans, and pointers, as well as user-defined indexer operators.
@@ -1011,13 +1069,8 @@ internal sealed partial class ExpressionResolutionPass
             return arraySemantic.ElementType;
         if (unwrapped.SpecialType is PointerSemanticType ptrSemantic)
             return ptrSemantic.ElementType;
-        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Str, out var strH) && unwrapped.Handle is { } th && context.UnwrapAlias(th) == strH)
-        {
-            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.UInt8, out var u8H))
-                return TypeRef.Resolved(u8H);
-        }
 
-        // User-defined indexer
+        // User-defined indexer (including Str, collections, and custom types)
         if (TryResolveIndexer(targetType, index, out var indexerResult))
             return indexerResult;
 
@@ -1034,28 +1087,70 @@ internal sealed partial class ExpressionResolutionPass
     private bool TryResolveIndexer(TypeRef targetType, IndexExpression index, out TypeRef result)
     {
         result = TypeRef.Unresolved;
+        var unwrapped = targetType;
+        while (unwrapped.SpecialType is AliasSemanticType or ReferenceSemanticType or DynSemanticType)
+        {
+            unwrapped = unwrapped.SpecialType switch
+            {
+                AliasSemanticType al => al.TargetType,
+                ReferenceSemanticType rf => rf.ElementType,
+                DynSemanticType d => d.TargetType,
+                _ => unwrapped
+            };
+        }
 
-        if (targetType.Handle is not { } handle)
+        if (unwrapped.Handle is not { } handle)
             return false;
 
-        var typeSym = context.GetTypeSymbol(handle);
+        var unwrappedH = context.UnwrapAlias(handle);
+        var typeSym = (Symbol?)context.GetTypeSymbol(unwrappedH) ?? context.GetSymbol(unwrappedH);
         if (typeSym is null)
             return false;
 
-        var scope = GetOwnedScope(typeSym);
-        foreach (var sym in scope.Symbols.Values)
+        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.IndexerGetter, out var candidates))
+            return false;
+
+        Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+        if (unwrapped.SpecialType is GenericSemanticType gst && typeSym is TypeSymbol ts && ts.GenericParameters.Count == gst.TypeArguments.Count)
         {
-            if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+            typeArgs = new Dictionary<SymbolHandle, TypeRef>(ts.GenericParameters.Count);
+            for (int i = 0; i < ts.GenericParameters.Count; i++)
+                typeArgs[ts.GenericParameters[i]] = gst.TypeArguments[i];
+        }
+
+        var candidateScopes = new List<Scope> { GetOwnedScope(typeSym) };
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.TargetType.Handle is { } cth && context.UnwrapAlias(cth) == unwrappedH &&
+                context.GetSymbol(conf.OwnerHandle) is ExtensionSymbol ext)
             {
-                if (context.DiscoveredOperators.TryGetOperators(OperatorKind.IndexerGetter, out var candidates))
+                candidateScopes.Add(GetOwnedScope(ext));
+            }
+        }
+
+        foreach (var scope in candidateScopes)
+        {
+            foreach (var sym in scope.Symbols.Values)
+            {
+                if (sym is not MethodSymbol method)
+                    continue;
+
+                foreach (var cand in candidates)
                 {
-                    if (candidates.Any(c => method.ExplicitInterfaceName?.Last.Equals(context.GetTypeSymbol(c.InterfaceHandle)?.Name) == true ||
-                                            method.ExplicitInterfaceName?.Last.Text == context.GetTypeSymbol(c.InterfaceHandle)?.Name.Text))
-                    {
-                        context.ResolvedTree.AddReference(index, ResolutionContext.GetHandle(method));
-                        result = method.ReturnType;
-                        return true;
-                    }
+                    var ifaceSym = context.GetTypeSymbol(cand.InterfaceHandle);
+                    if (ifaceSym is null)
+                        continue;
+
+                    bool isMatch = method.Flags.HasFlag(FunctionFlags.InterfaceScoped)
+                        ? method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text)
+                        : context.GetMethodSymbol(cand.MethodHandle) is { } opM && method.Name.Text == opM.Name.Text &&
+                          TypeRef.IsSubtypeOf(unwrappedH, cand.InterfaceHandle, context);
+                    if (!isMatch)
+                        continue;
+
+                    context.ResolvedTree.AddReference(index, ResolutionContext.GetHandle(method));
+                    result = typeArgs is not null ? SubstituteTypeRef(method.ReturnType, typeArgs) : method.ReturnType;
+                    return true;
                 }
             }
         }

@@ -35,13 +35,13 @@ public sealed class MultipleSharedBaseTests
         public interface Deref<T> where T : Layout
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> &T;
+            func Deref(&this) -> &T;
         }
 
         public interface Arrow<T> where T : Layout
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> &T;
+            func Arrow(&this) -> &T;
         }
 
         [IntrinsicType("Reference")]
@@ -51,9 +51,9 @@ public sealed class MultipleSharedBaseTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -66,9 +66,9 @@ public sealed class MultipleSharedBaseTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(&this) -> &T;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(&this) -> &T
             {
                 return *this;
             }
@@ -89,7 +89,7 @@ public sealed class MultipleSharedBaseTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -97,7 +97,7 @@ public sealed class MultipleSharedBaseTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -106,7 +106,7 @@ public sealed class MultipleSharedBaseTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 

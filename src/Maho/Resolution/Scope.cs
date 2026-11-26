@@ -78,55 +78,58 @@ internal sealed class Scope
         if (SymbolsByName.TryGetValue(name, out var symbols))
             return symbols;
 
-        if (name.Arity > 0)
+        foreach (var (key, list) in SymbolsByName)
         {
-            foreach (var (key, list) in SymbolsByName)
-            {
-                if (key.Text == name.Text && key.Arity != name.Arity)
-                {
-                    foreach (var sym in list)
-                    {
-                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
-                        {
-                            if (gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
-                                return list;
+            if (key.Text != name.Text)
+                continue;
 
-                            if (key.Arity > name.Arity)
+            foreach (var sym in list)
+            {
+                SeparatedSyntaxList<GenericParameterSyntax>? gp = sym switch
+                {
+                    TypeSymbol ts when ts.Syntax?.Name is GenericName gn => gn.GenericParameters,
+                    NestedTypeSymbol nts when nts.Syntax?.Name is GenericName ngn => ngn.GenericParameters,
+                    _ => null
+                };
+                if (gp is not { Count: > 0 } gpList)
+                    continue;
+
+                if (name.Arity > 0)
+                {
+                    if (key.Arity == name.Arity)
+                        continue;
+
+                    if (gpList[^1].IsVariadic && name.Arity >= gpList.Count - 1)
+                        return list;
+
+                    if (key.Arity > name.Arity)
+                    {
+                        bool allDefaults = true;
+                        for (int p = name.Arity; p < gpList.Count; p++)
+                        {
+                            if (gpList[p].DefaultType is null)
                             {
-                                bool allDefaults = true;
-                                for (int p = name.Arity; p < gp.Count; p++)
-                                {
-                                    if (gp[p].DefaultType == null)
-                                    {
-                                        allDefaults = false;
-                                        break;
-                                    }
-                                }
-                                if (allDefaults)
-                                    return list;
+                                allDefaults = false;
+                                break;
                             }
                         }
-                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp)
+                        if (allDefaults)
+                            return list;
+                    }
+                }
+                else
+                {
+                    bool allThis = true;
+                    for (int p = 0; p < gpList.Count; p++)
+                    {
+                        if (gpList[p].Kind is not GenericParameterKind.This)
                         {
-                            if (ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
-                                return list;
-
-                            if (key.Arity > name.Arity)
-                            {
-                                bool allDefaults = true;
-                                for (int p = name.Arity; p < ngp.Count; p++)
-                                {
-                                    if (ngp[p].DefaultType == null)
-                                    {
-                                        allDefaults = false;
-                                        break;
-                                    }
-                                }
-                                if (allDefaults)
-                                    return list;
-                            }
+                            allThis = false;
+                            break;
                         }
                     }
+                    if (allThis)
+                        return list;
                 }
             }
         }

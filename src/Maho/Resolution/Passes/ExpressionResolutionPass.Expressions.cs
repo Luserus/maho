@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Maho.Syntax;
 
 namespace Maho.Resolution;
@@ -327,9 +328,11 @@ internal sealed partial class ExpressionResolutionPass
             : new SymbolPart(named.Identifier, 0, hygiene);
 
         var syms = scope[new SymbolName(part)];
-        if (syms.Count > 0)
+        var sym = syms.FirstOrDefault(static s =>
+            s is MethodSymbol m ? !m.Flags.HasFlag(FunctionFlags.InterfaceScoped) :
+            s is PropertySymbol p ? !p.Flags.HasFlag(FunctionFlags.InterfaceScoped) : true);
+        if (sym is not null)
         {
-            var sym = syms[0];
             if (lambdaCapturedSymbols.Count > 0 && activeLambdaScopes.Count > 0)
             {
                 var curLambdaScope = activeLambdaScopes.Peek();
@@ -357,20 +360,6 @@ internal sealed partial class ExpressionResolutionPass
                     resType,
                     scope,
                     containingFunction);
-            }
-
-            if (sym is MethodSymbol ifaceImplMethod &&
-                ifaceImplMethod.Flags.HasFlag(FunctionFlags.InterfaceScoped) &&
-                context.GetEnclosingOwnerHandle(containingFunction, scope) is { } ownerH)
-            {
-                foreach (var conf in context.Conformances)
-                {
-                    if (conf.OwnerHandle == ownerH && conf.MethodMap.ContainsValue(symHandle))
-                    {
-                        context.ResolvedTree.AddConformance(named, conf);
-                        break;
-                    }
-                }
             }
 
             if (sym is ConstantSymbol c && c.Value.Kind != ConstantValueKind.None)
@@ -481,6 +470,28 @@ internal sealed partial class ExpressionResolutionPass
             MethodSymbol ms => ms.GenericParameters,
             _ => []
         };
+        if (sym is MethodSymbol methodSym && methodSym.Parent is { } parentH)
+        {
+            TypeRef expectedSelf = context.GetSymbol(parentH) is ExtensionSymbol ext ? ext.TargetTypeRef : TypeRef.Resolved(parentH);
+            int limit = Math.Min(genericParams.Count, resolvedArgs.Count);
+            for (int i = 0; i < limit; i++)
+            {
+                if (context.GetGenericParameterSymbol(genericParams[i]) is { ParameterKind: GenericParameterKind.This } gp)
+                {
+                    var arg = resolvedArgs[i];
+                    if (!arg.IsError && !arg.IsUnresolved && !arg.Equals(expectedSelf))
+                    {
+                        context.Diagnostics.ReportThisGenericArgumentMismatch(
+                            i < argSyntaxes.Count ? (argSyntaxes[i].GetSpan() ?? default) : default,
+                            gp.Name.Text,
+                            methodSym.Name.Text,
+                            expectedSelf.ToDisplayString(context),
+                            arg.ToDisplayString(context),
+                            i < argSyntaxes.Count ? argSyntaxes[i].GetSource() : null);
+                    }
+                }
+            }
+        }
         if (genericParams.Count == 0 || resolvedArgs.Count == 0)
             return symbolType;
 
@@ -570,16 +581,19 @@ internal sealed partial class ExpressionResolutionPass
             targetType = TypeRef.Slice(elemType, 1, sliceH != default ? sliceH : null);
         }
 
-        MethodSymbol? boundNewOperator = ResolveAllocationOperator(
+        ResolveAllocationAndTarget(
             isPut,
+            targetType,
             null,
             null,
             [],
             arrayCreation,
             scope,
-            containingFunction);
+            containingFunction,
+            out TypeRef allocResultType,
+            out _);
 
-        return ResolveObjectCreationReturnType(isPut, false, targetType, boundNewOperator, arrayCreation);
+        return allocResultType;
     }
 
     private TypeRef GetTypeFromHandle(SymbolHandle handle)

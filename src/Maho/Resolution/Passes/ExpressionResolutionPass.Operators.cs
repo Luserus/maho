@@ -466,9 +466,15 @@ internal sealed partial class ExpressionResolutionPass
         if (operandTypeSym is null)
             return false;
 
-        // Build generic parameter mapping if operand is generic (e.g. Optional<T>, Reference<T>, Pointer<T>)
+        // Build generic parameter mapping if operand is generic (e.g. Box<T>, Optional<T>, Reference<T>, Pointer<T>)
         Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
-        if (operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
+        if (operand.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
+        {
+            typeArgs = new Dictionary<SymbolHandle, TypeRef>();
+            for (int i = 0; i < tsGen.GenericParameters.Count; i++)
+                typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
+        }
+        else if (operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
         {
             if (operand.SpecialType is OptionalSemanticType optSem)
                 typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
@@ -476,12 +482,6 @@ internal sealed partial class ExpressionResolutionPass
                 typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = refSem.ElementType };
             else if (operand.SpecialType is PointerSemanticType ptrSem)
                 typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = ptrSem.ElementType };
-        }
-        else if (operand.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
-        {
-            typeArgs = new Dictionary<SymbolHandle, TypeRef>();
-            for (int i = 0; i < tsGen.GenericParameters.Count; i++)
-                typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
         }
 
         IReadOnlyList<TypeRef> baseTypes = operandTypeSym switch
@@ -630,6 +630,13 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         var opToken = assignment.EqualsOperator.Kind;
+        if (opToken == TokenKind.Equals &&
+            !lhs.IsError && !lhs.IsUnresolved && !lhs.IsInferred &&
+            !rhs.IsError && !rhs.IsUnresolved && !rhs.IsInferred &&
+            TryResolveOperatorOverload(OperatorKind.Assignment, lhs, rhs, assignment, out var assignResult))
+        {
+            return assignResult;
+        }
         if (opToken == TokenKind.Equals)
         {
             // 2a. If LHS is an unconstrained literal (e.g. var x = 100; x = Some();), collapse LHS to RHS type if compatible
@@ -784,6 +791,17 @@ internal sealed partial class ExpressionResolutionPass
         {
             if (member.Dot.Kind == TokenKind.MinusGreaterThan)
                 return true;
+            if (context.ResolvedTree.TryGetReference(member, out var mH))
+            {
+                if (mH.Kind == SymbolKind.Constant)
+                    return false;
+
+                if (context.GetFieldSymbol(mH) is { } staticField &&
+                    staticField.Flags.HasFlag(VariableFlags.Static))
+                {
+                    return staticField.Flags.HasFlag(VariableFlags.Mut) && !staticField.Flags.HasFlag(VariableFlags.Const);
+                }
+            }
             var recvType = context.GetExpressionType(member.Expression) ?? TypeRef.Unresolved;
             return IsExpressionLValue(member.Expression, recvType);
         }
@@ -798,6 +816,13 @@ internal sealed partial class ExpressionResolutionPass
 
             if (context.ResolvedTree.TryGetReference(named, out var h))
             {
+                if (h.Kind == SymbolKind.Field &&
+                    context.GetFieldSymbol(h) is { } fieldSym &&
+                    fieldSym.Flags.HasFlag(VariableFlags.Static))
+                {
+                    return fieldSym.Flags.HasFlag(VariableFlags.Mut) && !fieldSym.Flags.HasFlag(VariableFlags.Const);
+                }
+
                 if (h.Kind is SymbolKind.Variable or SymbolKind.Parameter or SymbolKind.Field or SymbolKind.GlobalVariable)
                     return true;
 

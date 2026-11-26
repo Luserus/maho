@@ -83,19 +83,19 @@ public sealed class UnsizedTypesAndConstraintsTests
     public void PostfixBeforePrefix_And_GroupedType_Precedence_AndStatementDisambiguation()
     {
         var source = Prelude + """
-            public interface MulOp { [OperatorFunction("Multiplication")] public func Mul(Num l, Num r) -> Num; }
-            public interface BitAndOp { [OperatorFunction("BitwiseAnd")] public func BitAnd(Num l, Num r) -> Num; }
+            public interface MulOp { [OperatorFunction("Multiplication")] func Mul(Num l, Num r) -> Num; }
+            public interface BitAndOp { [OperatorFunction("BitwiseAnd")] func BitAnd(Num l, Num r) -> Num; }
 
             public struct Num : MulOp, BitAndOp
             {
                 public int32 val;
-                public func MulOp.Mul(Num l, Num r) -> Num { return l; }
-                public func BitAndOp.BitAnd(Num l, Num r) -> Num { return l; }
+                func MulOp.Mul(Num l, Num r) -> Num { return l; }
+                func BitAndOp.BitAnd(Num l, Num r) -> Num { return l; }
             }
 
             public interface IGreetable
             {
-                public func Greet(&this) -> int32;
+                func Greet(&this) -> int32;
             }
 
             public union Choice(int32 | bool);
@@ -213,13 +213,13 @@ public sealed class UnsizedTypesAndConstraintsTests
             public interface Deref<TReturn>
             {
                 [OperatorFunction("Dereference")]
-                public func Deref(&this) -> TReturn;
+                func Deref(&this) -> TReturn;
             }
 
             public interface Arrow<TReturn>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                public func Arrow(&this) -> TReturn;
+                func Arrow(&this) -> TReturn;
             }
 
             [IntrinsicType("Reference")]
@@ -227,8 +227,8 @@ public sealed class UnsizedTypesAndConstraintsTests
             {
                 public nuint raw;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("Reference.Deref()")] public func Deref.Deref(&this) -> &T;
-                public func Arrow.Arrow(&this) -> &T { return *this; }
+                [IntrinsicFunction("Reference.Deref()")] func Deref.Deref(&this) -> &T;
+                func Arrow.Arrow(&this) -> &T { return *this; }
             }
 
             [IntrinsicType("MutableReference")]
@@ -236,8 +236,8 @@ public sealed class UnsizedTypesAndConstraintsTests
             {
                 public nuint raw;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("MutableReference.Deref()")] public func Deref.Deref(&this) -> mut &T;
-                public func Arrow.Arrow(&this) -> mut &T { return *this; }
+                [IntrinsicFunction("MutableReference.Deref()")] func Deref.Deref(&this) -> mut &T;
+                func Arrow.Arrow(&this) -> mut &T { return *this; }
             }
 
             [IntrinsicType("Pointer")]
@@ -245,8 +245,8 @@ public sealed class UnsizedTypesAndConstraintsTests
             {
                 public nuint addr;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("Pointer.Deref()")] public func Deref.Deref(&this) -> &T;
-                public func Arrow.Arrow(&this) -> &T { return *this; }
+                [IntrinsicFunction("Pointer.Deref()")] func Deref.Deref(&this) -> &T;
+                func Arrow.Arrow(&this) -> &T { return *this; }
             }
 
             [IntrinsicType("MutablePointer")]
@@ -254,37 +254,36 @@ public sealed class UnsizedTypesAndConstraintsTests
             {
                 public nuint addr;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("MutablePointer.Deref()")] public func Deref.Deref(&this) -> mut &T;
-                public func Arrow.Arrow(&this) -> mut &T { return *this; }
+                [IntrinsicFunction("MutablePointer.Deref()")] func Deref.Deref(&this) -> mut &T;
+                func Arrow.Arrow(&this) -> mut &T { return *this; }
             }
 
-            public interface Allocator { public func Allocate(mut &this, nuint size, nuint alignment) -> ValType*; }
-            public struct GlobalAllocator : Allocator
+            public interface Allocator { func Allocate(mut &this, nuint size, nuint alignment) -> ValType*; }
+            public struct GlobalAllocator
             {
-                public ValType* handle;
-                public func Allocate(mut &this, nuint size, nuint alignment) -> ValType* { return handle; }
+                public static mut dyn Allocator mut* instance;
+                public func Allocate(nuint size, nuint alignment) -> ValType* { return default; }
             }
 
             [IntrinsicType("Box")]
-            public struct Box<T, A = GlobalAllocator> : Arrow<&T>, Deref<&T> where T : Layout where A : Allocator
+            public struct Box<T> : Arrow<&T>, Deref<&T> where T : Layout
             {
-                public T* pointer;
-                public A allocator;
-                public func Arrow.Arrow(&this) -> &T { return *pointer; }
-                public func Deref.Deref(&this) -> &T { return *pointer; }
+                public T mut& pointer;
+                func Arrow.Arrow(&this) -> &T { return *pointer; }
+                func Deref.Deref(&this) -> &T { return *pointer; }
             }
 
             public interface Callable<TReturn, TParams...>
             {
                 [OperatorFunction("Callable")]
-                public func Invoke(&this, TParams args) -> TReturn;
+                func Invoke(&this, TParams args) -> TReturn;
             }
 
             [IntrinsicType("Function")]
             public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
             {
                 public nuint codeAddress;
-                [IntrinsicFunction("Function.Invoke(TParams...)")] public func Callable.Invoke(&this, TParams args) -> TReturn;
+                [IntrinsicFunction("Function.Invoke(TParams...)")] func Callable.Invoke(&this, TParams args) -> TReturn;
             }
 
             [IntrinsicType("Delegate")]
@@ -292,14 +291,14 @@ public sealed class UnsizedTypesAndConstraintsTests
             {
                 public nuint codeAddress;
                 public Pointer<ValType> env;
-                [IntrinsicFunction("Delegate.Invoke(TParams...)")] public func Callable.Invoke(&this, TParams args) -> TReturn;
+                [IntrinsicFunction("Delegate.Invoke(TParams...)")] func Callable.Invoke(&this, TParams args) -> TReturn;
             }
             """;
 
         var validSource = dynContractPrelude + """
             public interface IGreetable
             {
-                public func Greet(&this) -> int32;
+                func Greet(&this) -> int32;
             }
 
             public struct Greeter : IGreetable
@@ -342,7 +341,7 @@ public sealed class UnsizedTypesAndConstraintsTests
             var invalidSource = dynContractPrelude + $$"""
                 public interface IGreetable
                 {
-                    public func Greet(&this) -> int32;
+                    func Greet(&this) -> int32;
                 }
 
                 public func Test({{decl}}) -> ()
@@ -461,7 +460,7 @@ public sealed class UnsizedTypesAndConstraintsTests
         var source = Prelude + """
             public interface IRun
             {
-                public func Run(&this) -> int32;
+                func Run(&this) -> int32;
             }
 
             public struct Runner : IRun
@@ -539,7 +538,7 @@ public sealed class UnsizedTypesAndConstraintsTests
         var invalidSource = Prelude + """
             public interface SizedOnly : Sized
             {
-                public func SizeTag(&this) -> int32;
+                func SizeTag(&this) -> int32;
             }
 
             public struct BadUnsizedImpl : SizedOnly

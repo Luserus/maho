@@ -36,43 +36,43 @@ public sealed partial class ExpressionResolutionTests
                               LeftShift<int32>, RightShift<int32>,
                               Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
         {
-            [IntrinsicFunction("Int32.Add(Int32, Int32)")] public func Add.Add(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Subtract(Int32, Int32)")] public func Sub.Sub(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")] public func Mul.Mul(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Divide(Int32, Int32)")] public func Div.Div(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Remainder(Int32, Int32)")] public func Rem.Rem(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.BitwiseAnd(Int32, Int32)")] public func BitwiseAnd.BitwiseAnd(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.BitwiseOr(Int32, Int32)")] public func BitwiseOr.BitwiseOr(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.BitwiseXor(Int32, Int32)")] public func BitwiseXor.BitwiseXor(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.BitwiseNot(Int32)")] public func BitwiseNot.BitwiseNot(int32 o) -> int32;
-            [IntrinsicFunction("Int32.LeftShift(Int32, Int32)")] public func LeftShift.LeftShift(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.RightShift(Int32, Int32)")] public func RightShift.RightShift(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Equals(Int32, Int32)")] public func Eq.Eq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.NotEquals(Int32, Int32)")] public func Neq.Neq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.LessThan(Int32, Int32)")] public func Lt.Lt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")] public func Le.Le(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")] public func Gt.Gt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")] public func Ge.Ge(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")] func Add.Add(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Subtract(Int32, Int32)")] func Sub.Sub(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")] func Mul.Mul(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Divide(Int32, Int32)")] func Div.Div(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Remainder(Int32, Int32)")] func Rem.Rem(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseAnd(Int32, Int32)")] func BitwiseAnd.BitwiseAnd(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseOr(Int32, Int32)")] func BitwiseOr.BitwiseOr(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseXor(Int32, Int32)")] func BitwiseXor.BitwiseXor(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.BitwiseNot(Int32)")] func BitwiseNot.BitwiseNot(int32 o) -> int32;
+            [IntrinsicFunction("Int32.LeftShift(Int32, Int32)")] func LeftShift.LeftShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.RightShift(Int32, Int32)")] func RightShift.RightShift(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Equals(Int32, Int32)")] func Eq.Eq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.NotEquals(Int32, Int32)")] func Neq.Neq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThan(Int32, Int32)")] func Lt.Lt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")] func Le.Le(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")] func Gt.Gt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")] func Ge.Ge(int32 l, int32 r) -> bool;
             [IntrinsicFunction("Int32.<i32>")] public literal i32(int32 v);
         }
 
-        public interface Add<TLhs, TRhs, TReturn> { [OperatorFunction("Addition")] public func Add(TLhs l, TRhs r) -> TReturn; }
-        public interface Sub<T> { [OperatorFunction("Subtraction")] public func Sub(int32 l, int32 r) -> int32; }
-        public interface Mul<T> { [OperatorFunction("Multiplication")] public func Mul(int32 l, int32 r) -> int32; }
-        public interface Div<T> { [OperatorFunction("Division")] public func Div(int32 l, int32 r) -> int32; }
-        public interface Rem<T> { [OperatorFunction("Remainder")] public func Rem(int32 l, int32 r) -> int32; }
-        public interface BitwiseAnd<T> { [OperatorFunction("BitwiseAnd")] public func BitwiseAnd(int32 l, int32 r) -> int32; }
-        public interface BitwiseOr<T> { [OperatorFunction("BitwiseOr")] public func BitwiseOr(int32 l, int32 r) -> int32; }
-        public interface BitwiseXor<T> { [OperatorFunction("BitwiseXor")] public func BitwiseXor(int32 l, int32 r) -> int32; }
-        public interface BitwiseNot<T> { [OperatorFunction("BitwiseNot")] public func BitwiseNot(int32 o) -> int32; }
-        public interface LeftShift<T> { [OperatorFunction("LeftShift")] public func LeftShift(int32 l, int32 r) -> int32; }
-        public interface RightShift<T> { [OperatorFunction("RightShift")] public func RightShift(int32 l, int32 r) -> int32; }
-        public interface Eq<T> { [OperatorFunction("Equality")] public func Eq(int32 l, int32 r) -> bool; }
-        public interface Neq<T> { [OperatorFunction("Inequality")] public func Neq(int32 l, int32 r) -> bool; }
-        public interface Lt<T> { [OperatorFunction("LessThan")] public func Lt(int32 l, int32 r) -> bool; }
-        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public func Le(int32 l, int32 r) -> bool; }
-        public interface Gt<T> { [OperatorFunction("GreaterThan")] public func Gt(int32 l, int32 r) -> bool; }
-        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public func Ge(int32 l, int32 r) -> bool; }
+        public interface Add<TLhs, TRhs, TReturn> { [OperatorFunction("Addition")] func Add(TLhs l, TRhs r) -> TReturn; }
+        public interface Sub<T> { [OperatorFunction("Subtraction")] func Sub(int32 l, int32 r) -> int32; }
+        public interface Mul<T> { [OperatorFunction("Multiplication")] func Mul(int32 l, int32 r) -> int32; }
+        public interface Div<T> { [OperatorFunction("Division")] func Div(int32 l, int32 r) -> int32; }
+        public interface Rem<T> { [OperatorFunction("Remainder")] func Rem(int32 l, int32 r) -> int32; }
+        public interface BitwiseAnd<T> { [OperatorFunction("BitwiseAnd")] func BitwiseAnd(int32 l, int32 r) -> int32; }
+        public interface BitwiseOr<T> { [OperatorFunction("BitwiseOr")] func BitwiseOr(int32 l, int32 r) -> int32; }
+        public interface BitwiseXor<T> { [OperatorFunction("BitwiseXor")] func BitwiseXor(int32 l, int32 r) -> int32; }
+        public interface BitwiseNot<T> { [OperatorFunction("BitwiseNot")] func BitwiseNot(int32 o) -> int32; }
+        public interface LeftShift<T> { [OperatorFunction("LeftShift")] func LeftShift(int32 l, int32 r) -> int32; }
+        public interface RightShift<T> { [OperatorFunction("RightShift")] func RightShift(int32 l, int32 r) -> int32; }
+        public interface Eq<T> { [OperatorFunction("Equality")] func Eq(int32 l, int32 r) -> bool; }
+        public interface Neq<T> { [OperatorFunction("Inequality")] func Neq(int32 l, int32 r) -> bool; }
+        public interface Lt<T> { [OperatorFunction("LessThan")] func Lt(int32 l, int32 r) -> bool; }
+        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] func Le(int32 l, int32 r) -> bool; }
+        public interface Gt<T> { [OperatorFunction("GreaterThan")] func Gt(int32 l, int32 r) -> bool; }
+        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] func Ge(int32 l, int32 r) -> bool; }
 
         [IntrinsicType("Int64")]
         public struct int64;
@@ -128,29 +128,29 @@ public sealed partial class ExpressionResolutionTests
         public interface Deconstruct<T...>
         {
             [OperatorFunction("Deconstruct")]
-            public func Deconstruct(&this) -> Tuple<T...>;
+            func Deconstruct(&this) -> Tuple<T...>;
         }
 
         public interface DeconstructMut<T...>
         {
             [OperatorFunction("DeconstructMut")]
-            public func Deconstruct(mut &this) -> Tuple<T...>;
+            func Deconstruct(mut &this) -> Tuple<T...>;
         }
 
         [IntrinsicType("Tuple")]
         public struct Tuple<T...> : ValType, Deconstruct<T...>, DeconstructMut<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            public func Deconstruct.Deconstruct(&this) -> Tuple<T...>;
+            func Deconstruct.Deconstruct(&this) -> Tuple<T...>;
 
             [IntrinsicFunction("Tuple.DeconstructMut()")]
-            public func DeconstructMut.Deconstruct(mut &this) -> Tuple<T...>;
+            func DeconstructMut.Deconstruct(mut &this) -> Tuple<T...>;
         }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -158,7 +158,7 @@ public sealed partial class ExpressionResolutionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -167,7 +167,7 @@ public sealed partial class ExpressionResolutionTests
             nuint codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -317,7 +317,7 @@ public sealed partial class ExpressionResolutionTests
                 public int32 X;
                 public int32 Y;
 
-                public func Add.Add(Vector left, Vector right) -> Vector
+                func Add.Add(Vector left, Vector right) -> Vector
                 {
                     Vector result = default;
                     return result;

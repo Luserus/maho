@@ -298,7 +298,7 @@ internal sealed partial class DeclarationResolutionPass
                 if (targetScope is not null)
                 {
                     var memberName = new SymbolPart(access.Identifier);
-                    var candidates = targetScope[new SymbolName(memberName)];
+                    var candidates = targetScope.GetLocalSymbols(memberName);
 
                     MethodSymbol? chosen = null;
 
@@ -346,15 +346,15 @@ internal sealed partial class DeclarationResolutionPass
                 if (typeScope is not null)
                 {
                     var memberName = new SymbolPart(access.Identifier);
-                    var variantSyms = typeScope[new SymbolName(memberName)];
+                    var variantSyms = typeScope.GetLocalSymbols(memberName);
                     var accessible = variantSyms.Where(cand =>
                     {
                         if (cand is MethodSymbol m)
                             return !m.Flags.HasFlag(FunctionFlags.InterfaceScoped) && m.Flags.HasFlag(FunctionFlags.Static);
                         if (cand is PropertySymbol p)
                             return !p.Flags.HasFlag(FunctionFlags.InterfaceScoped) && p.Flags.HasFlag(FunctionFlags.Static);
-                        if (cand is FieldSymbol)
-                            return false;
+                        if (cand is FieldSymbol f)
+                            return f.Flags.HasFlag(VariableFlags.Static);
                         return true;
                     }).ToList();
                     if (accessible.Count > 0)

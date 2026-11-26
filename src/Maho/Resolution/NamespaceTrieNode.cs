@@ -61,6 +61,32 @@ internal sealed class NamespaceTrieNode
                 }
             }
         }
+        else
+        {
+            foreach (var (key, symbols) in SymbolsByName)
+            {
+                if (key.Text != name.Text)
+                    continue;
+
+                foreach (var sym in symbols)
+                {
+                    if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
+                    {
+                        bool allThis = true;
+                        for (int p = 0; p < gp.Count; p++)
+                        {
+                            if (gp[p].Kind is not GenericParameterKind.This)
+                            {
+                                allThis = false;
+                                break;
+                            }
+                        }
+                        if (allThis)
+                            return symbols;
+                    }
+                }
+            }
+        }
 
         return [];
     }

@@ -32,9 +32,9 @@ public sealed partial class MacroTests
         public struct int32 : Add<int32>, Mul<int32>
         {
             [IntrinsicFunction("Int32.Add(Int32, Int32)")]
-            public func Add.Add(int32 left, int32 right) -> int32;
+            func Add.Add(int32 left, int32 right) -> int32;
             [IntrinsicFunction("Int32.Multiply(Int32, Int32)")]
-            public func Mul.Mul(int32 left, int32 right) -> int32;
+            func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
         [IntrinsicType("Slice")]
@@ -75,7 +75,7 @@ public sealed partial class MacroTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -83,7 +83,7 @@ public sealed partial class MacroTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -92,19 +92,19 @@ public sealed partial class MacroTests
             nuint codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public interface Add<T>
         {
             [OperatorFunction("Addition")]
-            public func Add(int32 left, int32 right) -> int32;
+            func Add(int32 left, int32 right) -> int32;
         }
 
         public interface Mul<T>
         {
             [OperatorFunction("Multiplication")]
-            public func Mul(int32 left, int32 right) -> int32;
+            func Mul(int32 left, int32 right) -> int32;
         }
         """;
 

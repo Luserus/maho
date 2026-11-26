@@ -68,7 +68,7 @@ public sealed class CollectionExpressionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -76,7 +76,7 @@ public sealed class CollectionExpressionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -85,7 +85,7 @@ public sealed class CollectionExpressionTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -185,7 +185,7 @@ public sealed class CollectionExpressionTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct CustomFixedArray : Callable<int32>
             {
-                public func Callable.Invoke(&this) -> int32
+                func Callable.Invoke(&this) -> int32
                 {
                     return 42;
                 }
@@ -261,7 +261,7 @@ public sealed class CollectionExpressionTests
             public interface Collection<TKey, TValue>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, TKey key, TValue value) -> ();
+                func Add(mut &this, TKey key, TValue value) -> ();
             }
 
             public struct MyMap : Collection<int32, int64>
@@ -285,7 +285,7 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> ();
+                func Add(mut &this, T item) -> ();
             }
 
             public struct NotACollection;
@@ -307,7 +307,7 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> ();
+                func Add(mut &this, T item) -> ();
             }
 
             public struct MyList : Collection<int32>
@@ -332,13 +332,13 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> ();
+                func Add(mut &this, T item) -> ();
             }
 
             public interface CollectionWith<TCount>
             {
                 [OperatorFunction("CollectionWith")]
-                public func With(mut &this, TCount capacity) -> ();
+                func With(mut &this, TCount capacity) -> ();
             }
 
             public struct MyList : Collection<int32>, CollectionWith<int32>

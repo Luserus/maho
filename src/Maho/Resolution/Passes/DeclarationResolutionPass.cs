@@ -226,6 +226,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         ValidateModuleConformanceUniqueness();
         ValidateInterfaceImplementations();
         ValidateModifiers();
+        ValidateThisGenericParameters();
         ValidateGenericParameterDefaults();
         ValidateMainEntryPoints();
     }
@@ -318,8 +319,9 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         var ownerHandle = ResolutionContext.GetHandle(symbol);
+        var ownerSelfType = BuildSelfTypeRef(ownerHandle, symbol.Name.Text, symbol.GenericParameters);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, TypeRef.Resolved(ownerHandle));
+        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, ownerSelfType);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
@@ -332,6 +334,57 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         else
             PopulateProductMembers(symbol);
     }
+
+    private void ValidateThisArgumentsOnTarget(
+        TypeRef ifaceRef,
+        SymbolHandle ifaceHandle,
+        TypeRef targetSelfType,
+        IReadOnlyList<SymbolHandle>? ownerInterfaceParams,
+        TextSpan span,
+        SourceText? source)
+    {
+        if (ifaceRef.SpecialType is not GenericSemanticType gst)
+            return;
+
+        var ifaceGps = GetGenericParameters(ifaceHandle);
+        if (ifaceGps.Count == 0)
+            return;
+
+        string targetName = ResolutionContext.GetTargetDisplayName(context, ifaceHandle);
+        for (int i = 0; i < ifaceGps.Count && i < gst.TypeArguments.Count; i++)
+        {
+            if (context.GetGenericParameterSymbol(ifaceGps[i]) is not { ParameterKind: GenericParameterKind.This } gp)
+                continue;
+
+            var arg = gst.TypeArguments[i];
+            if (arg.IsError || arg.IsUnresolved)
+                continue;
+
+            if (arg.Equals(targetSelfType))
+                continue;
+
+            if (ownerInterfaceParams is not null &&
+                arg.Handle is { } argH &&
+                ownerInterfaceParams.Contains(argH) &&
+                context.GetGenericParameterSymbol(argH) is { ParameterKind: GenericParameterKind.This })
+            {
+                continue;
+            }
+
+            context.Diagnostics.ReportThisGenericArgumentMismatch(
+                span,
+                gp.Name.Text,
+                targetName,
+                targetSelfType.ToDisplayString(context),
+                arg.ToDisplayString(context),
+                source);
+        }
+    }
+
+    private TypeRef BuildSelfTypeRef(SymbolHandle handle, string name, IReadOnlyList<SymbolHandle> genericParams) =>
+        genericParams.Count == 0
+            ? TypeRef.Resolved(handle)
+            : TypeRef.Generic(handle, name, [.. genericParams.Select(TypeRef.Resolved)]);
 
     private List<TypeRef> ResolveBaseTypes(
         TypeBaseClause? baseClause,
@@ -346,11 +399,17 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         var result = new List<TypeRef>(baseClause.BaseTypes.Count);
         var seenInterfacesInClause = new List<(SymbolHandle IfaceH, TypeRef InterfaceType)>();
+        bool isOwnerInterface = !isExtension && context.GetSymbol(ownerHandle) switch
+        {
+            TypeSymbol ots => ots.TypeKind == TypeKind.Interface,
+            NestedTypeSymbol onts => onts.TypeKind == TypeKind.Interface,
+            _ => false
+        };
 
         for (int i = 0; i < baseClause.BaseTypes.Count; i++)
         {
             var item = baseClause.BaseTypes[i];
-            var baseRef = ResolveType(item.Type, scope, isTraitBoundContext: true);
+            var baseRef = ResolveType(item.Type, scope, isTraitBoundContext: true, implicitThisTarget: ownerTargetType, isConformanceOrConstraintContext: true);
             result.Add(baseRef);
 
             if (baseRef.IsError || baseRef.Handle is not { } rawBaseH)
@@ -366,6 +425,14 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
             if (!isInterface)
                 continue;
+
+            ValidateThisArgumentsOnTarget(
+                baseRef,
+                unwrappedBaseH,
+                ownerTargetType,
+                isOwnerInterface ? GetGenericParameters(ownerHandle) : null,
+                item.Type.GetSpan() ?? default,
+                item.GetSource());
 
             // Clarification #1: A single type or extension definition cannot implement the same interface twice
             // in its base list (even with different visibilities).
@@ -578,16 +645,20 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool hasCopy = false;
         bool hasMove = false;
 
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyIntrinsicH);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveIntrinsicH);
+
         foreach (var baseType in baseTypes)
         {
             if (!baseType.IsResolved || baseType.Handle is not { } ifaceHandle)
                 continue;
 
+            var unwrappedBaseH = context.UnwrapAlias(ifaceHandle);
             if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Destructor))
                 hasDestructor = true;
-            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy))
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy) || (copyIntrinsicH != default && unwrappedBaseH == copyIntrinsicH))
                 hasCopy = true;
-            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move))
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move) || (moveIntrinsicH != default && unwrappedBaseH == moveIntrinsicH))
                 hasMove = true;
         }
 
@@ -600,8 +671,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         if (hasDestructor && hasCopy)
             context.Diagnostics.ReportDestructorNandCopy(span, typeName, source);
-
-        if (hasCopy && hasMove)
+        else if (hasCopy && hasMove)
             context.Diagnostics.ReportCopyNandMove(span, typeName, source);
     }
 
@@ -664,8 +734,9 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         var scope = GetOwnedScope(symbol);
         var ownerHandle = ResolutionContext.GetHandle(symbol);
+        var ownerSelfType = BuildSelfTypeRef(ownerHandle, symbol.Name.Text, symbol.GenericParameters);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, TypeRef.Resolved(ownerHandle));
+        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, ownerSelfType);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
@@ -750,7 +821,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 context.GetGenericParameterSymbol(targetParameters[index]) is not { } parameter)
                 return false;
 
-            if (parameter.ParameterKind is not GenericParameterKind.Type || targetArguments[index] is LiteralGenericArgument)
+            if (parameter.ParameterKind is not (GenericParameterKind.Type or GenericParameterKind.This) || targetArguments[index] is LiteralGenericArgument)
                 continue;
 
             SymbolHandle? argument = ResolveGenericArgumentAsType(targetArguments[index], scope);
@@ -822,10 +893,16 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
     internal static bool SatisfiesConstraint(ResolutionContext context, SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
     {
+        if (candidate == required)
+            return true;
+
         var unwrappedCandidate = candidate.Kind == SymbolKind.GenericParameter ? candidate : context.UnwrapAlias(candidate);
         var unwrappedRequired = required.Kind == SymbolKind.GenericParameter ? required : context.UnwrapAlias(required);
         if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && unwrappedRequired == layoutH)
             return true;
+
+        if (!visited.Add(candidate))
+            return false;
 
         var candidateSym = context.GetSymbol(unwrappedCandidate);
         bool candidateIsInterface = candidateSym is TypeSymbol { TypeKind: TypeKind.Interface }
@@ -855,17 +932,43 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             }
         }
 
-        if (candidate == required)
-            return true;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Transfer, out var transferH) && unwrappedRequired == transferH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter || !candidateIsInterface)
+                return true;
+        }
 
-        if (!visited.Add(candidate))
-            return false;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyH) && unwrappedRequired == copyH)
+        {
+            if (!candidateIsInterface && unwrappedCandidate.Kind != SymbolKind.GenericParameter)
+                return new Ownership.OwnershipTypeClassifier(context).Classify(TypeRef.Resolved(unwrappedCandidate)) == Ownership.OwnershipKind.Copy;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveH) && unwrappedRequired == moveH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+            {
+                if (context.GetGenericParameterSymbol(unwrappedCandidate)?.RequiresCopy(context) == true)
+                    return false;
+            }
+            else if (!candidateIsInterface)
+            {
+                return new Ownership.OwnershipTypeClassifier(context).Classify(TypeRef.Resolved(unwrappedCandidate)) == Ownership.OwnershipKind.Move;
+            }
+        }
 
         switch (candidate.Kind)
         {
             case SymbolKind.GenericParameter:
                 if (context.GetGenericParameterSymbol(candidate) is { } gp)
                 {
+                    if (gp.ParameterKind == GenericParameterKind.This &&
+                        gp.GenericSymbol is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+                    {
+                        var ownerIfaceH = ResolutionContext.GetHandle(gp.GenericSymbol);
+                        if (SatisfiesConstraint(context, ownerIfaceH, required, visited))
+                            return true;
+                    }
                     foreach (var constraint in gp.Constraints)
                         if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(context, constraintHandle, required, visited))
                             return true;
@@ -895,6 +998,42 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 return SatisfiesConstraint(context, target, required, visited);
         }
 
+        return false;
+    }
+
+    internal static bool TrySatisfiesTransferHierarchyConstraint(
+        ResolutionContext context,
+        TypeRef argType,
+        SymbolHandle requiredHandle,
+        out bool satisfied)
+    {
+        var unwrappedRequired = context.UnwrapAlias(requiredHandle);
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Transfer, out var transferH) && unwrappedRequired == transferH)
+        {
+            satisfied = true;
+            return true;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyH) && unwrappedRequired == copyH)
+        {
+            if (argType.Handle is { Kind: SymbolKind.GenericParameter } gpH)
+                satisfied = context.GetGenericParameterSymbol(gpH)?.RequiresCopy(context) == true;
+            else
+                satisfied = new Ownership.OwnershipTypeClassifier(context).Classify(argType) == Ownership.OwnershipKind.Copy;
+            return true;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveH) && unwrappedRequired == moveH)
+        {
+            if (argType.Handle is { Kind: SymbolKind.GenericParameter } gpH)
+                satisfied = context.GetGenericParameterSymbol(gpH)?.RequiresMoveOnly(context) == true;
+            else
+                satisfied = new Ownership.OwnershipTypeClassifier(context).Classify(argType) == Ownership.OwnershipKind.Move;
+            return true;
+        }
+
+        satisfied = false;
         return false;
     }
 

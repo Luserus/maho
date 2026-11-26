@@ -152,6 +152,8 @@ internal enum OperatorKind
     Iterator,
     /// <summary>Owning dereference operator (<c>OwningDeref&lt;TReturn&gt;</c> interface).</summary>
     OwningDeref,
+    /// <summary>Allocation dereference operator (<c>AllocDeref&lt;TReturn&gt;</c> interface).</summary>
+    AllocDeref,
     /// <summary>Static constructor operator (<c>StaticConstructor</c> interface).</summary>
     StaticConstructor
 }

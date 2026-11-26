@@ -42,7 +42,7 @@ public sealed class InterfaceValidationTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -50,7 +50,7 @@ public sealed class InterfaceValidationTests
         {
             NUInt codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -59,7 +59,7 @@ public sealed class InterfaceValidationTests
             NUInt codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 
@@ -69,7 +69,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo;
@@ -86,8 +86,8 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func First();
-                public func Second();
+                func First();
+                func Second();
             }
 
             public struct MyStruct : IFoo;
@@ -108,11 +108,11 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo
             {
-                public func MethodWithBlock()
+                func MethodWithBlock()
                 {
                 }
 
-                public func MethodWithLambda() => 42;
+                func MethodWithLambda() => 42;
             }
 
             public struct MyStruct : IFoo;
@@ -128,12 +128,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo
             {
-                public func IFoo.Bar()
+                func IFoo.Bar()
                 {
                 }
             }
@@ -149,7 +149,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo
@@ -173,7 +173,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo
             {
-                public func Bar(Int32 x) -> Int32;
+                func Bar(Int32 x) -> Int32;
             }
 
             public struct MyStruct : IFoo
@@ -196,7 +196,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct InstanceStruct : IFoo
@@ -229,7 +229,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo<T>
             {
-                public func Bar(T x);
+                func Bar(T x);
             }
 
             public struct MyStruct : IFoo<Int32>
@@ -253,7 +253,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo<T>
             {
-                public func Bar(T x);
+                func Bar(T x);
             }
 
             public struct MyStruct : IFoo<Int32>
@@ -275,12 +275,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IBase
             {
-                public func A();
+                func A();
             }
 
             public interface IDerived : IBase
             {
-                public func B();
+                func B();
             }
 
             public struct PartialStruct : IDerived
@@ -302,7 +302,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct Base
@@ -325,12 +325,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IBase
             {
-                public func A();
+                func A();
             }
 
             public interface IDerived : IBase
             {
-                public func B();
+                func B();
             }
             """);
 

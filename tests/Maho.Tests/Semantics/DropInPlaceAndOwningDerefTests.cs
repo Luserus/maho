@@ -5,38 +5,7 @@ namespace Maho.Tests;
 
 public sealed class DropInPlaceAndOwningDerefTests
 {
-    private const string Prelude = CompilerTestBed.FullPrelude + """
-        public interface OwningDeref<TReturn>
-        {
-            [OperatorFunction("OwningDeref")]
-            public func OwningDeref(mut &this) -> TReturn;
-        }
-
-        public interface Destructor
-        {
-            [OperatorFunction("Destructor")]
-            public func Drop(&this) -> ();
-        }
-
-        public struct Box<T> : Destructor, Deref<T&>, OwningDeref<mut &T>
-        {
-            public T& ptr;
-
-            public func Deref.Deref(&this) -> T&
-            {
-                return this.ptr;
-            }
-
-            public func OwningDeref.OwningDeref(mut &this) -> mut &T
-            {
-                return this.ptr;
-            }
-
-            public func Destructor.Drop(&this) -> ()
-            {
-            }
-        }
-        """;
+    private const string Prelude = CompilerTestBed.FullPrelude;
 
     [Fact]
     public void MultidimensionalFixedArray_SyntaxAndTypeResolution_Succeeds()
@@ -69,7 +38,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> () {}
+                func Destructor.Drop(mut &this) -> () {}
             }
 
             public struct Pair
@@ -115,7 +84,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> () {}
+                func Destructor.Drop(mut &this) -> () {}
             }
 
             public struct Pair

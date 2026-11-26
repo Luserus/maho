@@ -414,6 +414,12 @@ internal sealed partial class ExpressionResolutionPass
             lambdaCapturedSymbols.Pop();
         }
 
+        var captureInfos = new List<ResolvedTree.LambdaCaptureInfo>(captures.Count);
+        foreach (var cap in captures)
+            captureInfos.Add(new ResolvedTree.LambdaCaptureInfo(cap, IsSymbolMutablyCaptured(lambda.Body, cap)));
+        context.ResolvedTree.SetLambdaCaptures(lambda, captureInfos);
+        context.ResolvedTree.AddResolvedLambda(lambda, lambdaScope, containingFunction);
+
         // Non-capturing lambdas yield Function; capturing lambdas yield Delegate
         if (captures.Count > 0 || expectedDel is not null)
         {
@@ -421,6 +427,85 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         return TypeRef.Function(resolvedReturnType, paramTypes);
+    }
+
+    private bool IsSymbolMutablyCaptured(SyntaxNode root, Symbol targetSym)
+    {
+        var targetHandle = ResolutionContext.GetHandle(targetSym);
+        bool IsRootTarget(Expression? expr) => expr switch
+        {
+            NamedExpression ne when context.ResolvedTree.TryGetReference(ne, out var h) =>
+                h == targetHandle || (ne.Identifier.MatchingKind is MatchingKeywordKind.This && h == targetHandle),
+            MemberAccessExpression mae => IsRootTarget(mae.Expression),
+            IndexExpression ie => IsRootTarget(ie.Expression),
+            ParenthesizedExpression pe => IsRootTarget(pe.Expression),
+            _ => false
+        };
+
+        var stack = new Stack<SyntaxNode>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (node is LambdaExpression)
+            {
+                if (!ReferenceEquals(node, root) &&
+                    context.ResolvedTree.TryGetLambdaCaptures((LambdaExpression)node, out var nestedCaps) &&
+                    nestedCaps.Any(c => ReferenceEquals(c.Symbol, targetSym) && c.IsMutable))
+                {
+                    return true;
+                }
+                if (!ReferenceEquals(node, root))
+                    continue;
+            }
+
+            switch (node)
+            {
+                case AssignmentExpression assign when IsRootTarget(assign.LhsExpression):
+                    return true;
+                case UnaryExpression { OperatorToken.Kind: TokenKind.PlusPlus or TokenKind.MinusMinus } unary when IsRootTarget(unary.Operand):
+                    return true;
+                case VariableDeclaration decl when decl.Declarator.Initializer?.Initializer is { } initExpr && IsRootTarget(initExpr):
+                    if (decl.Modifiers.Any(m => m.MatchingKind == MatchingKeywordKind.Mut) ||
+                        decl.Type is PrefixModifiedType { Modifier: SafeAliasTypeModifier { IsMutable: true } } ||
+                        decl.Type is ModifiedType { Modifier: ReferenceTypeModifier { IsMutable: true } })
+                        return true;
+                    break;
+                case CallExpression call:
+                    if (call.Callee is MemberAccessExpression calMae &&
+                        IsRootTarget(calMae.Expression) &&
+                        context.ResolvedTree.TryGetReference(calMae, out var mH) &&
+                        context.GetMethodSymbol(mH) is { Parameters.Count: > 0 } calleeMethod &&
+                        context.GetParameterSymbol(calleeMethod.Parameters[0]) is { Syntax.Declarator.ReceiverKind: ReceiverKind.MutAlias or ReceiverKind.MutReference })
+                    {
+                        return true;
+                    }
+                    if (context.ResolvedTree.TryGetReference(call.Callee, out var fnH))
+                    {
+                        IReadOnlyList<SymbolHandle> pHandles = context.GetSymbol(fnH) switch
+                        {
+                            FunctionSymbol fs => fs.Parameters,
+                            MethodSymbol ms => ms.Parameters,
+                            _ => []
+                        };
+                        int argOffset = (context.GetSymbol(fnH) is MethodSymbol mSym && !mSym.Flags.HasFlag(FunctionFlags.Static)) ? 1 : 0;
+                        for (int i = 0; i < call.Arguments.Count && i + argOffset < pHandles.Count; i++)
+                        {
+                            if (IsRootTarget(call.Arguments[i]) &&
+                                context.GetParameterSymbol(pHandles[i + argOffset]) is { } pSym &&
+                                TypeRef.UnwrapDyn(pSym.Type).SpecialType is AliasSemanticType { IsMutable: true } or ReferenceSemanticType { IsMutable: true })
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    break;
+            }
+
+            foreach (var (_, child) in SyntaxSpan.GetChildren(node))
+                stack.Push(child);
+        }
+        return false;
     }
 
     /// <summary>
@@ -680,121 +765,234 @@ internal sealed partial class ExpressionResolutionPass
                 allocArgTypes.Add(ResolveExpression(a, scope, containingFunction));
         }
 
-        // Phase 1: Allocation operator resolution (Put vs New)
-        bool hasAlloc = allocArgTypes.Count > 0 || constructorCall.AllocationTypeArguments is not null;
-        MethodSymbol? boundNewOperator = ResolveAllocationOperator(
+        // Phase 1: Allocation operator + AllocDeref resolution
+        ResolveAllocationAndTarget(
             isPut,
+            targetType,
             constructorCall.AllocationArguments,
             constructorCall.AllocationTypeArguments,
             allocArgTypes,
             constructorCall,
             scope,
-            containingFunction);
+            containingFunction,
+            out TypeRef allocResultType,
+            out TypeRef ctorTargetType);
 
-        // Phase 2: Constructor method resolution on targetType
-        if (targetType.Handle is { } targetHandle && context.GetTypeSymbol(targetHandle) is { } targetSym)
+        // Phase 2: Constructor method resolution on ctorTargetType
+        if (ctorTargetType.Handle is { } rawCtorH && context.GetTypeSymbol(context.UnwrapAlias(rawCtorH)) is { } targetSym)
         {
+            Dictionary<SymbolHandle, TypeRef> ctorSubs = BuildGenericSubstitutionMap(ctorTargetType);
             var targetScope = GetOwnedScope(targetSym);
             foreach (var sym in targetScope.Symbols.Values)
             {
-                if (sym is MethodSymbol m && m.Name.Text == "Construct")
+                if (sym is not MethodSymbol m || m.Name.Text != "Construct")
+                    continue;
+
+                bool hasReceiver = m.Parameters.Count > 0 &&
+                    context.GetParameterSymbol(m.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+                int paramStart = hasReceiver ? 1 : 0;
+                if (m.Parameters.Count - paramStart != ctorArgTypes.Count)
+                    continue;
+
+                bool matches = true;
+                for (int i = 0; i < ctorArgTypes.Count; i++)
                 {
-                    if (m.Parameters.Count == ctorArgTypes.Count)
+                    if (context.GetParameterSymbol(m.Parameters[i + paramStart]) is { } param)
                     {
-                        bool matches = true;
-                        for (int i = 0; i < ctorArgTypes.Count; i++)
+                        var effParamType = ctorSubs.Count > 0 ? param.Type.Substitute(ctorSubs) : param.Type;
+                        if (ctorArgTypes[i].IsLiteral)
                         {
-                            if (context.GetParameterSymbol(m.Parameters[i]) is { } param)
+                            if (!IsLiteralCompatibleWith(ctorArgTypes[i], effParamType))
                             {
-                                if (ctorArgTypes[i].IsLiteral)
-                                {
-                                    if (!IsLiteralCompatibleWith(ctorArgTypes[i], param.Type))
-                                    {
-                                        matches = false;
-                                        break;
-                                    }
-                                }
-                                else if (!param.Type.IsAssignableFrom(ctorArgTypes[i], context))
-                                {
-                                    matches = false;
-                                    break;
-                                }
+                                matches = false;
+                                break;
                             }
                         }
-                        if (matches)
+                        else if (!effParamType.IsAssignableFrom(ctorArgTypes[i], context))
                         {
-                            // Collapse literal arguments to the matched parameter types
-                            for (int i = 0; i < ctorArgTypes.Count; i++)
-                            {
-                                if (ctorArgTypes[i].IsLiteral && context.GetParameterSymbol(m.Parameters[i]) is { } param)
-                                {
-                                    CollapseExpression(constructorCall.Arguments[i], param.Type, scope, containingFunction);
-                                    ctorArgTypes[i] = param.Type;
-                                }
-                            }
-                            context.ResolvedTree.AddReference(constructorCall, ResolutionContext.GetHandle(m));
+                            matches = false;
                             break;
                         }
                     }
                 }
+                if (matches)
+                {
+                    for (int i = 0; i < ctorArgTypes.Count; i++)
+                    {
+                        if (ctorArgTypes[i].IsLiteral && context.GetParameterSymbol(m.Parameters[i + paramStart]) is { } param)
+                        {
+                            var effParamType = ctorSubs.Count > 0 ? param.Type.Substitute(ctorSubs) : param.Type;
+                            CollapseExpression(constructorCall.Arguments[i], effParamType, scope, containingFunction);
+                            ctorArgTypes[i] = effParamType;
+                        }
+                    }
+                    context.ResolvedTree.AddReference(constructorCall, ResolutionContext.GetHandle(m));
+                    break;
+                }
             }
         }
 
-        return ResolveObjectCreationReturnType(isPut, hasAlloc, targetType, boundNewOperator, constructorCall);
+        return allocResultType;
     }
 
-    private MethodSymbol? ResolveAllocationOperator(
+    private void ResolveAllocationAndTarget(
         bool isPut,
+        TypeRef targetType,
         SeparatedSyntaxList<Expression>? allocArgsSyntax,
         SeparatedSyntaxList<TypeSyntax>? allocTypeArgsSyntax,
         List<TypeRef> allocArgTypes,
         Expression creationNode,
         Scope scope,
+        SymbolHandle containingFunction,
+        out TypeRef allocResultType,
+        out TypeRef ctorTargetType)
+    {
+        MethodSymbol? boundNewOperator = ResolveAllocationOperator(
+            isPut,
+            targetType,
+            allocArgsSyntax,
+            allocTypeArgsSyntax,
+            allocArgTypes,
+            out var allocTypeArgs,
+            out var boundAllocReturnType,
+            creationNode,
+            scope,
+            containingFunction);
+
+        allocResultType = ResolveObjectCreationReturnType(
+            isPut,
+            targetType,
+            boundNewOperator,
+            boundAllocReturnType,
+            creationNode,
+            allocArgTypes,
+            allocTypeArgs,
+            allocTypeArgsSyntax,
+            scope,
+            containingFunction);
+
+        if (!allocResultType.IsError && !allocResultType.IsUnresolved &&
+            TryResolveAllocDerefTarget(allocResultType, creationNode, scope, out var derefTarget))
+        {
+            ctorTargetType = derefTarget;
+            return;
+        }
+
+        ctorTargetType = allocResultType.IsError || allocResultType.IsUnresolved
+            ? targetType
+            : allocResultType;
+    }
+
+    private MethodSymbol? ResolveAllocationOperator(
+        bool isPut,
+        TypeRef targetType,
+        SeparatedSyntaxList<Expression>? allocArgsSyntax,
+        SeparatedSyntaxList<TypeSyntax>? allocTypeArgsSyntax,
+        List<TypeRef> allocArgTypes,
+        out List<TypeRef> allocTypeArgs,
+        out TypeRef resolvedReturnType,
+        Expression creationNode,
+        Scope scope,
         SymbolHandle containingFunction)
     {
-        if (isPut)
+        allocTypeArgs = [];
+        resolvedReturnType = TypeRef.Unresolved;
+        if (allocTypeArgsSyntax is { } typeArgsSyntax)
         {
-            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Put, out var putCandidates))
+            foreach (var ta in typeArgsSyntax)
+                allocTypeArgs.Add(ResolveTypeSyntax(ta, scope));
+        }
+
+        if (targetType.IsError || targetType.IsUnresolved || targetType.Handle is not { } rawTargetH)
+            return null;
+
+        var opKind = isPut ? OperatorKind.Put : OperatorKind.New;
+        if (!context.DiscoveredOperators.TryGetOperators(opKind, out var candidates))
+            return null;
+
+        var unwrappedH = context.UnwrapAlias(rawTargetH);
+        var targetSym = (Symbol?)context.GetTypeSymbol(unwrappedH) ?? context.GetSymbol(unwrappedH);
+        if (targetSym is null)
+            return null;
+
+        var targetSubs = BuildGenericSubstitutionMap(targetType);
+        var candidateScopes = new List<Scope> { GetOwnedScope(targetSym) };
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.TargetType.Handle is { } cth && context.UnwrapAlias(cth) == unwrappedH &&
+                context.GetSymbol(conf.OwnerHandle) is ExtensionSymbol ext)
             {
-                foreach (var candidate in putCandidates)
+                candidateScopes.Add(GetOwnedScope(ext));
+            }
+        }
+
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            bool targetImplementsIface = TypeRef.IsSubtypeOf(unwrappedH, candidate.InterfaceHandle, context) ||
+                context.Conformances.Any(c =>
+                    c.TargetType.Handle is { } cth &&
+                    context.UnwrapAlias(cth) == unwrappedH &&
+                    (c.InterfaceHandle == candidate.InterfaceHandle || TypeRef.IsSubtypeOf(c.InterfaceHandle, candidate.InterfaceHandle, context)));
+
+            if (!targetImplementsIface)
+                continue;
+
+            var candSubs = BuildInterfaceSubstitutionMap(unwrappedH, targetType, candidate.InterfaceHandle, ifaceSym);
+
+            foreach (var candScope in candidateScopes)
+            {
+                foreach (var sym in candScope.Symbols.Values)
                 {
-                    if (context.GetMethodSymbol(candidate.MethodHandle) is { } putMethod)
+                    if (sym is not MethodSymbol method)
+                        continue;
+
+                    bool isMatch = method.Flags.HasFlag(FunctionFlags.InterfaceScoped)
+                        ? method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text)
+                        : context.GetMethodSymbol(candidate.MethodHandle) is { } opM &&
+                          method.Name.Text == opM.Name.Text;
+                    if (!isMatch)
+                        continue;
+
+                    if (TryMatchAllocationCandidate(
+                        method,
+                        targetSubs,
+                        candSubs,
+                        allocArgsSyntax,
+                        allocTypeArgsSyntax,
+                        allocArgTypes,
+                        allocTypeArgs,
+                        creationNode,
+                        scope,
+                        containingFunction,
+                        out resolvedReturnType))
                     {
-                        if (allocArgsSyntax is { } aArgs)
-                        {
-                            for (int i = 0; i < aArgs.Count && i < putMethod.Parameters.Count; i++)
-                            {
-                                if (allocArgTypes[i].IsLiteral && context.GetParameterSymbol(putMethod.Parameters[i]) is { } p)
-                                    CollapseExpression(aArgs[i], p.Type, scope, containingFunction);
-                            }
-                        }
-                        context.ResolvedTree.AddReference(creationNode, candidate.MethodHandle);
-                        break;
+                        return method;
                     }
                 }
             }
-            return null;
-        }
 
-        if (allocArgTypes.Count > 0 || allocTypeArgsSyntax is not null)
-        {
-            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.New, out var newCandidates))
+            // Check default interface method conformance entry (e.g. Put<T : this = this>.Put() default body)
+            if (context.GetMethodSymbol(candidate.MethodHandle) is { } ifaceOpMethod &&
+                (!ifaceOpMethod.Flags.HasFlag(FunctionFlags.Intrinsic) && ifaceOpMethod.Syntax?.Body is not null and not FunctionEmptyBody))
             {
-                foreach (var candidate in newCandidates)
+                if (TryMatchAllocationCandidate(
+                    ifaceOpMethod,
+                    targetSubs,
+                    candSubs,
+                    allocArgsSyntax,
+                    allocTypeArgsSyntax,
+                    allocArgTypes,
+                    allocTypeArgs,
+                    creationNode,
+                    scope,
+                    containingFunction,
+                    out resolvedReturnType))
                 {
-                    if (context.GetMethodSymbol(candidate.MethodHandle) is { } newMethod)
-                    {
-                        if (allocArgsSyntax is { } aArgs)
-                        {
-                            for (int i = 0; i < aArgs.Count && i < newMethod.Parameters.Count; i++)
-                            {
-                                if (allocArgTypes[i].IsLiteral && context.GetParameterSymbol(newMethod.Parameters[i]) is { } p)
-                                    CollapseExpression(aArgs[i], p.Type, scope, containingFunction);
-                            }
-                        }
-                        context.ResolvedTree.AddReference(creationNode, candidate.MethodHandle);
-                        return newMethod;
-                    }
+                    return ifaceOpMethod;
                 }
             }
         }
@@ -802,18 +1000,290 @@ internal sealed partial class ExpressionResolutionPass
         return null;
     }
 
+    private bool TryMatchAllocationCandidate(
+        MethodSymbol method,
+        Dictionary<SymbolHandle, TypeRef> targetSubs,
+        Dictionary<SymbolHandle, TypeRef> ifaceSubs,
+        SeparatedSyntaxList<Expression>? allocArgsSyntax,
+        SeparatedSyntaxList<TypeSyntax>? allocTypeArgsSyntax,
+        List<TypeRef> allocArgTypes,
+        List<TypeRef> allocTypeArgs,
+        Expression creationNode,
+        Scope scope,
+        SymbolHandle containingFunction,
+        out TypeRef resolvedReturnType)
+    {
+        resolvedReturnType = TypeRef.Unresolved;
+
+        if (allocTypeArgs.Count != method.GenericParameters.Count)
+            return false;
+
+        bool hasReceiver = method.Parameters.Count > 0 &&
+            context.GetParameterSymbol(method.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+        int paramStart = hasReceiver ? 1 : 0;
+        if (method.Parameters.Count - paramStart != allocArgTypes.Count)
+            return false;
+
+        var mergedSubs = new Dictionary<SymbolHandle, TypeRef>(ifaceSubs);
+        foreach (var kvp in targetSubs)
+            mergedSubs[kvp.Key] = kvp.Value;
+
+        if (allocTypeArgs.Count > 0)
+        {
+            for (int g = 0; g < method.GenericParameters.Count; g++)
+                mergedSubs[method.GenericParameters[g]] = allocTypeArgs[g];
+        }
+
+        for (int i = 0; i < allocArgTypes.Count; i++)
+        {
+            if (context.GetParameterSymbol(method.Parameters[i + paramStart]) is { } p)
+            {
+                var expectedParamType = mergedSubs.Count > 0 ? p.Type.Substitute(mergedSubs) : p.Type;
+                if (allocArgTypes[i].IsLiteral && allocArgsSyntax is { } aArgsLit)
+                {
+                    if (!IsLiteralCompatibleWith(allocArgTypes[i], expectedParamType))
+                        return false;
+                    CollapseExpression(aArgsLit[i], expectedParamType, scope, containingFunction);
+                }
+                else if (!expectedParamType.IsAssignableFrom(allocArgTypes[i], context) &&
+                         !TryResolveImplicitCast(allocArgTypes[i], expectedParamType, out _))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (allocTypeArgsSyntax is { Count: > 0 } taSyn && method.GenericParameters.Count > 0)
+        {
+            context.ValidateGenericTypeArgumentConformances(
+                ResolutionContext.GetHandle(method),
+                [.. taSyn],
+                allocTypeArgs,
+                scope,
+                containingFunction,
+                reportDiagnostics: true);
+        }
+
+        var methodHandle = ResolutionContext.GetHandle(method);
+        context.ResolvedTree.AddAllocationOperatorReference(creationNode, methodHandle);
+        context.ResolvedTree.AddReference(creationNode, methodHandle);
+        resolvedReturnType = mergedSubs.Count > 0 ? method.ReturnType.Substitute(mergedSubs) : method.ReturnType;
+        return true;
+    }
+
+    private Dictionary<SymbolHandle, TypeRef> BuildInterfaceSubstitutionMap(
+        SymbolHandle concreteTypeHandle,
+        TypeRef concreteType,
+        SymbolHandle ifaceHandle,
+        TypeSymbol ifaceSym)
+    {
+        var result = new Dictionary<SymbolHandle, TypeRef>();
+        if (ifaceSym.GenericParameters.Count == 0)
+            return result;
+
+        var targetSubs = BuildGenericSubstitutionMap(concreteType);
+        if (context.GetSymbol(concreteTypeHandle) is TypeSymbol concreteTs)
+        {
+            foreach (var b in concreteTs.BaseTypes)
+            {
+                if (b.Handle is { } bh && context.UnwrapAlias(bh) == ifaceHandle)
+                {
+                    if (b.SpecialType is GenericSemanticType gst)
+                    {
+                        for (int i = 0; i < ifaceSym.GenericParameters.Count && i < gst.TypeArguments.Count; i++)
+                        {
+                            var arg = targetSubs.Count > 0 ? gst.TypeArguments[i].Substitute(targetSubs) : gst.TypeArguments[i];
+                            result[ifaceSym.GenericParameters[i]] = arg;
+                        }
+                    }
+                }
+            }
+        }
+
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.TargetType.Handle is { } cth && context.UnwrapAlias(cth) == concreteTypeHandle &&
+                conf.InterfaceHandle == ifaceHandle && conf.InterfaceType.SpecialType is GenericSemanticType cgst)
+            {
+                for (int i = 0; i < ifaceSym.GenericParameters.Count && i < cgst.TypeArguments.Count; i++)
+                {
+                    var arg = targetSubs.Count > 0 ? cgst.TypeArguments[i].Substitute(targetSubs) : cgst.TypeArguments[i];
+                    result[ifaceSym.GenericParameters[i]] = arg;
+                }
+            }
+        }
+
+        for (int i = 0; i < ifaceSym.GenericParameters.Count; i++)
+        {
+            var gpH = ifaceSym.GenericParameters[i];
+            if (!result.ContainsKey(gpH) && context.GetGenericParameterSymbol(gpH)?.ParameterKind == GenericParameterKind.This)
+                result[gpH] = concreteType;
+        }
+
+        return result;
+    }
+
+    private bool TryResolveAllocDerefTarget(
+        TypeRef containerType,
+        Expression creationNode,
+        Scope scope,
+        out TypeRef targetType)
+    {
+        targetType = TypeRef.Unresolved;
+        if (containerType.Handle is not { } rawH)
+            return false;
+
+        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.AllocDeref, out var candidates))
+            return false;
+
+        var unwrappedH = context.UnwrapAlias(rawH);
+        var typeSym = (Symbol?)context.GetTypeSymbol(unwrappedH) ?? context.GetSymbol(unwrappedH);
+        if (typeSym is null)
+            return false;
+
+        var containerSubs = BuildGenericSubstitutionMap(containerType);
+        var candidateScopes = new List<Scope> { GetOwnedScope(typeSym) };
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.TargetType.Handle is { } cth && context.UnwrapAlias(cth) == unwrappedH &&
+                context.GetSymbol(conf.OwnerHandle) is ExtensionSymbol ext)
+            {
+                candidateScopes.Add(GetOwnedScope(ext));
+            }
+        }
+
+        foreach (var candidate in candidates)
+        {
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            bool implementsIface = TypeRef.IsSubtypeOf(unwrappedH, candidate.InterfaceHandle, context) ||
+                context.Conformances.Any(c =>
+                    c.TargetType.Handle is { } cth &&
+                    context.UnwrapAlias(cth) == unwrappedH &&
+                    (c.InterfaceHandle == candidate.InterfaceHandle || TypeRef.IsSubtypeOf(c.InterfaceHandle, candidate.InterfaceHandle, context)));
+            if (!implementsIface)
+                continue;
+
+            var ifaceSubs = BuildInterfaceSubstitutionMap(unwrappedH, containerType, candidate.InterfaceHandle, ifaceSym);
+            MethodSymbol? matchedMethod = null;
+
+            foreach (var candScope in candidateScopes)
+            {
+                foreach (var sym in candScope.Symbols.Values)
+                {
+                    if (sym is not MethodSymbol m)
+                        continue;
+
+                    bool isMatch = m.Flags.HasFlag(FunctionFlags.InterfaceScoped)
+                        ? m.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text)
+                        : context.GetMethodSymbol(candidate.MethodHandle) is { } opM && m.Name.Text == opM.Name.Text;
+                    if (isMatch)
+                    {
+                        matchedMethod = m;
+                        break;
+                    }
+                }
+                if (matchedMethod is not null)
+                    break;
+            }
+
+            if (matchedMethod is null && context.GetMethodSymbol(candidate.MethodHandle) is { } ifaceOp &&
+                !ifaceOp.Flags.HasFlag(FunctionFlags.Intrinsic) &&
+                ifaceOp.Syntax?.Body is not null and not FunctionEmptyBody)
+            {
+                matchedMethod = ifaceOp;
+            }
+
+            if (matchedMethod is null)
+                continue;
+
+            var merged = new Dictionary<SymbolHandle, TypeRef>(ifaceSubs);
+            foreach (var kvp in containerSubs)
+                merged[kvp.Key] = kvp.Value;
+
+            TypeRef ret = merged.Count > 0 ? matchedMethod.ReturnType.Substitute(merged) : matchedMethod.ReturnType;
+            TypeRef unwrappedRet = TypeRef.UnwrapDyn(ret);
+            TypeRef? inner = unwrappedRet.SpecialType switch
+            {
+                AliasSemanticType { IsMutable: true } al => al.TargetType,
+                ReferenceSemanticType { IsMutable: true } rf => rf.ElementType,
+                _ => null
+            };
+
+            if (inner is null)
+            {
+                context.Diagnostics.ReportInvalidOperatorFunctionSignature(
+                    creationNode.GetSpan() ?? default,
+                    KnownIntrinsics.OpAllocDeref,
+                    "AllocDeref must return a mutable reference or alias ('mut &T' or 'T mut&') for construction",
+                    creationNode.GetSource());
+                targetType = unwrappedRet.SpecialType switch
+                {
+                    AliasSemanticType al => al.TargetType,
+                    ReferenceSemanticType rf => rf.ElementType,
+                    _ => ret
+                };
+                return true;
+            }
+
+            context.ResolvedTree.AddAllocDerefReference(creationNode, ResolutionContext.GetHandle(matchedMethod));
+            targetType = inner.Value;
+            return true;
+        }
+
+        return false;
+    }
+
     private TypeRef ResolveObjectCreationReturnType(
         bool isPut,
-        bool hasAllocArgs,
         TypeRef targetType,
         MethodSymbol? boundNewOperator,
-        Expression creationNode)
+        TypeRef boundAllocReturnType,
+        Expression creationNode,
+        List<TypeRef> allocArgTypes,
+        List<TypeRef> allocTypeArgs,
+        SeparatedSyntaxList<TypeSyntax>? allocTypeArgsSyntax,
+        Scope scope,
+        SymbolHandle containingFunction)
     {
-        // Placement `put(dest) T(...)` constructs in-place and returns `()`;
-        // value/stack `put T(...)` or `put T { ... }` evaluates to `targetType` (which must be Sized).
+        if (boundNewOperator is not null)
+        {
+            return boundAllocReturnType.IsResolved || boundAllocReturnType.IsSpecial ? boundAllocReturnType : boundNewOperator.ReturnType;
+        }
+
+        if (targetType.IsError || targetType.IsUnresolved)
+            return targetType;
+
+        if (allocArgTypes.Count > 0 || allocTypeArgs.Count > 0)
+        {
+            context.Diagnostics.ReportNoMatchingAllocationOperator(
+                creationNode.GetSpan() ?? default,
+                isPut ? "put" : "new",
+                targetType.ToDisplayString(context),
+                isPut ? KnownIntrinsics.OpPut : KnownIntrinsics.OpNew,
+                creationNode.GetSource());
+            return TypeRef.Error;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) &&
+            !IsDerivedFromValueType(targetType, valTypeH))
+        {
+            context.Diagnostics.ReportObjectCreationNotSupported(
+                creationNode.GetSpan() ?? default,
+                isPut ? "put" : "new",
+                targetType.ToDisplayString(context),
+                KnownIntrinsics.ValueType,
+                isPut ? KnownIntrinsics.OpPut : KnownIntrinsics.OpNew,
+                creationNode.GetSource());
+            return TypeRef.Error;
+        }
+
+        // Default parameterless `put T(...)` / `put T { ... }` creates `T` on stack and returns `T` by value.
         if (isPut)
         {
-            if (!hasAllocArgs && !targetType.IsError && !targetType.IsUnresolved && !targetType.IsSized(context))
+            if (!targetType.IsSized(context))
             {
                 context.Diagnostics.ReportUnsizedTypeNotAllowed(
                     creationNode.GetSpan() ?? default,
@@ -821,24 +1291,65 @@ internal sealed partial class ExpressionResolutionPass
                     "in a stack 'put' expression",
                     creationNode.GetSource());
             }
-            return hasAllocArgs ? voidType : targetType;
+            return targetType;
         }
-
-        if (boundNewOperator is not null)
-            return boundNewOperator.ReturnType;
 
         if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Box, out var boxHandle))
         {
-            var boxName = context.GetTypeSymbol(boxHandle)?.Name.Text ?? KnownIntrinsics.Box;
+            var boxSym = context.GetTypeSymbol(boxHandle);
+            string boxName = boxSym?.Name.Text ?? KnownIntrinsics.Box;
+            var boxGps = boxSym?.GenericParameters ?? [];
+
+            // Single-arity Box<T> is required for compiler-synthesized `new T(...)`.
+            if (boxGps.Count != 1)
+            {
+                context.Diagnostics.ReportNoMatchingAllocationOperator(
+                    creationNode.GetSpan() ?? default,
+                    "new",
+                    targetType.ToDisplayString(context),
+                    KnownIntrinsics.OpNew,
+                    creationNode.GetSource());
+                return TypeRef.Error;
+            }
+
+            TypeSyntax? targetSyntax = creationNode switch
+            {
+                ConstructorCallExpression c => c.Type,
+                ObjectInitializerExpression o => o.Type,
+                ArrayCreationExpression a => a.Type,
+                _ => null
+            };
+            context.ValidateGenericTypeArgumentConformances(
+                boxHandle,
+                targetSyntax is not null ? [targetSyntax] : [],
+                [targetType],
+                scope,
+                containingFunction,
+                reportDiagnostics: true);
+
             return TypeRef.Generic(boxHandle, boxName, [targetType]);
         }
 
         if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Box))
         {
             context.Diagnostics.ReportMissingIntrinsicForSyntax(creationNode.GetSpan() ?? default, "new expression", KnownIntrinsics.Box, creationNode.GetSource());
+            return TypeRef.Error;
         }
 
         return targetType;
+    }
+
+    private bool IsDerivedFromValueType(TypeRef type, SymbolHandle valTypeH)
+    {
+        if (type.IsFunction || type.IsDelegate ||
+            type.Kind is TypeRefKind.Slice or TypeRefKind.Array or TypeRefKind.Tuple or
+            TypeRefKind.Reference or TypeRefKind.Pointer or TypeRefKind.Optional or TypeRefKind.Literal)
+            return true;
+
+        if (type.Handle is { } h)
+            return TypeRef.IsSubtypeOf(context.UnwrapAlias(h), valTypeH, context);
+
+        return false;
     }
 
     /// <summary>
@@ -857,18 +1368,20 @@ internal sealed partial class ExpressionResolutionPass
                 allocArgTypes.Add(ResolveExpression(a, scope, containingFunction));
         }
 
-        bool hasAlloc = allocArgTypes.Count > 0 || objInit.AllocationTypeArguments is not null;
-        MethodSymbol? boundNewOperator = ResolveAllocationOperator(
+        ResolveAllocationAndTarget(
             isPut,
+            targetType,
             objInit.AllocationArguments,
             objInit.AllocationTypeArguments,
             allocArgTypes,
             objInit,
             scope,
-            containingFunction);
+            containingFunction,
+            out TypeRef allocResultType,
+            out TypeRef ctorTargetType);
 
-        var structFields = CollectStructFields(targetType);
-        Dictionary<SymbolHandle, TypeRef> genericSubs = BuildGenericSubstitutionMap(targetType);
+        var structFields = CollectStructFields(ctorTargetType);
+        Dictionary<SymbolHandle, TypeRef> genericSubs = BuildGenericSubstitutionMap(ctorTargetType);
         var initializedFields = new HashSet<SymbolHandle>();
 
         foreach (var entry in objInit.Initializer.Expressions)
@@ -956,8 +1469,8 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
-        // Verify all fields of targetType are covered
-        if (!targetType.IsError && !targetType.IsUnresolved)
+        // Verify all fields of ctorTargetType are covered
+        if (!ctorTargetType.IsError && !ctorTargetType.IsUnresolved)
         {
             foreach (var field in structFields)
             {
@@ -966,14 +1479,14 @@ internal sealed partial class ExpressionResolutionPass
                 {
                     context.Diagnostics.ReportDirectInitializerMissingField(
                         objInit.Initializer.RightBrace.Span,
-                        targetType.ToDisplayString(context),
+                        ctorTargetType.ToDisplayString(context),
                         field.Name.Text,
                         objInit.GetSource());
                 }
             }
         }
 
-        return ResolveObjectCreationReturnType(isPut, hasAlloc, targetType, boundNewOperator, objInit);
+        return allocResultType;
     }
 
     private List<FieldSymbol> CollectStructFields(TypeRef targetType)
@@ -999,7 +1512,7 @@ internal sealed partial class ExpressionResolutionPass
             };
             foreach (var fh in fieldHandles)
             {
-                if (context.GetFieldSymbol(fh) is { } fs)
+                if (context.GetFieldSymbol(fh) is { } fs && !fs.Flags.HasFlag(VariableFlags.Static))
                     result.Add(fs);
             }
         }
@@ -1120,6 +1633,14 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         var targetType = ResolveTypeSyntax(asExpr.Type, scope);
+
+        if (!exprType.IsError && !exprType.IsUnresolved && !targetType.IsError && !targetType.IsUnresolved &&
+            TryResolveCastOperator(OperatorKind.ExplicitCast, exprType, targetType, out var explicitCastMethod))
+        {
+            if (explicitCastMethod is not null)
+                context.ResolvedTree.AddReference(asExpr, ResolutionContext.GetHandle(explicitCastMethod));
+            return targetType;
+        }
 
         if (TypeRef.IsNonContiguousSplitBase(targetType, exprType, context, out var splitBaseName))
         {
@@ -1319,6 +1840,12 @@ internal sealed partial class ExpressionResolutionPass
                     ReportMissingDynForBodyInterface(syntax, context.GetSymbol(context.UnwrapAlias(handle))?.Name.Text ?? res.ToDisplayString(context));
                 return TypeRef.Error;
             }
+            if (HasUninstantiatedThisGenericParameter(handle, out var missingParamName))
+            {
+                if (reportDiagnostics)
+                    context.Diagnostics.ReportMissingExplicitThisTypeArgument(syntax.GetSpan() ?? default, context.GetSymbol(handle)?.Name.Text ?? res.ToDisplayString(context), missingParamName, syntax.GetSource());
+                return TypeRef.Error;
+            }
             return res;
         }
 
@@ -1515,6 +2042,28 @@ internal sealed partial class ExpressionResolutionPass
         QualifiedType qt => FindLeafGenericType(qt.Right),
         _ => null
     };
+
+    private bool HasUninstantiatedThisGenericParameter(SymbolHandle handle, out string paramName)
+    {
+        paramName = string.Empty;
+        IReadOnlyList<SymbolHandle> gps = context.GetSymbol(handle) switch
+        {
+            TypeSymbol ts => ts.GenericParameters,
+            NestedTypeSymbol nts => nts.GenericParameters,
+            _ => []
+        };
+        if (gps.Count == 0)
+            return false;
+        foreach (var gpH in gps)
+        {
+            if (context.GetGenericParameterSymbol(gpH) is { ParameterKind: GenericParameterKind.This } gp)
+            {
+                paramName = gp.Name.Text;
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static bool IsInterfaceSymbol(ResolutionContext context, SymbolHandle handle)
     {

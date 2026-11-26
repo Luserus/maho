@@ -16,16 +16,31 @@ internal sealed class OwnershipLowerer
     private readonly ResolutionContext context;
     private readonly OwnershipTypeClassifier ownership;
     private readonly Dictionary<string, OwnershipBlock> labels = new(StringComparer.Ordinal);
-    // A safe alias/reference local does not own a new object.  Keep its provenance while
-    // lowering so a reborrow (`&T second = first`) remains a loan of the original place rather
-    // than a loan of the first handle's stack slot.
-    private readonly Dictionary<Symbol, Place> knownReferents = [];
+    // Safe alias/reference locals unwrap directly to their target referent place (`aliasReferents`).
+    // Delegates and non-owning borrow-holding composites retain their own storage identity while
+    // tracking captured/borrowed places separately in `borrowReferents` and `body.ReferentMap`.
+    private readonly Dictionary<Symbol, Place> aliasReferents = [];
+    private readonly Dictionary<Symbol, List<(Place Referent, BorrowKind Kind)>> borrowReferents = [];
+    private readonly HashSet<SyntaxNode> returnLeafExpressions = [];
     private readonly Stack<List<Symbol>> scopes = [];
     private OwnershipBody body = null!;
     private OwnershipBlock current = null!;
     private ParameterSymbol? receiverParameter;
     private int nextBlockId;
     private int nextTemporaryId;
+
+    private void SetKnownReferents(Symbol owner, List<(Place Referent, BorrowKind Kind)> referents)
+    {
+        borrowReferents[owner] = referents;
+        body.ReferentMap[owner] = [.. referents];
+    }
+
+    private void ClearKnownReferents(Symbol owner)
+    {
+        aliasReferents.Remove(owner);
+        borrowReferents.Remove(owner);
+        body.ReferentMap.Remove(owner);
+    }
 
     public OwnershipLowerer(ResolutionContext context)
     {
@@ -51,19 +66,7 @@ internal sealed class OwnershipLowerer
     /// </remarks>
     public OwnershipBody Lower(FunctionBody syntax, Scope scope, SymbolHandle containingSymbol)
     {
-        labels.Clear();
-        knownReferents.Clear();
-        scopes.Clear();
-        receiverParameter = null;
-        nextBlockId = 0;
-
-        var entry = NewBlock();
-        var exit = NewBlock();
-        body = new OwnershipBody(containingSymbol, entry, exit);
-        body.Blocks.Add(entry);
-        body.Blocks.Add(exit);
-        current = entry;
-
+        BeginBodyLowering(containingSymbol);
         BeginScope();
         RegisterParameters(containingSymbol);
         if (syntax is FunctionBlockBody block)
@@ -79,6 +82,87 @@ internal sealed class OwnershipLowerer
         EndScope();
         ConnectFallthroughToExit(current);
         return body;
+    }
+
+    /// <summary>
+    /// Produces one fresh ownership CFG for a resolved lambda body so move, borrow, and return
+    /// escape checks cover inline closures uniformly alongside named functions.
+    /// </summary>
+    public OwnershipBody LowerLambda(LambdaExpression lambda, Scope lambdaScope, SymbolHandle containingFunction)
+    {
+        BeginBodyLowering(containingFunction);
+        BeginScope();
+
+        foreach (var pSyntax in lambda.Parameters)
+        {
+            var paramPart = ResolutionContext.GetSymbolName(pSyntax.Identifier).Last;
+            if (lambdaScope[paramPart].OfType<ParameterSymbol>().FirstOrDefault() is { } paramSymbol)
+            {
+                body.RegisterPlace(paramSymbol, paramSymbol.Type);
+                scopes.Peek().Add(paramSymbol);
+                Emit(OwnershipStatementKind.StorageLive, new Place(paramSymbol), pSyntax.GetSpan() ?? default, pSyntax.GetSource());
+                Emit(OwnershipStatementKind.Assign, new Place(paramSymbol), pSyntax.GetSpan() ?? default, pSyntax.GetSource());
+            }
+        }
+
+        if (context.ResolvedTree.TryGetLambdaCaptures(lambda, out var captures))
+        {
+            foreach (var cap in captures)
+            {
+                TypeRef capType = cap.Symbol switch
+                {
+                    LocalVariableSymbol lv => lv.Type,
+                    ParameterSymbol pv => pv.Type,
+                    _ => TypeRef.Unresolved
+                };
+                if (!capType.IsUnresolved && !body.PlaceTypes.ContainsKey(cap.Symbol))
+                {
+                    body.RegisterPlace(cap.Symbol, capType);
+                    Emit(OwnershipStatementKind.StorageLive, new Place(cap.Symbol), GetSymbolSpan(cap.Symbol), GetSymbolSource(cap.Symbol));
+                    Emit(OwnershipStatementKind.Assign, new Place(cap.Symbol), GetSymbolSpan(cap.Symbol), GetSymbolSource(cap.Symbol));
+                }
+            }
+        }
+
+        if (lambda.Body is BlockExpression blockBody)
+        {
+            var innerScope = context.GetSyntaxScope(blockBody, lambdaScope);
+            PredeclareLabels(blockBody.Locals);
+            LowerLocals(blockBody.Locals, innerScope);
+            if (blockBody.FinalExpression is { } finalExpr)
+                LowerValue(finalExpr, innerScope);
+            EndScope();
+        }
+        else
+        {
+            LowerValue(lambda.Body, lambdaScope);
+            EmitBorrowOriginsForExpression(lambda.Body, lambdaScope, lambda.Body);
+            EndScope();
+            current.Terminator = OwnershipTerminator.Return(lambda.Body);
+            current.AddSuccessor(body.Exit);
+            current = AddBlock();
+        }
+
+        ConnectFallthroughToExit(current);
+        return body;
+    }
+
+    private void BeginBodyLowering(SymbolHandle containingSymbol)
+    {
+        labels.Clear();
+        aliasReferents.Clear();
+        borrowReferents.Clear();
+        returnLeafExpressions.Clear();
+        scopes.Clear();
+        receiverParameter = null;
+        nextBlockId = 0;
+
+        var entry = NewBlock();
+        var exit = NewBlock();
+        body = new OwnershipBody(containingSymbol, entry, exit);
+        body.Blocks.Add(entry);
+        body.Blocks.Add(exit);
+        current = entry;
     }
 
     private OwnershipBlock NewBlock() => new(nextBlockId++);
@@ -170,7 +254,10 @@ internal sealed class OwnershipLowerer
 
             case LocalReturnStatement returned:
                 if (returned.Statement.Expression is { } value)
-                    LowerValue(value, scope);
+                {
+                    LowerReturnValue(value, scope);
+                    EmitBorrowOriginsForExpression(value, scope, value);
+                }
                 ExitAllScopes();
                 current.Terminator = OwnershipTerminator.Return(returned.Statement.Expression);
                 current.AddSuccessor(body.Exit);
@@ -179,7 +266,10 @@ internal sealed class OwnershipLowerer
 
             case LocalThrowStatement thrown:
                 if (thrown.Statement.Expression is { } thrownVal)
+                {
                     LowerValue(thrownVal, scope);
+                    EmitBorrowOriginsForExpression(thrownVal, scope, thrownVal);
+                }
                 ExitAllScopes();
                 current.Terminator = OwnershipTerminator.Throw(thrown.Statement.Expression);
                 current.AddSuccessor(body.Exit);
@@ -232,12 +322,13 @@ internal sealed class OwnershipLowerer
                     // program point and ends after the holder's last use.
                     Emit(OwnershipStatementKind.Assign, new Place(local), declaration.Declarator.Identifier.GetSpan() ?? default, declaration.GetSource(), origin: declaration);
                     Emit(OwnershipStatementKind.Borrow, borrowed, initializer.GetSpan() ?? default, initializer.GetSource(), borrowKind: borrowKind, loanOwner: local, origin: initializer);
-                    knownReferents[local] = borrowed;
+                    aliasReferents[local] = borrowed;
                 }
                 else
                 {
                     LowerValueForDestination(initializer, local.Type, scope);
                     Emit(OwnershipStatementKind.Assign, new Place(local), declaration.Declarator.Identifier.GetSpan() ?? default, declaration.GetSource(), origin: declaration);
+                    EmitOwnedReferentsAfterAssign(initializer, local, scope);
                 }
             }
         }
@@ -331,7 +422,7 @@ internal sealed class OwnershipLowerer
     private Place ResolveKnownReferent(Place place)
     {
         var seen = new HashSet<Symbol>();
-        while (seen.Add(place.Root) && knownReferents.TryGetValue(place.Root, out var referent))
+        while (seen.Add(place.Root) && aliasReferents.TryGetValue(place.Root, out var referent))
             place = new Place(referent.Root, [.. referent.Projections, .. place.Projections]);
         return place;
     }
@@ -390,7 +481,19 @@ internal sealed class OwnershipLowerer
     private void LowerFor(ForExpression expression, Scope scope)
     {
         var forScope = context.GetSyntaxScope(expression, scope);
-        LowerValue(expression.Collection, scope);
+        LowerPlaceEvaluation(expression.Collection, scope);
+
+        Place? collectionBorrowPlace = null;
+        var colSpan = expression.Collection.GetSpan() ?? expression.Keyword.Span;
+        var colSource = expression.Collection.GetSource() ?? expression.GetSource();
+        if (TryGetPlace(expression.Collection, scope, out var colPlace))
+        {
+            var resolvedColPlace = ResolveKnownReferent(colPlace);
+            collectionBorrowPlace = CreateTemporaryPlace(expression.Collection, context.GetRequiredExpressionType(expression.Collection), forScope);
+            Emit(OwnershipStatementKind.StorageLive, collectionBorrowPlace.Value, colSpan, colSource, origin: expression.Collection);
+            Emit(OwnershipStatementKind.Assign, collectionBorrowPlace.Value, colSpan, colSource, origin: expression.Collection);
+            Emit(OwnershipStatementKind.Borrow, resolvedColPlace, colSpan, colSource, borrowKind: BorrowKind.Shared, loanOwner: collectionBorrowPlace.Value.Root, origin: expression.Collection);
+        }
 
         if (expression.Declaration is not null)
             LowerDeclaration(expression.Declaration, forScope);
@@ -421,6 +524,12 @@ internal sealed class OwnershipLowerer
         LowerBranchExpression(expression.Body, forScope);
         ConnectFallthrough(current, header);
         current = exit;
+
+        if (collectionBorrowPlace is { } cbPlace)
+        {
+            Emit(OwnershipStatementKind.Use, cbPlace, colSpan, colSource, OwnershipUseKind.Read, origin: expression.Collection);
+            Emit(OwnershipStatementKind.StorageDead, cbPlace, colSpan, colSource, origin: expression.Collection);
+        }
     }
 
     private void LowerTry(TryExpression tryExpr, Scope scope)
@@ -604,19 +713,13 @@ internal sealed class OwnershipLowerer
 
             case ObjectInitializerExpression objInit:
                 if (objInit.AllocationArguments is { } objAllocArgs)
-                {
-                    foreach (var arg in objAllocArgs)
-                        LowerValue(arg, scope);
-                }
+                    LowerCallArguments(objAllocArgs, GetAllocationOperatorParameters(objInit), scope);
                 LowerInitializerEntries(objInit.Initializer, scope);
                 break;
 
             case ConstructorCallExpression ctor:
                 if (ctor.AllocationArguments is { } ctorAllocArgs)
-                {
-                    foreach (var arg in ctorAllocArgs)
-                        LowerValue(arg, scope);
-                }
+                    LowerCallArguments(ctorAllocArgs, GetAllocationOperatorParameters(ctor), scope);
                 IReadOnlyList<ParameterSymbol> ctorParams = GetConstructorParameters(ctor);
                 LowerCallArguments(ctor.Arguments, ctorParams, scope);
                 if (ctor.WithClause is { } withClause)
@@ -656,8 +759,45 @@ internal sealed class OwnershipLowerer
     /// not the alias/reference handle. This is the destination-boundary implicit dereference rule;
     /// standalone alias evaluation still evaluates only its handle.
     /// </remarks>
-    private void LowerValueForDestination(Expression expression, TypeRef destination, Scope scope)
+    private void LowerReturnValue(Expression expression, Scope scope)
     {
+        CollectReturnLeafExpressions(expression);
+        LowerValueForDestination(expression, GetContainingReturnType(), scope, isReturnUse: returnLeafExpressions.Contains(expression));
+    }
+
+    private void CollectReturnLeafExpressions(Expression expr)
+    {
+        while (expr is ParenthesizedExpression paren)
+            expr = paren.Expression;
+
+        if (expr is IfExpression ifExpr)
+        {
+            CollectReturnLeafExpressions(ifExpr.ThenExpression);
+            if (ifExpr.ElseExpression is { } elseBranch)
+                CollectReturnLeafExpressions(elseBranch.Expression);
+            return;
+        }
+
+        if (expr is BlockExpression blockExpr && blockExpr.FinalExpression is { } finalExpr)
+        {
+            CollectReturnLeafExpressions(finalExpr);
+            return;
+        }
+
+        if (expr is NamedExpression or MemberAccessExpression or IndexExpression)
+            returnLeafExpressions.Add(expr);
+    }
+
+    private TypeRef GetContainingReturnType() => context.GetSymbol(body.ContainingSymbol) switch
+    {
+        FunctionSymbol fn => fn.ReturnType,
+        MethodSymbol m => m.ReturnType,
+        _ => TypeRef.Unresolved
+    };
+
+    private void LowerValueForDestination(Expression expression, TypeRef destination, Scope scope, bool isReturnUse = false)
+    {
+        isReturnUse = isReturnUse || returnLeafExpressions.Contains(expression);
         if (IsOwnedValueDestination(destination) && TryGetPlace(expression, scope, out var place))
         {
             place = ResolveKnownReferent(place);
@@ -670,16 +810,28 @@ internal sealed class OwnershipLowerer
                 // A move-only referent therefore needs a focused diagnostic rather than silently
                 // consuming storage that the alias promises to keep referring to.
                 useKind = OwnershipUseKind.Copy;
-                if (ownership.Classify(destination) == OwnershipKind.Move)
+                TypeRef materializedType = destination.Handle is { Kind: SymbolKind.GenericParameter }
+                    ? TypeRef.UnwrapDyn(sourceType).SpecialType switch
+                    {
+                        AliasSemanticType a => a.TargetType,
+                        ReferenceSemanticType r => r.ElementType,
+                        _ => destination
+                    }
+                    : destination;
+                if (ownership.Classify(materializedType) == OwnershipKind.Move)
                     context.Diagnostics.ReportCannotCopyMoveOnlyAlias(expression.GetSpan() ?? default, place.Root.Name.Text, expression.GetSource());
             }
             else
             {
-                useKind = ownership.Classify(destination) == OwnershipKind.Copy
+                TypeRef classificationType = !sourceType.IsError && !sourceType.IsUnresolved && !sourceType.IsInferred && !sourceType.IsLiteral &&
+                    destination.Handle is { Kind: SymbolKind.GenericParameter }
+                    ? sourceType
+                    : destination;
+                useKind = ownership.Classify(classificationType) == OwnershipKind.Copy
                     ? OwnershipUseKind.Copy
                     : OwnershipUseKind.Move;
             }
-            Emit(OwnershipStatementKind.Use, place, expression.GetSpan() ?? default, expression.GetSource(), useKind, origin: expression);
+            Emit(OwnershipStatementKind.Use, place, expression.GetSpan() ?? default, expression.GetSource(), useKind, origin: expression, isReturnUse: isReturnUse);
             return;
         }
 
@@ -720,7 +872,25 @@ internal sealed class OwnershipLowerer
         TypeRef destination = context.GetRequiredExpressionType(assignment.LhsExpression);
         LowerValueForDestination(assignment.RhsExpression, destination, scope);
         if (TryGetPlace(assignment.LhsExpression, scope, out var target))
+        {
             Emit(OwnershipStatementKind.Assign, target, assignment.LhsExpression.GetSpan() ?? default, assignment.GetSource(), origin: assignment);
+            var unwrappedDest = TypeRef.UnwrapDyn(destination);
+            if (target.Projections.Count == 0 && unwrappedDest.SpecialType is not AliasSemanticType)
+            {
+                ClearKnownReferents(target.Root);
+                if (unwrappedDest.SpecialType is ReferenceSemanticType &&
+                    TryGetDeclarationBorrow(assignment.RhsExpression, scope, destination, out var borrowed, out var borrowKind))
+                {
+                    borrowed = ResolveKnownReferent(borrowed);
+                    Emit(OwnershipStatementKind.Borrow, borrowed, assignment.RhsExpression.GetSpan() ?? default, assignment.RhsExpression.GetSource(), borrowKind: borrowKind, loanOwner: target.Root, origin: assignment.RhsExpression);
+                    SetKnownReferents(target.Root, [(borrowed, borrowKind)]);
+                }
+                else
+                {
+                    EmitOwnedReferentsAfterAssign(assignment.RhsExpression, target.Root, scope);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -736,14 +906,39 @@ internal sealed class OwnershipLowerer
         IReadOnlyList<ParameterSymbol> parameters = GetCallParameters(call);
         if (call.Callee is MemberAccessExpression member)
             LowerPlaceEvaluation(member.Expression, scope);
-        else if (call.Callee is not NamedExpression)
+        else if (call.Callee is NamedExpression namedCallee)
+        {
+            if (TryGetStorageSymbol(namedCallee, scope, out _))
+                LowerPlaceEvaluation(namedCallee, scope);
+        }
+        else
             LowerValue(call.Callee, scope);
 
-        LowerCallArguments(call.Arguments, parameters, scope);
+        List<(Place Owner, TextSpan Span, SourceText? Source, SyntaxNode Origin)> callTempOwners = [];
+        List<(Place Referent, BorrowKind Kind)> calleeRefs = [];
+        if (call.Callee is not MemberAccessExpression && call.Callee is not NamedExpression &&
+            TryCollectSafeBorrowReferents(call.Callee, scope, calleeRefs))
+        {
+            var tempOwner = CreateTemporaryPlace(call.Callee, context.GetRequiredExpressionType(call.Callee), scope);
+            var span = call.Callee.GetSpan() ?? default;
+            var source = call.Callee.GetSource();
+            Emit(OwnershipStatementKind.StorageLive, tempOwner, span, source, origin: call.Callee);
+            Emit(OwnershipStatementKind.Assign, tempOwner, span, source, origin: call.Callee);
+            foreach (var (referent, kind) in calleeRefs)
+                Emit(OwnershipStatementKind.Borrow, ResolveKnownReferent(referent), span, source, borrowKind: kind, loanOwner: tempOwner.Root, origin: call.Callee);
+            callTempOwners.Add((tempOwner, span, source, call.Callee));
+        }
+
+        LowerCallArguments(call.Arguments, parameters, scope, callTempOwners);
     }
 
-    private void LowerCallArguments(SeparatedSyntaxList<Expression> arguments, IReadOnlyList<ParameterSymbol> parameters, Scope scope)
+    private void LowerCallArguments(
+        SeparatedSyntaxList<Expression> arguments,
+        IReadOnlyList<ParameterSymbol> parameters,
+        Scope scope,
+        List<(Place Owner, TextSpan Span, SourceText? Source, SyntaxNode Origin)>? existingTempOwners = null)
     {
+        var tempOwners = existingTempOwners ?? [];
         for (int index = 0; index < arguments.Count; index++)
         {
             var argument = arguments[index];
@@ -773,8 +968,208 @@ internal sealed class OwnershipLowerer
             else
             {
                 LowerValueForDestination(argument, parameter?.Type ?? context.GetRequiredExpressionType(argument), scope);
+                List<(Place Referent, BorrowKind Kind)> argRefs = [];
+                if (TryCollectSafeBorrowReferents(argument, scope, argRefs))
+                {
+                    var tempOwner = CreateTemporaryPlace(argument, context.GetRequiredExpressionType(argument), scope);
+                    var span = argument.GetSpan() ?? default;
+                    var source = argument.GetSource();
+                    Emit(OwnershipStatementKind.StorageLive, tempOwner, span, source, origin: argument);
+                    Emit(OwnershipStatementKind.Assign, tempOwner, span, source, origin: argument);
+                    foreach (var (referent, kind) in argRefs)
+                        Emit(OwnershipStatementKind.Borrow, ResolveKnownReferent(referent), span, source, borrowKind: kind, loanOwner: tempOwner.Root, origin: argument);
+                    tempOwners.Add((tempOwner, span, source, argument));
+                }
             }
         }
+
+        foreach (var (owner, span, source, origin) in tempOwners)
+        {
+            Emit(OwnershipStatementKind.Use, owner, span, source, OwnershipUseKind.Read, origin: origin);
+            Emit(OwnershipStatementKind.StorageDead, owner, span, source, origin: origin);
+        }
+    }
+
+    private void EmitOwnedReferentsAfterAssign(Expression sourceExpr, Symbol owner, Scope scope)
+    {
+        List<(Place Referent, BorrowKind Kind)> collected = [];
+        if (!TryCollectSafeBorrowReferents(sourceExpr, scope, collected))
+            return;
+
+        var resolvedList = new List<(Place Referent, BorrowKind Kind)>(collected.Count);
+        var span = sourceExpr.GetSpan() ?? default;
+        var source = sourceExpr.GetSource();
+        foreach (var (referent, kind) in collected)
+        {
+            var resolved = ResolveKnownReferent(referent);
+            Emit(OwnershipStatementKind.Borrow, resolved, span, source, borrowKind: kind, loanOwner: owner, origin: sourceExpr);
+            resolvedList.Add((resolved, kind));
+        }
+        SetKnownReferents(owner, resolvedList);
+    }
+
+    private void EmitBorrowOriginsForExpression(Expression sourceExpr, Scope scope, Expression originExpr)
+    {
+        List<(Place Referent, BorrowKind Kind)> collected = [];
+        if (!TryCollectSafeBorrowReferents(sourceExpr, scope, collected))
+            return;
+
+        var span = originExpr.GetSpan() ?? default;
+        var source = originExpr.GetSource();
+        foreach (var (referent, kind) in collected)
+            Emit(OwnershipStatementKind.Borrow, ResolveKnownReferent(referent), span, source, borrowKind: kind, origin: originExpr);
+    }
+
+    private bool TryCollectSafeBorrowReferents(
+        Expression expr,
+        Scope scope,
+        List<(Place Referent, BorrowKind Kind)> referents,
+        HashSet<SyntaxNode>? visited = null)
+    {
+        while (expr is ParenthesizedExpression p)
+            expr = p.Expression;
+
+        visited ??= [];
+        if (!visited.Add(expr))
+            return false;
+
+        int initialCount = referents.Count;
+
+        if (expr is LambdaExpression lambda)
+        {
+            if (context.ResolvedTree.TryGetLambdaCaptures(lambda, out var captures))
+            {
+                foreach (var cap in captures)
+                {
+                    if (IsStorageSymbol(cap.Symbol))
+                        referents.Add((new Place(cap.Symbol), cap.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared));
+                }
+            }
+            return referents.Count > initialCount;
+        }
+
+        if (expr is TupleExpression tuple)
+        {
+            foreach (var arg in tuple.Arguments)
+                TryCollectSafeBorrowElement(arg, scope, referents, visited);
+            return referents.Count > initialCount;
+        }
+
+        if (expr is ObjectInitializerExpression objInit)
+        {
+            CollectInitializerBorrowReferents(objInit.Initializer, scope, referents, visited);
+            return referents.Count > initialCount;
+        }
+
+        if (expr is ConstructorCallExpression ctor)
+        {
+            foreach (var arg in ctor.Arguments)
+                TryCollectSafeBorrowElement(arg, scope, referents, visited);
+            if (ctor.WithClause is { } withClause)
+                CollectInitializerBorrowReferents(withClause.Initializer, scope, referents, visited);
+            return referents.Count > initialCount;
+        }
+
+        if (expr is IfExpression ifExpr)
+        {
+            TryCollectSafeBorrowReferents(ifExpr.ThenExpression, scope, referents, visited);
+            if (ifExpr.ElseExpression is { } elseBranch)
+                TryCollectSafeBorrowReferents(elseBranch.Expression, scope, referents, visited);
+            return referents.Count > initialCount;
+        }
+
+        if (expr is BlockExpression blockExpr && blockExpr.FinalExpression is { } finalExpr)
+        {
+            TryCollectSafeBorrowReferents(finalExpr, scope, referents, visited);
+            return referents.Count > initialCount;
+        }
+
+        if (context.GetExpressionType(expr) is { } exprType &&
+            TypeRef.UnwrapDyn(exprType).SpecialType is DelegateSemanticType)
+        {
+            if (expr is MemberAccessExpression member &&
+                context.ResolvedTree.TryGetReference(member, out var mHandle) &&
+                context.GetSymbol(mHandle) is MethodSymbol boundMethod &&
+                TryGetMethodReceiverMutability(boundMethod, out bool isMutRecv) &&
+                TryGetPlace(member.Expression, scope, out var recvPlace))
+            {
+                referents.Add((recvPlace, isMutRecv ? BorrowKind.Mutable : BorrowKind.Shared));
+                return true;
+            }
+
+            if (expr is NamedExpression named &&
+                context.ResolvedTree.TryGetReference(named, out var nHandle) &&
+                context.GetSymbol(nHandle) is MethodSymbol implicitMethod &&
+                TryGetMethodReceiverMutability(implicitMethod, out bool isMutThis) &&
+                receiverParameter is not null)
+            {
+                referents.Add((new Place(receiverParameter), isMutThis ? BorrowKind.Mutable : BorrowKind.Shared));
+                return true;
+            }
+        }
+
+        if (TryGetPlace(expr, scope, out var place) &&
+            borrowReferents.TryGetValue(place.Root, out var tracked) &&
+            tracked.Count > 0)
+        {
+            referents.AddRange(tracked);
+            return true;
+        }
+
+        return referents.Count > initialCount;
+    }
+
+    private void CollectInitializerBorrowReferents(
+        TypeInitializer initializer,
+        Scope scope,
+        List<(Place Referent, BorrowKind Kind)> referents,
+        HashSet<SyntaxNode> visited)
+    {
+        foreach (var entry in initializer.Expressions)
+        {
+            if (entry is AssignmentExpression assign && assign.EqualsOperator.Kind == TokenKind.Equals)
+                TryCollectSafeBorrowElement(assign.RhsExpression, scope, referents, visited);
+            else
+                TryCollectSafeBorrowElement(entry, scope, referents, visited);
+        }
+    }
+
+    private void TryCollectSafeBorrowElement(
+        Expression arg,
+        Scope scope,
+        List<(Place Referent, BorrowKind Kind)> referents,
+        HashSet<SyntaxNode> visited)
+    {
+        if (arg is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } addr &&
+            TypeRef.UnwrapDyn(context.GetRequiredExpressionType(addr)).SpecialType is ReferenceSemanticType rf)
+        {
+            if (TryGetPlace(addr.Operand, scope, out var targetPlace))
+                referents.Add((targetPlace, rf.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared));
+            return;
+        }
+
+        TryCollectSafeBorrowReferents(arg, scope, referents, visited);
+    }
+
+    private bool TryGetMethodReceiverMutability(MethodSymbol method, out bool isMutable)
+    {
+        isMutable = false;
+        if (method.Flags.HasFlag(FunctionFlags.Static) || method.Parameters.Count == 0)
+            return false;
+
+        if (context.GetParameterSymbol(method.Parameters[0]) is not { } p0 ||
+            p0.Syntax?.Declarator.ReceiverKind is null or ReceiverKind.None)
+        {
+            return false;
+        }
+
+        isMutable = TypeRef.UnwrapDyn(p0.Type).SpecialType switch
+        {
+            ReferenceSemanticType rf => rf.IsMutable,
+            AliasSemanticType { IsUnsafe: false } al => al.IsMutable,
+            _ => false
+        };
+        return true;
     }
 
     private void LowerInitializerEntries(TypeInitializer initializer, Scope scope)
@@ -797,13 +1192,34 @@ internal sealed class OwnershipLowerer
         }
     }
 
+    private List<ParameterSymbol> GetAllocationOperatorParameters(Expression creationNode)
+    {
+        if (!context.ResolvedTree.TryGetAllocationOperatorReference(creationNode, out var handle))
+            return [];
+
+        if (context.GetSymbol(handle) is MethodSymbol opMethod)
+        {
+            var list = opMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+            if (list.Count > 0 && list[0].Syntax?.Declarator.IsReceiver == true)
+                list.RemoveAt(0);
+            return list;
+        }
+
+        return [];
+    }
+
     private List<ParameterSymbol> GetConstructorParameters(ConstructorCallExpression ctor)
     {
         if (!context.ResolvedTree.TryGetReference(ctor, out var handle))
             return [];
 
         if (context.GetSymbol(handle) is MethodSymbol { Name.Text: "Construct" } ctorMethod)
-            return ctorMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+        {
+            var list = ctorMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+            if (list.Count > 0 && list[0].Syntax?.Declarator.IsReceiver == true)
+                list.RemoveAt(0);
+            return list;
+        }
 
         return [];
     }
@@ -995,8 +1411,8 @@ internal sealed class OwnershipLowerer
     /// <paramref name="origin"/> is retained for escape analysis; <paramref name="loanOwner"/>
     /// distinguishes a named loan from an ephemeral call borrow.
     /// </remarks>
-    private void Emit(OwnershipStatementKind kind, Place place, TextSpan span, SourceText? source, OwnershipUseKind? useKind = null, BorrowKind? borrowKind = null, Symbol? loanOwner = null, bool conditional = false, SyntaxNode? origin = null) =>
-        current.Statements.Add(new OwnershipStatement(kind, place, span, source, useKind, borrowKind, loanOwner, conditional, origin));
+    private void Emit(OwnershipStatementKind kind, Place place, TextSpan span, SourceText? source, OwnershipUseKind? useKind = null, BorrowKind? borrowKind = null, Symbol? loanOwner = null, bool conditional = false, SyntaxNode? origin = null, bool isReturnUse = false) =>
+        current.Statements.Add(new OwnershipStatement(kind, place, span, source, useKind, borrowKind, loanOwner, conditional, origin, isReturnUse));
 
     private void ConnectFallthroughToExit(OwnershipBlock block) => ConnectFallthrough(block, body.Exit);
 

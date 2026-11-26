@@ -62,7 +62,7 @@ public sealed class DeconstructTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -70,7 +70,7 @@ public sealed class DeconstructTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -79,7 +79,7 @@ public sealed class DeconstructTests
             nuint codeAddress;
             ValType* env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         public interface Deconstruct<T...>
@@ -92,7 +92,7 @@ public sealed class DeconstructTests
         public struct Tuple<T...> : ValType, Deconstruct<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            public func Deconstruct.Deconstruct(&this) -> (T...);
+            func Deconstruct.Deconstruct(&this) -> (T...);
         }
         """;
 
@@ -122,7 +122,7 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(&this) -> (int32, int32)
                 {
                     return (this.x, this.y);
                 }
@@ -150,7 +150,7 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(&this) -> (int32, int32)
                 {
                     return (this.x, this.y);
                 }
@@ -190,7 +190,7 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(&this) -> (int32, int32)
                 {
                     return (this.x, this.y);
                 }

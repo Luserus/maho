@@ -6,5 +6,6 @@ internal enum GenericParameterKind : byte
     Type,
     Integer,
     Float,
-    Constant
+    Constant,
+    This
 }

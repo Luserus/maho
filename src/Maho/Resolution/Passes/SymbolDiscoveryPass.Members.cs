@@ -256,6 +256,10 @@ internal sealed partial class SymbolDiscoveryPass
                 if (retStmt.Statement.Expression is not null)
                     DiscoverBlockExpressions(retStmt.Statement.Expression, scope, containingSymbol, containingMethod);
                 break;
+            case LocalThrowStatement throwStmt:
+                if (throwStmt.Statement.Expression is not null)
+                    DiscoverBlockExpressions(throwStmt.Statement.Expression, scope, containingSymbol, containingMethod);
+                break;
             case LocalYieldStatement yieldStmt:
                 if (yieldStmt.Expression is not null)
                     DiscoverBlockExpressions(yieldStmt.Expression, scope, containingSymbol, containingMethod);
@@ -333,8 +337,57 @@ internal sealed partial class SymbolDiscoveryPass
         }
         else if (expr is TupleExpression tuple)
         {
-            foreach (var arg in tuple.Arguments)
-                DiscoverBlockExpressions(arg, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(tuple.Arguments, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MemberAccessExpression member)
+        {
+            DiscoverBlockExpressions(member.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is IndexExpression index)
+        {
+            DiscoverBlockExpressions(index.Expression, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(index.Arguments, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ObjectInitializerExpression objInit)
+        {
+            DiscoverExpressionList(objInit.AllocationArguments, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(objInit.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ConstructorCallExpression ctor)
+        {
+            DiscoverExpressionList(ctor.AllocationArguments, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(ctor.Arguments, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(ctor.WithClause?.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ArrayCreationExpression arr)
+        {
+            DiscoverBlockExpressions(arr.Size, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(arr.Initializer, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(arr.WithClause?.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is CollectionExpression collection)
+        {
+            DiscoverExpressionList(collection.Expressions, scope, containingSymbol, containingMethod);
+            foreach (var modifier in collection.Modifiers)
+            {
+                if (modifier is CollectionConstructorModifier ctorMod)
+                    DiscoverExpressionList(ctorMod.Arguments, scope, containingSymbol, containingMethod);
+            }
+        }
+        else if (expr is VariantCreationExpression variant)
+        {
+            DiscoverBlockExpressions(variant.Target, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(variant.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MultiTermExpression multiTerm)
+        {
+            DiscoverExpressionList(multiTerm.Terms, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MatchExpression match)
+        {
+            DiscoverBlockExpressions(match.Expression, scope, containingSymbol, containingMethod);
+            foreach (var arm in match.Arms)
+                DiscoverBlockExpressions(arm.Expression, scope, containingSymbol, containingMethod);
         }
         else if (expr is AsExpression asExpr)
         {
@@ -417,6 +470,21 @@ internal sealed partial class SymbolDiscoveryPass
                 DiscoverBlockExpressions(lambda.Body, lambdaScope, containingSymbol, containingMethod);
             }
         }
+    }
+
+    private void DiscoverTypeInitializer(TypeInitializer? initializer, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
+    {
+        if (initializer is not null)
+            DiscoverExpressionList(initializer.Expressions, scope, containingSymbol, containingMethod);
+    }
+
+    private void DiscoverExpressionList(SeparatedSyntaxList<Expression>? list, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
+    {
+        if (list is null)
+            return;
+
+        foreach (var item in list)
+            DiscoverBlockExpressions(item, scope, containingSymbol, containingMethod);
     }
 
 
@@ -635,6 +703,7 @@ internal sealed partial class SymbolDiscoveryPass
             {
                 MatchingKeywordKind.Static => VariableFlags.Static,
                 MatchingKeywordKind.Const => VariableFlags.Const,
+                MatchingKeywordKind.Mut => VariableFlags.Mut,
                 _ => VariableFlags.None
             };
         }

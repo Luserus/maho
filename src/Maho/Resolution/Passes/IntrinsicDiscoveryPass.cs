@@ -41,8 +41,9 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
         // 4. Discover and validate operator functions on interfaces
         DiscoverAndValidateOperatorFunctions();
 
-        // 5. Discover and validate intrinsic functions
+        // 5. Discover and validate intrinsic functions and properties
         DiscoverAndValidateIntrinsicFunctions();
+        DiscoverAndValidateIntrinsicProperties();
     }
 
     /// <summary>
@@ -78,6 +79,9 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             if (context.DiscoveredOperators.IntrinsicFunctionAttribute is null && project.DiscoveredOperators.IntrinsicFunctionAttribute is not null)
                 context.DiscoveredOperators.IntrinsicFunctionAttribute = project.DiscoveredOperators.IntrinsicFunctionAttribute;
 
+            if (context.DiscoveredOperators.IntrinsicPropertyAttribute is null && project.DiscoveredOperators.IntrinsicPropertyAttribute is not null)
+                context.DiscoveredOperators.IntrinsicPropertyAttribute = project.DiscoveredOperators.IntrinsicPropertyAttribute;
+
             foreach (var (opKind, list) in project.DiscoveredOperators.AllByKind)
             {
                 foreach (var op in list)
@@ -103,7 +107,8 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             if (isMarkedIntrinsic &&
                 attr.Name.Text != KnownIntrinsics.IntrinsicTypeAttribute &&
                 attr.Name.Text != KnownIntrinsics.OperatorFunctionAttribute &&
-                attr.Name.Text != KnownIntrinsics.IntrinsicFunctionAttribute)
+                attr.Name.Text != KnownIntrinsics.IntrinsicFunctionAttribute &&
+                attr.Name.Text != KnownIntrinsics.IntrinsicPropertyAttribute)
             {
                 var span = attr.Syntax?.Name.GetSpan() ?? default;
                 context.Diagnostics.ReportUnknownIntrinsicAttribute(span, attr.Name.Text, attr.Syntax?.GetSource());
@@ -112,33 +117,18 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
 
             if (attr.Name.Text == KnownIntrinsics.OperatorFunctionAttribute)
             {
-                int paramCount = attr.Syntax?.Parameters?.Parameters.Count ?? 0;
-                if (paramCount != 1)
-                {
-                    if (isMarkedIntrinsic || paramCount > 0)
-                    {
-                        var span = attr.Syntax?.GetSpan() ?? default;
-                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(span, "must accept exactly one parameter", attr.Syntax?.GetSource(), KnownIntrinsics.OperatorFunctionAttribute);
-                    }
-                    continue;
-                }
-
-                context.DiscoveredOperators.OperatorFunctionAttribute = attr;
+                if (HasSingleAttributeParameter(attr, KnownIntrinsics.OperatorFunctionAttribute, isMarkedIntrinsic))
+                    context.DiscoveredOperators.OperatorFunctionAttribute = attr;
             }
             else if (attr.Name.Text == KnownIntrinsics.IntrinsicFunctionAttribute)
             {
-                int paramCount = attr.Syntax?.Parameters?.Parameters.Count ?? 0;
-                if (paramCount != 1)
-                {
-                    if (isMarkedIntrinsic || paramCount > 0)
-                    {
-                        var span = attr.Syntax?.GetSpan() ?? default;
-                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(span, "must accept exactly one parameter", attr.Syntax?.GetSource(), KnownIntrinsics.IntrinsicFunctionAttribute);
-                    }
-                    continue;
-                }
-
-                context.DiscoveredOperators.IntrinsicFunctionAttribute = attr;
+                if (HasSingleAttributeParameter(attr, KnownIntrinsics.IntrinsicFunctionAttribute, isMarkedIntrinsic))
+                    context.DiscoveredOperators.IntrinsicFunctionAttribute = attr;
+            }
+            else if (attr.Name.Text == KnownIntrinsics.IntrinsicPropertyAttribute)
+            {
+                if (HasSingleAttributeParameter(attr, KnownIntrinsics.IntrinsicPropertyAttribute, isMarkedIntrinsic))
+                    context.DiscoveredOperators.IntrinsicPropertyAttribute = attr;
             }
             else if (attr.Name.Text == KnownIntrinsics.IntrinsicTypeAttribute)
             {
@@ -231,52 +221,60 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             }
         }
 
-        if (context.DiscoveredOperators.OperatorFunctionAttribute is { Parameters.Count: 1 } opAttr)
-        {
-            var paramSymbol = context.GetParameterSymbol(opAttr.Parameters[0]);
-            var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-
-            if (!IsAliasToType(paramTypeSyntax, opAttr.EnclosingScope, candidateStrHandle))
-            {
-                var span = opAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? opAttr.Syntax?.GetSpan() ?? default;
-                context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                    span,
-                    "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
-                    opAttr.Syntax?.GetSource(),
-                    KnownIntrinsics.OperatorFunctionAttribute);
-            }
-        }
-
-        if (context.DiscoveredOperators.IntrinsicFunctionAttribute is { } ifnAttr)
-        {
-            if (ifnAttr.Parameters.Count != 1)
-            {
-                var span = ifnAttr.Syntax?.GetSpan() ?? default;
-                context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                    span,
-                    "must accept exactly one parameter",
-                    ifnAttr.Syntax?.GetSource(),
-                    KnownIntrinsics.IntrinsicFunctionAttribute);
-            }
-            else
-            {
-                var paramSymbol = context.GetParameterSymbol(ifnAttr.Parameters[0]);
-                var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-
-                if (!IsAliasToType(paramTypeSyntax, ifnAttr.EnclosingScope, candidateStrHandle))
-                {
-                    var span = ifnAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? ifnAttr.Syntax?.GetSpan() ?? default;
-                    context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                        span,
-                        "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
-                        ifnAttr.Syntax?.GetSource(),
-                        KnownIntrinsics.IntrinsicFunctionAttribute);
-                }
-            }
-        }
+        ValidateStrIntrinsicAttribute(context.DiscoveredOperators.OperatorFunctionAttribute, KnownIntrinsics.OperatorFunctionAttribute, candidateStrHandle);
+        ValidateStrIntrinsicAttribute(context.DiscoveredOperators.IntrinsicFunctionAttribute, KnownIntrinsics.IntrinsicFunctionAttribute, candidateStrHandle);
+        ValidateStrIntrinsicAttribute(context.DiscoveredOperators.IntrinsicPropertyAttribute, KnownIntrinsics.IntrinsicPropertyAttribute, candidateStrHandle);
 
         context.DiscoveredIntrinsics.IntrinsicTypeAttribute = candidateAttr;
         return candidateAttr;
+    }
+
+    private bool HasSingleAttributeParameter(AttributeSymbol attr, string attributeName, bool isMarkedIntrinsic)
+    {
+        int paramCount = attr.Syntax?.Parameters?.Parameters.Count ?? 0;
+        if (paramCount == 1)
+            return true;
+
+        if (isMarkedIntrinsic || paramCount > 0)
+        {
+            var span = attr.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                span,
+                "must accept exactly one parameter",
+                attr.Syntax?.GetSource(),
+                attributeName);
+        }
+
+        return false;
+    }
+
+    private void ValidateStrIntrinsicAttribute(AttributeSymbol? attr, string attributeName, SymbolHandle strHandle)
+    {
+        if (attr is null)
+            return;
+
+        if (attr.Parameters.Count != 1)
+        {
+            var span = attr.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                span,
+                "must accept exactly one parameter",
+                attr.Syntax?.GetSource(),
+                attributeName);
+            return;
+        }
+
+        var paramSymbol = context.GetParameterSymbol(attr.Parameters[0]);
+        var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
+        if (!IsAliasToType(paramTypeSyntax, attr.EnclosingScope, strHandle))
+        {
+            var span = attr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? attr.Syntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                span,
+                "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                attr.Syntax?.GetSource(),
+                attributeName);
+        }
     }
 
     private void DiscoverAndValidateIntrinsicTypes(AttributeSymbol? intrinsicAttr)
@@ -332,8 +330,9 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
             }
         }
 
-        // Group 0: Layout / Sized / Unsized marker interfaces
+        // Group 0: Layout / Sized / Unsized marker interfaces & Transfer / Move / Copy interfaces
         ValidateLayoutInterfaces(typesByIntrinsic);
+        ValidateTransferInterfaces(typesByIntrinsic);
 
         // Group 1: Zero-instance-field primitives
         foreach (var name in KnownIntrinsics.ZeroInstanceFieldPrimitives)

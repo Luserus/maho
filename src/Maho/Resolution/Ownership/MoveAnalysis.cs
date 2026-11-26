@@ -93,7 +93,8 @@ internal sealed class MoveAnalysis
         if (!visited.Add(unwrap))
             return;
 
-        if (ownership.IsOwningIndirection(type, out var pointeeType))
+        if (ownership.IsOwningIndirection(type, out var pointeeType) ||
+            ownership.TryGetAllocDerefInfo(type, out pointeeType, out _))
         {
             var derefPlace = parent.Dereference();
             result.Add(derefPlace);
@@ -185,7 +186,9 @@ internal sealed class MoveAnalysis
         bool first = true;
         foreach (var predecessor in block.Predecessors)
         {
-            var state = GetOrEmpty(outgoing, predecessor);
+            if (!outgoing.TryGetValue(predecessor, out var state))
+                continue;
+
             var predMoved = outgoingMoved.GetValueOrDefault(predecessor);
             if (predMoved is not null)
                 movedResult.UnionWith(predMoved);
@@ -425,6 +428,14 @@ internal sealed class MoveAnalysis
                 if (statement.Kind is OwnershipStatementKind.Use or OwnershipStatementKind.Borrow)
                 {
                     var current = GetEffectiveState(state, mayBeMoved, statement.Place, out var placeMoved);
+                    if (statement.IsReturnUse &&
+                        ownership.IsAllocationOperatorMethod(body.ContainingSymbol, out var allocTargetType) &&
+                        TryHandleAllocationOperatorReturnUse(state, mayBeMoved, statement, current, placeMoved, allocTargetType))
+                    {
+                        Apply(state, mayBeMoved, statement);
+                        continue;
+                    }
+
                     if (current == InitializationState.Moved)
                     {
                         context.Diagnostics.ReportUseAfterMove(statement.Span, GetPlaceName(statement.Place), statement.Source);
@@ -445,6 +456,118 @@ internal sealed class MoveAnalysis
                 Apply(state, mayBeMoved, statement);
             }
         }
+    }
+
+    private bool TryHandleAllocationOperatorReturnUse(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        OwnershipStatement statement,
+        InitializationState current,
+        bool placeMoved,
+        TypeRef allocTargetType)
+    {
+        if (current == InitializationState.Moved || placeMoved || HasMovedDescendant(state, mayBeMoved, statement.Place))
+            return false;
+
+        if (current == InitializationState.Initialized)
+            return false;
+
+        if (!placeTypes.TryGetValue(statement.Place, out var placeType))
+            return false;
+
+        if (ownership.TryGetAllocDerefInfo(placeType, out _, out var allowedUninitFields))
+        {
+            ValidateAllocDerefNonTargetFields(state, mayBeMoved, statement.Place, placeType, allowedUninitFields, statement);
+            return true;
+        }
+
+        return MatchesAllocationTargetType(placeType, allocTargetType);
+    }
+
+    private bool HasMovedDescendant(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        Place ancestor)
+    {
+        foreach (var candidate in allTrackedPlaces)
+        {
+            if (!IsStrictDescendant(candidate, ancestor))
+                continue;
+            if (GetEffectiveState(state, mayBeMoved, candidate, out var moved) == InitializationState.Moved || moved)
+                return true;
+        }
+        return false;
+    }
+
+    private void ValidateAllocDerefNonTargetFields(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        Place containerPlace,
+        TypeRef containerType,
+        HashSet<SymbolHandle> allowedUninitFields,
+        OwnershipStatement statement)
+    {
+        foreach (var fieldHandle in GetTypeFields(containerType))
+        {
+            if (allowedUninitFields.Contains(fieldHandle))
+                continue;
+
+            var fieldPlace = containerPlace.ProjectField(fieldHandle);
+            var fState = GetEffectiveState(state, mayBeMoved, fieldPlace, out var fMoved);
+            if (fState == InitializationState.Initialized || IsPlaceAlwaysInitialized(fieldPlace))
+                continue;
+
+            if (fMoved || fState == InitializationState.Moved)
+            {
+                context.Diagnostics.ReportUseAfterMove(statement.Span, GetPlaceName(fieldPlace), statement.Source);
+                continue;
+            }
+
+            if (placeTypes.TryGetValue(fieldPlace, out var fieldType) &&
+                ContainsAnyAllowedField(fieldType, allowedUninitFields, []))
+            {
+                ValidateAllocDerefNonTargetFields(state, mayBeMoved, fieldPlace, fieldType, allowedUninitFields, statement);
+                continue;
+            }
+
+            if (fState == InitializationState.Uninitialized)
+                context.Diagnostics.ReportUseOfUninitializedValue(statement.Span, GetPlaceName(fieldPlace), statement.Source);
+            else if (fState == InitializationState.MaybeInitialized)
+                context.Diagnostics.ReportUseOfPossiblyUninitializedValue(statement.Span, GetPlaceName(fieldPlace), statement.Source);
+        }
+    }
+
+    private bool ContainsAnyAllowedField(
+        TypeRef type,
+        HashSet<SymbolHandle> allowedUninitFields,
+        HashSet<SymbolHandle> visitedTypes)
+    {
+        if (type.Handle is not { } rawH)
+            return false;
+        if (!visitedTypes.Add(context.UnwrapAlias(rawH)))
+            return false;
+
+        foreach (var fieldHandle in GetTypeFields(type))
+        {
+            if (allowedUninitFields.Contains(fieldHandle))
+                return true;
+            if (context.GetFieldSymbol(fieldHandle) is { } fs &&
+                ContainsAnyAllowedField(fs.Type, allowedUninitFields, visitedTypes))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool MatchesAllocationTargetType(TypeRef actual, TypeRef target)
+    {
+        if (actual.Equals(target))
+            return true;
+        if (actual.Handle is { } ah && target.Handle is { } th)
+            return context.UnwrapAlias(ah) == context.UnwrapAlias(th);
+        return false;
     }
 
     private string GetPlaceName(Place place)

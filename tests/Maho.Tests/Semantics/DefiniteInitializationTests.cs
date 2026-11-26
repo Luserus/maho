@@ -1,6 +1,3 @@
-using System.Linq;
-using Xunit;
-
 namespace Maho.Tests.Semantics;
 
 public sealed class DefiniteInitializationTests
@@ -20,7 +17,7 @@ public sealed class DefiniteInitializationTests
             public func Second(&this) -> int32 { return this.b; }
         }
 
-        public struct Box<T>
+        public struct Cell<T>
         {
             public T val;
         }
@@ -122,7 +119,7 @@ public sealed class DefiniteInitializationTests
             public func Test() -> int32
             {
                 Pair p = put Pair { a = 3, b = 4 };
-                Box<int32> bx = put Box<int32> { val = 5 };
+                Cell<int32> bx = put Cell<int32> { val = 5 };
                 return p.First();
             }
             """);
@@ -240,16 +237,9 @@ public sealed class DefiniteInitializationTests
         Assert.False(bothBranches.HasErrors);
 
         var conditionalMove = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Handle : Move<Handle>
+            public struct Handle : Move
             {
                 public int32 id;
-                public func Move(Handle& dest, Handle& source) -> () {}
             }
 
             public func Consume(Handle h) -> () {}

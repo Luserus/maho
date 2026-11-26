@@ -64,13 +64,15 @@ public sealed partial class IntrinsicDiscoveryTests
     private const string UseSitePrelude = IntrinsicBootstrapPrelude + """
         intrinsic attribute IntrinsicFunction(&Str signature);
 
+        intrinsic attribute IntrinsicProperty(&Str signature);
+
         intrinsic attribute OperatorFunction(&Str name);
 
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -78,7 +80,7 @@ public sealed partial class IntrinsicDiscoveryTests
         {
             NUInt codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Delegate")]
@@ -87,7 +89,7 @@ public sealed partial class IntrinsicDiscoveryTests
             NUInt codeAddress;
             Pointer<ValType> env;
             [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(&this, TParams args) -> TReturn;
         }
         """;
 

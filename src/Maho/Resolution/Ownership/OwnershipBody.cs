@@ -17,6 +17,7 @@ internal sealed class OwnershipBody
     public OwnershipBlock Exit { get; }
     public List<OwnershipBlock> Blocks { get; } = [];
     public IReadOnlyDictionary<Symbol, TypeRef> PlaceTypes => placeTypes;
+    public Dictionary<Symbol, List<(Place Referent, BorrowKind Kind)>> ReferentMap { get; } = [];
 
     private readonly Dictionary<Symbol, TypeRef> placeTypes = [];
 
@@ -68,7 +69,8 @@ internal sealed record OwnershipStatement(
     BorrowKind? BorrowKind = null,
     Symbol? LoanOwner = null,
     bool Conditional = false,
-    SyntaxNode? Origin = null);
+    SyntaxNode? Origin = null,
+    bool IsReturnUse = false);
 
 /// <summary>Control transfer for a lowered ownership block.</summary>
 internal sealed class OwnershipTerminator

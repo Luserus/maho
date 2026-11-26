@@ -1616,6 +1616,7 @@ internal sealed partial class Parser
                     MatchingKeywordKind.Int => GenericParameterKind.Integer,
                     MatchingKeywordKind.Float => GenericParameterKind.Float,
                     MatchingKeywordKind.Const => GenericParameterKind.Constant,
+                    MatchingKeywordKind.This => GenericParameterKind.This,
                     _ => GenericParameterKind.Type
                 };
             }
@@ -1625,8 +1626,10 @@ internal sealed partial class Parser
             if (CurrentToken.Kind is TokenKind.Equals)
             {
                 equals = Consume();
-                if (kind is not GenericParameterKind.Type && IsLiteralTokenKind(CurrentToken.Kind))
+                if (kind is not GenericParameterKind.Type && kind is not GenericParameterKind.This && IsLiteralTokenKind(CurrentToken.Kind))
                     defaultType = new LiteralGenericArgument(new LiteralExpression(Consume()));
+                else if (kind is GenericParameterKind.This && CurrentToken.MatchingKind is MatchingKeywordKind.This)
+                    defaultType = new SimpleType(Consume());
                 else
                     defaultType = ParseTypeSyntax();
             }

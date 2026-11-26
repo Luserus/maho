@@ -24,16 +24,7 @@ public sealed class LifetimeAnalysisTests
     public void ImplicitMove_ReportsSecondUse()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -52,16 +43,7 @@ public sealed class LifetimeAnalysisTests
     public void ConditionalMove_ReportsPossibleSecondUse()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -80,16 +62,7 @@ public sealed class LifetimeAnalysisTests
     public void SafeAlias_PreventsMovingItsReferent()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -108,16 +81,7 @@ public sealed class LifetimeAnalysisTests
     public void SafeAlias_EndsAfterItsLastUse()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -136,16 +100,7 @@ public sealed class LifetimeAnalysisTests
     public void SafeReference_UsesIntrinsicDeref_AndKeepsReferentBorrowed()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -193,16 +148,7 @@ public sealed class LifetimeAnalysisTests
     public void AliasToMoveOnlyValue_ReportsCopyErrorWithoutMovingReferent()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func CannotCopy(Resource value) -> ()
             {
@@ -220,16 +166,7 @@ public sealed class LifetimeAnalysisTests
     public void Reborrow_KeepsOriginalReferentBorrowed()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public func Consume(Resource resource) -> () {}
 
@@ -249,15 +186,9 @@ public sealed class LifetimeAnalysisTests
     public void DestructorValue_GetsDropBeforeStorageDeath()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Destructor
-            {
-                [OperatorFunction("Destructor")]
-                public func Drop(&this) -> ();
-            }
-
             public struct Resource : Destructor
             {
-                public func Drop(&this) -> () {}
+                public func Drop(mut &this) -> () {}
             }
 
             public func Consume(Resource resource) -> () {}
@@ -289,16 +220,7 @@ public sealed class LifetimeAnalysisTests
     public void PartialMove_CompositeStruct_AllowsIndividualFieldMove()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public struct Pair
             {
@@ -323,16 +245,7 @@ public sealed class LifetimeAnalysisTests
     public void PartialMove_ReuseMovedField_ReportsMH1001()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public struct Pair
             {
@@ -358,16 +271,7 @@ public sealed class LifetimeAnalysisTests
     public void PartialMove_WholeObjectMoveInvariant_ReportsMH1007()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public struct Pair
             {
@@ -394,16 +298,7 @@ public sealed class LifetimeAnalysisTests
     public void PartialMove_Reinitialization_AllowsWholeObjectMove()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
+            public struct Resource : Move;
 
             public struct Pair
             {
@@ -435,21 +330,11 @@ public sealed class LifetimeAnalysisTests
     public void MonolithicType_PartialMoveDisallowed_ReportsMH1006()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
-            {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
+            public struct Resource : Move;
 
-            public struct Resource : Move<Resource>
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-            }
-
-            public struct Monolithic : Move<Monolithic>
+            public struct Monolithic : Move
             {
                 public Resource res;
-                public func Move(Monolithic& dest, Monolithic& source) -> () {}
             }
 
             public func Consume(Resource r) -> () {}
@@ -492,22 +377,9 @@ public sealed class LifetimeAnalysisTests
     public void DropElaborator_EmitsConditionalDrop_WhenFieldConditionallyMoved()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Move<T>
+            public struct Resource : Destructor
             {
-                [OperatorFunction("Move")]
-                public func Move(T& dest, T& source) -> ();
-            }
-
-            public interface Destructor
-            {
-                [OperatorFunction("Destructor")]
-                public func Drop(&this) -> ();
-            }
-
-            public struct Resource : Move<Resource>, Destructor
-            {
-                public func Move(Resource& dest, Resource& source) -> () {}
-                public func Drop(&this) -> () {}
+                public func Drop(mut &this) -> () {}
             }
 
             public struct Pair

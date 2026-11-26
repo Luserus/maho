@@ -110,7 +110,7 @@ public sealed partial class ExpressionResolutionTests
             public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
                 public func Abs(this) -> Concrete { return this; }
             }
 
@@ -162,7 +162,7 @@ public sealed partial class ExpressionResolutionTests
             public struct Concrete : Add<Concrete, Concrete, Concrete>
             {
                 public literal int() { Concrete res; return res; }
-                public func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
+                func Add.Add(Concrete l, Concrete r) -> Concrete { return l; }
             }
 
             public struct Host
@@ -331,13 +331,13 @@ public sealed partial class ExpressionResolutionTests
             public interface New
             {
                 [OperatorFunction("New")]
-                public func New(Arena pool) -> Point;
+                func New(Arena pool) -> Point;
             }
 
             public interface Put
             {
                 [OperatorFunction("Put")]
-                public func Put(int32 offset) -> ();
+                func Put(int32 offset) -> Point;
             }
 
             public struct Point : New, Put
@@ -345,22 +345,22 @@ public sealed partial class ExpressionResolutionTests
                 public int32 X;
                 public int32 Y;
 
-                public func Construct(int32 x, int32 y) -> Point
+                public func Construct(mut &this, int32 x, int32 y) -> ()
                 {
-                    Point p;
-                    p.X = x;
-                    p.Y = y;
-                    return p;
+                    this.X = x;
+                    this.Y = y;
                 }
 
-                public func New.New(Arena pool) -> Point
+                func New.New(Arena pool) -> Point
                 {
                     Point p = default;
                     return p;
                 }
 
-                public func Put.Put(int32 offset) -> ()
+                func Put.Put(int32 offset) -> Point
                 {
+                    Point p = default;
+                    return p;
                 }
             }
 
@@ -387,7 +387,7 @@ public sealed partial class ExpressionResolutionTests
             {
                 public int32 Factor;
 
-                public func Callable.Invoke(&this, int32 x, int32 y) -> int32
+                func Callable.Invoke(&this, int32 x, int32 y) -> int32
                 {
                     return x;
                 }
@@ -494,7 +494,7 @@ public sealed partial class ExpressionResolutionTests
             public struct uint64 : Add<uint64, int32, uint64>
             {
                 [IntrinsicFunction("UInt64.Add(UInt64, Int32)")]
-                public func Add.Add(uint64 l, int32 r) -> uint64;
+                func Add.Add(uint64 l, int32 r) -> uint64;
 
                 [IntrinsicFunction("UInt64.<u64>")]
                 public literal u64(int32 v);

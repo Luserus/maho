@@ -62,7 +62,7 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Printable { public func Print(&this) -> (); }
+            public interface Printable { func Print(&this) -> (); }
 
             public struct Item : Printable
             {
@@ -92,7 +92,7 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Printable { public func Print(&this) -> (); }
+            public interface Printable { func Print(&this) -> (); }
 
             public struct Plain { }
 
@@ -165,7 +165,7 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Identifiable { public func Id(&this) -> int32; }
+            public interface Identifiable { func Id(&this) -> int32; }
 
             public struct Entity { public int32 id; }
 

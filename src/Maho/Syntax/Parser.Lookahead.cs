@@ -250,6 +250,10 @@ internal sealed partial class Parser
                 {
                     LookaheadConsume();
                 }
+                else if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.This)
+                {
+                    LookaheadConsume();
+                }
                 else
                 {
                     var (_, dtOk, _) = LookaheadParseTypeSyntax();
@@ -1211,6 +1215,7 @@ internal sealed partial class Parser
                     MatchingKeywordKind.Int => GenericParameterKind.Integer,
                     MatchingKeywordKind.Float => GenericParameterKind.Float,
                     MatchingKeywordKind.Const => GenericParameterKind.Constant,
+                    MatchingKeywordKind.This => GenericParameterKind.This,
                     _ => GenericParameterKind.Type
                 };
             }
@@ -1220,9 +1225,13 @@ internal sealed partial class Parser
             if (LookaheadCurrentToken.Kind is TokenKind.Equals)
             {
                 equals = LookaheadConsume();
-                if (kind is not GenericParameterKind.Type && IsLiteralTokenKind(LookaheadCurrentToken.Kind))
+                if (kind is not GenericParameterKind.Type && kind is not GenericParameterKind.This && IsLiteralTokenKind(LookaheadCurrentToken.Kind))
                 {
                     defaultType = new LiteralGenericArgument(new LiteralExpression(LookaheadConsume()));
+                }
+                else if (kind is GenericParameterKind.This && LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.This)
+                {
+                    defaultType = new SimpleType(LookaheadConsume());
                 }
                 else
                 {

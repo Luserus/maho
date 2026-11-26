@@ -696,13 +696,38 @@ internal sealed class ResolutionContext
         CollectConformancesForTypeHierarchy(targetH, rawCandidates);
 
         var expectedGen = ifaceUnwrapped.SpecialType as GenericSemanticType;
+        var actualTargetGen = UnwrapConcreteTarget(concreteTarget).SpecialType as GenericSemanticType;
         foreach (var c in rawCandidates)
         {
             if (c.InterfaceHandle != ifaceH && !TypeRef.IsSubtypeOf(c.InterfaceHandle, ifaceH, this))
                 continue;
 
-            if (expectedGen is not null && c.InterfaceType.SpecialType is GenericSemanticType confGen && !confGen.Equals(expectedGen))
-                continue;
+            if (expectedGen is not null && c.InterfaceType.SpecialType is GenericSemanticType confGen)
+            {
+                var effectiveConfGen = confGen;
+                if (actualTargetGen is not null &&
+                    c.TargetType.SpecialType is GenericSemanticType confTargetGen &&
+                    GetSymbol(UnwrapAlias(c.TargetType.Handle ?? default)) is { } confTargetSym)
+                {
+                    IReadOnlyList<SymbolHandle> tGps = confTargetSym switch
+                    {
+                        TypeSymbol ts => ts.GenericParameters,
+                        NestedTypeSymbol nts => nts.GenericParameters,
+                        _ => []
+                    };
+                    if (tGps.Count == actualTargetGen.TypeArguments.Count)
+                    {
+                        var subst = new Dictionary<SymbolHandle, TypeRef>(tGps.Count);
+                        for (int gi = 0; gi < tGps.Count; gi++)
+                            subst[tGps[gi]] = actualTargetGen.TypeArguments[gi];
+                        if (c.InterfaceType.Substitute(subst).SpecialType is GenericSemanticType subGen)
+                            effectiveConfGen = subGen;
+                    }
+                }
+
+                if (!effectiveConfGen.Equals(expectedGen))
+                    continue;
+            }
 
             candidates.Add(c);
         }
@@ -1051,9 +1076,11 @@ internal sealed class ResolutionContext
         IReadOnlyList<TypeRef> resolvedArgs,
         Scope scope,
         SymbolHandle containingFunction,
-        bool reportDiagnostics)
+        bool reportDiagnostics,
+        bool isConformanceOrConstraintContext = false)
     {
-        IReadOnlyList<SymbolHandle> genericParams = GetSymbol(targetHandle) switch
+        var targetSym = GetSymbol(targetHandle);
+        IReadOnlyList<SymbolHandle> genericParams = targetSym switch
         {
             TypeSymbol ts => ts.GenericParameters,
             NestedTypeSymbol nts => nts.GenericParameters,
@@ -1065,10 +1092,17 @@ internal sealed class ResolutionContext
 
         string targetName = GetTargetDisplayName(this, targetHandle);
         int count = Math.Min(genericParams.Count, Math.Min(argSyntaxes.Count, resolvedArgs.Count));
+        var genericArgSubst = new Dictionary<SymbolHandle, TypeRef>(count);
+        for (int s = 0; s < count; s++)
+        {
+            if (!resolvedArgs[s].IsError && !resolvedArgs[s].IsUnresolved)
+                genericArgSubst[genericParams[s]] = resolvedArgs[s];
+        }
+
         for (int i = 0; i < count; i++)
         {
             var gp = GetGenericParameterSymbol(genericParams[i]);
-            if (gp is null || gp.ParameterKind is not GenericParameterKind.Type)
+            if (gp is null || gp.ParameterKind is not (GenericParameterKind.Type or GenericParameterKind.This))
                 continue;
 
             var argType = resolvedArgs[i];
@@ -1105,6 +1139,81 @@ internal sealed class ResolutionContext
                 continue;
             }
 
+            if (gp.ParameterKind == GenericParameterKind.This &&
+                !isConformanceOrConstraintContext &&
+                targetSym is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+            {
+                bool isOwnThisGp = argType.Handle is { } argGpH &&
+                    GetGenericParameterSymbol(argGpH) is { ParameterKind: GenericParameterKind.This } selfGp &&
+                    Equals(selfGp.GenericSymbol, targetSym);
+                if (!isOwnThisGp)
+                {
+                    var expectedIface = TypeRef.Generic(targetHandle, targetName, [.. resolvedArgs]);
+                    if (argType.Handle is { } argH2 && GetGenericParameterSymbol(argH2) is { } gpArg)
+                    {
+                        bool satisfied = false;
+                        foreach (var c in gpArg.Constraints)
+                        {
+                            if (c.Equals(expectedIface) ||
+                                (c.Handle is { } ch2 && DeclarationResolutionPass.SatisfiesConstraint(this, ch2, UnwrapAlias(targetHandle), [])))
+                            {
+                                satisfied = true;
+                                break;
+                            }
+                        }
+                        if (!satisfied && reportDiagnostics)
+                        {
+                            Diagnostics.ReportDefaultGenericConstraintViolation(
+                                argSyntaxes[i].GetSpan() ?? default,
+                                gp.Name.Text,
+                                argType.ToDisplayString(this),
+                                expectedIface.ToDisplayString(this),
+                                argSyntaxes[i].GetSource());
+                        }
+                    }
+                    else
+                    {
+                        var thisLookup = ResolveInterfaceConformance(argType, expectedIface, explicitModuleQualifier: null, scope, containingFunction);
+                        if (thisLookup.Status == ConformanceLookupStatus.Found)
+                        {
+                            ResolvedTree.AddConformance(argSyntaxes[i], thisLookup.Conformance!);
+                        }
+                        else if (reportDiagnostics)
+                        {
+                            if (thisLookup.Status == ConformanceLookupStatus.Inaccessible)
+                            {
+                                Diagnostics.ReportInaccessibleInterfaceConformance(
+                                    argSyntaxes[i].GetSpan() ?? default,
+                                    argType.ToDisplayString(this),
+                                    thisLookup.Conformance!.InterfaceType.ToDisplayString(this),
+                                    thisLookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                                    argSyntaxes[i].GetSource());
+                            }
+                            else if (thisLookup.Status == ConformanceLookupStatus.Ambiguous)
+                            {
+                                var mods = thisLookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList();
+                                Diagnostics.ReportAmbiguousInterfaceConformance(
+                                    argSyntaxes[i].GetSpan() ?? default,
+                                    argType.ToDisplayString(this),
+                                    expectedIface.ToDisplayString(this),
+                                    mods,
+                                    argSyntaxes[i].GetSource());
+                            }
+                            else
+                            {
+                                Diagnostics.ReportThisGenericArgumentMismatch(
+                                    argSyntaxes[i].GetSpan() ?? default,
+                                    gp.Name.Text,
+                                    targetName,
+                                    argType.ToDisplayString(this),
+                                    expectedIface.ToDisplayString(this),
+                                    argSyntaxes[i].GetSource());
+                            }
+                        }
+                    }
+                }
+            }
+
             if (gp.Constraints.Count == 0)
                 continue;
 
@@ -1116,7 +1225,24 @@ internal sealed class ResolutionContext
                 if (constraint.Handle is { } ch && IsBuiltInLayoutInterface(ch))
                     continue;
 
-                var lookup = ResolveInterfaceConformance(argType, constraint, explicitModuleQualifier: null, scope, containingFunction);
+                if (constraint.Handle is { } trCh &&
+                    DeclarationResolutionPass.TrySatisfiesTransferHierarchyConstraint(this, argType, trCh, out bool trSatisfied))
+                {
+                    if (!trSatisfied && reportDiagnostics)
+                    {
+                        Diagnostics.ReportGenericConstraintViolation(
+                            argSyntaxes[i].GetSpan() ?? default,
+                            argType.ToDisplayString(this),
+                            gp.Name.Text,
+                            targetName,
+                            constraint.ToDisplayString(this),
+                            argSyntaxes[i].GetSource());
+                    }
+                    continue;
+                }
+
+                var effectiveConstraint = genericArgSubst.Count > 0 ? constraint.Substitute(genericArgSubst) : constraint;
+                var lookup = ResolveInterfaceConformance(argType, effectiveConstraint, explicitModuleQualifier: null, scope, containingFunction);
                 if (lookup.Status == ConformanceLookupStatus.Found)
                 {
                     ResolvedTree.AddConformance(argSyntaxes[i], lookup.Conformance!);
@@ -1136,9 +1262,41 @@ internal sealed class ResolutionContext
                     Diagnostics.ReportAmbiguousInterfaceConformance(
                         argSyntaxes[i].GetSpan() ?? default,
                         TypeRef.UnwrapConformance(argType).ToDisplayString(this),
-                        constraint.ToDisplayString(this),
+                        effectiveConstraint.ToDisplayString(this),
                         mods,
                         argSyntaxes[i].GetSource());
+                }
+                else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.NotFound)
+                {
+                    Diagnostics.ReportGenericConstraintViolation(
+                        argSyntaxes[i].GetSpan() ?? default,
+                        TypeRef.UnwrapConformance(argType).ToDisplayString(this),
+                        gp.Name.Text,
+                        targetName,
+                        effectiveConstraint.ToDisplayString(this),
+                        argSyntaxes[i].GetSource());
+                }
+                else if (reportDiagnostics &&
+                         !isConformanceOrConstraintContext &&
+                         lookup.Status == ConformanceLookupStatus.NotApplicable &&
+                         effectiveConstraint.Handle is { } reqIfaceH &&
+                         argType.Handle is { } rawArgH &&
+                         GetGenericParameterSymbol(UnwrapAlias(rawArgH)) is { } argGp)
+                {
+                    bool satisfiedByGp = argGp.Constraints.Any(c =>
+                        c.Equals(effectiveConstraint) ||
+                        c.Equals(constraint) ||
+                        (c.Handle is { } cH && DeclarationResolutionPass.SatisfiesConstraint(this, UnwrapAlias(cH), UnwrapAlias(reqIfaceH), [])));
+                    if (!satisfiedByGp)
+                    {
+                        Diagnostics.ReportGenericConstraintViolation(
+                            argSyntaxes[i].GetSpan() ?? default,
+                            argType.ToDisplayString(this),
+                            gp.Name.Text,
+                            targetName,
+                            effectiveConstraint.ToDisplayString(this),
+                            argSyntaxes[i].GetSource());
+                    }
                 }
             }
         }

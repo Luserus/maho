@@ -7,6 +7,7 @@ internal static class KnownIntrinsics
 {
     public const string IntrinsicTypeAttribute = "IntrinsicType";
     public const string IntrinsicFunctionAttribute = "IntrinsicFunction";
+    public const string IntrinsicPropertyAttribute = "IntrinsicProperty";
     public const string OperatorFunctionAttribute = "OperatorFunction";
 
     // Signed Integers
@@ -58,6 +59,11 @@ internal static class KnownIntrinsics
     public const string Layout = "Layout";
     public const string Sized = "Sized";
     public const string Unsized = "Unsized";
+
+    // Ownership transfer constraints
+    public const string Transfer = "Transfer";
+    public const string Move = "Move";
+    public const string Copy = "Copy";
 
     // Slices and Arrays
     public const string Slice = "Slice";
@@ -133,6 +139,7 @@ internal static class KnownIntrinsics
     public const string OpIterable = "Iterable";
     public const string OpIterator = "Iterator";
     public const string OpOwningDeref = "OwningDeref";
+    public const string OpAllocDeref = "AllocDeref";
     public const string OpStaticConstructor = "StaticConstructor";
     public const string StaticConstructor = "StaticConstructor";
 
@@ -175,6 +182,7 @@ internal static class KnownIntrinsics
         Float16, Float32, Float64, Float128,
         Bool, Char, Str, Box, Never,
         Layout, Sized, Unsized,
+        Transfer, Move, Copy,
         ValueType, Struct, Enum, Function, Delegate, Tuple,
         Pointer, MutablePointer, Reference, MutableReference, Metadata,
         Slice, Array, Optional, Throwable
@@ -226,7 +234,7 @@ internal static class KnownIntrinsics
         OpUnwrap, OpTry,
         OpCollectionAdd, OpCollectionWith,
         OpDeconstruct, OpDeconstructMut,
-        OpIterable, OpIterator, OpOwningDeref,
+        OpIterable, OpIterator, OpOwningDeref, OpAllocDeref,
         OpStaticConstructor
     ];
 
@@ -298,6 +306,7 @@ internal static class KnownIntrinsics
             case OpIterable: kind = OperatorKind.Iterable; return true;
             case OpIterator: kind = OperatorKind.Iterator; return true;
             case OpOwningDeref: kind = OperatorKind.OwningDeref; return true;
+            case OpAllocDeref: kind = OperatorKind.AllocDeref; return true;
             case OpStaticConstructor: kind = OperatorKind.StaticConstructor; return true;
             default:
                 kind = OperatorKind.None;
@@ -371,6 +380,7 @@ internal static class KnownIntrinsics
         OperatorKind.Iterable => OpIterable,
         OperatorKind.Iterator => OpIterator,
         OperatorKind.OwningDeref => OpOwningDeref,
+        OperatorKind.AllocDeref => OpAllocDeref,
         OperatorKind.StaticConstructor => OpStaticConstructor,
         _ => string.Empty
     };

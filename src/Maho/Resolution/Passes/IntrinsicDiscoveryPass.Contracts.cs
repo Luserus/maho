@@ -114,6 +114,62 @@ internal sealed partial class IntrinsicDiscoveryPass
         }
     }
 
+    private void ValidateTransferInterfaces(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
+    {
+        if (typesByIntrinsic.TryGetValue(KnownIntrinsics.Transfer, out var transferList) &&
+            transferList.Count == 1 &&
+            !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Transfer))
+        {
+            var entry = transferList[0];
+            if (ValidateMarkerInterfaceContract(entry.Symbol, KnownIntrinsics.Transfer, requireLayoutBase: false))
+                context.DiscoveredIntrinsics.Register(KnownIntrinsics.Transfer, ResolutionContext.GetHandle(entry.Symbol), entry.Span, entry.Source);
+        }
+
+        foreach (string name in (ReadOnlySpan<string>)[KnownIntrinsics.Move, KnownIntrinsics.Copy])
+        {
+            if (!typesByIntrinsic.TryGetValue(name, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(name))
+                continue;
+
+            var entry = list[0];
+            var symbol = entry.Symbol;
+            var syntax = GetSyntax(symbol);
+            var span = syntax?.Name.GetSpan() ?? default;
+            var source = syntax?.GetSource();
+
+            var typeKind = symbol switch
+            {
+                TypeSymbol ts => ts.TypeKind,
+                NestedTypeSymbol nts => nts.TypeKind,
+                _ => TypeKind.Struct
+            };
+
+            if (typeKind != TypeKind.Interface)
+            {
+                context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, name, "must be declared as an interface", source);
+                continue;
+            }
+
+            if (GetGenericParameterCount(symbol) > 1)
+            {
+                context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, name, "can have at most 1 ': this' generic parameter", source);
+                continue;
+            }
+
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Transfer, out var transferHandle))
+            {
+                bool inheritsTransfer = syntax?.Base is { } baseList &&
+                    baseList.BaseTypes.Any(b => ResolveTypeSymbol(b.Type, symbol.EnclosingScope) == transferHandle);
+                if (!inheritsTransfer)
+                {
+                    context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, name, $"must inherit from '{KnownIntrinsics.Transfer}'", source);
+                    continue;
+                }
+            }
+
+            context.DiscoveredIntrinsics.Register(name, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
+        }
+    }
+
     private bool ValidateMarkerInterfaceContract(Symbol symbol, string intrinsicName, bool requireLayoutBase)
     {
         var syntax = GetSyntax(symbol);
@@ -949,10 +1005,10 @@ internal sealed partial class IntrinsicDiscoveryPass
         var syntax = GetSyntax(symbol);
 
         int gpCount = GetGenericParameterCount(symbol);
-        if (gpCount is not (1 or 2))
+        if (gpCount != 1)
         {
             var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Box, "must have 1 or 2 generic parameters (<T> or <T, A>)", syntax?.GetSource());
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Box, "must have exactly 1 generic parameter (<T>)", syntax?.GetSource());
             return;
         }
 

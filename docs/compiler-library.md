@@ -79,6 +79,7 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
   - `[IntrinsicType("...")]`: must accept exactly one `&Str` parameter.
   - `[OperatorFunction("...")]`: must accept one `&Str` parameter naming the operator kind.
   - `[IntrinsicFunction("...")]`: declares intrinsic runtime functions with canonical signature contracts (e.g. `"Int32.LessThanOrEqual(Int32, Int32)"`).
+  - `[IntrinsicProperty("...")]`: declares runtime-computed get-only properties on intrinsic types without generating backing fields (e.g. `"Slice.Length"` on `Slice<T, D>`).
 - **Intrinsic Hierarchy & Implicit Deriving**:
   - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations; has zero base types.
   - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Slice`, `Array`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
@@ -89,12 +90,13 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
   - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0020`). `Char` represents a 4-byte Unicode scalar value.
   - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0020`).
-  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `Pointer<ValType>` environment pointer (`MH0020`).
+  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `ValType&` (`Reference<ValType>`) environment reference (`MH0020`).
+  - *Transfer & Lifecycle Interfaces*: `Transfer` is the root transfer marker inherited by `Move<T : this = this>` and `Copy<T : this = this>`. Unconstrained generic parameters default to `Transfer` (`Move` in generic body, zero drop on `Copy` instantiations), while `Destructor : Move` strictly requires a `mut &this` receiver (`MH0560`).
   - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` and `Metadata<T>` (constrained by `where T : Layout`) to represent thin/fat pointer metadata uniformly for `Sized` and `Unsized` pointees.
   - *Str*: unsized struct requiring `UInt8` and `Slice`; must have 1 instance field of type `UInt8[]` (or `Slice<UInt8>`).
   - *Slice & Array*: zero-field intrinsic structs parameterized by `<T, D : int = 1>` (`Slice`) and `<T, N : int, D : int = 1>` (`Array`).
 - **Lazy Intrinsic Requirement (`MH0240`)**: Intrinsics are lazily required. Minimal or empty compilations do not fail verification; `MH0240` is reported only when a syntactic construct requiring an intrinsic is used without declaration.
-- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
+- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `AllocDeref`, `OwningDeref`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
   - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `&this` for immutable access, while `MutDeref<TReturn>` / `MutArrow<TReturn>` declare `mut &this` for mutable access.
   - *AddressOf*: every type is implicitly populated with an `AddressOf(&this) -> T&` operator overload.
 
@@ -110,6 +112,7 @@ The declaration resolution pass validates and binds declarations across the disc
 - **Duplicate Variables, Fields & Properties (`MH0535`, `MH0536`)**: Detects collisions in enclosing scopes.
 - **Cyclic Type Hierarchies (`MH0538`)**: Detects cyclic inheritance graphs via depth-first search.
 - **Ambiguous Type References (`MH0501`)**: Identifies collisions when unqualified type names match multiple imported namespaces.
+- **Interface Default Implementations, Member Isolation & `: this` Generics**: Interfaces and interface/struct methods can declare `<T : this>` (`<T : this = this>`) parameters (`MH0584`–`MH0587`) and default interface method bodies inherited in `InterfaceConformance.MethodMap` unless overridden. All types—including intrinsic types—undergo full interface contract verification (`MH0550`). Interface methods/properties (including accessors) and explicit `Interface.Member` implementations forbid visibility modifiers (`MH0128`), and both explicit `Interface.Member` and unoverridden default interface methods are hidden from direct concrete-type lookups (`MH2014`), remaining reachable through interface views (`as Interface`, `&Interface`, `dyn &Interface`, `<Type as Interface>`, and constrained generic receivers).
 - **Modifier Validation & Canonical Ordering (`MH0128`, `MH0129`, `MH0130`, `MH0131`)**:
   - Enforces permitted modifiers and canonical ordering per declaration item (`[visibility] [storage/lifetime] [virtual/unsealed] [safety] [partial] [untagged]`).
   - `static` is strictly a lifetime/storage modifier for global variables and type-bound static fields; it is **disallowed on functions and methods** (`MH0128`), where staticness is inferred purely from the absence of a `this` receiver parameter.
@@ -145,9 +148,11 @@ The expression resolution pass types AST expressions and enforces Maho's operato
   - Unary and member operator dispatch enforces receiver mutability: methods declaring `mut &this` or `this mut*` require a mutable operand/receiver (`ReferenceSemanticType.IsMutable`, `PointerSemanticType.IsMutable`, or `AliasSemanticType.IsMutable`).
   - `Deref<&T>` and `Arrow<&T>` provide safe immutable dereferencing; `MutDeref<mut &T>` and `MutArrow<mut &T>` provide mutable dereferencing yielding assignable L-values.
 - **Two-Phase Object Allocation & Construction**:
-  - Placement allocation (`put<arena> Type(...)`) resolves the `Put` operator.
-  - Heap allocation (`new<allocator> Type(...)`) resolves the `New` operator.
-  - Target constructor resolution matches `Construct` method on the type implementing the `Constructor` operator interface.
+  - Value-returning stack creation (`put Type(...)` / `put Type { ... }`) resolves custom `[OperatorFunction("Put")]` overloads (which must return a non-void value) or synthesizes a zero-argument stack `T` value for `ValType` descendants (`MH0589`). Argumentful `new(args...)` / `put(args...)` requires an explicit matching `[OperatorFunction("New")]`/`[OperatorFunction("Put")]` overload (`MH0591`).
+- **Heap/Managed Allocation (`new Type(...)` / `new<A> Type(...)` / `new(args...)`)**: Resolves matching `[OperatorFunction("New")]` overloads (returning `Box<T>` or a custom `AllocDeref<mut &T>` wrapper); if no allocation arguments or allocator type arguments are provided, bare `new Type(...)` / `new Type { ... }` / `new Type[]` falls back to compiler-synthesized single-arity `[IntrinsicType("Box")]` (`Box<T> where T : Layout`, backed at runtime by `GlobalAllocator`) for `ValType` descendants (`MH0589`). Supplying allocation arguments (`new(alloc) Type(...)`) or allocator type arguments (`new<Alloc> Type(...)`) without a matching `[OperatorFunction("New")]` overload emits `MH0591`.
+  - Phase 2 target construction dereferences wrapper results implementing `AllocDeref<mut &T>` to obtain `mut &T` and binds `Construct(mut &this, ...)` (skipping the receiver parameter) or field initializers while returning the allocation operator's wrapper type. Only allocation operators (`New` / `Put`) may return uninitialized target values or `AllocDeref` wrappers with uninitialized target storage while enforcing definite initialization on all other wrapper fields.
+- **Collection Iteration (`for` Loops)**:
+  - `for` resolves item types through source-declared `Iterable<TItem, TIterator>` / `Iterator<TItem>` conformances (e.g., `Slice` and `Array` yielding `SliceIterator<T, D>`) rather than hardcoded intrinsic element types (`MH0571`).
 - **Callable Operator (`Callable`)**:
   - Non-function instances can be invoked if the type implements `Callable<TReturn, ...>`, reporting `MH0611` if not callable.
 - **Literal Range Overflow Warning (`MH3001`)**:
@@ -184,9 +189,9 @@ The control flow analysis pass constructs control flow graphs, checks reachabili
 ---
 
 ### 2.8 Lifetime Analysis Pass (`LifetimeAnalysisPass`)
-The lifetime analysis pass enforces move semantics, borrow checking, and ownership tracking:
-- **Place & Storage Modeling**: Maps locals, fields, and temporary storage into fine-grained `Place` allocations.
-- **Borrow & Move Verification**: Enforces single-writer/multiple-reader aliasing invariants; verifies move validity and detects use-after-move or simultaneous conflicting borrows.
+The lifetime analysis pass enforces move semantics, borrow checking, delegate/composite captures, and ownership tracking:
+- **Place & Storage Modeling**: Maps locals, parameters, fields, indices, safe dereferences, delegates, and borrow-holding composites (`Tuple`, `ObjectInitializer`, `ConstructorCall`) into tracked storage and `OwnershipBody.ReferentMap` loan provenance.
+- **Borrow & Move Verification**: Enforces single-writer/multiple-reader aliasing invariants (`MH1003`), fixed-point definite initialization across loops (`MH1001`, `MH1002`), source-truth `for`-loop shared borrows, and `return`/`throw`/catch/temporary escape checks (`MH1004`, `MH1008`).
 
 ---
 

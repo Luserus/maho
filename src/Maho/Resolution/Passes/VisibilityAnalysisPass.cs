@@ -545,6 +545,9 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
             if (declTypeHandle is null)
                 return;
 
+            if (currentExtension is not null && ResolutionContext.GetHandle(currentExtension) == declTypeHandle.Value)
+                return;
+
             if (currentType is null || !IsWithinTypeHierarchy(context, currentType.Value, declTypeHandle.Value))
             {
                 context.Diagnostics.ReportCannotAccessPrivateMember(span, memberName, declaringTypeName, currentSource);
@@ -677,22 +680,34 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
 
     private static Accessibility GetAccessibility(Symbol symbol, ResolutionContext context)
     {
-        if (symbol is MethodSymbol ms && ms.Parent is { } ifaceH)
+        if (symbol is MethodSymbol ms)
         {
-            var ifaceSym = context.GetSymbol(ifaceH);
-            if (ifaceSym is TypeSymbol { TypeKind: TypeKind.Interface } ts)
-                return GetTypeAccessibility(ts.Flags, isTopLevel: true);
-            if (ifaceSym is NestedTypeSymbol { TypeKind: TypeKind.Interface } nts)
-                return GetTypeAccessibility(nts.Flags, isTopLevel: false);
+            if (ms.Flags.HasFlag(FunctionFlags.InterfaceScoped) || ms.ExplicitInterfaceName is not null)
+                return GetInterfaceScopedAccessibility(symbol, ms.Parent, context);
+
+            if (ms.Parent is { } ifaceH)
+            {
+                var ifaceSym = context.GetSymbol(ifaceH);
+                if (ifaceSym is TypeSymbol { TypeKind: TypeKind.Interface } ts)
+                    return GetTypeAccessibility(ts.Flags, isTopLevel: true);
+                if (ifaceSym is NestedTypeSymbol { TypeKind: TypeKind.Interface } nts)
+                    return GetTypeAccessibility(nts.Flags, isTopLevel: false);
+            }
         }
 
-        if (symbol is PropertySymbol ifaceProp && ifaceProp.Parent is { } ifacePropH)
+        if (symbol is PropertySymbol ifaceProp)
         {
-            var ifacePropSym = context.GetSymbol(ifacePropH);
-            if (ifacePropSym is TypeSymbol { TypeKind: TypeKind.Interface } ts)
-                return GetTypeAccessibility(ts.Flags, isTopLevel: true);
-            if (ifacePropSym is NestedTypeSymbol { TypeKind: TypeKind.Interface } nts)
-                return GetTypeAccessibility(nts.Flags, isTopLevel: false);
+            if (ifaceProp.Flags.HasFlag(FunctionFlags.InterfaceScoped) || ifaceProp.ExplicitInterfaceName is not null)
+                return GetInterfaceScopedAccessibility(symbol, ifaceProp.Parent, context);
+
+            if (ifaceProp.Parent is { } ifacePropH)
+            {
+                var ifacePropSym = context.GetSymbol(ifacePropH);
+                if (ifacePropSym is TypeSymbol { TypeKind: TypeKind.Interface } ts)
+                    return GetTypeAccessibility(ts.Flags, isTopLevel: true);
+                if (ifacePropSym is NestedTypeSymbol { TypeKind: TypeKind.Interface } nts)
+                    return GetTypeAccessibility(nts.Flags, isTopLevel: false);
+            }
         }
 
         return symbol switch
@@ -709,6 +724,32 @@ internal sealed class VisibilityAnalysisPass : ResolutionPass
                 : Accessibility.Public,
             _ => Accessibility.Public
         };
+    }
+
+    private static Accessibility GetInterfaceScopedAccessibility(
+        Symbol symbol,
+        SymbolHandle? parentHandle,
+        ResolutionContext context)
+    {
+        var symHandle = ResolutionContext.GetHandle(symbol);
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.MethodMap.ContainsValue(symHandle))
+                return conf.Accessibility;
+        }
+
+        if (parentHandle is { } ph)
+        {
+            var parentSym = context.GetSymbol(ph);
+            if (parentSym is ExtensionSymbol ext)
+                return ext.Accessibility;
+            if (parentSym is TypeSymbol ts)
+                return GetTypeAccessibility(ts.Flags, isTopLevel: true);
+            if (parentSym is NestedTypeSymbol nts)
+                return GetTypeAccessibility(nts.Flags, isTopLevel: false);
+        }
+
+        return Accessibility.Public;
     }
 
     private static Accessibility GetTypeAccessibility(TypeFlags flags, bool isTopLevel) =>

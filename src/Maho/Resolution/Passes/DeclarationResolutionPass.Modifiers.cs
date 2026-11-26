@@ -112,21 +112,9 @@ internal sealed partial class DeclarationResolutionPass
                 bool isInterface = (parentSym as TypeSymbol)?.TypeKind == TypeKind.Interface || (parentSym as NestedTypeSymbol)?.TypeKind == TypeKind.Interface;
                 if (isInterface)
                 {
-                    var allowedList = new List<MatchingKeywordKind> { MatchingKeywordKind.Unsafe };
-                    Accessibility ifaceAccess = parentSym switch
-                    {
-                        TypeSymbol ts => AccessibilityExtensions.FromTypeFlags(ts.Flags, isTopLevel: true),
-                        NestedTypeSymbol nts => AccessibilityExtensions.FromTypeFlags(nts.Flags, isTopLevel: false),
-                        _ => Accessibility.Internal
-                    };
-                    if (ifaceAccess == Accessibility.Public)
-                        allowedList.Add(MatchingKeywordKind.Public);
-                    else if (ifaceAccess == Accessibility.Internal)
-                        allowedList.Add(MatchingKeywordKind.Internal);
-
                     ValidateModifierList(
                         method.Syntax.Signature.Modifiers,
-                        allowed: [.. allowedList],
+                        allowed: [MatchingKeywordKind.Unsafe],
                         itemKind: "interface method",
                         name: method.Name.Text,
                         span: method.Syntax.Signature.Identifier.GetSpan() ?? default,
@@ -134,10 +122,13 @@ internal sealed partial class DeclarationResolutionPass
                 }
                 else
                 {
+                    bool isExplicitInterfaceImpl = method.ExplicitInterfaceName is not null;
                     ValidateModifierList(
                         method.Syntax.Signature.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
-                        itemKind: "method",
+                        allowed: isExplicitInterfaceImpl
+                            ? [MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial]
+                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
+                        itemKind: isExplicitInterfaceImpl ? "explicit interface method implementation" : "method",
                         name: method.Name.Text,
                         span: method.Syntax.Signature.Identifier.GetSpan() ?? default,
                         source: method.Syntax.GetSource());
@@ -152,23 +143,12 @@ internal sealed partial class DeclarationResolutionPass
             {
                 var parentSym = prop.Parent is { } pH ? context.GetSymbol(pH) : null;
                 bool isInterface = (parentSym as TypeSymbol)?.TypeKind == TypeKind.Interface || (parentSym as NestedTypeSymbol)?.TypeKind == TypeKind.Interface;
+                bool isExplicitInterfaceProp = prop.ExplicitInterfaceName is not null;
                 if (isInterface)
                 {
-                    var allowedList = new List<MatchingKeywordKind> { MatchingKeywordKind.Unsafe, MatchingKeywordKind.Static };
-                    Accessibility ifaceAccess = parentSym switch
-                    {
-                        TypeSymbol ts => AccessibilityExtensions.FromTypeFlags(ts.Flags, isTopLevel: true),
-                        NestedTypeSymbol nts => AccessibilityExtensions.FromTypeFlags(nts.Flags, isTopLevel: false),
-                        _ => Accessibility.Internal
-                    };
-                    if (ifaceAccess == Accessibility.Public)
-                        allowedList.Add(MatchingKeywordKind.Public);
-                    else if (ifaceAccess == Accessibility.Internal)
-                        allowedList.Add(MatchingKeywordKind.Internal);
-
                     ValidateModifierList(
                         prop.Syntax.Modifiers,
-                        allowed: [.. allowedList],
+                        allowed: [MatchingKeywordKind.Unsafe, MatchingKeywordKind.Static],
                         itemKind: "interface property",
                         name: prop.Name.Text,
                         span: prop.Syntax.Identifier.GetSpan() ?? default,
@@ -178,19 +158,22 @@ internal sealed partial class DeclarationResolutionPass
                 {
                     ValidateModifierList(
                         prop.Syntax.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe],
-                        itemKind: "property",
+                        allowed: isExplicitInterfaceProp
+                            ? [MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe]
+                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe],
+                        itemKind: isExplicitInterfaceProp ? "explicit interface property implementation" : "property",
                         name: prop.Name.Text,
                         span: prop.Syntax.Identifier.GetSpan() ?? default,
                         source: prop.Syntax.GetSource());
                 }
 
+                bool disallowVisibilityOnAccessors = isInterface || isExplicitInterfaceProp;
                 foreach (var acc in prop.Syntax.Body.Accessors)
                 {
                     ValidateModifierList(
                         acc.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private],
-                        itemKind: "property accessor",
+                        allowed: disallowVisibilityOnAccessors ? [] : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private],
+                        itemKind: isInterface ? "interface property accessor" : isExplicitInterfaceProp ? "explicit interface property accessor" : "property accessor",
                         name: acc.Kind == PropertyAccessorKind.Get ? "get" : "set",
                         span: acc.GetSpan() ?? default,
                         source: acc.GetSource());

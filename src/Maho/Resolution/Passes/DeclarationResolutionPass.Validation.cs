@@ -1038,6 +1038,29 @@ internal sealed partial class DeclarationResolutionPass
                string.Equals(System.IO.Path.GetFileName(path), entryOption, System.StringComparison.OrdinalIgnoreCase);
     }
 
+    private void ValidateThisGenericParameters()
+    {
+        foreach (var gp in context.GenericParameterSymbols)
+        {
+            if (gp.ParameterKind is not GenericParameterKind.This)
+                continue;
+
+            bool validOwner = gp.GenericSymbol switch
+            {
+                TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
+                NestedTypeSymbol nts => nts.TypeKind == TypeKind.Interface,
+                MethodSymbol => true,
+                _ => false
+            };
+
+            if (!validOwner)
+            {
+                var span = gp.Syntax?.ValueKindToken?.Span ?? gp.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportInvalidThisGenericParameterPlacement(span, gp.Name.Text, gp.Syntax?.GetSource());
+            }
+        }
+    }
+
     private void ValidateGenericParameterDefaults()
     {
         foreach (var gp in context.GenericParameterSymbols)
@@ -1046,7 +1069,7 @@ internal sealed partial class DeclarationResolutionPass
                 continue;
 
             var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
-            if (gp.ParameterKind is GenericParameterKind.Type && gp.RequiresSized(context) && !def.IsSized(context))
+            if (gp.ParameterKind is GenericParameterKind.Type or GenericParameterKind.This && gp.RequiresSized(context) && !def.IsSized(context))
             {
                 context.Diagnostics.ReportGenericConstraintNotSized(
                     span,
@@ -1057,7 +1080,7 @@ internal sealed partial class DeclarationResolutionPass
                     gp.Syntax?.GetSource());
             }
 
-            if (gp.ParameterKind is GenericParameterKind.Type && gp.RequiresUnsized(context) && !def.IsKnownUnsized(context))
+            if (gp.ParameterKind is GenericParameterKind.Type or GenericParameterKind.This && gp.RequiresUnsized(context) && !def.IsKnownUnsized(context))
             {
                 context.Diagnostics.ReportGenericConstraintNotSized(
                     span,
@@ -1072,6 +1095,21 @@ internal sealed partial class DeclarationResolutionPass
             {
                 if (constraint.Handle is { } ch && context.IsBuiltInLayoutInterface(ch))
                     continue;
+
+                if (constraint.Handle is { } trCh &&
+                    DeclarationResolutionPass.TrySatisfiesTransferHierarchyConstraint(context, def, trCh, out bool trSatisfied))
+                {
+                    if (!trSatisfied)
+                    {
+                        context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                            span,
+                            gp.Name.ToString(),
+                            def.ToDisplayString(context),
+                            constraint.ToDisplayString(context),
+                            gp.Syntax?.GetSource());
+                    }
+                    continue;
+                }
 
                 if (!constraint.IsAssignableFrom(def, context))
                 {

@@ -10,6 +10,7 @@ internal sealed class GenericParameterSymbol : Symbol
     public bool IsVariadic { get; }
     public GenericParameterSyntax? Syntax { get; }
     public TypeRef? DefaultType { get; internal set; }
+    public bool HasSelfDefault { get; internal set; }
 
     public bool HasExplicitLayout { get; internal set; }
     public bool HasExplicitSized { get; internal set; }
@@ -30,6 +31,49 @@ internal sealed class GenericParameterSymbol : Symbol
 
     internal bool RequiresUnsized(ResolutionContext context) =>
         !RequiresSized(context) && HasExplicitUnsized;
+
+    internal bool RequiresCopy(ResolutionContext context)
+    {
+        if (!context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyHandle))
+            return false;
+
+        var visited = new HashSet<SymbolHandle> { ResolutionContext.GetHandle(this) };
+        if (ParameterKind == GenericParameterKind.This &&
+            DeclarationResolutionPass.SatisfiesConstraint(context, ResolutionContext.GetHandle(GenericSymbol), copyHandle, visited))
+        {
+            return true;
+        }
+
+        foreach (var c in Constraints)
+        {
+            if (c.IsResolved && c.Handle is { } ch && DeclarationResolutionPass.SatisfiesConstraint(context, ch, copyHandle, visited))
+                return true;
+        }
+        return false;
+    }
+
+    internal bool RequiresMoveOnly(ResolutionContext context)
+    {
+        if (RequiresCopy(context))
+            return false;
+
+        if (!context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveHandle))
+            return false;
+
+        var visited = new HashSet<SymbolHandle> { ResolutionContext.GetHandle(this) };
+        if (ParameterKind == GenericParameterKind.This &&
+            DeclarationResolutionPass.SatisfiesConstraint(context, ResolutionContext.GetHandle(GenericSymbol), moveHandle, visited))
+        {
+            return true;
+        }
+
+        foreach (var c in Constraints)
+        {
+            if (c.IsResolved && c.Handle is { } ch && DeclarationResolutionPass.SatisfiesConstraint(context, ch, moveHandle, visited))
+                return true;
+        }
+        return false;
+    }
 
     private bool ConstraintsRequireSized(ResolutionContext context)
     {

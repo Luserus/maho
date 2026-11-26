@@ -1344,6 +1344,88 @@ internal sealed class DiagnosticsManager
             .WithHelp(help)
             .Report();
 
+    /// <summary> Reports an invalid declaration site for a <c>: this</c> generic parameter. </summary>
+    public void ReportInvalidThisGenericParameterPlacement(
+        TextSpan span,
+        string paramName,
+        SourceText? source = null) =>
+        BuildError("MH0584", $"': this' generic parameter '{paramName}' can only be declared on an interface or method", span, source)
+            .WithPrimaryLabel(span, $"invalid ': this' generic parameter on non-interface type or standalone function", source)
+            .WithHelp("move ': this' onto an interface or method generic parameter list, or use a regular type parameter")
+            .Report();
+
+    /// <summary> Reports a type argument that does not strictly match the implementing or constrained <c>this</c> type. </summary>
+    public void ReportThisGenericArgumentMismatch(
+        TextSpan span,
+        string paramName,
+        string targetName,
+        string expectedType,
+        string actualType,
+        SourceText? source = null) =>
+        BuildError("MH0585", $"type argument '{actualType}' for 'this' parameter '{paramName}' on '{targetName}' must exactly match '{expectedType}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{expectedType}', got '{actualType}'", source)
+            .WithHelp($"pass '{expectedType}' for '{paramName}' (exact type identity is required, not a base type or unrelated type)")
+            .Report();
+
+    /// <summary> Reports an unparameterized reference to a <c>: this</c> generic interface outside a base clause or generic constraint. </summary>
+    public void ReportMissingExplicitThisTypeArgument(
+        TextSpan span,
+        string ifaceName,
+        string paramName,
+        SourceText? source = null) =>
+        BuildError("MH0586", $"interface '{ifaceName}' requires an explicit type argument for 'this' parameter '{paramName}'", span, source)
+            .WithPrimaryLabel(span, $"missing concrete type argument for '{paramName}'", source)
+            .WithHelp($"specify the concrete type explicitly, e.g. '{ifaceName}<MyType>'")
+            .Report();
+
+    /// <summary> Reports calling a generic method with a <c>: this</c> type parameter on a type-erased <c>dyn</c> receiver. </summary>
+    public void ReportDynThisGenericMethodCallNotAllowed(
+        TextSpan span,
+        string methodName,
+        string ifaceName,
+        SourceText? source = null) =>
+        BuildError("MH0587", $"cannot call method '{methodName}' requiring a ': this' generic parameter on type-erased 'dyn {ifaceName}'", span, source)
+            .WithPrimaryLabel(span, $"concrete type for ': this' parameter is only known in runtime metadata", source)
+            .WithHelp($"declare the ': this' parameter on interface '{ifaceName}<T : this>' or call '{methodName}' on a statically known type")
+            .Report();
+
+    /// <summary> Reports <c>new</c>/<c>put</c> creation when allocation arguments or type arguments do not match any user operator and no compiler fallback applies. </summary>
+    public void ReportNoMatchingAllocationOperator(
+        TextSpan span,
+        string keyword,
+        string typeName,
+        string operatorName,
+        SourceText? source = null) =>
+        BuildError("MH0591", $"no matching '{operatorName}' operator found for '{keyword}' on type '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"missing matching '{operatorName}' operator", source)
+            .WithHelp($"implement '[OperatorFunction(\"{operatorName}\")]' with a matching signature or omit allocation arguments")
+            .Report();
+
+    /// <summary> Reports <c>new</c>/<c>put</c> object creation on a type that does not derive from <c>ValueType</c> and implements no matching operator. </summary>
+    public void ReportObjectCreationNotSupported(
+        TextSpan span,
+        string keyword,
+        string typeName,
+        string valTypeName,
+        string operatorName,
+        SourceText? source = null) =>
+        BuildError("MH0589", $"type '{typeName}' does not derive from '{valTypeName}' and does not implement '{operatorName}' for '{keyword}'", span, source)
+            .WithPrimaryLabel(span, $"missing '{operatorName}' operator for '{typeName}'", source)
+            .WithHelp($"inherit '{valTypeName}' or implement '[OperatorFunction(\"{operatorName}\")]' on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports a generic type argument that does not satisfy an explicit interface or ownership constraint. </summary>
+    public void ReportGenericConstraintViolation(
+        TextSpan span,
+        string typeName,
+        string paramName,
+        string targetName,
+        string requiredConstraint,
+        SourceText? source = null) =>
+        BuildError("MH0590", $"type '{typeName}' does not satisfy constraint '{requiredConstraint}' on generic parameter '{paramName}' of '{targetName}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{requiredConstraint}', got '{typeName}'", source)
+            .Report();
+
     /// <summary> Reports an attempt to branch out of a finally block via return, break, or continue. </summary>
     public void ReportControlLeavesFinally(TextSpan span, string kind, SourceText? source = null) =>
         BuildError("MH2033", $"control cannot leave the body of a finally clause with '{kind}'", span, source)
