@@ -15,7 +15,7 @@ internal sealed class BorrowEscapeAnalysis
     private readonly ResolutionContext context;
     private readonly OwnershipBody body;
     private readonly Dictionary<Symbol, Place> namedLoans = [];
-    private readonly Dictionary<Expression, Place> temporaryLoans = [];
+    private readonly Dictionary<Expression, List<Place>> temporaryLoans = [];
 
     public BorrowEscapeAnalysis(ResolutionContext context, OwnershipBody body)
     {
@@ -50,29 +50,80 @@ internal sealed class BorrowEscapeAnalysis
         }
 
         // 2. Safe borrows cannot escape enclosing function
-        if (!ReturnsSafeBorrow())
-            return;
+        if (ReturnsSafeBorrow())
+        {
+            foreach (var block in body.Blocks)
+            {
+                if (block.Terminator.ReturnExpression is { } returned && TryFindReferents(returned, out var referents))
+                    ReportEscapingReferents(returned, referents, "enclosing function");
+            }
+        }
 
+        // 3. Safe borrows cannot escape through throw statements
         foreach (var block in body.Blocks)
         {
-            if (block.Terminator.ReturnExpression is { } returned && TryFindReferent(returned, out var referent))
+            if (block.Terminator.ThrowExpression is { } thrown && TryFindReferents(thrown, out var referents))
+                ReportEscapingReferents(thrown, referents, "enclosing function (via throw)");
+        }
+    }
+
+    private void ReportEscapingReferents(Expression expr, List<Place> referents, string temporaryScopeLabel)
+    {
+        foreach (var referent in referents)
+        {
+            if (referent.Root is TemporaryStorageSymbol)
             {
-                if (referent.Root is TemporaryStorageSymbol)
-                {
-                    context.Diagnostics.ReportBorrowEscapesTemporary(
-                        returned.GetSpan() ?? default,
-                        "enclosing function",
-                        returned.GetSource());
-                }
-                else if (referent.Root is LocalVariableSymbol local)
-                {
-                    Report(returned, local);
-                }
+                context.Diagnostics.ReportBorrowEscapesTemporary(
+                    expr.GetSpan() ?? default,
+                    temporaryScopeLabel,
+                    expr.GetSource());
+            }
+            else if (referent.Root is LocalVariableSymbol local)
+            {
+                Report(expr, local);
             }
         }
     }
 
-    private bool ReturnsSafeBorrow() => GetReturnType().SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };
+    private bool ReturnsSafeBorrow() => ContainsSafeBorrowType(GetReturnType());
+
+    private bool ContainsSafeBorrowType(TypeRef type, HashSet<SymbolHandle>? visited = null)
+    {
+        var unwrapped = TypeRef.UnwrapDyn(type);
+        if (unwrapped.SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false })
+            return true;
+
+        if (unwrapped.SpecialType is OptionalSemanticType opt)
+            return ContainsSafeBorrowType(opt.ElementType, visited);
+
+        if (unwrapped.SpecialType is TupleSemanticType tuple)
+            return tuple.Elements.Any(e => ContainsSafeBorrowType(e.Type, visited));
+
+        if (unwrapped.Handle is { } handle)
+        {
+            var classifier = new OwnershipTypeClassifier(context);
+            if (!classifier.RequiresDrop(unwrapped))
+            {
+                visited ??= [];
+                var uH = context.UnwrapAlias(handle);
+                if (!visited.Add(uH))
+                    return false;
+                IEnumerable<SymbolHandle> fields = context.GetSymbol(uH) switch
+                {
+                    ProductTypeSymbol p => p.Fields,
+                    MemberProductTypeSymbol mp => mp.Fields,
+                    _ => []
+                };
+                foreach (var fh in fields)
+                {
+                    if (context.GetFieldSymbol(fh) is { } fs && ContainsSafeBorrowType(fs.Type, visited))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private TypeRef GetReturnType() => context.GetSymbol(body.ContainingSymbol) switch
     {
@@ -97,26 +148,48 @@ internal sealed class BorrowEscapeAnalysis
             if (statement.LoanOwner is { } owner)
                 namedLoans[owner] = statement.Place;
             if (statement.Origin is Expression expression)
-                temporaryLoans[expression] = statement.Place;
+            {
+                if (!temporaryLoans.TryGetValue(expression, out var list))
+                {
+                    list = [];
+                    temporaryLoans[expression] = list;
+                }
+                list.Add(statement.Place);
+            }
         }
     }
 
     /// <summary>
-    /// Resolves a return expression to the place borrowed by either a direct temporary borrow or a
-    /// named alias/reference holder.
+    /// Resolves a returned or thrown expression to all places borrowed by a direct temporary
+    /// borrow, a named alias/reference holder, or a delegate/composite capture map.
     /// </summary>
-    private bool TryFindReferent(Expression returned, out Place referent)
+    private bool TryFindReferents(Expression expr, out List<Place> referents)
     {
-        if (temporaryLoans.TryGetValue(returned, out referent))
+        if (temporaryLoans.TryGetValue(expr, out var directLoans) && directLoans.Count > 0)
+        {
+            referents = directLoans;
             return true;
+        }
 
         foreach (var statement in body.Blocks.SelectMany(static block => block.Statements))
         {
-            if (statement.Kind == OwnershipStatementKind.Use && ReferenceEquals(statement.Origin, returned) && namedLoans.TryGetValue(statement.Place.Root, out referent))
+            if (statement.Kind != OwnershipStatementKind.Use || !ReferenceEquals(statement.Origin, expr))
+                continue;
+
+            if (body.ReferentMap.TryGetValue(statement.Place.Root, out var mapEntries) && mapEntries.Count > 0)
+            {
+                referents = mapEntries.Select(static entry => entry.Referent).ToList();
                 return true;
+            }
+
+            if (namedLoans.TryGetValue(statement.Place.Root, out var singleReferent))
+            {
+                referents = [singleReferent];
+                return true;
+            }
         }
 
-        referent = default;
+        referents = [];
         return false;
     }
 

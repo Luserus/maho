@@ -11,13 +11,20 @@ internal sealed class DynSemanticType : SemanticType
     public TypeRef TargetType { get; }
     public IReadOnlyList<TypeRef> ComposedTypes { get; }
 
+    /// <summary>
+    /// True when written with an explicit <c>dyn</c> modifier (e.g. <c>dyn &amp;Bar</c> or <c>dyn Bar&amp;</c>),
+    /// as opposed to an implicitly promoted bare interface reference (<c>&amp;Bar</c>).
+    /// </summary>
+    public bool IsExplicitDyn { get; }
+
     public override bool IsResolved => TargetType.IsResolved && ComposedTypes.All(t => t.IsResolved);
     public override bool IsError => TargetType.IsError || ComposedTypes.Any(t => t.IsError);
 
-    public DynSemanticType(TypeRef targetType, IReadOnlyList<TypeRef>? composedTypes = null)
+    public DynSemanticType(TypeRef targetType, IReadOnlyList<TypeRef>? composedTypes = null, bool isExplicitDyn = false)
     {
         TargetType = targetType;
         ComposedTypes = composedTypes ?? Array.Empty<TypeRef>();
+        IsExplicitDyn = isExplicitDyn;
     }
 
     public override bool Equals(SemanticType? other)

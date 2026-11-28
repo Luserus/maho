@@ -10,14 +10,25 @@ internal sealed class GenericParameterSyntax : SyntaxNode
     public Token? Colon { get; }
     public Token? ValueKindToken { get; }
     public GenericParameterKind Kind { get; }
+    public Token? EqualsToken { get; }
+    public TypeSyntax? DefaultType { get; }
     public bool IsVariadic => Ellipsis.Count != 0;
 
-    public GenericParameterSyntax(Token identifier, IReadOnlyList<Token> ellipsis, Token? colon, Token? valueKindToken, GenericParameterKind kind)
+    public GenericParameterSyntax(
+        Token identifier,
+        IReadOnlyList<Token> ellipsis,
+        Token? colon,
+        Token? valueKindToken,
+        GenericParameterKind kind,
+        Token? equalsToken = null,
+        TypeSyntax? defaultType = null)
     {
         Identifier = identifier;
         Ellipsis = ellipsis;
         Colon = colon;
         ValueKindToken = valueKindToken;
         Kind = kind;
+        EqualsToken = equalsToken;
+        DefaultType = defaultType;
     }
 }

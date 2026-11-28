@@ -162,19 +162,24 @@ internal sealed partial class SymbolDiscoveryPass
 
     private void ResolveFieldDeclaration(VariableDeclaration declaration, Scope scope, SymbolHandle containingType)
     {
+        var (dirAcc, extAcc) = ResolveFieldAccessibility(declaration.Modifiers);
         var declarator = declaration.Declarator;
         if (declarator.Identifier is TupleName tupleName)
         {
             foreach (var elem in tupleName.Elements)
             {
                 var symbol = context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(elem).Last, containingType, declaration);
-                symbol.Flags = ResolveVariableFlags(declaration.Modifiers);
+                symbol.DirectAccessibility = dirAcc;
+                symbol.ExtensionAccessibility = extAcc;
+                symbol.Flags = ResolveVariableFlags(declaration.Modifiers, dirAcc);
             }
         }
         else
         {
             var symbol = context.CreateFieldSymbol(scope, ResolutionContext.GetSymbolName(declarator.Identifier).Last, containingType, declaration);
-            symbol.Flags = ResolveVariableFlags(declaration.Modifiers);
+            symbol.DirectAccessibility = dirAcc;
+            symbol.ExtensionAccessibility = extAcc;
+            symbol.Flags = ResolveVariableFlags(declaration.Modifiers, dirAcc);
         }
     }
 
@@ -219,6 +224,9 @@ internal sealed partial class SymbolDiscoveryPass
             case LocalAliasDeclaration declaration:
                 ResolveLocalAliasDeclaration(declaration.Alias, scope, containingSymbol);
                 break;
+            case LocalExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
+                break;
             case LocalUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);
                 break;
@@ -247,6 +255,10 @@ internal sealed partial class SymbolDiscoveryPass
             case LocalReturnStatement retStmt:
                 if (retStmt.Statement.Expression is not null)
                     DiscoverBlockExpressions(retStmt.Statement.Expression, scope, containingSymbol, containingMethod);
+                break;
+            case LocalThrowStatement throwStmt:
+                if (throwStmt.Statement.Expression is not null)
+                    DiscoverBlockExpressions(throwStmt.Statement.Expression, scope, containingSymbol, containingMethod);
                 break;
             case LocalYieldStatement yieldStmt:
                 if (yieldStmt.Expression is not null)
@@ -325,8 +337,57 @@ internal sealed partial class SymbolDiscoveryPass
         }
         else if (expr is TupleExpression tuple)
         {
-            foreach (var arg in tuple.Arguments)
-                DiscoverBlockExpressions(arg, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(tuple.Arguments, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MemberAccessExpression member)
+        {
+            DiscoverBlockExpressions(member.Expression, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is IndexExpression index)
+        {
+            DiscoverBlockExpressions(index.Expression, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(index.Arguments, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ObjectInitializerExpression objInit)
+        {
+            DiscoverExpressionList(objInit.AllocationArguments, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(objInit.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ConstructorCallExpression ctor)
+        {
+            DiscoverExpressionList(ctor.AllocationArguments, scope, containingSymbol, containingMethod);
+            DiscoverExpressionList(ctor.Arguments, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(ctor.WithClause?.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is ArrayCreationExpression arr)
+        {
+            DiscoverBlockExpressions(arr.Size, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(arr.Initializer, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(arr.WithClause?.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is CollectionExpression collection)
+        {
+            DiscoverExpressionList(collection.Expressions, scope, containingSymbol, containingMethod);
+            foreach (var modifier in collection.Modifiers)
+            {
+                if (modifier is CollectionConstructorModifier ctorMod)
+                    DiscoverExpressionList(ctorMod.Arguments, scope, containingSymbol, containingMethod);
+            }
+        }
+        else if (expr is VariantCreationExpression variant)
+        {
+            DiscoverBlockExpressions(variant.Target, scope, containingSymbol, containingMethod);
+            DiscoverTypeInitializer(variant.Initializer, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MultiTermExpression multiTerm)
+        {
+            DiscoverExpressionList(multiTerm.Terms, scope, containingSymbol, containingMethod);
+        }
+        else if (expr is MatchExpression match)
+        {
+            DiscoverBlockExpressions(match.Expression, scope, containingSymbol, containingMethod);
+            foreach (var arm in match.Arms)
+                DiscoverBlockExpressions(arm.Expression, scope, containingSymbol, containingMethod);
         }
         else if (expr is AsExpression asExpr)
         {
@@ -364,6 +425,25 @@ internal sealed partial class SymbolDiscoveryPass
             }
             DiscoverBlockExpressions(forExpr.Body, forScope, containingSymbol, containingMethod);
         }
+        else if (expr is TryExpression tryExpr)
+        {
+            DiscoverBlockExpressions(tryExpr.TryBlock, scope, containingSymbol, containingMethod);
+            foreach (var catchClause in tryExpr.CatchClauses)
+            {
+                var catchScope = context.CreateScope(scope);
+                context.RegisterSyntaxScope(catchClause, catchScope);
+                if (catchClause.VariableIdentifier is { } varId && varId.Value != "_")
+                {
+                    var varPart = new SymbolPart(varId.Value);
+                    context.CreateLocalVariableSymbol(catchScope, varPart, containingSymbol, null);
+                }
+                DiscoverBlockExpressions(catchClause.Block, catchScope, containingSymbol, containingMethod);
+            }
+            if (tryExpr.FinallyClause is { } finallyClause)
+            {
+                DiscoverBlockExpressions(finallyClause.Block, scope, containingSymbol, containingMethod);
+            }
+        }
         else if (expr is LambdaExpression lambda)
         {
             Scope lambdaScope = context.CreateScope(scope);
@@ -390,6 +470,21 @@ internal sealed partial class SymbolDiscoveryPass
                 DiscoverBlockExpressions(lambda.Body, lambdaScope, containingSymbol, containingMethod);
             }
         }
+    }
+
+    private void DiscoverTypeInitializer(TypeInitializer? initializer, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
+    {
+        if (initializer is not null)
+            DiscoverExpressionList(initializer.Expressions, scope, containingSymbol, containingMethod);
+    }
+
+    private void DiscoverExpressionList(SeparatedSyntaxList<Expression>? list, Scope scope, SymbolHandle containingSymbol, SymbolHandle? containingMethod)
+    {
+        if (list is null)
+            return;
+
+        foreach (var item in list)
+            DiscoverBlockExpressions(item, scope, containingSymbol, containingMethod);
     }
 
 
@@ -425,15 +520,76 @@ internal sealed partial class SymbolDiscoveryPass
         if (genericName is null)
             return [];
 
-        var genericParameters = new List<SymbolHandle>(genericName.GenericParameters.Count);
+        return ResolveGenericParametersFromList(genericName.GenericParameters, scope, genericSymbol);
+    }
 
-        foreach (var genericParameter in genericName.GenericParameters)
+    private List<SymbolHandle> ResolveGenericParametersFromList(SeparatedSyntaxList<GenericParameterSyntax> list, Scope scope, Symbol genericSymbol)
+    {
+        var genericParameters = new List<SymbolHandle>(list.Count);
+
+        foreach (var genericParameter in list)
         {
-            var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic);
+            var symbol = context.CreateGenericParameterSymbol(scope, new SymbolPart(genericParameter.Identifier), genericSymbol, genericParameter.Kind, genericParameter.IsVariadic, genericParameter);
             genericParameters.Add(ResolutionContext.GetHandle(symbol));
         }
 
         return genericParameters;
+    }
+
+    public static (Accessibility Direct, Accessibility Extension) ResolveFieldAccessibility(IReadOnlyList<Token> modifiers)
+    {
+        int extIndex = -1;
+        for (int i = 0; i < modifiers.Count; i++)
+        {
+            if (modifiers[i].MatchingKind == MatchingKeywordKind.Ext)
+            {
+                extIndex = i;
+                break;
+            }
+        }
+
+        if (extIndex < 0)
+        {
+            foreach (var mod in modifiers)
+            {
+                if (mod.MatchingKind == MatchingKeywordKind.Public)
+                    return (Accessibility.Public, Accessibility.Public);
+                if (mod.MatchingKind == MatchingKeywordKind.Internal)
+                    return (Accessibility.Internal, Accessibility.Internal);
+                if (mod.MatchingKind == MatchingKeywordKind.Protected)
+                    return (Accessibility.Protected, Accessibility.Protected);
+                if (mod.MatchingKind == MatchingKeywordKind.Private)
+                    return (Accessibility.Private, Accessibility.Private);
+            }
+            return (Accessibility.Private, Accessibility.Private);
+        }
+
+        Accessibility direct = Accessibility.Private;
+        for (int i = 0; i < extIndex; i++)
+        {
+            var kind = modifiers[i].MatchingKind;
+            if (kind == MatchingKeywordKind.Public) direct = Accessibility.Public;
+            else if (kind == MatchingKeywordKind.Internal) direct = Accessibility.Internal;
+            else if (kind == MatchingKeywordKind.Protected) direct = Accessibility.Protected;
+            else if (kind == MatchingKeywordKind.Private) direct = Accessibility.Private;
+        }
+
+        Accessibility? ext = null;
+        for (int i = extIndex + 1; i < modifiers.Count; i++)
+        {
+            var kind = modifiers[i].MatchingKind;
+            if (kind == MatchingKeywordKind.Public) ext = Accessibility.Public;
+            else if (kind == MatchingKeywordKind.Internal) ext = Accessibility.Internal;
+            else if (kind == MatchingKeywordKind.Protected) ext = Accessibility.Protected;
+            else if (kind == MatchingKeywordKind.Private) ext = Accessibility.Private;
+        }
+
+        if (ext is null)
+        {
+            ext = (direct == Accessibility.Internal) ? Accessibility.Public : Accessibility.Internal;
+        }
+
+        return (direct, ext.Value);
     }
 
     private static NamespaceTrieNode GetOrDeclareNamespace(NamespaceTrieNode containingNamespace, NamedSyntax name)
@@ -494,13 +650,18 @@ internal sealed partial class SymbolDiscoveryPass
         };
     }
 
-    // TODO: Define order in which modifiers should appear and add diagnostic otherwise.
     private static TypeFlags ResolveTypeFlags(IReadOnlyList<Token> modifiers)
     {
-        var flags = TypeFlags.None;
+        var flags = TypeFlags.Sealed;
 
         foreach (var mod in modifiers)
         {
+            if (mod.MatchingKind == MatchingKeywordKind.Unsealed)
+            {
+                flags &= ~TypeFlags.Sealed;
+                continue;
+            }
+
             flags |= mod.MatchingKind switch
             {
                 MatchingKeywordKind.Public => TypeFlags.Public,
@@ -508,7 +669,6 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Private => TypeFlags.Private,
                 MatchingKeywordKind.Protected => TypeFlags.Protected,
                 MatchingKeywordKind.Unsafe => TypeFlags.Unsafe,
-                MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
                 MatchingKeywordKind.Partial => TypeFlags.Partial,
                 MatchingKeywordKind.Untagged => TypeFlags.Untagged,
@@ -537,7 +697,7 @@ internal sealed partial class SymbolDiscoveryPass
         return flags;
     }
 
-    private static VariableFlags ResolveVariableFlags(IReadOnlyList<Token> modifiers)
+    private static VariableFlags ResolveVariableFlags(IReadOnlyList<Token> modifiers, Accessibility? directAccessibility = null)
     {
         var flags = VariableFlags.None;
 
@@ -545,14 +705,36 @@ internal sealed partial class SymbolDiscoveryPass
         {
             flags |= mod.MatchingKind switch
             {
-                MatchingKeywordKind.Public => VariableFlags.Public,
-                MatchingKeywordKind.Internal => VariableFlags.Internal,
-                MatchingKeywordKind.Private => VariableFlags.Private,
                 MatchingKeywordKind.Static => VariableFlags.Static,
-                MatchingKeywordKind.Protected => VariableFlags.Protected,
                 MatchingKeywordKind.Const => VariableFlags.Const,
+                MatchingKeywordKind.Mut => VariableFlags.Mut,
                 _ => VariableFlags.None
             };
+        }
+
+        if (directAccessibility is not null)
+        {
+            flags |= directAccessibility.Value switch
+            {
+                Accessibility.Public => VariableFlags.Public,
+                Accessibility.Internal => VariableFlags.Internal,
+                Accessibility.Protected => VariableFlags.Protected,
+                _ => VariableFlags.Private
+            };
+        }
+        else
+        {
+            foreach (var mod in modifiers)
+            {
+                flags |= mod.MatchingKind switch
+                {
+                    MatchingKeywordKind.Public => VariableFlags.Public,
+                    MatchingKeywordKind.Internal => VariableFlags.Internal,
+                    MatchingKeywordKind.Private => VariableFlags.Private,
+                    MatchingKeywordKind.Protected => VariableFlags.Protected,
+                    _ => VariableFlags.None
+                };
+            }
         }
 
         return flags;
@@ -572,6 +754,7 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Internal => FunctionFlags.Internal,
                 MatchingKeywordKind.Static => FunctionFlags.Static,
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
+                MatchingKeywordKind.Override => FunctionFlags.Override,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
                 _ => FunctionFlags.None

@@ -316,7 +316,9 @@ public static class CommandLine
 
         string projectDirectory = cliOptions.ProjectDirectory ?? rootPath;
         string projectName = cliOptions.ProjectName ?? Path.GetFileName(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        string moduleName = cliOptions.ModuleName ?? ToKebabCase(projectName);
+        string moduleName = !string.IsNullOrWhiteSpace(cliOptions.ModuleName)
+            ? NormalizeModuleIdentifier(cliOptions.ModuleName)
+            : NormalizeModuleIdentifier(projectName);
         var request = new CompilerServerRequest(CompilerProtocol.Version, projectName, moduleName, projectDirectory, [.. files], compOptions, cliOptions.CheckOnly);
         CompilerServerResponse response = CompilerServerClient.Compile(ToolchainVersion, request);
 
@@ -328,17 +330,30 @@ public static class CommandLine
         return new CompilerProjectAnalysisResult(response.ProjectName, batch, response.EntryFile, response.ElapsedTicks, response.HasErrors);
     }
 
-    private static string ToKebabCase(string value)
+    private static string NormalizeModuleIdentifier(string? rawName, string fallback = "App")
     {
-        var output = new StringBuilder(value.Length + 8);
-        for (int i = 0; i < value.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(value[i]) && (char.IsLower(value[i - 1]) || char.IsDigit(value[i - 1])))
-                output.Append('-');
+        if (string.IsNullOrWhiteSpace(rawName))
+            return fallback;
 
-            output.Append(char.ToLowerInvariant(value[i]));
+        var sb = new StringBuilder(rawName.Length);
+        bool capitalizeNext = true;
+        foreach (char c in rawName)
+        {
+            if (char.IsLetterOrDigit(c) || c == '_')
+            {
+                sb.Append(capitalizeNext ? char.ToUpperInvariant(c) : c);
+                capitalizeNext = false;
+            }
+            else
+            {
+                capitalizeNext = true;
+            }
         }
-        return output.ToString();
+        if (sb.Length == 0)
+            return fallback;
+        if (char.IsDigit(sb[0]))
+            sb.Insert(0, '_');
+        return sb.ToString();
     }
 
     private static readonly JsonSerializerOptions PipeJsonOptions = new(JsonSerializerDefaults.Web);
@@ -1058,12 +1073,12 @@ public static class CommandLine
         writer.WriteLine("  --no-recurse                                                Do not search subdirectories recursively when directory is passed.");
         writer.WriteLine("  --source-paths-stdin                                        Read explicit source paths, one per line, from standard input.");
         writer.WriteLine("  --project-name <PascalCase>                                 Project identity supplied by the build system.");
-        writer.WriteLine("  --module-name <kebab-case>                                  Compiled module identity supplied by the build system.");
+        writer.WriteLine("  --module-name <PascalCase>                                  Symbolic module identity supplied by the build system.");
         writer.WriteLine("  --project-directory <path>                                  Directory watched by the compiler server.");
         writer.WriteLine("  --server-path <path>                                        Compiler server executable; defaults beside mahoc.");
         writer.WriteLine("  --compiler-package <path>                                   Compiler package directory or compiler.json manifest.");
         writer.WriteLine("  --shutdown-servers                                          Stop all compiler daemons owned by this user.");
-        writer.WriteLine("  --reference-project <path>                                  Referenced project metadata/source path supplied by Miryo.");
+        writer.WriteLine("  --reference-project [Alias=]<path>                          Referenced project metadata/source path with optional extern alias.");
         writer.WriteLine("  --entry <file>                                              Specify the explicit entry point source file.");
         writer.WriteLine("  --alias <name=target>                                       Define a global type alias (e.g. 'int32=Std.Int32').");
         writer.WriteLine("  --diagnostics [pretty|text|json] (-o|--output) <file|->     Write diagnostics to a file or stderr (default: pretty).");

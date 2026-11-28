@@ -17,7 +17,7 @@ internal sealed class TupleSemanticType : SemanticType
     public override SemanticTypeKind Kind => SemanticTypeKind.Tuple;
     public IReadOnlyList<TupleElement> Elements { get; }
 
-    public override bool IsResolved => Elements.Count > 0 && Elements.All(e => e.Type.IsResolved);
+    public override bool IsResolved => Elements.All(e => e.Type.IsResolved);
     public override bool IsError => Elements.Any(e => e.Type.IsError);
 
     public TupleSemanticType(IReadOnlyList<TupleElement> elements) => Elements = elements;

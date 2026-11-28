@@ -24,7 +24,7 @@ internal sealed partial class DeclarationResolutionPass
         MatchingKeywordKind.Public or MatchingKeywordKind.Internal or MatchingKeywordKind.Protected or MatchingKeywordKind.Private => ModifierCategory.Visibility,
         MatchingKeywordKind.Extern or MatchingKeywordKind.Intrinsic => ModifierCategory.Linkage,
         MatchingKeywordKind.Static => ModifierCategory.Storage,
-        MatchingKeywordKind.Virtual or MatchingKeywordKind.Unsealed => ModifierCategory.Polymorphism,
+        MatchingKeywordKind.Virtual or MatchingKeywordKind.Override or MatchingKeywordKind.Unsealed => ModifierCategory.Polymorphism,
         MatchingKeywordKind.Unsafe => ModifierCategory.Safety,
         MatchingKeywordKind.Partial => ModifierCategory.Partial,
         MatchingKeywordKind.Const or MatchingKeywordKind.Mut => ModifierCategory.Mutability,
@@ -32,7 +32,7 @@ internal sealed partial class DeclarationResolutionPass
         _ => ModifierCategory.None
     };
 
-    private const string CanonicalOrderString = "[visibility] [extern|intrinsic] [static] [virtual|unsealed] [unsafe] [partial] [const|mut] [untagged]";
+    private const string CanonicalOrderString = "[visibility] [extern|intrinsic] [static] [virtual|override|unsealed] [unsafe] [partial] [const|mut] [untagged]";
 
     private void ValidateModifiers()
     {
@@ -112,21 +112,9 @@ internal sealed partial class DeclarationResolutionPass
                 bool isInterface = (parentSym as TypeSymbol)?.TypeKind == TypeKind.Interface || (parentSym as NestedTypeSymbol)?.TypeKind == TypeKind.Interface;
                 if (isInterface)
                 {
-                    var allowedList = new List<MatchingKeywordKind> { MatchingKeywordKind.Unsafe };
-                    Accessibility ifaceAccess = parentSym switch
-                    {
-                        TypeSymbol ts => AccessibilityExtensions.FromTypeFlags(ts.Flags, isTopLevel: true),
-                        NestedTypeSymbol nts => AccessibilityExtensions.FromTypeFlags(nts.Flags, isTopLevel: false),
-                        _ => Accessibility.Internal
-                    };
-                    if (ifaceAccess == Accessibility.Public)
-                        allowedList.Add(MatchingKeywordKind.Public);
-                    else if (ifaceAccess == Accessibility.Internal)
-                        allowedList.Add(MatchingKeywordKind.Internal);
-
                     ValidateModifierList(
                         method.Syntax.Signature.Modifiers,
-                        allowed: [.. allowedList],
+                        allowed: [MatchingKeywordKind.Unsafe],
                         itemKind: "interface method",
                         name: method.Name.Text,
                         span: method.Syntax.Signature.Identifier.GetSpan() ?? default,
@@ -134,10 +122,13 @@ internal sealed partial class DeclarationResolutionPass
                 }
                 else
                 {
+                    bool isExplicitInterfaceImpl = method.ExplicitInterfaceName is not null;
                     ValidateModifierList(
                         method.Syntax.Signature.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
-                        itemKind: "method",
+                        allowed: isExplicitInterfaceImpl
+                            ? [MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Override, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial]
+                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Override, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
+                        itemKind: isExplicitInterfaceImpl ? "explicit interface method implementation" : "method",
                         name: method.Name.Text,
                         span: method.Syntax.Signature.Identifier.GetSpan() ?? default,
                         source: method.Syntax.GetSource());
@@ -152,23 +143,12 @@ internal sealed partial class DeclarationResolutionPass
             {
                 var parentSym = prop.Parent is { } pH ? context.GetSymbol(pH) : null;
                 bool isInterface = (parentSym as TypeSymbol)?.TypeKind == TypeKind.Interface || (parentSym as NestedTypeSymbol)?.TypeKind == TypeKind.Interface;
+                bool isExplicitInterfaceProp = prop.ExplicitInterfaceName is not null;
                 if (isInterface)
                 {
-                    var allowedList = new List<MatchingKeywordKind> { MatchingKeywordKind.Unsafe };
-                    Accessibility ifaceAccess = parentSym switch
-                    {
-                        TypeSymbol ts => AccessibilityExtensions.FromTypeFlags(ts.Flags, isTopLevel: true),
-                        NestedTypeSymbol nts => AccessibilityExtensions.FromTypeFlags(nts.Flags, isTopLevel: false),
-                        _ => Accessibility.Internal
-                    };
-                    if (ifaceAccess == Accessibility.Public)
-                        allowedList.Add(MatchingKeywordKind.Public);
-                    else if (ifaceAccess == Accessibility.Internal)
-                        allowedList.Add(MatchingKeywordKind.Internal);
-
                     ValidateModifierList(
                         prop.Syntax.Modifiers,
-                        allowed: [.. allowedList],
+                        allowed: [MatchingKeywordKind.Unsafe, MatchingKeywordKind.Static],
                         itemKind: "interface property",
                         name: prop.Name.Text,
                         span: prop.Syntax.Identifier.GetSpan() ?? default,
@@ -178,19 +158,22 @@ internal sealed partial class DeclarationResolutionPass
                 {
                     ValidateModifierList(
                         prop.Syntax.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe],
-                        itemKind: "property",
+                        allowed: isExplicitInterfaceProp
+                            ? [MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe]
+                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsafe],
+                        itemKind: isExplicitInterfaceProp ? "explicit interface property implementation" : "property",
                         name: prop.Name.Text,
                         span: prop.Syntax.Identifier.GetSpan() ?? default,
                         source: prop.Syntax.GetSource());
                 }
 
+                bool disallowVisibilityOnAccessors = isInterface || isExplicitInterfaceProp;
                 foreach (var acc in prop.Syntax.Body.Accessors)
                 {
                     ValidateModifierList(
                         acc.Modifiers,
-                        allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private],
-                        itemKind: "property accessor",
+                        allowed: disallowVisibilityOnAccessors ? [] : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private],
+                        itemKind: isInterface ? "interface property accessor" : isExplicitInterfaceProp ? "explicit interface property accessor" : "property accessor",
                         name: acc.Kind == PropertyAccessorKind.Get ? "get" : "set",
                         span: acc.GetSpan() ?? default,
                         source: acc.GetSource());
@@ -221,11 +204,27 @@ internal sealed partial class DeclarationResolutionPass
             {
                 ValidateModifierList(
                     field.Syntax.Modifiers,
-                    allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Static, MatchingKeywordKind.Const, MatchingKeywordKind.Mut, MatchingKeywordKind.Unsafe],
+                    allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Ext, MatchingKeywordKind.Static, MatchingKeywordKind.Const, MatchingKeywordKind.Mut, MatchingKeywordKind.Unsafe],
                     itemKind: "field",
                     name: field.Name.Text,
                     span: field.Syntax.Declarator.Identifier.GetSpan() ?? default,
-                    source: field.Syntax.GetSource());
+                    source: field.Syntax.GetSource(),
+                    isField: true);
+            }
+        }
+
+        // 7b. Extensions
+        foreach (var ext in context.ExtensionSymbols)
+        {
+            if (ext.Syntax is not null)
+            {
+                ValidateModifierList(
+                    ext.Syntax.Modifiers,
+                    allowed: [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Unsafe],
+                    itemKind: "extension",
+                    name: ext.Name.Text,
+                    span: ext.Syntax.Keyword.Span,
+                    source: ext.Syntax.GetSource());
             }
         }
 
@@ -294,7 +293,8 @@ internal sealed partial class DeclarationResolutionPass
         string name,
         TextSpan span,
         SourceText? source,
-        bool requireStatic = false)
+        bool requireStatic = false,
+        bool isField = false)
     {
         if (requireStatic)
         {
@@ -316,17 +316,33 @@ internal sealed partial class DeclarationResolutionPass
         if (modifiers.Count == 0)
             return;
 
+        int extIndex = -1;
+        if (isField)
+        {
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                if (modifiers[i].MatchingKind == MatchingKeywordKind.Ext)
+                {
+                    extIndex = i;
+                    break;
+                }
+            }
+        }
+
         var seenKinds = new HashSet<MatchingKeywordKind>();
-        Token? seenVisibility = null;
+        Token? seenVisibilityBeforeExt = null;
+        Token? seenVisibilityAfterExt = null;
         Token? seenConst = null;
         Token? seenMut = null;
         Token? seenVirtual = null;
+        Token? seenOverride = null;
         Token? seenUnsealed = null;
 
         var lastCategory = ModifierCategory.None;
 
-        foreach (var mod in modifiers)
+        for (int i = 0; i < modifiers.Count; i++)
         {
+            var mod = modifiers[i];
             var kind = mod.MatchingKind;
 
             // 1. Check if allowed
@@ -337,22 +353,48 @@ internal sealed partial class DeclarationResolutionPass
             }
 
             // 2. Check duplicate
-            if (!seenKinds.Add(kind))
+            var category = GetModifierCategory(kind);
+            if (isField && extIndex >= 0 && category == ModifierCategory.Visibility)
             {
-                context.Diagnostics.ReportDuplicateModifier(mod.Span, mod.Value, name, source);
-                continue;
+                // Visibility on a field with 'ext' can appear before and after 'ext'
+                if (i < extIndex)
+                {
+                    if (seenVisibilityBeforeExt is not null)
+                    {
+                        context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVisibilityBeforeExt.Value, mod.Value, name, source);
+                        continue;
+                    }
+                    seenVisibilityBeforeExt = mod;
+                }
+                else
+                {
+                    if (seenVisibilityAfterExt is not null)
+                    {
+                        context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVisibilityAfterExt.Value, mod.Value, name, source);
+                        continue;
+                    }
+                    seenVisibilityAfterExt = mod;
+                }
+            }
+            else
+            {
+                if (!seenKinds.Add(kind))
+                {
+                    context.Diagnostics.ReportDuplicateModifier(mod.Span, mod.Value, name, source);
+                    continue;
+                }
+
+                // 3. Check conflicts
+                if (category == ModifierCategory.Visibility)
+                {
+                    if (seenVisibilityBeforeExt is not null)
+                        context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVisibilityBeforeExt.Value, mod.Value, name, source);
+                    else
+                        seenVisibilityBeforeExt = mod;
+                }
             }
 
-            // 3. Check conflicts
-            var category = GetModifierCategory(kind);
-            if (category == ModifierCategory.Visibility)
-            {
-                if (seenVisibility is not null)
-                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVisibility.Value, mod.Value, name, source);
-                else
-                    seenVisibility = mod;
-            }
-            else if (kind == MatchingKeywordKind.Const)
+            if (kind == MatchingKeywordKind.Const)
             {
                 if (seenMut is not null)
                     context.Diagnostics.ReportConflictingModifiers(mod.Span, seenMut.Value, mod.Value, name, source);
@@ -370,13 +412,26 @@ internal sealed partial class DeclarationResolutionPass
             {
                 if (seenUnsealed is not null)
                     context.Diagnostics.ReportConflictingModifiers(mod.Span, seenUnsealed.Value, mod.Value, name, source);
+                else if (seenOverride is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenOverride.Value, mod.Value, name, source);
                 else
                     seenVirtual = mod;
+            }
+            else if (kind == MatchingKeywordKind.Override)
+            {
+                if (seenUnsealed is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenUnsealed.Value, mod.Value, name, source);
+                else if (seenVirtual is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVirtual.Value, mod.Value, name, source);
+                else
+                    seenOverride = mod;
             }
             else if (kind == MatchingKeywordKind.Unsealed)
             {
                 if (seenVirtual is not null)
                     context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVirtual.Value, mod.Value, name, source);
+                else if (seenOverride is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenOverride.Value, mod.Value, name, source);
                 else
                     seenUnsealed = mod;
             }

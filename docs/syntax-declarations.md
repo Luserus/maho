@@ -22,16 +22,16 @@ These model identifier-like structures and name composition.
 - `SimpleType`
 - `QualifiedType`
 - `GenericType`
-- `ModifiedType` (postfix-modified types, e.g. `T?`, `T*`, `T mut*`, `T&`, `T mut&`, `T[&]`, `T[]`, `T[N]`)
-- `PrefixModifiedType` (prefix-modified alias types, e.g. `&T`, `*T`, `mut &T`, `mut *T`)
+- `ModifiedType` (postfix-modified types, e.g. `T?`, `T*`, `T mut*`, `T&`, `T mut&`, `T[]`, `T[N]`)
+- `GroupedType` (explicit parenthesized type grouping `(Type)` for modifier precedence, e.g. `(&T)[]`, `(dyn &I)[]`)
+- `PrefixModifiedType` (prefix-modified alias/modifier types, e.g. `&T`, `*T`, `mut &T`, `mut *T`, `dyn &T`)
 - `TupleType`
 - `TupleTypeElement`
 - `UniformTupleType`
 - `FunctionTypeSyntax`
-- `DelegateTypeSyntax`
 - `TypeKind`
 
-These files define how type references are represented independently of semantic meaning. `FunctionTypeSyntax` (`func(params) -> ReturnType`) and `DelegateTypeSyntax` (`delegate(params) -> ReturnType`) represent function pointer and delegate types respectively.
+These files define how type references are represented independently of semantic meaning. `FunctionTypeSyntax` (`func(params) -> ReturnType`) represents function pointer types.
 
 ### Declaration families
 
@@ -50,16 +50,16 @@ Function declarations in Maho use the `func` keyword with trailing return types:
 ```
 - **Trailing Return Type**: The return type appears after the parameter list prefixed by `->` (e.g. `func Add(int32 a, int32 b) -> int32 { return a + b; }`).
 - **Default Return Type**: If `-> ReturnType` is omitted, the return type defaults to `void`.
-- **Pre- and Post-Modifiers**: Modifiers (such as `public`, `static`, `const`, `mut`, `untagged`) are permitted both before `func` and after the parameter list / return type; semantic analysis validates their applicability.
-- **Constraints**: Generic `where` constraint clauses appear after the trailing return type.
-- **Bodies**: Functions support block bodies (`{ ... }`), expression bodies (`=> expr;`), or empty declarations (`;`).
-- **Unified Function Typing**: All function declarations receive a first-class function type (`Std.Function<TReturn, TParams...>` for static/global functions, `Std.Delegate<TReturn, TParams...>` for instance methods). They implement the `Callable` interface and can access members directly from their type (`Func.Member`).
+- **Pre- and Post-Modifiers**: Modifiers (such as `public`, `static`, `const`, `mut`, `untagged`) are permitted both before `func` and after the parameter list / return type; semantic analysis validates their applicability. Visibility modifiers (`public`, `internal`, `protected`, `private`) are disallowed on interface members (and accessors) as well as explicit `Interface.Member` implementations (`MH0128`), which derive their visibility from the enclosing interface or conformance. Explicit `Interface.Member` implementations and unoverridden default interface methods are accessible only through an interface view (`as Interface`, `&Interface`, `dyn &Interface`, `<Type as Interface>`, or a constrained generic parameter) rather than directly on concrete struct instances (`MH2014`).
+- `Constraints`: Generic parameters support type parameters, `int` constant value parameters (`N : int`), and contextual `this` self-type parameters on interfaces/methods (`T : this`, with optional `= this` default: `T : this = this`). Explicit `where` constraint clauses appear after the trailing return type (including layout bounds `Layout`/`Sized`/`Unsized` and transfer bounds `Transfer`/`Move`/`Copy`).
+- `Operators`: `[OperatorFunction("Destructor")]` methods require a `mut &this` receiver (`MH0560`). Single-argument generic calls in expressions (including member calls) use turbofish syntax (`obj.Method::<T>(args)` or `Fn::<T>(p: x)`).
+- `Bodies`: Functions support block bodies (`{ ... }`), expression bodies (`=> expr;`), or empty declarations (`;` for intrinsics, abstract interface members, or conformance markers). Instance interface methods may also supply default bodies inherited by conforming types unless overridden.
+- **Unified Function Typing**: All function and method declarations receive a first-class function type (`Std.Function<TReturn, TParams...>`); instance methods include their explicit receiver parameter (`this`/`this&`/`this mut&`/`this*`/`this mut*`) as parameter 0. They implement `Callable`, `CallableMut`, and `CallableOnce`, while accessing an instance method on a type yields an unbound `Function` and referencing it on an instance outside a direct call synthesizes a bound closure struct.
 
-#### Function Pointer and Delegate Types
-Function pointers and delegates are declared with trailing return types:
-- `modifiers func(params) -> ReturnType identifier;` defines a function pointer matching exact static/global function signatures (aliases intrinsic `Std.Function<TReturn, TParams...> : Callable`).
-- `modifiers delegate(params) -> ReturnType identifier;` defines a delegate with an implicit environment pointer subject to lifetime rules (aliases intrinsic `Std.Delegate<TReturn, TParams...> : Callable`).
-Variable declarations remain `type ident;`, giving clean, unambiguous decoration where the function/delegate type is the variable's type.
+#### Function Pointer Types
+Function pointers are declared with trailing return types:
+- `modifiers func(params) -> ReturnType identifier;` defines a function pointer matching exact static, global, or explicit-receiver method signatures (aliases intrinsic `Std.Function<TReturn, TParams...>`).
+Variable declarations remain `type ident;`, giving clean, unambiguous decoration where the function type is the variable's type.
 
 ### Context-specific declaration wrappers
 

@@ -5,9 +5,7 @@ namespace Maho.Tests;
 
 public sealed class SumTypesTests
 {
-    private static readonly string Prelude = CompilerTestBed.FullPrelude + """
-        public struct uint8;
-        """;
+    private static readonly string Prelude = CompilerTestBed.FullPrelude;
 
     // ==========================================
     // 1. Enum Declaration & Symbol Discovery
@@ -130,7 +128,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Run() -> void
+                public func Run() -> ()
                 {
                     Shape.Circle { radius = 10 };
                 }
@@ -153,7 +151,7 @@ public sealed class SumTypesTests
             public struct C;
             public union U (A | B | C)
             {
-                public func Foo() -> void { }
+                public func Foo() -> () { }
             }
             """);
 
@@ -260,7 +258,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Check(E e) -> void
+                public func Check(E e) -> ()
                 {
                     match (e)
                     {
@@ -287,7 +285,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Check(E e) -> void
+                public func Check(E e) -> ()
                 {
                     match (e)
                     {
@@ -313,7 +311,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Check(E e) -> void
+                public func Check(E e) -> ()
                 {
                     match (e)
                     {
@@ -339,7 +337,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Check(E e) -> void
+                public func Check(E e) -> ()
                 {
                     match (e)
                     {
@@ -364,7 +362,7 @@ public sealed class SumTypesTests
             public struct B;
             public struct Test
             {
-                public func Check((A | B) u) -> void
+                public func Check((A | B) u) -> ()
                 {
                     match (u)
                     {
@@ -386,7 +384,7 @@ public sealed class SumTypesTests
             public struct B;
             public struct Test
             {
-                public func Check((A | B) u) -> void
+                public func Check((A | B) u) -> ()
                 {
                     match (u)
                     {
@@ -454,7 +452,7 @@ public sealed class SumTypesTests
             }
             public struct Test
             {
-                public func Check(untagged E e) -> void
+                public func Check(untagged E e) -> ()
                 {
                     match (e)
                     {
@@ -478,7 +476,7 @@ public sealed class SumTypesTests
             public struct B;
             public struct Test
             {
-                public func Check(untagged (A | B) u) -> void
+                public func Check(untagged (A | B) u) -> ()
                 {
                     match (u)
                     {
@@ -505,12 +503,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> void { }
-                public func UntaggedMethod(untagged &this) -> void { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {
-                public func Run(E e) -> void
+                public func Run(E e) -> ()
                 {
                     e.NormalMethod();
                     e.UntaggedMethod();
@@ -529,12 +527,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> void { }
-                public func UntaggedMethod(untagged &this) -> void { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {
-                public func Run(untagged E e) -> void
+                public func Run(untagged E e) -> ()
                 {
                     e.NormalMethod();
                 }
@@ -554,12 +552,12 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> void { }
-                public func UntaggedMethod(untagged &this) -> void { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {
-                public func Run(untagged E e) -> void
+                public func Run(untagged E e) -> ()
                 {
                     e.UntaggedMethod();
                 }
@@ -577,11 +575,11 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func StaticHelper() -> void { }
+                public func StaticHelper() -> () { }
             }
             public struct Test
             {
-                public func Run(E e) -> void
+                public func Run(E e) -> ()
                 {
                     e.StaticHelper();
                 }
@@ -601,11 +599,11 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func StaticHelper() -> void { }
+                public func StaticHelper() -> () { }
             }
             public struct Test
             {
-                public func Run() -> void
+                public func Run() -> ()
                 {
                     E.StaticHelper();
                 }
@@ -621,12 +619,12 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public func MethodOnA(&this) -> void { }
+                public func MethodOnA(&this) -> () { }
             }
             public struct B;
             public struct Test
             {
-                public func Run((A | B) u) -> void
+                public func Run((A | B) u) -> ()
                 {
                     u.MethodOnA();
                 }
@@ -644,11 +642,11 @@ public sealed class SumTypesTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct A
             {
-                public func MethodOnA(&this) -> void { }
+                public func MethodOnA(&this) -> () { }
             }
             public struct Test
             {
-                public func Run((A | A) u) -> void
+                public func Run((A | A) u) -> ()
                 {
                     u.MethodOnA();
                 }

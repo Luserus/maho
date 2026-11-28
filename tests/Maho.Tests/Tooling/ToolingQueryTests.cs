@@ -27,6 +27,8 @@ public class ToolingQueryTests : IDisposable
                 Directory.Delete(testDir, recursive: true);
         }
         catch { }
+
+        GC.SuppressFinalize(this);
     }
 
     private (Compilation Compilation, SemanticModel Model, string FilePath) Compile(string code)
@@ -253,5 +255,40 @@ public class ToolingQueryTests : IDisposable
         var tokens = model.GetSemanticTokens();
         Assert.NotEmpty(tokens);
         Assert.Contains(tokens, t => t.TokenType == "function" || t.TokenType == "type" || t.TokenType == "variable" || t.TokenType == "parameter");
+    }
+
+    [Fact]
+    public void GetSemanticTokens_SplitsLiteralStringsAndEscapeSequencesWithoutOverlap()
+    {
+        string code = """
+            [IntrinsicType("Char")] public struct char;
+
+            func Main() -> ()
+            {
+                var s = "hi\n\u{1F600}!";
+                var c = '\t';
+            }
+            """;
+
+        var (comp, model, _) = Compile(code);
+        Assert.False(comp.HasErrors, string.Join("; ", comp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.NotNull(model);
+
+        var tokens = model.GetSemanticTokens();
+        var escapeTokens = tokens.Where(t => t.TokenType == "escapeSequence").ToList();
+        Assert.Equal(3, escapeTokens.Count); // \n, \u{1F600}, \t
+        Assert.Contains(escapeTokens, t => t.Length == 2); // \n or \t
+        Assert.Contains(escapeTokens, t => t.Length == 9); // \u{1F600}
+
+        // Verify literal line segments do not overlap any token on the same line
+        foreach (int line in tokens.Select(t => t.Line).Distinct())
+        {
+            var onLine = tokens.Where(t => t.Line == line).OrderBy(t => t.Column).ToList();
+            for (int i = 1; i < onLine.Count; i++)
+            {
+                Assert.True(onLine[i - 1].Column + onLine[i - 1].Length <= onLine[i].Column,
+                    $"Overlapping tokens on line {line}: {onLine[i - 1]} and {onLine[i]}");
+            }
+        }
     }
 }

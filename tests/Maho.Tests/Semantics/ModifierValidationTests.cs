@@ -138,7 +138,7 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            protected func SecretFunc() -> void { }
+            protected func SecretFunc() -> () { }
             """);
 
         Assert.True(compilation.HasErrors);
@@ -156,7 +156,7 @@ public sealed class ModifierValidationTests
                 Active,
                 Inactive;
 
-                public func Process(untagged &this) -> void { }
+                public func Process(untagged this&) -> () { }
             }
 
             public untagged union Shape
@@ -164,7 +164,7 @@ public sealed class ModifierValidationTests
                 int32 circle;
                 int32 square;
 
-                public func Describe(untagged &this) -> void { }
+                public func Describe(untagged this&) -> () { }
             }
             """);
 
@@ -193,11 +193,11 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public untagged func TopFunc() -> void { }
+            public untagged func TopFunc() -> () { }
 
             public struct S
             {
-                public untagged func MemberMethod(&this) -> void { }
+                public untagged func MemberMethod(this&) -> () { }
             }
             """);
 
@@ -214,7 +214,7 @@ public sealed class ModifierValidationTests
 
             public struct S
             {
-                public func Method(untagged &this) -> void { }
+                public func Method(untagged this&) -> () { }
             }
             """);
 
@@ -230,7 +230,7 @@ public sealed class ModifierValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public func TestFunc(untagged int32 x) -> void { }
+            public func TestFunc(untagged int32 x) -> () { }
             """);
 
         Assert.True(compilation.HasErrors);
@@ -256,5 +256,53 @@ public sealed class ModifierValidationTests
         Assert.True(compilation.HasErrors);
         var errors = compilation.Diagnostics.Where(d => d.Code == "MH0128" && d.Message.Contains("untagged")).ToList();
         Assert.Equal(2, errors.Count);
+    }
+
+    [Fact]
+    public void InterfaceAndExplicitImplVisibilityModifiers_ReportMH0128_WhileSignatureImplAllowsThem()
+    {
+        var invalid = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface IService
+            {
+                public func Run(this&) -> ();
+                internal func Helper(this&) -> ();
+                public int32 Value { public get; }
+            }
+
+            public struct Impl : IService
+            {
+                private int32 raw;
+
+                public func IService.Run(this&) -> () { }
+                internal func IService.Helper(this&) -> () { }
+                public int32 IService.Value { protected get { return this.raw; } }
+            }
+            """);
+
+        Assert.True(invalid.HasErrors);
+        var mh0128 = invalid.Diagnostics.Where(d => d.Code == "MH0128").ToList();
+        Assert.Equal(8, mh0128.Count);
+
+        var validSignatureImpl = Compilation.FromSource($$"""
+            {{Prelude}}
+
+            public interface IService
+            {
+                func Run(this&) -> ();
+                int32 Value { get; }
+            }
+
+            public struct Impl : IService
+            {
+                private int32 raw;
+
+                public func Run(this&) -> () { }
+                public int32 Value { public get { return this.raw; } }
+            }
+            """);
+
+        Assert.False(validSignatureImpl.HasErrors, string.Join("\n", validSignatureImpl.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 }

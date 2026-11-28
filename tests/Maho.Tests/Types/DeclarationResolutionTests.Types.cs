@@ -115,7 +115,7 @@ public sealed partial class DeclarationResolutionTests
             public struct TypeB;
             public struct TypeC;
 
-            public func Test() -> void
+            public func Test() -> ()
             {
                 (TypeA a, TypeB b, TypeC c) = (1, 2, 3);
             }
@@ -141,13 +141,13 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_MultipleFunctionsHaveIndependentLocalVariableIdsAndIndexers()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func First() -> void
+            public func First() -> ()
             {
                 int a = 1;
                 int b = 2;
             }
 
-            public func Second() -> void
+            public func Second() -> ()
             {
                 int x = 10;
                 int y = 20;
@@ -197,7 +197,7 @@ public sealed partial class DeclarationResolutionTests
             public attribute Marker;
             public attribute Config(int value);
 
-            public func Foo([Marker] int a, [Config(42)] string b, int c) -> void
+            public func Foo([Marker] int a, [Config(42)] string b, int c) -> ()
             {
             }
             """);
@@ -229,26 +229,35 @@ public sealed partial class DeclarationResolutionTests
             public struct Int32;
             public Int32* ptr;
             public Int32& refVal;
-            public Int32[&] spanVal;
-            public Int32[] arrVal;
+            public Int32[]& sliceRefVal;
             public Int32[42] fixedArrVal;
             public Int32? optVal;
-            public Int32*[] nestedVal;
+            public (Int32&)[] nestedRefSliceVal;
+
+            public func LocalAliases(Int32[]& slRef, Int32 val)
+            {
+                &Int32[] sliceAliasLocal = *slRef;
+                &Int32 aliasLocal = val;
+            }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
 
         ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        Assert.DoesNotContain(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0592");
         var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
         var int32Handle = ResolutionContext.GetHandle(int32);
 
         var ptr = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "ptr");
         var refVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "refVal");
-        var spanVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "spanVal");
-        var arrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "arrVal");
+        var sliceRefVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "sliceRefVal");
         var fixedArrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "fixedArrVal");
         var optVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "optVal");
-        var nestedVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVal");
+        var nestedRefSliceVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedRefSliceVal");
+
+        var fn = Assert.Single(context.FunctionSymbols, f => f.Name.Text == "LocalAliases");
+        var sliceAliasLocal = Assert.Single(fn.LocalVariables, v => v.Name.Text == "sliceAliasLocal");
+        var aliasLocal = Assert.Single(fn.LocalVariables, v => v.Name.Text == "aliasLocal");
 
         Assert.Equal(TypeRefKind.Pointer, ptr.Type.Kind);
         Assert.True(ptr.Type.IsResolved);
@@ -260,19 +269,22 @@ public sealed partial class DeclarationResolutionTests
         var refSem = Assert.IsType<ReferenceSemanticType>(refVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), refSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Span, spanVal.Type.Kind);
-        Assert.True(spanVal.Type.IsResolved);
-        var spanSem = Assert.IsType<SpanSemanticType>(spanVal.Type.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), spanSem.ElementType);
+        Assert.Equal(TypeRefKind.Alias, sliceAliasLocal.Type.Kind);
+        var aliasSem = Assert.IsType<AliasSemanticType>(sliceAliasLocal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, aliasSem.TargetType.Kind);
+        Assert.Equal(TypeRef.Resolved(int32Handle), Assert.IsType<SliceSemanticType>(aliasSem.TargetType.SpecialType).ElementType);
 
-        Assert.Equal(TypeRefKind.Array, arrVal.Type.Kind);
-        Assert.True(arrVal.Type.IsResolved);
-        var arrSem = Assert.IsType<ArraySemanticType>(arrVal.Type.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), arrSem.ElementType);
+        Assert.Equal(TypeRefKind.Alias, aliasLocal.Type.Kind);
+        var localAliasSem = Assert.IsType<AliasSemanticType>(aliasLocal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), localAliasSem.TargetType);
 
-        Assert.Equal(TypeRefKind.FixedArray, fixedArrVal.Type.Kind);
+        Assert.Equal(TypeRefKind.Reference, sliceRefVal.Type.Kind);
+        var sliceRefSem = Assert.IsType<ReferenceSemanticType>(sliceRefVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, sliceRefSem.ElementType.Kind);
+
+        Assert.Equal(TypeRefKind.Array, fixedArrVal.Type.Kind);
         Assert.True(fixedArrVal.Type.IsResolved);
-        var fixedArrSem = Assert.IsType<FixedArraySemanticType>(fixedArrVal.Type.SpecialType);
+        var fixedArrSem = Assert.IsType<ArraySemanticType>(fixedArrVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), fixedArrSem.ElementType);
 
         Assert.Equal(TypeRefKind.Optional, optVal.Type.Kind);
@@ -280,12 +292,12 @@ public sealed partial class DeclarationResolutionTests
         var optSem = Assert.IsType<OptionalSemanticType>(optVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), optSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Array, nestedVal.Type.Kind);
-        Assert.True(nestedVal.Type.IsResolved);
-        var nestedSem = Assert.IsType<ArraySemanticType>(nestedVal.Type.SpecialType);
-        Assert.Equal(TypeRefKind.Pointer, nestedSem.ElementType.Kind);
-        var innerPtrSem = Assert.IsType<PointerSemanticType>(nestedSem.ElementType.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), innerPtrSem.ElementType);
+        Assert.Equal(TypeRefKind.Slice, nestedRefSliceVal.Type.Kind);
+        Assert.True(nestedRefSliceVal.Type.IsResolved);
+        var nestedSem = Assert.IsType<SliceSemanticType>(nestedRefSliceVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Reference, nestedSem.ElementType.Kind);
+        var innerRefSem = Assert.IsType<ReferenceSemanticType>(nestedSem.ElementType.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), innerRefSem.ElementType);
 
         // Verify that the inner SimpleType node was recorded in ResolvedTree
         var ptrDecl = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
@@ -338,11 +350,11 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Int32;
-            public func Process(Int32 value) -> void { }
-            public func Process(Int32* value) -> void { }
-            public func Process(Int32[&] value) -> void { }
-            public func Process(Int32[] value) -> void { }
-            public func Process(Int32[10] value) -> void { }
+            public func Process(Int32 value) -> () { }
+            public func Process(Int32* value) -> () { }
+            public func Process(Int32[]& value) -> () { }
+            public func Process((Int32&)[]& value) -> () { }
+            public func Process(Int32[10] value) -> () { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -355,9 +367,15 @@ public sealed partial class DeclarationResolutionTests
 
         var fnPlain = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type == TypeRef.Resolved(int32Handle));
         var fnPtr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Pointer);
-        var fnSpan = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Span);
+        var fnSliceRef = Assert.Single(context.FunctionSymbols, f =>
+            context.ParameterSymbols[f.Parameters[0].ID].Type.SpecialType is ReferenceSemanticType rf &&
+            rf.ElementType.SpecialType is SliceSemanticType sl &&
+            sl.ElementType == TypeRef.Resolved(int32Handle));
+        var fnGroupedSliceRef = Assert.Single(context.FunctionSymbols, f =>
+            context.ParameterSymbols[f.Parameters[0].ID].Type.SpecialType is ReferenceSemanticType rf &&
+            rf.ElementType.SpecialType is SliceSemanticType sl &&
+            sl.ElementType.Kind == TypeRefKind.Reference);
         var fnArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Array);
-        var fnFixedArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.FixedArray);
     }
 
     [Fact]
@@ -388,7 +406,7 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct var;
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var x = 1;
             }
@@ -411,7 +429,7 @@ public sealed partial class DeclarationResolutionTests
             {
                 public struct var;
             }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 Holder.var x;
             }
@@ -436,7 +454,7 @@ public sealed partial class DeclarationResolutionTests
         // When struct var is in scope, parameter type "var" resolves to struct var
         var (_, diag1, _, root1) = CompilerTestBed.Parse("""
             public struct var;
-            public func Test(var p) -> void { }
+            public func Test(var p) -> () { }
             """);
 
         Assert.Empty(diag1.Diagnostics);
@@ -448,7 +466,7 @@ public sealed partial class DeclarationResolutionTests
 
         // When struct var is NOT in scope, parameter type "var" reports error
         var (_, diag2, _, root2) = CompilerTestBed.Parse("""
-            public func Test(var p) -> void { }
+            public func Test(var p) -> () { }
             """);
 
         Assert.Empty(diag2.Diagnostics);
@@ -462,18 +480,18 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawaySymbols_PutInSink_MultipleCanCoexist_NotLoweredOrInGlobalTables()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func _() -> void { }
-            public func _(int a) -> void { }
+            public func _() -> () { }
+            public func _(int a) -> () { }
             public struct _
             {
                 public int x;
-                public func Method() -> void { }
+                public func Method() -> () { }
             }
             public struct _
             {
                 public int y;
             }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var _ = 1;
                 var _ = 2;
@@ -512,7 +530,7 @@ public sealed partial class DeclarationResolutionTests
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct Value;
-            public func _() -> void
+            public func _() -> ()
             {
                 Value a;
                 Value b = a;
@@ -549,9 +567,9 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawaySymbols_CannotBeReferenced()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func _() -> void { }
+            public func _() -> () { }
             public struct _ { }
-            public func Test() -> void
+            public func Test() -> ()
             {
                 var _ = 1;
                 var a = _;
@@ -604,7 +622,7 @@ public sealed partial class DeclarationResolutionTests
     public void Resolve_ThrowawayParameters_CanCoexist_AndRoutedToSink()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
-            public func Handler(int _, int _) -> void { }
+            public func Handler(int _, int _) -> () { }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -623,9 +641,9 @@ public sealed partial class DeclarationResolutionTests
         // it cannot be called from active code, but its body resolution still validates types
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             public struct User;
-            public func ActiveFn(User u) -> void { }
+            public func ActiveFn(User u) -> () { }
             // Temporarily inactivated function for testing
-            public func _(User u) -> void
+            public func _(User u) -> ()
             {
                 ActiveFn(u);
             }

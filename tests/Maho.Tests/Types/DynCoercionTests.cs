@@ -5,36 +5,70 @@ namespace Maho.Tests;
 public sealed class DynCoercionTests
 {
     private const string PreludeAndHierarchy = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
+
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            func Arrow(this&) -> TReturn;
+        }
+
+        public interface Deref<TReturn>
+        {
+            [OperatorFunction("Dereference")]
+            func Deref(this&) -> TReturn;
+        }
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
 
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
+
+            [IntrinsicFunction("Reference.Deref()")]
+            func Deref.Deref(this&) -> T&;
+
+            func Arrow.Arrow(this&) -> T&
+            {
+                return &(*(*this));
+            }
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -46,7 +80,7 @@ public sealed class DynCoercionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -54,16 +88,7 @@ public sealed class DynCoercionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
         public struct Base
@@ -106,7 +131,7 @@ public sealed class DynCoercionTests
     public void SplitBase_ThinReference_FailsWithMH0555()
     {
         var source = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 MiddleB& refB = d;
             }
@@ -136,9 +161,9 @@ public sealed class DynCoercionTests
     public void SplitBase_MethodArgument_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
-            public func ConsumeThin(MiddleB& b) -> Unit {}
+            public func ConsumeThin(MiddleB& b) -> () {}
 
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 ConsumeThin(d);
             }
@@ -149,9 +174,9 @@ public sealed class DynCoercionTests
         Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
-            public func ConsumeDyn(dyn MiddleB& b) -> Unit {}
+            public func ConsumeDyn(dyn MiddleB& b) -> () {}
 
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 ConsumeDyn(d);
             }
@@ -165,7 +190,7 @@ public sealed class DynCoercionTests
     public void SplitBase_AsCast_ThinFailsMH0555_DynSucceeds()
     {
         var thinSource = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 var b = d as MiddleB&;
             }
@@ -176,7 +201,7 @@ public sealed class DynCoercionTests
         Assert.Contains(thinComp.Diagnostics, d => d.Code == "MH0555");
 
         var dynSource = PreludeAndHierarchy + """
-            public func Test(Derived& d) -> Unit
+            public func Test(Derived& d) -> ()
             {
                 var b = d as dyn MiddleB&;
             }
@@ -187,45 +212,79 @@ public sealed class DynCoercionTests
     }
 
     [Fact]
-    public void ImplicitDyn_Interface_ResolvesAsDynSemanticType_OutsideGenerics()
+    public void InterfaceIndirection_WithoutDyn_Succeeds_WhileDynOnUnsized_ReportsMH0583()
     {
-        var source = PreludeAndHierarchy + """
+        var unsizedWithDynSource = PreludeAndHierarchy + """
             public interface IGreetable
             {
-                public func Greet(&this) -> Int32;
+                func Greet(this&) -> Int32;
+            }
+
+            public func TestDynOnInterface(IGreetable& ok, dyn IGreetable& badRef) -> Int32
+            {
+                dyn &IGreetable badLocalAlias = *ok;
+                return ok->Greet();
+            }
+            """;
+
+        var badComp = Compilation.FromSource(unsizedWithDynSource);
+        Assert.True(badComp.HasErrors);
+        Assert.Equal(2, badComp.Diagnostics.Count(d => d.Code == "MH0583"));
+
+        var bareValComp = Compilation.FromSource(PreludeAndHierarchy + """
+            public interface IGreetable
+            {
+                func Greet(this&) -> Int32;
+            }
+
+            public func BadBare(IGreetable g) -> Int32 { return 0; }
+            """);
+        Assert.Contains(bareValComp.Diagnostics, d => d.Code == "MH0580");
+
+        var interfaceIndirectionSource = PreludeAndHierarchy + """
+            public interface IGreetable
+            {
+                func Greet(this&) -> Int32;
             }
 
             public struct Greeter : IGreetable
             {
-                public func Greet(&this) -> Int32 { return 42; }
+                public func Greet(this&) -> Int32 { return 42; }
             }
 
-            public func TestAlias(&IGreetable g) -> Int32
+            public func TestLocalAlias(Greeter g) -> Int32
             {
-                return g.Greet();
+                &Greeter localAlias = g;
+                return localAlias.Greet();
             }
 
-            public func TestOwned(IGreetable g) -> Int32
+            public func TestRef(IGreetable& g) -> Int32
             {
-                return g.Greet();
+                return g->Greet();
+            }
+
+            public func TestRefDeref(IGreetable& g) -> Int32
+            {
+                return (*g).Greet();
             }
             """;
 
-        var comp = Compilation.FromSource(source);
+        var comp = Compilation.FromSource(interfaceIndirectionSource);
         Assert.False(comp.HasErrors, string.Join("\n", comp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         var greetableSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "IGreetable");
-        var testAliasSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestAlias");
-        var paramAlias = comp.Context.GetParameterSymbol(testAliasSym.Parameters[0])!;
-        Assert.True(paramAlias.Type.SpecialType is AliasSemanticType);
-        var aliasInner = ((AliasSemanticType)paramAlias.Type.SpecialType).TargetType;
-        Assert.True(aliasInner.SpecialType is DynSemanticType);
+        var greeterTypeSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "Greeter");
+        var testAliasSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestLocalAlias");
+        var localAlias = Assert.Single(testAliasSym.LocalVariables, v => v.Name.Text == "localAlias");
+        var aliasType = Assert.IsType<AliasSemanticType>(localAlias.Type.SpecialType);
+        Assert.Equal(ResolutionContext.GetHandle(greeterTypeSym), aliasType.TargetType.Handle);
 
-        var testOwnedSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestOwned");
-        var paramOwned = comp.Context.GetParameterSymbol(testOwnedSym.Parameters[0])!;
-        Assert.True(paramOwned.Type.SpecialType is DynSemanticType);
+        var testRefSym = comp.Context.FunctionSymbols.First(f => f.Name.Text == "TestRef");
+        var paramRef = comp.Context.GetParameterSymbol(testRefSym.Parameters[0])!;
+        var refType = Assert.IsType<ReferenceSemanticType>(paramRef.Type.SpecialType);
+        Assert.Equal(ResolutionContext.GetHandle(greetableSym), refType.ElementType.Handle);
 
-        // Verify struct base types is trait bound, NOT dyn
+        // Verify struct base type is trait bound, NOT dyn
         var greeterSym = comp.Context.TypeSymbols.First(t => t.Name.Text == "Greeter");
         var ifaceBase = greeterSym.BaseTypes.First(b => b.Handle == ResolutionContext.GetHandle(greetableSym));
         Assert.False(ifaceBase.SpecialType is DynSemanticType);
@@ -237,7 +296,7 @@ public sealed class DynCoercionTests
         var source = PreludeAndHierarchy + """
             public interface IWorker
             {
-                public func Work(&this) -> Int32;
+                func Work(this&) -> Int32;
             }
 
             public func Execute<T>(T item) -> Int32 where T : IWorker

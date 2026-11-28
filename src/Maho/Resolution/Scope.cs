@@ -17,6 +17,20 @@ internal sealed class Scope
     /// <summary> Namespaces imported into this scope via using directives. </summary>
     public List<NamespaceTrieNode> UsingNamespaces { get; } = [];
 
+    /// <summary> External module aliases brought into this lexical scope via <c>extern using &lt;Alias&gt;;</c>. </summary>
+    public Dictionary<string, ModuleSymbol> ExternModuleAliases { get; } = new(System.StringComparer.Ordinal);
+
+    public bool TryLookupExternAlias(string alias, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ModuleSymbol? module)
+    {
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.ExternModuleAliases.TryGetValue(alias, out module))
+                return true;
+        }
+        module = null;
+        return false;
+    }
+
     private NamespaceTrieNode? globalNamespace;
 
     /// <summary> Root namespace trie node for namespace navigation. </summary>
@@ -64,30 +78,83 @@ internal sealed class Scope
         if (SymbolsByName.TryGetValue(name, out var symbols))
             return symbols;
 
-        if (name.Arity > 0)
+        foreach (var (key, list) in SymbolsByName)
         {
-            foreach (var (key, list) in SymbolsByName)
+            if (key.Text != name.Text)
+                continue;
+
+            foreach (var sym in list)
             {
-                if (key.Text == name.Text && key.Arity != name.Arity)
+                SeparatedSyntaxList<GenericParameterSyntax>? gp = sym switch
                 {
-                    foreach (var sym in list)
+                    TypeSymbol ts when ts.Syntax?.Name is GenericName gn => gn.GenericParameters,
+                    NestedTypeSymbol nts when nts.Syntax?.Name is GenericName ngn => ngn.GenericParameters,
+                    _ => null
+                };
+                if (gp is not { Count: > 0 } gpList)
+                    continue;
+
+                if (name.Arity > 0)
+                {
+                    if (key.Arity == name.Arity)
+                        continue;
+
+                    if (gpList[^1].IsVariadic && name.Arity >= gpList.Count - 1)
+                        return list;
+
+                    if (key.Arity > name.Arity)
                     {
-                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
-                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        bool allDefaults = true;
+                        for (int p = name.Arity; p < gpList.Count; p++)
                         {
-                            return list;
+                            if (gpList[p].DefaultType is null)
+                            {
+                                allDefaults = false;
+                                break;
+                            }
                         }
-                        if (sym is NestedTypeSymbol nts && nts.Syntax?.Name is GenericName ngn && ngn.GenericParameters is { Count: > 0 } ngp &&
-                            ngp[^1].IsVariadic && name.Arity >= ngp.Count - 1)
-                        {
+                        if (allDefaults)
                             return list;
+                    }
+                }
+                else
+                {
+                    bool allThis = true;
+                    for (int p = 0; p < gpList.Count; p++)
+                    {
+                        if (gpList[p].Kind is not GenericParameterKind.This)
+                        {
+                            allThis = false;
+                            break;
                         }
                     }
+                    if (allThis)
+                        return list;
                 }
             }
         }
 
         return [];
+    }
+
+    public IReadOnlyList<Symbol> GetLocalCallableSymbolsAnyArity(string name, HygieneId hygiene = default)
+    {
+        List<Symbol>? matches = null;
+        foreach (var (key, list) in SymbolsByName)
+        {
+            if (key.Text != name || key.Hygiene != hygiene)
+                continue;
+
+            foreach (var sym in list)
+            {
+                if (sym is FunctionSymbol or MethodSymbol)
+                {
+                    matches ??= [];
+                    matches.Add(sym);
+                }
+            }
+        }
+        return matches ?? (IReadOnlyList<Symbol>)[];
     }
 
     private static bool IsTypeSymbol(Symbol s) =>
@@ -147,7 +214,8 @@ internal sealed class Scope
                         if (IsTypeSymbol(matches[j]))
                         {
                             imported ??= [];
-                            imported.Add(matches[j]);
+                            if (!imported.Contains(matches[j]))
+                                imported.Add(matches[j]);
                         }
                     }
                 }
@@ -253,10 +321,64 @@ internal sealed class Scope
                         imported ??= [];
 
                         for (int j = 0; j < matches.Count; j++)
-                            imported.Add(matches[j]);
+                        {
+                            if (!imported.Contains(matches[j]))
+                                imported.Add(matches[j]);
+                        }
                     }
                 }
 
+                if (imported != null)
+                    return imported;
+            }
+        }
+
+        return [];
+    }
+
+    public IReadOnlyList<Symbol> GetCallableSymbolsAnyArity(string name, HygieneId hygiene = default)
+    {
+        for (var current = this; current != null; current = current.Parent)
+        {
+            var locals = current.GetLocalCallableSymbolsAnyArity(name, hygiene);
+            if (locals.Count != 0)
+                return locals;
+        }
+
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.UsingNamespaces.Count != 0)
+            {
+                List<Symbol>? found = null;
+                for (int i = 0; i < current.UsingNamespaces.Count; i++)
+                {
+                    var matches = current.UsingNamespaces[i].GetCallableSymbolsAnyArity(name);
+                    if (matches.Count != 0)
+                    {
+                        found ??= [];
+                        found.AddRange(matches);
+                    }
+                }
+                if (found != null)
+                    return found;
+            }
+        }
+
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.ImportedScopes.Count != 0)
+            {
+                List<Symbol>? imported = null;
+                for (int i = 0; i < current.ImportedScopes.Count; i++)
+                {
+                    var matches = current.ImportedScopes[i].GetCallableSymbolsAnyArity(name, hygiene);
+                    for (int j = 0; j < matches.Count; j++)
+                    {
+                        imported ??= [];
+                        if (!imported.Contains(matches[j]))
+                            imported.Add(matches[j]);
+                    }
+                }
                 if (imported != null)
                     return imported;
             }

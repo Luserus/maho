@@ -34,6 +34,19 @@ internal sealed partial class Parser
         return true;
     }
 
+    private bool IsExternUsingDirective() =>
+        CurrentToken.MatchingKind is MatchingKeywordKind.Extern &&
+        Peek().MatchingKind is MatchingKeywordKind.Using;
+
+    private ExternUsingDirective ParseExternUsingDirective()
+    {
+        Token externKeyword = Consume();
+        Token usingKeyword = Consume();
+        NamedSyntax aliasName = ParseNamedSyntax(allowQualified: false, allowGenericName: false);
+        Token semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the extern module alias", MissingTokenAnchor.AfterPrevious);
+        return new ExternUsingDirective(externKeyword, usingKeyword, aliasName, semicolon);
+    }
+
     private UsingDirective ParseUsingDirective()
     {
         Token keyword = Consume();
@@ -47,7 +60,7 @@ internal sealed partial class Parser
         List<Directive> directives = [];
         topLevelStatementsEnabled = allowImplicitTopLevel;
 
-        while (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+        while (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective() || IsExternUsingDirective())
         {
             if (CurrentToken.Kind is TokenKind.Octothorpe)
             {
@@ -72,6 +85,10 @@ internal sealed partial class Parser
                     topLevelStatementsEnabled = false;
                 else
                     diagnostics.ReportExpectedToken(pragma.Value.Span, "'enable' or 'disable'", GetTokenDisplay(pragma.Value), "for '#pragma toplevel'");
+            }
+            else if (IsExternUsingDirective())
+            {
+                directives.Add(ParseExternUsingDirective());
             }
             else
             {

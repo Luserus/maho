@@ -5,17 +5,17 @@ internal enum SemanticTypeKind : byte
 {
     Pointer,
     Reference,
+    Slice,
     Array,
-    FixedArray,
-    Span,
     Optional,
     Tuple,
     Union,
     Untagged,
     Dyn,
     Function,
-    Delegate,
     Literal,
     Generic,
-    Alias
+    Alias,
+    Conformance,
+    DerivedSelf
 }

@@ -18,5 +18,6 @@ internal enum FunctionFlags : ulong
     Untagged    = 1UL << 10,
     InterfaceScoped = 1UL << 11,
     Intrinsic   = 1UL << 12,
-    Literal     = 1UL << 13
+    Literal     = 1UL << 13,
+    Override    = 1UL << 14
 }

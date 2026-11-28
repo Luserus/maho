@@ -1,0 +1,57 @@
+// Utility macros.
+// Demonstrates: macro declarations, pattern arms, expression macros.
+
+namespace Demo;
+
+using Std;
+
+// Square a value.
+public macro $sq {
+    (@x: expr) => @x * @x;
+}
+
+// Return the larger of two values.
+public macro $max {
+    (@a: expr, @b: expr) => {
+        Int32 __a = @a;
+        Int32 __b = @b;
+        Int32 __result = __a;
+        if (__b > __a) { __result = __b; }
+        __result
+    };
+}
+
+// Return the smaller of two values.
+public macro $min {
+    (@a: expr, @b: expr) => {
+        Int32 __a = @a;
+        Int32 __b = @b;
+        Int32 __result = __a;
+        if (__b < __a) { __result = __b; }
+        __result
+    };
+}
+
+// Absolute value.
+public macro $abs {
+    (@x: expr) => {
+        Int32 __v = @x;
+        Int32 __result = __v;
+        if (__v < 0) { __result = -__v; }
+        __result
+    };
+}
+
+// Clamp a value between min and max.
+public macro $clamp {
+    (@val: expr, @lo: expr, @hi: expr) => {
+        Int32 __v = @val;
+        Int32 __lo = @lo;
+        Int32 __hi = @hi;
+        Int32 __result = __v;
+        if (__v < __lo) { __result = __lo; }
+        if (__v > __hi) { __result = __hi; }
+        __result
+    };
+}
+

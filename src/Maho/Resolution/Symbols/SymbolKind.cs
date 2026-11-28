@@ -28,5 +28,8 @@ internal enum SymbolKind : byte
     Constant,
     Label,
     Macro,
-    EnumVariant
+    EnumVariant,
+    Extension,
+    /// <summary> Symbolic module identity (<c>ModA::</c> or <c>extern using Disamb;</c>). </summary>
+    Module
 }

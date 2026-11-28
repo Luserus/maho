@@ -10,6 +10,7 @@ internal sealed class PropertySymbol : Symbol
     public SymbolName? ExplicitInterfaceName { get; internal set; }
     public FunctionFlags Flags { get; internal set; }
     public SymbolHandle? BackingField { get; internal set; }
+    public string? IntrinsicSignature { get; internal set; }
 
     public FunctionFlags GetterFlags { get; internal set; }
     public FunctionFlags SetterFlags { get; internal set; }

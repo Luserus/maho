@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Maho.Syntax;
 using Miryo.Build;
 
@@ -29,9 +28,9 @@ public sealed class MahoCompilerTests
 
             public struct Result;
 
-            public func Main() -> Result
+            public func Main() -> int32
             {
-                return new Result();
+                return 0;
             }
             """, "basic.mh");
 
@@ -71,9 +70,9 @@ public sealed class MahoCompilerTests
             File.WriteAllText(validPath, CompilerTestBed.FullPrelude + """
                 public struct Result;
 
-                public func Main() -> Result
+                public func Main() -> int32
                 {
-                    return new Result();
+                    return 0;
                 }
                 """);
             File.WriteAllText(invalidPath, """

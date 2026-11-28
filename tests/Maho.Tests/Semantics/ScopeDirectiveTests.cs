@@ -1,6 +1,4 @@
 using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
@@ -51,7 +49,7 @@ public sealed class ScopeDirectiveTests
             {
                 const
                 {
-                    public func Compute() -> void { }
+                    public func Compute() -> () { }
                 }
             }
             """);

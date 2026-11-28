@@ -1,50 +1,17 @@
-using System.Linq;
 using Maho.Resolution;
 using Maho.Resolution.Ownership;
-using Xunit;
 
 namespace Maho.Tests;
 
 public sealed class DropInPlaceAndOwningDerefTests
 {
-    private const string Prelude = CompilerTestBed.FullPrelude + """
-        public interface OwningDeref<TReturn>
-        {
-            [OperatorFunction("OwningDeref")]
-            public func OwningDeref(mut &this) -> TReturn;
-        }
-
-        public interface Destructor
-        {
-            [OperatorFunction("Destructor")]
-            public func Drop(&this) -> void;
-        }
-
-        public struct Box<T> : Destructor, Deref<T&>, OwningDeref<mut &T>
-        {
-            public T& ptr;
-
-            public func Deref.Deref(&this) -> T&
-            {
-                return this.ptr;
-            }
-
-            public func OwningDeref.OwningDeref(mut &this) -> mut &T
-            {
-                return this.ptr;
-            }
-
-            public func Destructor.Drop(&this) -> void
-            {
-            }
-        }
-        """;
+    private const string Prelude = CompilerTestBed.FullPrelude;
 
     [Fact]
     public void MultidimensionalFixedArray_SyntaxAndTypeResolution_Succeeds()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public func Test() -> void
+            public func Test() -> ()
             {
                 int32[5, 4] grid2D;
                 int32[2, 3, 4] grid3D;
@@ -54,12 +21,12 @@ public sealed class DropInPlaceAndOwningDerefTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context.FunctionSymbols, f => f.Name.Text == "Test");
         var var2D = Assert.Single(fn.LocalVariables, v => v.Name.Text == "grid2D");
-        var fix2D = Assert.IsType<FixedArraySemanticType>(var2D.Type.SpecialType);
+        var fix2D = Assert.IsType<ArraySemanticType>(var2D.Type.SpecialType);
         Assert.Equal(2, fix2D.Dimension);
         Assert.Equal(2, fix2D.Sizes.Count);
 
         var var3D = Assert.Single(fn.LocalVariables, v => v.Name.Text == "grid3D");
-        var fix3D = Assert.IsType<FixedArraySemanticType>(var3D.Type.SpecialType);
+        var fix3D = Assert.IsType<ArraySemanticType>(var3D.Type.SpecialType);
         Assert.Equal(3, fix3D.Dimension);
         Assert.Equal(3, fix3D.Sizes.Count);
     }
@@ -71,7 +38,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> void {}
+                func Destructor.Drop(this mut&) -> () {}
             }
 
             public struct Pair
@@ -80,9 +47,9 @@ public sealed class DropInPlaceAndOwningDerefTests
                 public Resource second;
             }
 
-            public func Consume(Resource r) -> void {}
+            public func Consume(Resource r) -> () {}
 
-            public func Test(Box<Pair> b) -> void
+            public func Test(Box<Pair> b) -> ()
             {
                 var r1 = b.first;
                 Consume(r1);
@@ -117,7 +84,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                public func Destructor.Drop(&this) -> void {}
+                func Destructor.Drop(this mut&) -> () {}
             }
 
             public struct Pair
@@ -126,10 +93,10 @@ public sealed class DropInPlaceAndOwningDerefTests
                 public Resource second;
             }
 
-            public func ConsumeResource(Resource r) -> void {}
-            public func ConsumeBox(Box<Pair> b) -> void {}
+            public func ConsumeResource(Resource r) -> () {}
+            public func ConsumeBox(Box<Pair> b) -> () {}
 
-            public func Test(Box<Pair> b) -> void
+            public func Test(Box<Pair> b) -> ()
             {
                 var r1 = b.first;
                 ConsumeResource(r1);

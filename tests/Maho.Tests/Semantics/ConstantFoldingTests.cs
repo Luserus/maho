@@ -1,17 +1,17 @@
-using System.Linq;
-using Maho.Diagnostics;
 using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
 public sealed class ConstantFoldingTests
 {
     private const string ConstantFoldingPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")] public interface Layout;
+        [IntrinsicType("Sized")] public interface Sized : Layout;
+        [IntrinsicType("Unsized")] public interface Unsized : Layout;
+
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("ValueType")]
         public struct ValType;
@@ -22,13 +22,11 @@ public sealed class ConstantFoldingTests
         [IntrinsicType("Enum")]
         public struct Enum : ValType;
 
-        [IntrinsicType("Unit")]
-        public struct void;
 
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> TReturn;
+            func Deref(this&) -> TReturn;
         }
 
         [IntrinsicType("Int8")]
@@ -52,57 +50,64 @@ public sealed class ConstantFoldingTests
         [IntrinsicType("NUInt")]
         public struct nuint;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             public nuint addr;
+            public Metadata<T> metadata;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Deref<T&>
+        public struct Reference<T> : Deref<T&> where T : Layout
         {
             public nuint raw;
+            public Metadata<T> metadata;
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> T&;
+            func Deref.Deref(this&) -> T&;
         }
 
-        public interface LogicalAnd<T> { [OperatorFunction("LogicalAnd")] public func And(bool l, bool r) -> bool; }
-        public interface LogicalOr<T> { [OperatorFunction("LogicalOr")] public func Or(bool l, bool r) -> bool; }
-        public interface LogicalNot<T> { [OperatorFunction("LogicalNot")] public func Not(bool o) -> bool; }
+        public interface LogicalAnd<T> { [OperatorFunction("LogicalAnd")] func And(bool l, bool r) -> bool; }
+        public interface LogicalOr<T> { [OperatorFunction("LogicalOr")] func Or(bool l, bool r) -> bool; }
+        public interface LogicalNot<T> { [OperatorFunction("LogicalNot")] func Not(bool o) -> bool; }
 
         [IntrinsicType("Bool")]
         public struct bool : LogicalAnd<bool>, LogicalOr<bool>, LogicalNot<bool>
         {
-            [IntrinsicFunction("Bool.LogicalAnd(Bool, Bool)")] public func LogicalAnd.And(bool l, bool r) -> bool;
-            [IntrinsicFunction("Bool.LogicalOr(Bool, Bool)")] public func LogicalOr.Or(bool l, bool r) -> bool;
-            [IntrinsicFunction("Bool.LogicalNot(Bool)")] public func LogicalNot.Not(bool o) -> bool;
+            [IntrinsicFunction("Bool.LogicalAnd(Bool, Bool)")] func LogicalAnd.And(bool l, bool r) -> bool;
+            [IntrinsicFunction("Bool.LogicalOr(Bool, Bool)")] func LogicalOr.Or(bool l, bool r) -> bool;
+            [IntrinsicFunction("Bool.LogicalNot(Bool)")] func LogicalNot.Not(bool o) -> bool;
         }
 
-        public interface Add<T> { [OperatorFunction("Addition")] public func Add(T l, T r) -> T; }
-        public interface Sub<T> { [OperatorFunction("Subtraction")] public func Sub(T l, T r) -> T; }
-        public interface Mul<T> { [OperatorFunction("Multiplication")] public func Mul(T l, T r) -> T; }
-        public interface Div<T> { [OperatorFunction("Division")] public func Div(T l, T r) -> T; }
-        public interface Rem<T> { [OperatorFunction("Remainder")] public func Rem(T l, T r) -> T; }
-        public interface Eq<T> { [OperatorFunction("Equality")] public func Eq(T l, T r) -> bool; }
-        public interface Neq<T> { [OperatorFunction("Inequality")] public func Neq(T l, T r) -> bool; }
-        public interface Lt<T> { [OperatorFunction("LessThan")] public func Lt(T l, T r) -> bool; }
-        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] public func Le(T l, T r) -> bool; }
-        public interface Gt<T> { [OperatorFunction("GreaterThan")] public func Gt(T l, T r) -> bool; }
-        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] public func Ge(T l, T r) -> bool; }
+        public interface Add<T> { [OperatorFunction("Addition")] func Add(T l, T r) -> T; }
+        public interface Sub<T> { [OperatorFunction("Subtraction")] func Sub(T l, T r) -> T; }
+        public interface Mul<T> { [OperatorFunction("Multiplication")] func Mul(T l, T r) -> T; }
+        public interface Div<T> { [OperatorFunction("Division")] func Div(T l, T r) -> T; }
+        public interface Rem<T> { [OperatorFunction("Remainder")] func Rem(T l, T r) -> T; }
+        public interface Eq<T> { [OperatorFunction("Equality")] func Eq(T l, T r) -> bool; }
+        public interface Neq<T> { [OperatorFunction("Inequality")] func Neq(T l, T r) -> bool; }
+        public interface Lt<T> { [OperatorFunction("LessThan")] func Lt(T l, T r) -> bool; }
+        public interface Le<T> { [OperatorFunction("LessThanOrEqual")] func Le(T l, T r) -> bool; }
+        public interface Gt<T> { [OperatorFunction("GreaterThan")] func Gt(T l, T r) -> bool; }
+        public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] func Ge(T l, T r) -> bool; }
 
         [IntrinsicType("Str")]
-        public struct Str : Add<Str>, Eq<Str>
+        public struct Str : Add<Str&>, Eq<Str&>
         {
-            public int8& buffer;
-            public nuint length;
-            [IntrinsicFunction("Str.Add(Str, Str)")] public func Add.Add(Str l, Str r) -> Str;
-            [IntrinsicFunction("Str.Eq(Str, Str)")] public func Eq.Eq(Str l, Str r) -> bool;
+            public uint8[] data;
+            [IntrinsicFunction("Str.Add(Str&, Str&)")] func Add.Add(Str& l, Str& r) -> Str&;
+            [IntrinsicFunction("Str.Eq(Str&, Str&)")] func Eq.Eq(Str& l, Str& r) -> bool;
         }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -110,33 +115,25 @@ public sealed class ConstantFoldingTests
         {
             public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            public nuint codeAddress;
-            public Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         [IntrinsicType("Int32")]
         public struct int32 : Add<int32>, Sub<int32>, Mul<int32>, Div<int32>, Rem<int32>,
                               Eq<int32>, Neq<int32>, Lt<int32>, Le<int32>, Gt<int32>, Ge<int32>
         {
-            [IntrinsicFunction("Int32.Add(Int32, Int32)")] public func Add.Add(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Subtract(Int32, Int32)")] public func Sub.Sub(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")] public func Mul.Mul(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Divide(Int32, Int32)")] public func Div.Div(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Remainder(Int32, Int32)")] public func Rem.Rem(int32 l, int32 r) -> int32;
-            [IntrinsicFunction("Int32.Equals(Int32, Int32)")] public func Eq.Eq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.NotEquals(Int32, Int32)")] public func Neq.Neq(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.LessThan(Int32, Int32)")] public func Lt.Lt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")] public func Le.Le(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")] public func Gt.Gt(int32 l, int32 r) -> bool;
-            [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")] public func Ge.Ge(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.Add(Int32, Int32)")] func Add.Add(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Subtract(Int32, Int32)")] func Sub.Sub(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Multiply(Int32, Int32)")] func Mul.Mul(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Divide(Int32, Int32)")] func Div.Div(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Remainder(Int32, Int32)")] func Rem.Rem(int32 l, int32 r) -> int32;
+            [IntrinsicFunction("Int32.Equals(Int32, Int32)")] func Eq.Eq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.NotEquals(Int32, Int32)")] func Neq.Neq(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThan(Int32, Int32)")] func Lt.Lt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.LessThanOrEqual(Int32, Int32)")] func Le.Le(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThan(Int32, Int32)")] func Gt.Gt(int32 l, int32 r) -> bool;
+            [IntrinsicFunction("Int32.GreaterThanOrEqual(Int32, Int32)")] func Ge.Ge(int32 l, int32 r) -> bool;
         }
 
         [IntrinsicType("Never")]
@@ -316,7 +313,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int8 x = 128;
                 }
@@ -336,7 +333,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     uint8 y = 300;
                 }
@@ -355,7 +352,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int8 a = 127;
                     uint8 c = 255;
@@ -379,7 +376,7 @@ public sealed class ConstantFoldingTests
             {
                 public const int32 Val = 10 / 0;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     const int32 local = 42 % 0;
                 }
@@ -398,7 +395,7 @@ public sealed class ConstantFoldingTests
 
             public struct Evaluator
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 10 / 0;
                     int32 y = 20 % 0;
@@ -420,7 +417,7 @@ public sealed class ConstantFoldingTests
 
             public struct BufferHolder
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 a = MaxBufferSize;
                     int64 b = MaxBufferSize;
@@ -447,7 +444,7 @@ public sealed class ConstantFoldingTests
             {
                 public const int64 MemberConst = 200;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 a = ExplicitInt;
                     int64 b = MemberConst;
@@ -462,5 +459,32 @@ public sealed class ConstantFoldingTests
         var sym = compilation.Context.GetSymbol(topConst.Type.Handle.Value) as TypeSymbol;
         Assert.NotNull(sym);
         Assert.Equal("int32", sym.Name.Text);
+    }
+
+    [Fact]
+    public void Const_StringAndCharEscapes_DecodeUnicodeScalars()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            [IntrinsicType("Char")] public struct char;
+
+            public const EscStr = "line1\n\x41\u{1F600}";
+            public const char EscChar = '\u{1F600}';
+            public const char NewLine = '\n';
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var escStr = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "EscStr");
+        Assert.Equal(ConstantValueKind.Str, escStr.Value.Kind);
+        Assert.Equal("line1\nA\U0001F600", escStr.Value.AsStr);
+
+        var escChar = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "EscChar");
+        Assert.Equal(ConstantValueKind.Char, escChar.Value.Kind);
+        Assert.Equal((uint)0x1F600, escChar.Value.AsChar);
+
+        var newLine = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "NewLine");
+        Assert.Equal(ConstantValueKind.Char, newLine.Value.Kind);
+        Assert.Equal((uint)'\n', newLine.Value.AsChar);
     }
 }

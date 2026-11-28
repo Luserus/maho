@@ -20,7 +20,7 @@ internal sealed partial class Parser
         {
             // consume the prefix operator (combined)
             var opToken = ConsumeOperator();
-            int rbp = prefixEntry.RightBindingPower;
+            int rbp = prefixEntry.PrefixBindingPower;
             var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
             left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
         }
@@ -57,7 +57,10 @@ internal sealed partial class Parser
             {
                 var dot = Consume();
                 var identifier = ExpectIdentifierToken("after '.'");
-                left = new MemberAccessExpression(left, dot, identifier);
+                if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+                    left = new MemberAccessExpression(left, dot, identifier, colonColon, lessThan, genericArguments, greaterThan);
+                else
+                    left = new MemberAccessExpression(left, dot, identifier);
 
                 continue;
             }
@@ -74,7 +77,7 @@ internal sealed partial class Parser
 
                 continue;
             }
-            else if (CurrentToken.Kind is TokenKind.LeftBrace && left is MemberAccessExpression or IdentifierNameExpression && LooksLikeTypeInitializer())
+            else if (CurrentToken.Kind is TokenKind.LeftBrace && left is MemberAccessExpression or IdentifierNameExpression or ScopeResolutionExpression && LooksLikeTypeInitializer())
             {
                 var initializer = ParseTypeInitializer();
                 left = new VariantCreationExpression(left, initializer);
@@ -97,7 +100,10 @@ internal sealed partial class Parser
                 }
 
                 var identifier = ExpectIdentifierToken("after '->'");
-                left = new MemberAccessExpression(left, arrow, identifier);
+                if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+                    left = new MemberAccessExpression(left, arrow, identifier, colonColon, lessThan, genericArguments, greaterThan);
+                else
+                    left = new MemberAccessExpression(left, arrow, identifier);
                 continue;
             }
 
@@ -276,14 +282,16 @@ internal sealed partial class Parser
             TokenKind.LessThanSign => ParseTypeAsExpression(),
             TokenKind.Identifier => CurrentToken.MatchingKind switch
             {
-                MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
+                MatchingKeywordKind.New => ParseObjectCreationExpression(),
                 MatchingKeywordKind.If => ParseIfExpression(),
                 MatchingKeywordKind.While => ParseWhileExpression(),
                 MatchingKeywordKind.For => ParseForExpression(),
                 MatchingKeywordKind.Match => ParseMatchExpression(),
+                MatchingKeywordKind.Try => ParseTryExpression(),
                 MatchingKeywordKind.Nameof when Peek().Kind is TokenKind.LeftParen => ParseNameofExpression(),
+                MatchingKeywordKind.Default => ParseDefaultExpression(),
                 MatchingKeywordKind.True or MatchingKeywordKind.False or MatchingKeywordKind.Null => ParseLiteralExpression(),
-                _ => ParseNamedExpression()
+                _ => ParsePrimaryIdentifierOrScopedExpression()
             },
             TokenKind.Integer or TokenKind.Float or TokenKind.Char or TokenKind.String
                 or TokenKind.SuffixedInteger or TokenKind.SuffixedFloat or TokenKind.SuffixedChar or TokenKind.SuffixedString => ParseLiteralExpression(),
@@ -298,6 +306,20 @@ internal sealed partial class Parser
         var argument = ParseExpression();
         var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'nameof' expression");
         return new NameofExpression(keyword, openParen, argument, closeParen);
+    }
+
+    private DefaultExpression ParseDefaultExpression()
+    {
+        var keyword = Consume();
+        if (CurrentToken.Kind is TokenKind.LeftParen)
+        {
+            var openParen = Consume();
+            var explicitType = ParseTypeSyntax();
+            var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close 'default(Type)' expression");
+            return new DefaultExpression(keyword, openParen, explicitType, closeParen);
+        }
+
+        return new DefaultExpression(keyword);
     }
 
     private TypeAsExpression ParseTypeAsExpression()
@@ -323,19 +345,35 @@ internal sealed partial class Parser
     /// <summary> Parses a literal expression. </summary>
     /// <returns> The literal expression node. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
+    private LiteralExpression ParseLiteralExpression()
+    {
+        var token = Consume();
+        if (token.HasSuffix)
+            containsMacroSyntax = true;
+        return new LiteralExpression(token);
+    }
+
+    private bool LooksLikeColonColonAt(int offset = 0)
+    {
+        var first = Peek(offset);
+        if (first.Kind is TokenKind.ColonColon)
+            return true;
+
+        var second = Peek(offset + 1);
+        return first.Kind is TokenKind.Colon &&
+               second.Kind is TokenKind.Colon &&
+               first.Span.End == second.Span.Start &&
+               first.TrailingTrivia.Length == 0 &&
+               second.LeadingTrivia.Length == 0;
+    }
 
     private bool LooksLikeTurbofish()
     {
-        if (CurrentToken.Kind is TokenKind.ColonColon)
-            return Peek().Kind is TokenKind.LessThanSign;
+        if (!LooksLikeColonColonAt(0))
+            return false;
 
-        return CurrentToken.Kind is TokenKind.Colon &&
-               Peek().Kind is TokenKind.Colon &&
-               CurrentToken.Span.End == Peek().Span.Start &&
-               CurrentToken.TrailingTrivia.Length == 0 &&
-               Peek().LeadingTrivia.Length == 0 &&
-               Peek(2).Kind is TokenKind.LessThanSign;
+        int afterColon = CurrentToken.Kind is TokenKind.ColonColon ? 1 : 2;
+        return Peek(afterColon).Kind is TokenKind.LessThanSign;
     }
 
     private Token ConsumeColonColon()
@@ -348,24 +386,67 @@ internal sealed partial class Parser
         return new Token(text, new TextSpan(first.Span.Start, second.Span.End - first.Span.Start), TokenKind.ColonColon, first.LeadingTrivia, second.TrailingTrivia);
     }
 
+    private Expression ParsePrimaryIdentifierOrScopedExpression()
+    {
+        if ((CurrentToken.MatchingKind is MatchingKeywordKind.Global || CurrentToken.Kind is TokenKind.Identifier) &&
+            LooksLikeColonColonAt(1))
+        {
+            int afterColon = Peek(1).Kind is TokenKind.ColonColon ? 2 : 3;
+            if (Peek(afterColon).Kind is not TokenKind.LessThanSign)
+            {
+                var qualifier = Consume();
+                var colonColon = ConsumeColonColon();
+                NamedExpression member = CurrentToken.Kind is TokenKind.Identifier
+                    ? ParseNamedExpression()
+                    : new IdentifierNameExpression(ExpectIdentifierToken("after '::'"));
+                return new ScopeResolutionExpression(qualifier, colonColon, member);
+            }
+        }
+
+        return ParseNamedExpression();
+    }
+
     private NamedExpression ParseNamedExpression()
     {
         var identifier = Consume();
 
+        if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+        {
+            return colonColon is not null
+                ? new GenericNameExpression(identifier, colonColon, lessThan!, genericArguments!.Value, greaterThan!)
+                : new GenericNameExpression(identifier, lessThan!, genericArguments!.Value, greaterThan!);
+        }
+
+        return new IdentifierNameExpression(identifier);
+    }
+
+    private bool TryParseOptionalExpressionGenerics(
+        out Token? colonColon,
+        out Token? lessThan,
+        out SeparatedSyntaxList<TypeSyntax>? genericArguments,
+        out Token? greaterThan)
+    {
         if (LooksLikeTurbofish())
         {
-            var colonColon = ConsumeColonColon();
-            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, colonColon, lessThan, genericArguments, greaterThan);
+            colonColon = ConsumeColonColon();
+            (lessThan, var args, greaterThan) = ParseGenerics();
+            genericArguments = args;
+            return true;
         }
 
         if (CurrentToken.Kind is TokenKind.LessThanSign && LooksLikeExpressionGenerics().ShouldParseAsGenerics)
         {
-            var (lessThan, genericArguments, greaterThan) = ParseGenerics();
-            return new GenericNameExpression(identifier, lessThan, genericArguments, greaterThan);
+            colonColon = null;
+            (lessThan, var args, greaterThan) = ParseGenerics();
+            genericArguments = args;
+            return true;
         }
 
-        return new IdentifierNameExpression(identifier);
+        colonColon = null;
+        lessThan = null;
+        genericArguments = null;
+        greaterThan = null;
+        return false;
     }
 
     private Expression ParseParenthesizedOrTupleExpression()
@@ -612,7 +693,6 @@ internal sealed partial class Parser
         var kind = keyword.MatchingKind switch
         {
             MatchingKeywordKind.New => ObjectCreationKind.New,
-            MatchingKeywordKind.Put => ObjectCreationKind.Put,
             _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled object creation keyword.")
         };
 
@@ -640,7 +720,7 @@ internal sealed partial class Parser
 
         if (type is ModifiedType modified && CurrentToken.Kind is not TokenKind.LeftParen)
         {
-            if (modified.Modifier is ArrayTypeModifier arrayModifier)
+            if (modified.Modifier is SliceTypeModifier sliceModifier)
             {
                 var elementType = modified.Type;
                 TypeInitializer? initializer = null;
@@ -653,9 +733,9 @@ internal sealed partial class Parser
                 if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
                     withClause = ParseObjectWithClause();
 
-                return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, null, arrayModifier.RightBracket, initializer, withClause);
+                return new ArrayCreationExpression(keyword, kind, elementType, sliceModifier.LeftBracket, null, sliceModifier.RightBracket, initializer, withClause);
             }
-            else if (modified.Modifier is FixedArrayTypeModifier fixedModifier)
+            else if (modified.Modifier is ArrayTypeModifier arrayModifier)
             {
                 var elementType = modified.Type;
                 TypeInitializer? initializer = null;
@@ -668,9 +748,25 @@ internal sealed partial class Parser
                 if (CurrentToken.MatchingKind is MatchingKeywordKind.With && Peek().Kind is TokenKind.LeftBrace)
                     withClause = ParseObjectWithClause();
 
-                return new ArrayCreationExpression(keyword, kind, elementType, fixedModifier.LeftBracket, fixedModifier.Size, fixedModifier.RightBracket, initializer, withClause);
+                return new ArrayCreationExpression(keyword, kind, elementType, arrayModifier.LeftBracket, arrayModifier.Size, arrayModifier.RightBracket, initializer, withClause);
             }
         }
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            var initializer = ParseTypeInitializer();
+            return new ObjectInitializerExpression(
+                keyword,
+                kind,
+                allocLessThan,
+                allocTypeArguments,
+                allocGreaterThan,
+                allocOpenParen,
+                allocArguments,
+                allocCloseParen,
+                type,
+                initializer);
+        }
+
         var openParen = ExpectToken(TokenKind.LeftParen, "'('", GetObjectCreationContext(keyword.MatchingKind));
 
         var arguments = ParseExpressionArgumentList();
@@ -773,10 +869,91 @@ internal sealed partial class Parser
         return new MatchExpression(matchKeyword, openParen, expression, closeParen, openBrace, arms, closeBrace);
     }
 
+    private TryExpression ParseTryExpression()
+    {
+        var tryKeyword = Consume();
+        BlockExpression tryBlock;
+        if (CurrentToken.Kind is TokenKind.LeftBrace)
+        {
+            tryBlock = ParseBlockExpression();
+        }
+        else
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "after 'try'");
+            tryBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+        }
+
+        var catchClauses = new List<CatchClause>();
+        while (CurrentToken.MatchingKind is MatchingKeywordKind.Catch)
+        {
+            var catchKeyword = Consume();
+            Token? openParen = null;
+            TypeSyntax? type = null;
+            Token? varId = null;
+            Token? closeParen = null;
+
+            if (CurrentToken.Kind is TokenKind.LeftParen)
+            {
+                openParen = Consume();
+                if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && (CurrentToken.Source ?? text) is { } discardSrc && (uint)CurrentToken.Span.Start < (uint)discardSrc.Length && discardSrc[CurrentToken.Span.Start] == '_')
+                {
+                    varId = Consume();
+                }
+                else
+                {
+                    type = ParseTypeSyntax();
+                    if (CurrentToken.Kind is TokenKind.Identifier)
+                    {
+                        varId = Consume();
+                    }
+                }
+                closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close catch specification");
+            }
+
+            BlockExpression catchBlock;
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                catchBlock = ParseBlockExpression();
+            }
+            else
+            {
+                diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "for catch block");
+                catchBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+            }
+
+            catchClauses.Add(new CatchClause(catchKeyword, openParen, type, varId, closeParen, catchBlock));
+        }
+
+        FinallyClause? finallyClause = null;
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.Finally)
+        {
+            var finallyKeyword = Consume();
+            BlockExpression finallyBlock;
+            if (CurrentToken.Kind is TokenKind.LeftBrace)
+            {
+                finallyBlock = ParseBlockExpression();
+            }
+            else
+            {
+                diagnostics.ReportExpectedToken(CurrentToken.Span, "'{'", GetTokenDisplay(CurrentToken), "for finally block");
+                finallyBlock = new BlockExpression(CreateMissingToken(), Array.Empty<Local>(), null, CreateMissingToken());
+            }
+
+            finallyClause = new FinallyClause(finallyKeyword, finallyBlock);
+        }
+
+        if (catchClauses.Count == 0 && finallyClause is null)
+        {
+            diagnostics.ReportExpectedToken(CurrentToken.Span, "'catch' or 'finally'", GetTokenDisplay(CurrentToken), "after 'try' block");
+        }
+
+        return new TryExpression(tryKeyword, tryBlock, catchClauses, finallyClause);
+    }
+
     private PatternSyntax ParsePattern()
     {
         // 1. Wildcard '_'
-        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && text[CurrentToken.Span.Start] == '_')
+        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && (CurrentToken.Source ?? text) is { } discardSrc2 && (uint)CurrentToken.Span.Start < (uint)discardSrc2.Length && discardSrc2[CurrentToken.Span.Start] == '_')
             return new WildcardPattern(Consume());
 
         // 2. Literal pattern

@@ -67,6 +67,17 @@ internal sealed class DiagnosticsManager
     public DiagnosticBuilder BuildInfo(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
         new(this, code, message, DiagnosticKind.Info, primarySpan, source ?? defaultSource);
 
+    /// <summary> Helper to suppress cascading diagnostics when types contain error or unresolved markers. </summary>
+    private static bool IsErrorOrUnresolved(params string?[] typeNames)
+    {
+        foreach (var name in typeNames)
+        {
+            if (name is not null && (name.Contains("<error>") || name.Contains("<unresolved>")))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// Reports an unsupported binary operator or type mismatch between left and right operands,
     /// annotating the operator with a primary caret and the operands with secondary underlines.
@@ -85,6 +96,9 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(lhsTypeName, rhsTypeName))
+            return;
+
         var lhsDisplay = lhsLabel ?? lhsTypeName;
         var rhsDisplay = rhsLabel ?? rhsTypeName;
         var builder = BuildError("MH2001", $"cannot apply binary operator '{op}' to types '{lhsTypeName}' and '{rhsTypeName}'", opSpan, source)
@@ -116,6 +130,9 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(operandTypeName))
+            return;
+
         var operandDisplay = operandLabel ?? operandTypeName;
         var builder = BuildError("MH2002", $"cannot apply unary operator '{op}' to operand of type '{operandTypeName}'", opSpan, source)
             .WithPrimaryLabel(opSpan, $"cannot apply '{op}'")
@@ -140,6 +157,9 @@ internal sealed class DiagnosticsManager
         string? lhsLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(rhsTypeName, lhsTypeName))
+            return;
+
         var rhsDisplay = rhsLabel ?? rhsTypeName;
         BuildError("MH2003", $"cannot assign expression of type '{rhsTypeName}' to variable of type '{lhsTypeName}'", span, source)
             .WithPrimaryLabel(span, rhsDisplay, source)
@@ -156,6 +176,9 @@ internal sealed class DiagnosticsManager
         string? paramLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(argTypeName, paramTypeName))
+            return;
+
         var argDisplay = argLabel ?? argTypeName;
         BuildError("MH2004", $"argument {index}: cannot convert from '{argTypeName}' to '{paramTypeName}'", span, source)
             .WithPrimaryLabel(span, argDisplay, source)
@@ -177,6 +200,9 @@ internal sealed class DiagnosticsManager
         string? returnLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(exprTypeName, returnTypeName))
+            return;
+
         var exprDisplay = exprLabel ?? exprTypeName;
         BuildError("MH2006", $"cannot convert return expression of type '{exprTypeName}' to return type '{returnTypeName}'", span, source)
             .WithPrimaryLabel(span, exprDisplay, source)
@@ -190,6 +216,9 @@ internal sealed class DiagnosticsManager
         string? actualLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(actualTypeName))
+            return;
+
         var actualDisplay = actualLabel ?? actualTypeName;
         BuildError("MH2007", $"condition expression must have type 'Bool', but found '{actualTypeName}'", span, source)
             .WithPrimaryLabel(span, actualDisplay, source)
@@ -370,6 +399,24 @@ internal sealed class DiagnosticsManager
     public void ReportUnterminatedMultiLineComment(TextSpan span, SourceText? source = null) =>
         ReportError("MH0104", "unterminated multi-line comment", span, source);
 
+    /// <summary> Reports an unrecognized or malformed escape sequence inside a string or character literal. </summary>
+    public void ReportInvalidEscapeSequence(TextSpan span, string detail, SourceText? source = null) =>
+        BuildError("MH0105", detail, span, source)
+            .WithPrimaryLabel(span, "invalid escape sequence", source)
+            .Report();
+
+    /// <summary> Reports an out-of-range or surrogate Unicode escape inside a string or character literal. </summary>
+    public void ReportInvalidUnicodeEscape(TextSpan span, string detail, SourceText? source = null) =>
+        BuildError("MH0106", detail, span, source)
+            .WithPrimaryLabel(span, "invalid Unicode scalar value", source)
+            .Report();
+
+    /// <summary> Reports a character literal (unsuffixed or suffixed) that does not decode to a single Unicode scalar value. </summary>
+    public void ReportInvalidCharacterLiteralLength(TextSpan span, int scalarCount, SourceText? source = null) =>
+        BuildError("MH0107", $"character literal must contain exactly one Unicode scalar value (found {scalarCount})", span, source)
+            .WithPrimaryLabel(span, $"expected 1 Unicode scalar value, found {scalarCount}", source)
+            .Report();
+
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
     public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0120", expected, found, span, context, source, unexpectedSpan);
@@ -415,6 +462,51 @@ internal sealed class DiagnosticsManager
         BuildError("MH0161", "only one source file may contain top-level statements", span, source)
             .WithPrimaryLabel(span, "extra top-level statement source declared here", source)
             .WithHelp("ensure only a single file in the project has top-level statements")
+            .Report();
+
+    /// <summary> Reports that 'Main' function can only be declared at top level in global or namespace scope. </summary>
+    public void ReportMainMustBeTopLevel(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0162", "'Main' function can only be declared at top level in global or namespace scope", span, source)
+            .WithPrimaryLabel(span, "'Main' cannot be declared as a type member", source)
+            .WithHelp("move 'Main' to the top level of the file or namespace")
+            .Report();
+
+    /// <summary> Reports an invalid signature on the top-level 'Main' entry point. </summary>
+    public void ReportInvalidMainSignature(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0163", "invalid 'Main' entry point signature; supported signatures are '() -> void', '() -> int32', '(Array<Str>) -> void', '(Array<Str>) -> int32', '(Str[&]) -> void', or '(Str[&]) -> int32'", span, source)
+            .WithPrimaryLabel(span, "invalid 'Main' signature", source)
+            .WithHelp("change the signature to a supported entry point signature, e.g. '() -> void' or '() -> int32'")
+            .Report();
+
+    /// <summary> Reports ambiguous 'Main' entry points across compilation units. </summary>
+    public void ReportAmbiguousMainEntryPoint(TextSpan span, string message, SourceText? source = null) =>
+        BuildError("MH0164", message, span, source)
+            .WithPrimaryLabel(span, "ambiguous entry point", source)
+            .WithHelp("specify the entry point file using the EntryFile configuration")
+            .Report();
+
+    /// <summary> Reports that a type declares more than one static constructor. </summary>
+    public void ReportDuplicateStaticConstructor(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0165", $"type '{typeName}' cannot declare more than one static constructor", span, source)
+            .WithPrimaryLabel(span, "duplicate static constructor", source)
+            .Report();
+
+    /// <summary> Reports that an extension declares a stored field. </summary>
+    public void ReportExtensionCannotDeclareFields(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0170", "extensions cannot declare stored fields", span, source)
+            .WithPrimaryLabel(span, "extensions cannot declare stored fields", source)
+            .Report();
+
+    /// <summary> Reports that an extension specifies a base struct or class instead of an interface. </summary>
+    public void ReportExtensionCannotSpecifyBaseStruct(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH0171", $"extensions cannot specify a base struct or class, only interfaces; found '{typeName}'", span, source)
+            .WithPrimaryLabel(span, "base struct or class not permitted on extension", source)
+            .Report();
+
+    /// <summary> Reports that an extension method call is ambiguous between multiple extensions. </summary>
+    public void ReportAmbiguousExtensionMethod(TextSpan span, string memberName, SourceText? source = null) =>
+        BuildError("MH0172", $"call to extension method '{memberName}' is ambiguous between multiple extensions", span, source)
+            .WithPrimaryLabel(span, "ambiguous extension method call", source)
             .Report();
 
     /// <summary> Reports a generic parser mismatch when no narrower expectation is available. </summary>
@@ -761,6 +853,38 @@ internal sealed class DiagnosticsManager
             .Report();
     }
 
+    /// <summary> Reports a method overload that differs solely by receiver modifier. </summary>
+    public void ReportMethodOverloadSolelyByReceiver(
+        string methodName,
+        TextSpan redeclSpan,
+        TextSpan? firstDeclSpan = null,
+        SourceText? redeclSource = null,
+        SourceText? firstSource = null)
+    {
+        var builder = BuildError(
+            "MH0564",
+            $"method '{methodName}' cannot be overloaded solely by receiver modifier; use distinct method names or generic parameters",
+            redeclSpan,
+            redeclSource)
+            .WithPrimaryLabel(redeclSpan, "conflicting receiver overload", redeclSource);
+
+        if (firstDeclSpan.HasValue)
+            builder = builder.WithSecondaryLabel(firstDeclSpan.Value, "previous receiver declaration here", firstSource);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports a default generic type that does not satisfy declared type constraints. </summary>
+    public void ReportDefaultGenericConstraintViolation(
+        TextSpan span,
+        string paramName,
+        string defaultTypeName,
+        string constraintName,
+        SourceText? source = null) =>
+        BuildError("MH0125", $"default type '{defaultTypeName}' for generic parameter '{paramName}' does not satisfy constraint '{constraintName}'", span, source)
+            .WithPrimaryLabel(span, $"does not satisfy '{constraintName}'", source)
+            .Report();
+
     /// <summary> Reports an unknown intrinsic type literal applied via IntrinsicType. </summary>
     public void ReportUnknownIntrinsicType(TextSpan span, string intrinsicLiteral, SourceText? source = null) =>
         BuildError("MH0542", $"unknown intrinsic type '{intrinsicLiteral}'", span, source)
@@ -826,6 +950,9 @@ internal sealed class DiagnosticsManager
         string? elseLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(thenType, elseType))
+            return;
+
         var thenDisplay = thenLabel ?? thenType;
         var elseDisplay = elseLabel ?? elseType;
         BuildError("MH2011", $"conditional branches evaluate to different types '{thenType}' and '{elseType}'; explicit cast to a common base type is required", span, source)
@@ -835,10 +962,15 @@ internal sealed class DiagnosticsManager
     }
 
     /// <summary> Reports conflicting return types in inferred function. </summary>
-    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null) =>
+    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null)
+    {
+        if (IsErrorOrUnresolved(actualType, previousType))
+            return;
+
         BuildError("MH2012", $"return statement returns type '{actualType}', which conflicts with previous return type '{previousType}'; all return branches must return the exact same type or require explicit return type declaration", span, source)
             .WithPrimaryLabel(span, $"returns '{actualType}' but previous return yielded '{previousType}'", source)
             .Report();
+    }
 
     /// <summary> Reports ambiguous literal conversion when multiple literal overloads exist. </summary>
     public void ReportAmbiguousLiteralConversion(
@@ -863,6 +995,9 @@ internal sealed class DiagnosticsManager
         string? labelTypeName = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         var labelType = labelTypeName ?? typeName;
         BuildError("MH2014", $"type '{typeName}' does not contain a definition for '{memberName}'", span, source)
             .WithPrimaryLabel(span, $"'{memberName}' not found on '{labelType}'", source)
@@ -876,6 +1011,9 @@ internal sealed class DiagnosticsManager
         string? labelTypeName = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         var labelType = labelTypeName ?? typeName;
         BuildError("MH0611", $"type '{typeName}' is not callable or has no matching overload for 'Call'", span, source)
             .WithPrimaryLabel(span, $"'{labelType}' is not callable", source)
@@ -1068,11 +1206,16 @@ internal sealed class DiagnosticsManager
             .Report();
 
     /// <summary> Reports that an expression in a for-in loop is not iterable. </summary>
-    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null) =>
+    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null)
+    {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         BuildError("MH0571", $"type '{typeName}' is not iterable; missing 'Iterable' contract", span, source)
             .WithPrimaryLabel(span, $"type '{typeName}' is not iterable", source)
             .WithHelp($"implement the 'Iterable<TItem, TIterator>' operator contract on '{typeName}'")
             .Report();
+    }
 
     /// <summary> Reports that yield was used outside a generator function returning an Iterator or Iterable. </summary>
     public void ReportInvalidYieldUsage(TextSpan span, SourceText? source = null) =>
@@ -1086,4 +1229,326 @@ internal sealed class DiagnosticsManager
         BuildError("MH0573", $"yield expression of type '{yieldType}' cannot be assigned to iterator item type '{itemType}'", span, source)
             .WithPrimaryLabel(span, $"expected '{itemType}', found '{yieldType}'", source)
             .Report();
+
+    /// <summary> Reports that a thrown type does not implement the Throwable interface. </summary>
+    public void ReportTypeNotThrowable(TextSpan span, string typeName, string? label = null, SourceText? source = null)
+    {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
+        var display = label ?? typeName;
+        BuildError("MH2030", $"type '{typeName}' is not throwable; must implement 'Throwable'", span, source)
+            .WithPrimaryLabel(span, $"type '{display}' cannot be thrown", source)
+            .WithHelp("implement interface 'Throwable' to throw values of this type")
+            .Report();
+    }
+
+    /// <summary> Reports that an expression in a throw statement is a reference or pointer rather than a value. </summary>
+    public void ReportThrowMustBeValueOrMoved(TextSpan span, string typeName, SourceText? source = null) =>
+        BuildError("MH2032", $"exceptions must be thrown by value or moved; cannot throw reference or pointer '{typeName}' directly", span, source)
+            .WithPrimaryLabel(span, "cannot throw reference or pointer directly", source)
+            .WithHelp("throw an owned value of a type implementing 'Throwable' instead")
+            .Report();
+
+    /// <summary> Reports a bare re-throw statement used outside of a catch block. </summary>
+    public void ReportBareThrowOutsideCatch(TextSpan span, SourceText? source = null) =>
+        BuildError("MH2031", "a re-throw statement without an expression is only valid inside a catch block", span, source)
+            .WithPrimaryLabel(span, "cannot re-throw outside a catch block", source)
+            .Report();
+
+    /// <summary> Reports use of a definitely uninitialized variable or field before assignment. </summary>
+    public void ReportUseOfUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
+        BuildError("MH1000", $"use of uninitialized variable '{name}'", span, source)
+            .WithPrimaryLabel(span, $"'{name}' is used before it has been initialized", source)
+            .WithHelp("initialize the variable via a constructor, direct initializer 'new T { ... }', 'default', or piecewise field assignment")
+            .Report();
+
+    /// <summary> Reports an attempt to piecewise initialize a struct containing inaccessible fields. </summary>
+    public void ReportStructCannotBePiecewiseInitialized(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0574", $"struct '{typeName}' cannot be piecewise initialized because it contains inaccessible fields; use a constructor or default expression", span, source)
+            .WithPrimaryLabel(span, $"field '{fieldName}' on '{typeName}' is inaccessible from this scope", source)
+            .WithHelp($"construct '{typeName}' using a constructor or assign 'default'")
+            .Report();
+
+    /// <summary> Reports that a direct struct initializer omitted one or more fields. </summary>
+    public void ReportDirectInitializerMissingField(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0578", $"direct initializer for struct '{typeName}' must initialize all fields; missing field '{fieldName}'", span, source)
+            .WithPrimaryLabel(span, $"missing initializer for field '{fieldName}'", source)
+            .Report();
+
+    /// <summary> Reports that a direct struct initializer assigned the same field multiple times. </summary>
+    public void ReportDuplicateInitializerField(
+        TextSpan span,
+        string typeName,
+        string fieldName,
+        SourceText? source = null) =>
+        BuildError("MH0578", $"field '{fieldName}' is initialized more than once in initializer for struct '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"duplicate initializer for field '{fieldName}'", source)
+            .Report();
+
+    /// <summary> Reports an ambiguous module-qualified reference across duplicate-named modules. </summary>
+    public void ReportAmbiguousModuleMember(
+        TextSpan span,
+        string moduleName,
+        string memberName,
+        SourceText? source = null) =>
+        BuildError("MH0575", $"ambiguous reference '{moduleName}::{memberName}' matches multiple imported modules named '{moduleName}'; assign an alias to the compiler reference and import it with 'extern using <Alias>;'", span, source)
+            .WithPrimaryLabel(span, $"multiple imported '{moduleName}' modules export '{memberName}'", source)
+            .WithHelp($"pass an alias when referencing the project and add 'extern using <Alias>;' then use '<Alias>::{memberName}'")
+            .Report();
+
+    /// <summary> Reports an <c>extern using</c> directive referencing an undefined compiler module alias. </summary>
+    public void ReportUndefinedExternModuleAlias(
+        TextSpan span,
+        string aliasName,
+        SourceText? source = null) =>
+        BuildError("MH0576", $"extern module alias '{aliasName}' is not defined by the compilation references", span, source)
+            .WithPrimaryLabel(span, $"'{aliasName}' is not a known compiler module alias", source)
+            .WithHelp($"pass '--reference-project {aliasName}=<path>' (or alias it in .mhpr ProjectsReferenced) before using 'extern using {aliasName};'")
+            .Report();
+
+    /// <summary> Reports conflicting interface conformances on the same type definition, base clause, or module. </summary>
+    public void ReportConflictingInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string reason,
+        SourceText? source = null) =>
+        BuildError("MH0565", $"conflicting conformance of '{typeName}' to '{interfaceName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports an interface conformance that exists but is inaccessible from the current scope. </summary>
+    public void ReportInaccessibleInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        string visibility,
+        SourceText? source = null) =>
+        BuildError("MH0566", $"conformance of '{typeName}' to '{interfaceName}' is {visibility} and inaccessible in this context", span, source)
+            .WithPrimaryLabel(span, $"{visibility} conformance '{typeName} : {interfaceName}' cannot be used here", source)
+            .Report();
+
+    /// <summary> Reports an ambiguous interface conformance across multiple imported modules. </summary>
+    public void ReportAmbiguousInterfaceConformance(
+        TextSpan span,
+        string typeName,
+        string interfaceName,
+        IReadOnlyList<string> candidateModules,
+        SourceText? source = null) =>
+        BuildError("MH0567", $"ambiguous conformance of '{typeName}' to '{interfaceName}'; multiple imported modules provide an implementation ({string.Join(", ", candidateModules)})", span, source)
+            .WithPrimaryLabel(span, $"multiple '{interfaceName}' implementations available for '{typeName}'", source)
+            .WithHelp($"disambiguate with '<expr> as <Module>::{interfaceName}' or '<{typeName} as <Module>::{interfaceName}>'")
+            .Report();
+
+    /// <summary> Reports that an unsized (DST) type is used in a position requiring a statically sized type. </summary>
+    public void ReportUnsizedTypeNotAllowed(
+        TextSpan span,
+        string typeName,
+        string contextDescription,
+        SourceText? source = null) =>
+        BuildError("MH0580", $"unsized type '{typeName}' cannot be used {contextDescription}", span, source)
+            .WithPrimaryLabel(span, $"'{typeName}' is unsized and requires a statically sized type {contextDescription}", source)
+            .WithHelp($"wrap it behind an indirection ('&{typeName}', '{typeName}&', '{typeName}*') or 'Box<{typeName}>'")
+            .Report();
+
+    /// <summary> Reports a generic type argument or conformance violating a <c>Sized</c> / <c>Unsized</c> / <c>Layout</c> constraint. </summary>
+    public void ReportGenericConstraintNotSized(
+        TextSpan span,
+        string typeName,
+        string paramName,
+        string targetName,
+        string requiredBound,
+        SourceText? source = null) =>
+        BuildError("MH0581", $"type '{typeName}' does not satisfy the '{requiredBound}' constraint on '{paramName}' of '{targetName}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{requiredBound}', got '{typeName}'", source)
+            .WithHelp(requiredBound == "Sized"
+                ? $"add ': Layout' or ': Unsized' to '{paramName}' if dynamically sized types should be accepted, or pass a reference/Box"
+                : $"provide an unsized type for '{paramName}'")
+            .Report();
+
+    /// <summary> Reports a derived struct/class adding fields after an unsized base or inheriting multiple unsized bases. </summary>
+    public void ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+        TextSpan span,
+        string derivedName,
+        string unsizedBaseName,
+        string reason,
+        SourceText? source = null) =>
+        BuildError("MH0582", $"type '{derivedName}' cannot inherit unsized base '{unsizedBaseName}': {reason}", span, source)
+            .WithPrimaryLabel(span, reason, source)
+            .Report();
+
+    /// <summary> Reports invalid <c>dyn</c> placement (e.g. wrapping <c>Unsized</c> types or inside <c>&amp;dyn</c>/<c>*dyn</c>). </summary>
+    public void ReportInvalidInterfaceOrDynUsage(
+        TextSpan span,
+        string message,
+        string label,
+        string help,
+        SourceText? source = null) =>
+        BuildError("MH0583", message, span, source)
+            .WithPrimaryLabel(span, label, source)
+            .WithHelp(help)
+            .Report();
+
+    /// <summary> Reports an invalid declaration site for a <c>: this</c> generic parameter. </summary>
+    public void ReportInvalidThisGenericParameterPlacement(
+        TextSpan span,
+        string paramName,
+        SourceText? source = null) =>
+        BuildError("MH0584", $"': this' generic parameter '{paramName}' can only be declared on an interface or method", span, source)
+            .WithPrimaryLabel(span, $"invalid ': this' generic parameter on non-interface type or standalone function", source)
+            .WithHelp("move ': this' onto an interface or method generic parameter list, or use a regular type parameter")
+            .Report();
+
+    /// <summary> Reports a type argument that does not strictly match the implementing or constrained <c>this</c> type. </summary>
+    public void ReportThisGenericArgumentMismatch(
+        TextSpan span,
+        string paramName,
+        string targetName,
+        string expectedType,
+        string actualType,
+        SourceText? source = null) =>
+        BuildError("MH0585", $"type argument '{actualType}' for 'this' parameter '{paramName}' on '{targetName}' must exactly match '{expectedType}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{expectedType}', got '{actualType}'", source)
+            .WithHelp($"pass '{expectedType}' for '{paramName}' (exact type identity is required, not a base type or unrelated type)")
+            .Report();
+
+    /// <summary> Reports an unparameterized reference to a <c>: this</c> generic interface outside a base clause or generic constraint. </summary>
+    public void ReportMissingExplicitThisTypeArgument(
+        TextSpan span,
+        string ifaceName,
+        string paramName,
+        SourceText? source = null) =>
+        BuildError("MH0586", $"interface '{ifaceName}' requires an explicit type argument for 'this' parameter '{paramName}'", span, source)
+            .WithPrimaryLabel(span, $"missing concrete type argument for '{paramName}'", source)
+            .WithHelp($"specify the concrete type explicitly, e.g. '{ifaceName}<MyType>'")
+            .Report();
+
+    /// <summary> Reports calling a generic method with a <c>: this</c> type parameter on a type-erased <c>dyn</c> receiver. </summary>
+    public void ReportDynThisGenericMethodCallNotAllowed(
+        TextSpan span,
+        string methodName,
+        string ifaceName,
+        SourceText? source = null) =>
+        BuildError("MH0587", $"cannot call method '{methodName}' requiring a ': this' generic parameter on type-erased 'dyn {ifaceName}'", span, source)
+            .WithPrimaryLabel(span, $"concrete type for ': this' parameter is only known in runtime metadata", source)
+            .WithHelp($"declare the ': this' parameter on interface '{ifaceName}<T : this>' or call '{methodName}' on a statically known type")
+            .Report();
+
+    /// <summary> Reports <c>new</c> creation when allocation arguments or type arguments do not match any user operator and no compiler fallback applies. </summary>
+    public void ReportNoMatchingAllocationOperator(
+        TextSpan span,
+        string keyword,
+        string typeName,
+        string operatorName,
+        SourceText? source = null) =>
+        BuildError("MH0591", $"no matching '{operatorName}' operator found for '{keyword}' on type '{typeName}'", span, source)
+            .WithPrimaryLabel(span, $"missing matching '{operatorName}' operator", source)
+            .WithHelp($"implement '[OperatorFunction(\"{operatorName}\")]' with a matching signature or omit allocation arguments")
+            .Report();
+
+    /// <summary> Reports <c>new</c> object creation on a type that does not derive from <c>ValueType</c> and implements no matching operator. </summary>
+    public void ReportObjectCreationNotSupported(
+        TextSpan span,
+        string keyword,
+        string typeName,
+        string valTypeName,
+        string operatorName,
+        SourceText? source = null) =>
+        BuildError("MH0589", $"type '{typeName}' does not derive from '{valTypeName}' and does not implement '{operatorName}' for '{keyword}'", span, source)
+            .WithPrimaryLabel(span, $"missing '{operatorName}' operator for '{typeName}'", source)
+            .WithHelp($"inherit '{valTypeName}' or implement '[OperatorFunction(\"{operatorName}\")]' on '{typeName}'")
+            .Report();
+
+    /// <summary> Reports a generic type argument that does not satisfy an explicit interface or ownership constraint. </summary>
+    public void ReportGenericConstraintViolation(
+        TextSpan span,
+        string typeName,
+        string paramName,
+        string targetName,
+        string requiredConstraint,
+        SourceText? source = null) =>
+        BuildError("MH0590", $"type '{typeName}' does not satisfy constraint '{requiredConstraint}' on generic parameter '{paramName}' of '{targetName}'", span, source)
+            .WithPrimaryLabel(span, $"expected '{requiredConstraint}', got '{typeName}'", source)
+            .Report();
+
+    /// <summary> Reports an attempt to branch out of a finally block via return, break, or continue. </summary>
+    public void ReportControlLeavesFinally(TextSpan span, string kind, SourceText? source = null) =>
+        BuildError("MH2033", $"control cannot leave the body of a finally clause with '{kind}'", span, source)
+            .WithPrimaryLabel(span, $"'{kind}' not allowed in finally clause", source)
+            .WithHelp("remove the branch statement from the finally clause")
+            .Report();
+
+    /// <summary> Reports an alias type (<c>&amp;T</c> or <c>*T</c>) used outside a local variable declaration. </summary>
+    public void ReportAliasNotAllowedOutsideLocal(TextSpan span, string contextDescription, SourceText? source = null) =>
+        BuildError("MH0592", $"alias type '&T' / '*T' is not allowed {contextDescription}", span, source)
+            .WithPrimaryLabel(span, $"alias type not allowed {contextDescription}", source)
+            .WithHelp("use a reference ('T&', 'T mut&') or pointer ('T*', 'T mut*') outside local variable declarations")
+            .Report();
+
+    /// <summary> Reports an alias type used as the target of an <c>extension</c> block. </summary>
+    public void ReportAliasNotAllowedAsExtensionTarget(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0593", "alias type cannot be an extension target", span, source)
+            .WithPrimaryLabel(span, "extension target cannot be an alias type", source)
+            .WithHelp("extend 'T' or its reference type 'T&' / 'T mut&' instead")
+            .Report();
+
+    /// <summary>
+    /// Reports a field-adding derived type attempting to inherit a <c>Self</c>-returning method
+    /// from a <c>derived</c> base interface without overriding it.
+    /// </summary>
+    public void ReportDerivedSelfMethodNeedsOverride(
+        TextSpan span,
+        string derivedTypeName,
+        string baseOwnerName,
+        string methodName,
+        string baseReturnType,
+        string interfaceName,
+        SourceText? source = null,
+        TextSpan? baseMethodSpan = null,
+        SourceText? baseMethodSource = null)
+    {
+        var builder = BuildError(
+                "MH0594",
+                $"type '{derivedTypeName}' adds instance fields and cannot inherit base method '{baseOwnerName}.{methodName}' returning '{baseReturnType}' for 'derived' interface '{interfaceName}'; override '{methodName}' explicitly",
+                span,
+                source)
+            .WithPrimaryLabel(span, $"'{derivedTypeName}' adds fields so inherited '{baseOwnerName}.{methodName}' cannot return '{derivedTypeName}'", source)
+            .WithHelp($"declare an explicit 'override' or implementing method for '{methodName}' returning '{derivedTypeName}' on '{derivedTypeName}'");
+
+        if (baseMethodSpan is { } bSpan)
+            builder.WithSecondaryLabel(bSpan, $"inherited method declared here returning '{baseReturnType}'", baseMethodSource);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports invalid placement or mismatched signature for <c>derived</c> generic arguments or <c>override</c> methods. </summary>
+    public void ReportInheritanceOrOverrideError(
+        TextSpan span,
+        string message,
+        SourceText? source = null,
+        TextSpan? relatedSpan = null,
+        SourceText? relatedSource = null,
+        string? relatedLabel = null,
+        string? help = null)
+    {
+        var builder = BuildError("MH0595", message, span, source)
+            .WithPrimaryLabel(span, message, source);
+
+        if (relatedSpan is { } rSpan)
+            builder.WithSecondaryLabel(rSpan, relatedLabel ?? "related declaration here", relatedSource);
+
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
 }

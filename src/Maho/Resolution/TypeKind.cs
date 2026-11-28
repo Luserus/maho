@@ -6,7 +6,6 @@ internal enum TypeKind
     Class,
     Interface,
     Attribute,
-    Delegate,
     Union,
     Enum
 }

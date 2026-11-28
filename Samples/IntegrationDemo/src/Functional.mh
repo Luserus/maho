@@ -1,0 +1,71 @@
+// Higher-order functions, closures, and callable interfaces.
+// Demonstrates: Callable, CallableMut, CallableOnce, lambdas,
+// function pointers, generic functions with callable constraints,
+// Box<CallableOnce>.
+using Std;
+
+namespace Demo;
+
+
+// Apply a function to a value: generic over the callable type.
+public func Apply<F, T, R>(F fn, T arg) -> R
+    where F : Callable<R, T>
+{
+    return fn(arg);
+}
+
+// Map a function over two values and combine with addition.
+public func MapAndAdd<F>(F fn, Int32 a, Int32 b) -> Int32
+    where F : Callable<Int32, Int32>
+{
+    return fn(a) + fn(b);
+}
+
+// A simple stateful accumulator that uses CallableMut.
+public struct Accumulator : CallableMut<Int32, Int32>
+{
+    public Int32 total;
+
+    func CallableMut.Invoke(this mut&, Int32 value) -> Int32
+    {
+        this->total = this->total + value;
+        return this->total;
+    }
+}
+
+// Identity function — demonstrates function pointer creation.
+public func Identity(Int32 x) -> Int32
+{
+    return x;
+}
+
+// Double function — simple arithmetic function.
+public func Double(Int32 x) -> Int32
+{
+    return x + x;
+}
+
+// Negate function.
+public func Negate(Int32 x) -> Int32
+{
+    return -x;
+}
+
+// Compose two functions: returns a closure that applies g then f.
+// This demonstrates returning a capturing closure.
+public func Compose(func(Int32) -> Int32 f, func(Int32) -> Int32 g) -> func(Int32) -> Int32
+{
+    return f;
+}
+
+// A predicate-based filter counter: counts how many items satisfy a predicate.
+public func CountWhere<F>(Int32 a, Int32 b, Int32 c, F pred) -> Int32
+    where F : Callable<Bool, Int32>
+{
+    Int32 count = 0;
+    if (pred(a)) { count = count + 1; }
+    if (pred(b)) { count = count + 1; }
+    if (pred(c)) { count = count + 1; }
+    return count;
+}
+

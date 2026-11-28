@@ -42,8 +42,8 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrayHandle);
-        return TypeRef.FixedArray(elemType, collection.Expressions.Count, fixedArrayHandle != default ? fixedArrayHandle : null);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayHandle);
+        return TypeRef.Array(elemType, collection.Expressions.Count, arrayHandle != default ? arrayHandle : null);
     }
 
     private void TypeCheckCollectionExpression(CollectionExpression collection, TypeRef targetType, Scope scope, SymbolHandle containingFunction, SyntaxNode diagnosticAnchor)
@@ -93,7 +93,7 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
-        // 3. Check Collection<T...> contract or FixedArray / Array
+        // 3. Check Collection<T...> contract or Array / Slice
         int expectedTerms = 1;
         IReadOnlyList<TypeRef>? expectedTermTypes = null;
         bool hasCollectionAddContract = context.DiscoveredOperators.TryGetOperators(OperatorKind.CollectionAdd, out var addCandidates) && addCandidates.Count > 0;
@@ -126,15 +126,15 @@ internal sealed partial class ExpressionResolutionPass
 
         if (expectedTermTypes is null)
         {
-            if (targetType.SpecialType is ArraySemanticType arraySem)
+            if (targetType.SpecialType is SliceSemanticType sliceSem)
+            {
+                expectedTerms = 1;
+                expectedTermTypes = [sliceSem.ElementType];
+            }
+            else if (targetType.SpecialType is ArraySemanticType arraySem)
             {
                 expectedTerms = 1;
                 expectedTermTypes = [arraySem.ElementType];
-            }
-            else if (targetType.SpecialType is FixedArraySemanticType fixedSem)
-            {
-                expectedTerms = 1;
-                expectedTermTypes = [fixedSem.ElementType];
             }
             else if (!hasCollectionAddContract)
             {

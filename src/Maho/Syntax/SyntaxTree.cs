@@ -11,15 +11,24 @@ public sealed class SyntaxTree
     public string FilePath { get; }
     internal SourceText SourceText { get; }
     internal CompilationUnit Root { get; }
-    internal DiagnosticsManager DiagnosticsManager { get; }
+    /// <summary>Immutable diagnostics emitted during lexing and parsing of this file.</summary>
+    internal DiagnosticsManager SyntaxDiagnostics { get; }
+    /// <summary>Resolution and macro-expansion diagnostics scoped to this compilation snapshot.</summary>
+    internal IReadOnlyList<Diagnostic> ResolutionDiagnostics { get; }
+    internal List<Token>? Tokens { get; }
+    internal bool AllowImplicitTopLevel { get; }
+    internal bool WasMacroExpanded { get; set; }
+    internal bool ContainsMacroSyntax => Root.ContainsMacroSyntax;
 
     /// <summary>Diagnostics associated with this source file only.</summary>
     public IReadOnlyList<DiagnosticInfo> Diagnostics
     {
         get
         {
-            var diagnostics = new List<DiagnosticInfo>(DiagnosticsManager.Diagnostics.Count);
-            foreach (var diagnostic in DiagnosticsManager.Diagnostics)
+            var diagnostics = new List<DiagnosticInfo>(SyntaxDiagnostics.Diagnostics.Count + ResolutionDiagnostics.Count);
+            foreach (var diagnostic in SyntaxDiagnostics.Diagnostics)
+                diagnostics.Add(DiagnosticInfo.FromDiagnostic(diagnostic, SourceText, FilePath));
+            foreach (var diagnostic in ResolutionDiagnostics)
                 diagnostics.Add(DiagnosticInfo.FromDiagnostic(diagnostic, SourceText, FilePath));
             return DiagnosticInfo.OrderDiagnostics(diagnostics);
         }
@@ -103,12 +112,24 @@ public sealed class SyntaxTree
     public bool IsEquivalent(SyntaxTree other) =>
         other != null && string.Equals(ContentHash, other.ContentHash, System.StringComparison.OrdinalIgnoreCase);
 
-    internal SyntaxTree(CompilationUnit root, SourceText sourceText, DiagnosticsManager diagnostics, string filePath)
+    internal SyntaxTree(
+        CompilationUnit root,
+        SourceText sourceText,
+        DiagnosticsManager syntaxDiagnostics,
+        string filePath,
+        IReadOnlyList<Diagnostic>? resolutionDiagnostics = null,
+        List<Token>? tokens = null,
+        bool allowImplicitTopLevel = false,
+        bool wasMacroExpanded = false)
     {
         Root = root;
         SourceText = sourceText;
-        DiagnosticsManager = diagnostics;
+        SyntaxDiagnostics = syntaxDiagnostics;
+        ResolutionDiagnostics = resolutionDiagnostics ?? [];
         FilePath = filePath;
+        Tokens = tokens;
+        AllowImplicitTopLevel = allowImplicitTopLevel;
+        WasMacroExpanded = wasMacroExpanded;
     }
 
     internal static SyntaxTree CreateSingleRoot(CompilationUnit root, string name = "<single-file>")

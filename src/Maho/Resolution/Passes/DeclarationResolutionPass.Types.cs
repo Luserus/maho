@@ -10,8 +10,16 @@ internal sealed partial class DeclarationResolutionPass
     private void ResolveTypeConstraints(IReadOnlyList<TypeConstraintClause> clauses, IReadOnlyList<SymbolHandle> parameters, Scope scope)
     {
         foreach (var (Kind, ID) in parameters)
+        {
             if (Kind is SymbolKind.GenericParameter)
-                context.GenericParameterSymbols[ID].Constraints = [];
+            {
+                var gp = context.GenericParameterSymbols[ID];
+                gp.Constraints = [];
+                gp.HasExplicitLayout = false;
+                gp.HasExplicitSized = false;
+                gp.HasExplicitUnsized = false;
+            }
+        }
 
         foreach (var clause in clauses)
         {
@@ -22,8 +30,32 @@ internal sealed partial class DeclarationResolutionPass
             context.ResolvedTree.AddReference(clause.GenericParameter, ResolutionContext.GetHandle(parameter));
 
             foreach (var constraint in clause.Constraints)
+            {
                 if (constraint is TypeTypeConstraint typeConstraint)
-                    parameter.Constraints.Add(ResolveType(typeConstraint.Type, scope, isTraitBoundContext: true));
+                {
+                    var paramSelfRef = TypeRef.Resolved(ResolutionContext.GetHandle(parameter));
+                    var resolved = ResolveType(typeConstraint.Type, scope, isTraitBoundContext: true, implicitThisTarget: paramSelfRef, isConformanceOrConstraintContext: true);
+                    parameter.Constraints.Add(resolved);
+                    if (resolved.Handle is { } ch)
+                    {
+                        var unwrapped = context.UnwrapAlias(ch);
+                        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && unwrapped == layoutH)
+                            parameter.HasExplicitLayout = true;
+                        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedH) && unwrapped == sizedH)
+                            parameter.HasExplicitSized = true;
+                        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out var unsizedH) && unwrapped == unsizedH)
+                            parameter.HasExplicitUnsized = true;
+
+                        ValidateThisArgumentsOnTarget(
+                            resolved,
+                            unwrapped,
+                            paramSelfRef,
+                            null,
+                            typeConstraint.Type.GetSpan() ?? default,
+                            typeConstraint.GetSource());
+                    }
+                }
+            }
         }
     }
 
@@ -36,7 +68,7 @@ internal sealed partial class DeclarationResolutionPass
         return null;
     }
 
-    private void ResolveGenericParameterDeclarations(NamedSyntax name, IReadOnlyList<SymbolHandle> parameters)
+    private void ResolveGenericParameterDeclarations(NamedSyntax name, IReadOnlyList<SymbolHandle> parameters, Scope scope)
     {
         var genericName = name switch
         {
@@ -49,7 +81,24 @@ internal sealed partial class DeclarationResolutionPass
             return;
 
         for (int index = 0; index < genericName.GenericParameters.Count && index < parameters.Count; index++)
-            context.ResolvedTree.AddReference(genericName.GenericParameters[index], parameters[index]);
+        {
+            var handle = parameters[index];
+            var paramSyntax = genericName.GenericParameters[index];
+            context.ResolvedTree.AddReference(paramSyntax, handle);
+            if (paramSyntax.DefaultType is { } defaultTypeSyntax)
+            {
+                if (paramSyntax.Kind is GenericParameterKind.This &&
+                    defaultTypeSyntax is SimpleType { Name.MatchingKind: MatchingKeywordKind.This })
+                {
+                    context.GenericParameterSymbols[handle.ID].HasSelfDefault = true;
+                }
+                else
+                {
+                    var defType = ResolveType(defaultTypeSyntax, scope);
+                    context.GenericParameterSymbols[handle.ID].DefaultType = defType;
+                }
+            }
+        }
     }
 
     private List<SymbolHandle> ResolveAttributes(IReadOnlyList<AttributeListSyntax> attributes, Scope scope)
@@ -81,38 +130,75 @@ internal sealed partial class DeclarationResolutionPass
         return result;
     }
 
-    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false, bool isTraitBoundContext = false)
+    private TypeRef ResolveType(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false, bool isTraitBoundContext = false, bool isDynTargetContext = false, TypeRef? implicitThisTarget = null, bool isConformanceOrConstraintContext = false, bool allowAlias = false)
     {
-        if (resolvedTypes.TryGetValue((syntax, scope, allowInference, isTraitBoundContext), out var cached))
+        bool canCache = implicitThisTarget is null && !isConformanceOrConstraintContext;
+        if (canCache && resolvedTypes.TryGetValue((syntax, scope, allowInference, isTraitBoundContext || isDynTargetContext, allowAlias), out var cached))
             return cached;
 
-        var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext);
+        var result = ResolveTypeCore(syntax, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, isConformanceOrConstraintContext, allowAlias);
 
-        if (reportDiagnostics || result.IsResolved)
-            resolvedTypes[(syntax, scope, allowInference, isTraitBoundContext)] = result;
+        if (canCache && (reportDiagnostics || result.IsResolved))
+            resolvedTypes[(syntax, scope, allowInference, isTraitBoundContext || isDynTargetContext, allowAlias)] = result;
 
         return result;
     }
 
-    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false, bool isTraitBoundContext = false)
+    private TypeRef ResolveTypeCore(TypeSyntax syntax, Scope scope, bool reportDiagnostics = true, bool allowInference = false, bool isUntaggedContext = false, bool isTraitBoundContext = false, bool isDynTargetContext = false, TypeRef? implicitThisTarget = null, bool isConformanceOrConstraintContext = false, bool allowAlias = false)
     {
+        if (syntax is GroupedType grouped)
+        {
+            return ResolveType(grouped.InnerType, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, isConformanceOrConstraintContext, allowAlias);
+        }
+
+        if (syntax is DerivedGenericArgumentSyntax derivedArg)
+        {
+            if (activeDerivedBaseContext is not { } derivedCtx)
+            {
+                if (reportDiagnostics)
+                {
+                    context.Diagnostics.ReportInheritanceOrOverrideError(
+                        derivedArg.GetSpan() ?? derivedArg.DerivedKeyword.Span,
+                        "'derived' generic type argument is only allowed in a base interface's generic arguments on a struct, class, enum, or union",
+                        derivedArg.GetSource());
+                }
+
+                return ResolveType(derivedArg.TargetType, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, isConformanceOrConstraintContext, allowAlias);
+            }
+
+            var resolvedInner = ResolveType(derivedArg.TargetType, scope, reportDiagnostics, isConformanceOrConstraintContext: true);
+            if (!resolvedInner.IsError && !resolvedInner.IsUnresolved && !IsTypeEquivalent(resolvedInner, derivedCtx.OwnerSelf))
+            {
+                if (reportDiagnostics)
+                {
+                    context.Diagnostics.ReportInheritanceOrOverrideError(
+                        derivedArg.GetSpan() ?? default,
+                        $"'derived' type argument '{resolvedInner.ToDisplayString(context)}' must match declaring type '{derivedCtx.OwnerSelf.ToDisplayString(context)}'",
+                        derivedArg.GetSource());
+                }
+            }
+
+            return derivedCtx.OwnerSelf;
+        }
+
+        if (syntax is LiteralGenericArgument litArg)
+        {
+            var litKind = litArg.Expression.Literal.Kind switch
+            {
+                TokenKind.Float => CompileTimeLiteralKind.Float,
+                TokenKind.String => CompileTimeLiteralKind.Str,
+                TokenKind.Char => CompileTimeLiteralKind.Char,
+                _ => CompileTimeLiteralKind.Int
+            };
+            return TypeRef.Literal(litKind, litArg.Expression.Literal.Value);
+        }
         if (syntax is FunctionTypeSyntax fnSyntax)
         {
             TypeRef ret;
             if (fnSyntax.ArrowToken is not null)
-            {
                 ret = ResolveType(fnSyntax.ReturnType, scope, reportDiagnostics);
-            }
             else
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-                {
-                    if (reportDiagnostics)
-                        context.Diagnostics.ReportMissingIntrinsicForSyntax(fnSyntax.FuncKeyword.Span, "omitted function pointer return type", KnownIntrinsics.Unit, fnSyntax.GetSource());
-                }
-                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle);
-                ret = unitHandle != default ? TypeRef.Resolved(unitHandle) : ResolveType(fnSyntax.ReturnType, scope, reportDiagnostics);
-            }
+                ret = TypeRef.EmptyTuple;
 
             var paramTypes = new List<TypeRef>(fnSyntax.ParameterTypes.Count);
             foreach (var p in fnSyntax.ParameterTypes)
@@ -125,37 +211,6 @@ internal sealed partial class DeclarationResolutionPass
             }
 
             return TypeRef.Function(ret, paramTypes);
-        }
-
-        if (syntax is DelegateTypeSyntax delSyntax)
-        {
-            TypeRef ret;
-            if (delSyntax.ArrowToken is not null)
-            {
-                ret = ResolveType(delSyntax.ReturnType, scope, reportDiagnostics);
-            }
-            else
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Unit))
-                {
-                    if (reportDiagnostics)
-                        context.Diagnostics.ReportMissingIntrinsicForSyntax(delSyntax.DelegateKeyword.Span, "omitted delegate return type", KnownIntrinsics.Unit, delSyntax.GetSource());
-                }
-                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle);
-                ret = unitHandle != default ? TypeRef.Resolved(unitHandle) : ResolveType(delSyntax.ReturnType, scope, reportDiagnostics);
-            }
-
-            var paramTypes = new List<TypeRef>(delSyntax.ParameterTypes.Count);
-            foreach (var p in delSyntax.ParameterTypes)
-                paramTypes.Add(ResolveType(p, scope, reportDiagnostics));
-
-            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Delegate))
-            {
-                if (reportDiagnostics)
-                    context.Diagnostics.ReportMissingIntrinsicForSyntax(delSyntax.DelegateKeyword.Span, "delegate type syntax", KnownIntrinsics.Delegate, delSyntax.GetSource());
-            }
-
-            return TypeRef.Delegate(ret, paramTypes);
         }
 
         if (syntax is SimpleType simple && (simple.Name.MatchingKind == MatchingKeywordKind.Var || simple.Name.Value == "var"))
@@ -172,12 +227,20 @@ internal sealed partial class DeclarationResolutionPass
         {
             var elements = new List<TypeRef>(union.Variants.Count);
             foreach (var elem in union.Variants)
-                elements.Add(ResolveType(elem, scope, reportDiagnostics));
+            {
+                var elemType = ResolveType(elem, scope, reportDiagnostics);
+                if (reportDiagnostics && !elemType.IsError && !elemType.IsSized(context))
+                    context.Diagnostics.ReportUnsizedTypeNotAllowed(elem.GetSpan() ?? default, elemType.ToDisplayString(context), "as a union variant", elem.GetSource());
+                elements.Add(elemType);
+            }
             return TypeRef.Union(elements, isUntagged: false);
         }
 
         if (syntax is TupleType tuple)
         {
+            if (tuple.Elements.Count == 0)
+                return TypeRef.EmptyTuple;
+
             var elements = new List<TupleElement>(tuple.Elements.Count);
             foreach (var elem in tuple.Elements)
             {
@@ -212,16 +275,29 @@ internal sealed partial class DeclarationResolutionPass
 
         if (syntax is ModifiedType modified)
         {
+            if (modified.Modifier is PointerTypeModifier ptrMod)
+            {
+                if (ReportInvalidDynIndirectionIfWrapped(modified.Type, modified, reportDiagnostics))
+                    return TypeRef.Error;
+                var inner = ResolveType(modified.Type, scope, reportDiagnostics, isDynTargetContext: isDynTargetContext);
+                return ResolvePointerModifier(modified, inner, ptrMod.IsMutable, reportDiagnostics);
+            }
+
+            if (modified.Modifier is ReferenceTypeModifier refMod)
+            {
+                if (ReportInvalidDynIndirectionIfWrapped(modified.Type, modified, reportDiagnostics))
+                    return TypeRef.Error;
+                var inner = ResolveType(modified.Type, scope, reportDiagnostics, isDynTargetContext: isDynTargetContext);
+                return ResolveReferenceModifier(modified, inner, refMod.IsMutable, reportDiagnostics);
+            }
+
             var innerType = ResolveType(modified.Type, scope, reportDiagnostics);
 
             return modified.Modifier switch
             {
-                PointerTypeModifier ptrMod => ResolvePointerModifier(modified, innerType, ptrMod.IsMutable, reportDiagnostics),
-                ReferenceTypeModifier refMod => ResolveReferenceModifier(modified, innerType, refMod.IsMutable, reportDiagnostics),
-                SpanTypeModifier => ResolveSpanModifier(modified, innerType, reportDiagnostics),
                 OptionalTypeModifier => ResolveOptionalModifier(modified, innerType, reportDiagnostics),
-                ArrayTypeModifier => ResolveArrayModifier(modified, innerType, reportDiagnostics),
-                FixedArrayTypeModifier fixedArray => ResolveFixedArrayModifier(modified, fixedArray, innerType, scope, reportDiagnostics),
+                SliceTypeModifier sliceMod => ResolveSliceModifier(modified, sliceMod, innerType, reportDiagnostics),
+                ArrayTypeModifier arrayMod => ResolveArrayModifier(modified, arrayMod, innerType, scope, reportDiagnostics),
                 VariadicTypeModifier => innerType,
                 _ => TypeRef.Error
             };
@@ -231,13 +307,29 @@ internal sealed partial class DeclarationResolutionPass
         {
             if (prefixModified.Modifier is SafeAliasTypeModifier safeMod)
             {
-                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+                if (!allowAlias)
+                {
+                    if (reportDiagnostics)
+                        context.Diagnostics.ReportAliasNotAllowedOutsideLocal(prefixModified.GetSpan() ?? default, "outside a local variable declaration", prefixModified.GetSource());
+                    return TypeRef.Error;
+                }
+                if (ReportInvalidDynIndirectionIfWrapped(prefixModified.Type, prefixModified, reportDiagnostics))
+                    return TypeRef.Error;
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext, isDynTargetContext: isDynTargetContext);
                 return TypeRef.Alias(inner, isMutable: safeMod.IsMutable, isUnsafe: false);
             }
 
             if (prefixModified.Modifier is UnsafeAliasTypeModifier unsafeMod)
             {
-                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext);
+                if (!allowAlias)
+                {
+                    if (reportDiagnostics)
+                        context.Diagnostics.ReportAliasNotAllowedOutsideLocal(prefixModified.GetSpan() ?? default, "outside a local variable declaration", prefixModified.GetSource());
+                    return TypeRef.Error;
+                }
+                if (ReportInvalidDynIndirectionIfWrapped(prefixModified.Type, prefixModified, reportDiagnostics))
+                    return TypeRef.Error;
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext, isDynTargetContext: isDynTargetContext);
                 return TypeRef.Alias(inner, isMutable: unsafeMod.IsMutable, isUnsafe: true);
             }
 
@@ -267,8 +359,8 @@ internal sealed partial class DeclarationResolutionPass
 
             if (prefixModified.Modifier is DynTypeModifier)
             {
-                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext: true);
-                return TypeRef.Dyn(inner);
+                var inner = ResolveType(prefixModified.Type, scope, reportDiagnostics, allowInference, isUntaggedContext, isDynTargetContext: true, allowAlias: allowAlias);
+                return TypeRef.CreateValidatedDynType(inner, prefixModified, context, reportDiagnostics);
             }
 
             return TypeRef.Error;
@@ -283,20 +375,13 @@ internal sealed partial class DeclarationResolutionPass
             if (genericTarget.Handle is { } h && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optH) && h == optH && generic.GenericArguments.Count == 1)
             {
                 var elemType = ResolveType(generic.GenericArguments[0], scope, reportDiagnostics);
+                if (reportDiagnostics && !elemType.IsError && !elemType.IsSized(context))
+                    context.Diagnostics.ReportGenericConstraintNotSized(generic.GenericArguments[0].GetSpan() ?? default, elemType.ToDisplayString(context), "T", KnownIntrinsics.Optional, "Sized", generic.GetSource());
                 return TypeRef.Optional(elemType, optH);
             }
 
             if (genericTarget.IsResolved && genericTarget.Handle is { } targetH)
-            {
-                var typeArgs = new List<TypeRef>(generic.GenericArguments.Count);
-                foreach (var arg in generic.GenericArguments)
-                    typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
-
-                var gen = TypeRef.Generic(targetH, generic.Name.Value, typeArgs);
-                if (!isTraitBoundContext && IsInterfaceSymbol(context, targetH))
-                    return TypeRef.Dyn(gen);
-                return gen;
-            }
+                return ResolveAndInstantiateGenericTarget(targetH, generic.Name.Value, generic.GenericArguments, scope, reportDiagnostics, implicitThisTarget, isConformanceOrConstraintContext);
 
             return genericTarget;
         }
@@ -316,20 +401,13 @@ internal sealed partial class DeclarationResolutionPass
                 if (target.Handle is { } qh && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var qOptH) && qh == qOptH && qualifiedGeneric.GenericArguments.Count == 1)
                 {
                     var elemType = ResolveType(qualifiedGeneric.GenericArguments[0], scope, reportDiagnostics);
+                    if (reportDiagnostics && !elemType.IsError && !elemType.IsSized(context))
+                        context.Diagnostics.ReportGenericConstraintNotSized(qualifiedGeneric.GenericArguments[0].GetSpan() ?? default, elemType.ToDisplayString(context), "T", KnownIntrinsics.Optional, "Sized", qualifiedGeneric.GetSource());
                     return TypeRef.Optional(elemType, qOptH);
                 }
 
                 if (target.IsResolved && target.Handle is { } qtargetH)
-                {
-                    var typeArgs = new List<TypeRef>(qualifiedGeneric.GenericArguments.Count);
-                    foreach (var arg in qualifiedGeneric.GenericArguments)
-                        typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
-
-                    var gen = TypeRef.Generic(qtargetH, qualifiedGeneric.Name.Value, typeArgs);
-                    if (!isTraitBoundContext && IsInterfaceSymbol(context, qtargetH))
-                        return TypeRef.Dyn(gen);
-                    return gen;
-                }
+                    return ResolveAndInstantiateGenericTarget(qtargetH, qualifiedGeneric.Name.Value, qualifiedGeneric.GenericArguments, scope, reportDiagnostics, implicitThisTarget, isConformanceOrConstraintContext);
 
                 return target;
             }
@@ -339,24 +417,253 @@ internal sealed partial class DeclarationResolutionPass
             if (result.Handle is { } rightHandle)
                 context.ResolvedTree.AddReference(qualified.Right, rightHandle);
 
-            CheckUntaggedUsage(result, syntax, isUntaggedContext, reportDiagnostics);
-            if (!isTraitBoundContext && result.Handle is { } resH && IsInterfaceSymbol(context, resH))
-                return TypeRef.Dyn(result);
-            return result;
+            return FinalizeNonGenericType(result, syntax, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, reportDiagnostics);
+        }
+
+        if (syntax is ScopeQualifiedType scopeQualified)
+        {
+            return ResolveScopeQualifiedType(scopeQualified, scope, reportDiagnostics, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, isConformanceOrConstraintContext);
+        }
+
+        if (syntax is ConformanceQualifiedType confQualified)
+        {
+            return context.ResolveConformanceQualifiedType(
+                confQualified,
+                scope,
+                default,
+                (ts, sc) => ResolveType(ts, sc, reportDiagnostics, allowInference: false, isUntaggedContext: false, isTraitBoundContext: true),
+                (ts, sc) => ResolveType(ts, sc, reportDiagnostics, allowInference, isUntaggedContext, isTraitBoundContext, isDynTargetContext),
+                reportDiagnostics);
         }
 
         ResolveTypeChildren(syntax, scope);
 
         var finalRes = ResolveTypeName(syntax, scope, reportDiagnostics);
-        CheckUntaggedUsage(finalRes, syntax, isUntaggedContext, reportDiagnostics);
-        if (!isTraitBoundContext && finalRes.Handle is { } fHandle && IsInterfaceSymbol(context, fHandle))
-            return TypeRef.Dyn(finalRes);
-        return finalRes;
+        return FinalizeNonGenericType(finalRes, syntax, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, reportDiagnostics);
     }
+
+    private TypeRef ResolveAndInstantiateGenericTarget(
+        SymbolHandle targetH,
+        string targetName,
+        SeparatedSyntaxList<TypeSyntax> genericArguments,
+        Scope scope,
+        bool reportDiagnostics,
+        TypeRef? implicitThisTarget,
+        bool isConformanceOrConstraintContext)
+    {
+        var typeArgs = new List<TypeRef>(genericArguments.Count);
+        foreach (var arg in genericArguments)
+            typeArgs.Add(ResolveType(arg, scope, reportDiagnostics));
+
+        var genericParams = GetGenericParameters(targetH);
+        if (typeArgs.Count < genericParams.Count)
+        {
+            for (int i = typeArgs.Count; i < genericParams.Count; i++)
+            {
+                var gp = context.GetGenericParameterSymbol(genericParams[i]);
+                if (gp?.HasSelfDefault == true && implicitThisTarget is { } selfDef)
+                    typeArgs.Add(selfDef);
+                else if (gp?.DefaultType is { } def && def.IsResolved)
+                    typeArgs.Add(def);
+                else
+                    break;
+            }
+        }
+
+        if (genericParams.Count == 0 || typeArgs.Count > 0)
+            context.ValidateGenericTypeArgumentConformances(targetH, genericArguments.ToList(), typeArgs, scope, default, reportDiagnostics, isConformanceOrConstraintContext);
+
+        return InstantiateSpecialOrGenericType(targetH, targetName, typeArgs, genericArguments);
+    }
+
+    private TypeRef FinalizeNonGenericType(
+        TypeRef result,
+        TypeSyntax syntax,
+        bool isUntaggedContext,
+        bool isTraitBoundContext,
+        bool isDynTargetContext,
+        TypeRef? implicitThisTarget,
+        bool reportDiagnostics)
+    {
+        CheckUntaggedUsage(result, syntax, isUntaggedContext, reportDiagnostics);
+
+        if (result.IsResolved && result.Handle is { } handle)
+        {
+            var gps = GetGenericParameters(handle);
+            if (gps.Count > 0)
+            {
+                bool allThis = true;
+                bool allSelfDefaults = true;
+                foreach (var gpH in gps)
+                {
+                    var gp = context.GetGenericParameterSymbol(gpH);
+                    if (gp is not { ParameterKind: GenericParameterKind.This })
+                    {
+                        allThis = false;
+                        break;
+                    }
+                    if (!gp.HasSelfDefault)
+                        allSelfDefaults = false;
+                }
+
+                if (allThis)
+                {
+                    if (allSelfDefaults && implicitThisTarget is { } selfTarget)
+                    {
+                        var args = new List<TypeRef>(gps.Count);
+                        for (int i = 0; i < gps.Count; i++)
+                            args.Add(selfTarget);
+                        return TypeRef.Generic(handle, context.GetSymbol(handle)?.Name.Text ?? result.ToDisplayString(context), args);
+                    }
+
+                    if (reportDiagnostics)
+                    {
+                        var firstGp = context.GetGenericParameterSymbol(gps[0])!;
+                        context.Diagnostics.ReportMissingExplicitThisTypeArgument(
+                            syntax.GetSpan() ?? default,
+                            context.GetSymbol(handle)?.Name.Text ?? result.ToDisplayString(context),
+                            firstGp.Name.Text,
+                            syntax.GetSource());
+                    }
+                    return TypeRef.Error;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private TypeRef InstantiateSpecialOrGenericType(SymbolHandle targetH, string targetName, IReadOnlyList<TypeRef> typeArgs, SeparatedSyntaxList<TypeSyntax> argSyntaxes)
+    {
+        var unwrapped = context.UnwrapAlias(targetH);
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH) && unwrapped == sliceH && typeArgs.Count >= 1)
+        {
+            int dim = 1;
+            if (argSyntaxes.Count >= 2 && argSyntaxes[1] is LiteralGenericArgument lit && int.TryParse(lit.Expression.Literal.Value, out int parsedDim) && parsedDim >= 1)
+                dim = parsedDim;
+            return TypeRef.Slice(typeArgs[0], dim, sliceH);
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrH) && unwrapped == arrH && typeArgs.Count >= 2 && argSyntaxes.Count >= 2 && argSyntaxes[1] is LiteralGenericArgument litSize)
+        {
+            var sizes = new List<Expression> { litSize.Expression };
+            for (int i = 2; i < argSyntaxes.Count; i++)
+            {
+                if (argSyntaxes[i] is LiteralGenericArgument l)
+                    sizes.Add(l.Expression);
+            }
+            return TypeRef.Array(typeArgs[0], sizes, arrH);
+        }
+
+        return TypeRef.Generic(targetH, targetName, typeArgs);
+    }
+
+    private bool ReportInvalidDynIndirectionIfWrapped(TypeSyntax innerSyntax, TypeSyntax outerSyntax, bool reportDiagnostics)
+    {
+        while (innerSyntax is GroupedType g)
+            innerSyntax = g.InnerType;
+
+        if (innerSyntax is PrefixModifiedType { Modifier: DynTypeModifier } innerDyn)
+        {
+            if (reportDiagnostics)
+            {
+                var innerName = innerDyn.Type.ToString() ?? "T";
+                context.Diagnostics.ReportInvalidInterfaceOrDynUsage(
+                    outerSyntax.GetSpan() ?? default,
+                    "indirection modifier cannot wrap 'dyn'; write 'dyn' outside the reference, alias, or pointer",
+                    "apply 'dyn' outside '&' or '*'",
+                    $"write 'dyn &{innerName}' (or 'dyn {innerName}&' / 'dyn {innerName}*') instead",
+                    outerSyntax.GetSource());
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private TypeRef ResolveScopeQualifiedType(
+        ScopeQualifiedType scopeQualified,
+        Scope scope,
+        bool reportDiagnostics,
+        bool isUntaggedContext,
+        bool isTraitBoundContext,
+        bool isDynTargetContext,
+        TypeRef? implicitThisTarget = null,
+        bool isConformanceOrConstraintContext = false)
+    {
+        var memberPath = ResolutionContext.GetSymbolName(scopeQualified.MemberType);
+        GenericType? leafGeneric = FindLeafGenericType(scopeQualified.MemberType);
+        SymbolHandle handle;
+        if (context.ResolvedTree.TryGetReference(scopeQualified, out var preboundH))
+        {
+            handle = preboundH;
+        }
+        else
+        {
+            var syms = context.ResolveScopedSymbols(
+                scopeQualified.Qualifier,
+                memberPath,
+                scope,
+                typesOnly: true,
+                scopeQualified.GetSpan() ?? default,
+                scopeQualified.GetSource(),
+                reportAmbiguity: reportDiagnostics,
+                out bool isAmbiguousAcrossModules);
+
+            if (syms.Count == 0)
+            {
+                if (leafGeneric is not null)
+                    ResolveGenericArguments(leafGeneric, null, scope);
+
+                if (reportDiagnostics && !isAmbiguousAcrossModules)
+                {
+                    context.Diagnostics.ReportUnresolvedTypeReference(
+                        scopeQualified.GetSpan() ?? default,
+                        $"{scopeQualified.Qualifier.Value}::{memberPath.ToDisplayString()}",
+                        scopeQualified.GetSource(),
+                        scopeQualified.ExpansionOrigin);
+                }
+                return TypeRef.Error;
+            }
+
+            handle = ResolutionContext.GetHandle(syms[0]);
+            context.ResolvedTree.AddReference(scopeQualified, handle);
+            context.ResolvedTree.AddReference(scopeQualified.MemberType, handle);
+        }
+
+        if (leafGeneric is not null)
+        {
+            context.ResolvedTree.AddReference(leafGeneric, handle);
+            ResolveGenericArguments(leafGeneric, handle, scope);
+
+            if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optH) &&
+                handle == optH &&
+                leafGeneric.GenericArguments.Count == 1)
+            {
+                var optElem = ResolveType(leafGeneric.GenericArguments[0], scope, reportDiagnostics);
+                if (reportDiagnostics && !optElem.IsError && !optElem.IsSized(context))
+                    context.Diagnostics.ReportGenericConstraintNotSized(leafGeneric.GenericArguments[0].GetSpan() ?? default, optElem.ToDisplayString(context), "T", KnownIntrinsics.Optional, "Sized", scopeQualified.GetSource());
+                return TypeRef.Optional(optElem, optH);
+            }
+
+            return ResolveAndInstantiateGenericTarget(handle, leafGeneric.Name.Value, leafGeneric.GenericArguments, scope, reportDiagnostics, implicitThisTarget, isConformanceOrConstraintContext);
+        }
+
+        if (scopeQualified.MemberType is QualifiedType qt)
+            context.ResolvedTree.AddReference(qt.Right, handle);
+
+        return FinalizeNonGenericType(TypeRef.Resolved(handle), scopeQualified, isUntaggedContext, isTraitBoundContext, isDynTargetContext, implicitThisTarget, reportDiagnostics);
+    }
+
+    private static GenericType? FindLeafGenericType(TypeSyntax syntax) => syntax switch
+    {
+        GenericType gt => gt,
+        QualifiedType qt => FindLeafGenericType(qt.Right),
+        _ => null
+    };
 
     private static bool IsInterfaceSymbol(ResolutionContext context, SymbolHandle handle)
     {
-        var sym = context.GetSymbol(handle);
+        var sym = context.GetSymbol(context.UnwrapAlias(handle));
         return sym switch
         {
             TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
@@ -409,15 +716,41 @@ internal sealed partial class DeclarationResolutionPass
 
         if (symbol is AliasSymbol aliasSymbol && aliasSymbol.IsGlobalAlias && !aliasSymbol.Target.IsResolved)
         {
-            if (reportDiagnostics)
+            // The alias target may not be resolved yet because DeclarationResolutionPass resolves
+            // TypeSymbols before AliasSymbols.  Try to resolve it lazily now (with a cycle guard).
+            if (!resolvingAliases.Add(aliasSymbol))
             {
-                var span = syntax.GetSpan() ?? default;
-                var source = syntax.GetSource();
-                string? arityNote = GetArityMismatchNote(scope, name);
-                context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+                // Cycle detected – report error
+                if (reportDiagnostics)
+                {
+                    var span = syntax.GetSpan() ?? default;
+                    var source = syntax.GetSource();
+                    context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin);
+                }
+                return TypeRef.Error;
             }
 
-            return TypeRef.Error;
+            try
+            {
+                ResolveAlias(aliasSymbol);
+            }
+            finally
+            {
+                resolvingAliases.Remove(aliasSymbol);
+            }
+
+            if (!aliasSymbol.Target.IsResolved)
+            {
+                if (reportDiagnostics)
+                {
+                    var span = syntax.GetSpan() ?? default;
+                    var source = syntax.GetSource();
+                    string? arityNote = GetArityMismatchNote(scope, name);
+                    context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+                }
+
+                return TypeRef.Error;
+            }
         }
 
         var handle = ResolutionContext.GetHandle(symbol);
@@ -464,16 +797,19 @@ internal sealed partial class DeclarationResolutionPass
         {
             var argument = generic.GenericArguments[index];
             var parameter = index < parameters.Count && parameters[index].Kind is SymbolKind.GenericParameter
-                ? context.GenericParameterSymbols[parameters[index].ID]
-                : (parameters.Count > 0 && parameters[^1].Kind is SymbolKind.GenericParameter && context.GenericParameterSymbols[parameters[^1].ID].IsVariadic
-                    ? context.GenericParameterSymbols[parameters[^1].ID]
+                ? context.GetGenericParameterSymbol(parameters[index])
+                : (parameters.Count > 0 && parameters[^1].Kind is SymbolKind.GenericParameter && context.GetGenericParameterSymbol(parameters[^1]) is { IsVariadic: true } variadicParam
+                    ? variadicParam
                     : null);
 
             switch (argument)
             {
                 case LiteralGenericArgument:
                     break;
-                case NamedExpressionGenericArgument named when parameter?.ParameterKind is GenericParameterKind.Type:
+                case DerivedGenericArgumentSyntax derivedArg:
+                    ResolveType(derivedArg.TargetType, scope, reportDiagnostics: false);
+                    break;
+                case NamedExpressionGenericArgument named when parameter?.ParameterKind is GenericParameterKind.Type or GenericParameterKind.This:
                     ResolveNamedArgumentAsType(named.Expression, scope);
                     break;
                 case NamedExpressionGenericArgument named:
@@ -584,53 +920,53 @@ internal sealed partial class DeclarationResolutionPass
         return TypeRef.Reference(innerType, isMutable);
     }
 
-    private TypeRef ResolveSpanModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics)
+    private TypeRef ResolveSliceModifier(ModifiedType modified, SliceTypeModifier sliceMod, TypeRef innerType, bool reportDiagnostics = true)
     {
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Span))
+        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Slice))
         {
             var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "span type syntax", KnownIntrinsics.Span, modified.GetSource());
+            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "slice type syntax", KnownIntrinsics.Slice, modified.GetSource());
         }
 
-        return TypeRef.Span(innerType);
+        if (reportDiagnostics && !innerType.IsError && !innerType.IsSized(context))
+        {
+            var span = modified.Type.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportGenericConstraintNotSized(span, innerType.ToDisplayString(context), "T", KnownIntrinsics.Slice, "Sized", modified.GetSource());
+        }
+
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceHandle);
+        return TypeRef.Slice(innerType, sliceMod.Dimension, sliceHandle != default ? sliceHandle : null);
     }
 
-    private TypeRef ResolveArrayModifier(ModifiedType modified, TypeRef innerType, bool reportDiagnostics = true)
+    private TypeRef ResolveArrayModifier(ModifiedType modified, ArrayTypeModifier arrayMod, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
     {
         if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
         {
-            var span = modified.Modifier.GetSpan() ?? modified.GetSpan() ?? default;
+            var span = arrayMod.GetSpan() ?? default;
             context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "array type syntax", KnownIntrinsics.Array, modified.GetSource());
         }
 
-        int dimension = modified.Modifier is ArrayTypeModifier arrMod ? arrMod.Dimension : 1;
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayHandle);
-        return TypeRef.Array(innerType, dimension, arrayHandle != default ? arrayHandle : null);
-    }
-
-    private TypeRef ResolveFixedArrayModifier(ModifiedType modified, FixedArrayTypeModifier fixedArray, TypeRef innerType, Scope scope, bool reportDiagnostics = true)
-    {
-        if (reportDiagnostics && !context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+        if (reportDiagnostics && !innerType.IsError && !innerType.IsSized(context))
         {
-            var span = fixedArray.GetSpan() ?? default;
-            context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "fixed-size array type syntax", KnownIntrinsics.FixedArray, modified.GetSource());
+            var span = modified.Type.GetSpan() ?? modified.GetSpan() ?? default;
+            context.Diagnostics.ReportGenericConstraintNotSized(span, innerType.ToDisplayString(context), "T", KnownIntrinsics.Array, "Sized", modified.GetSource());
         }
 
-        foreach (var s in fixedArray.Sizes)
+        foreach (var s in arrayMod.Sizes)
             ResolveExpression(s, scope, default);
 
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrayHandle);
-        return TypeRef.FixedArray(innerType, fixedArray.Sizes.ToList(), fixedArrayHandle != default ? fixedArrayHandle : null);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayHandle);
+        return TypeRef.Array(innerType, arrayMod.Sizes.ToList(), arrayHandle != default ? arrayHandle : null);
     }
 
     private void CheckInferredInitializer(Expression expr, bool isInferred)
     {
         if (expr is CollectionExpression collection && isInferred)
         {
-            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.FixedArray))
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Array))
             {
                 var span = collection.GetSpan() ?? default;
-                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "inferred collection expression", KnownIntrinsics.FixedArray, collection.GetSource());
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "inferred collection expression", KnownIntrinsics.Array, collection.GetSource());
             }
         }
         else if (expr is LiteralExpression literal && !literal.HasSuffix && isInferred)
@@ -680,6 +1016,9 @@ internal sealed partial class DeclarationResolutionPass
                 break;
             case PrefixModifiedType prefixModified:
                 ResolveTypeChildren(prefixModified.Type, scope);
+                break;
+            case GroupedType grouped:
+                ResolveTypeChildren(grouped.InnerType, scope);
                 break;
         }
     }

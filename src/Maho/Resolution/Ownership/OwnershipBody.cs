@@ -17,6 +17,7 @@ internal sealed class OwnershipBody
     public OwnershipBlock Exit { get; }
     public List<OwnershipBlock> Blocks { get; } = [];
     public IReadOnlyDictionary<Symbol, TypeRef> PlaceTypes => placeTypes;
+    public Dictionary<Symbol, List<(Place Referent, BorrowKind Kind)>> ReferentMap { get; } = [];
 
     private readonly Dictionary<Symbol, TypeRef> placeTypes = [];
 
@@ -68,7 +69,8 @@ internal sealed record OwnershipStatement(
     BorrowKind? BorrowKind = null,
     Symbol? LoanOwner = null,
     bool Conditional = false,
-    SyntaxNode? Origin = null);
+    SyntaxNode? Origin = null,
+    bool IsReturnUse = false);
 
 /// <summary>Control transfer for a lowered ownership block.</summary>
 internal sealed class OwnershipTerminator
@@ -92,8 +94,14 @@ internal sealed class OwnershipTerminator
     /// <summary>Creates a return terminator and retains its source expression for escape analysis.</summary>
     public static OwnershipTerminator Return(Expression? expression = null) => new(OwnershipTerminatorKind.Return, condition: expression);
 
+    /// <summary>Creates a throw terminator and retains its source expression for escape analysis.</summary>
+    public static OwnershipTerminator Throw(Expression? expression = null) => new(OwnershipTerminatorKind.Throw, condition: expression);
+
     /// <summary>The returned expression for a return terminator, if any.</summary>
     public Expression? ReturnExpression => Kind == OwnershipTerminatorKind.Return ? Condition : null;
+
+    /// <summary>The thrown expression for a throw terminator, if any.</summary>
+    public Expression? ThrowExpression => Kind == OwnershipTerminatorKind.Throw ? Condition : null;
 
     private OwnershipTerminator(OwnershipTerminatorKind kind, OwnershipBlock? target = null, OwnershipBlock? falseTarget = null, Expression? condition = null)
     {
@@ -110,5 +118,6 @@ internal enum OwnershipTerminatorKind : byte
     Fallthrough,
     Branch,
     Conditional,
-    Return
+    Return,
+    Throw
 }

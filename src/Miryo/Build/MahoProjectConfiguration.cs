@@ -5,6 +5,10 @@ namespace Miryo.Build;
 /// <summary> Configuration read from one domain-specific <c>.mhpr</c> project file. </summary>
 public sealed class MahoProjectConfiguration
 {
+    /// <summary> Optional canonical PascalCase module symbol name (defaults to ProjectName). </summary>
+    public string? ModuleName { get; init; }
+    /// <summary> Optional binary output artifact filename on disk (defaults to kebab-case of ProjectName). </summary>
+    public string? ArtifactName { get; init; }
     /// <summary> Optional source file selected as the project's explicit entry point. </summary>
     public string? EntryFile { get; init; }
     /// <summary> Whether unsafe operations are enabled project-wide. </summary>

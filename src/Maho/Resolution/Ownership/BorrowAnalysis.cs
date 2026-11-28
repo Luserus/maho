@@ -93,6 +93,20 @@ internal sealed class BorrowAnalysis
             if (statement.Kind == OwnershipStatementKind.StorageDead)
             {
                 active.RemoveWhere(loan => ReferenceEquals(loan.Owner, statement.Place.Root));
+                var referentLoans = active.Where(loan => Overlaps(loan.Referent, statement.Place)).ToList();
+                foreach (var loan in referentLoans)
+                {
+                    if (report && statement.Place.Root is LocalVariableSymbol local)
+                    {
+                        context.Diagnostics.ReportBorrowEscapesLocal(
+                            loan.Origin,
+                            local.Name.Text,
+                            statement.Span,
+                            loan.Source,
+                            statement.Source);
+                    }
+                    active.Remove(loan);
+                }
                 continue;
             }
 
@@ -125,6 +139,13 @@ internal sealed class BorrowAnalysis
                         if (report)
                             ReportConflict(statement, loan, isMove ? "move" : "assign to");
                     }
+                }
+                if (isWrite &&
+                    statement.Place.Projections.Count == 0 &&
+                    (!body.PlaceTypes.TryGetValue(statement.Place.Root, out var targetType) ||
+                     TypeRef.UnwrapDyn(targetType).SpecialType is not AliasSemanticType))
+                {
+                    active.RemoveWhere(loan => ReferenceEquals(loan.Owner, statement.Place.Root));
                 }
             }
 
@@ -192,6 +213,7 @@ internal sealed class BorrowAnalysis
                 case OwnershipStatementKind.Assign:
                     live.Remove(statement.Place.Root);
                     break;
+                case OwnershipStatementKind.Borrow:
                 case OwnershipStatementKind.Use:
                     live.Add(statement.Place.Root);
                     break;

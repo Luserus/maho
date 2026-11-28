@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -48,10 +49,11 @@ internal sealed partial class IntrinsicDiscoveryPass
             return;
         }
 
-        if (!TryExtractLiteralSpan(app.Arguments[0], out var nameSpan) || !KnownIntrinsics.TryGetOperatorKind(nameSpan, out var opKind))
+        string? opName = ExtractLiteralString(app.Arguments[0]);
+        if (opName is null || !KnownIntrinsics.TryGetOperatorKind(opName.AsSpan(), out var opKind))
         {
             var span = app.Arguments[0].GetSpan() ?? default;
-            string displayVal = nameSpan.Length > 0 ? nameSpan.ToString() : (app.Arguments[0].ToString() ?? "");
+            string displayVal = opName ?? app.Arguments[0].ToString() ?? "";
             context.Diagnostics.ReportInvalidOperatorFunctionSignature(span, displayVal, $"unknown operator function '{displayVal}'", method.Syntax?.GetSource());
             return;
         }
@@ -62,7 +64,7 @@ internal sealed partial class IntrinsicDiscoveryPass
         int totalParamCount = method.Syntax?.Signature.Parameters.Count ?? method.Parameters.Count;
         int paramCount = hasReceiver ? totalParamCount - 1 : totalParamCount;
         var returnTypeSyntax = method.Syntax?.Signature.ReturnType;
-        bool isVoidReturn = returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope);
+        bool isVoidReturn = method.Syntax?.Signature.ArrowToken is null || (returnTypeSyntax is not null && IsVoidType(returnTypeSyntax, method.EnclosingScope));
         bool isRefReturn = returnTypeSyntax is not null && IsReferenceType(returnTypeSyntax, method.EnclosingScope);
         var sigSpan = method.Syntax?.Signature.Identifier.GetSpan() ?? app.GetSpan() ?? default;
         var source = method.Syntax?.GetSource();
@@ -132,12 +134,7 @@ internal sealed partial class IntrinsicDiscoveryPass
             // Cast operators
             case OperatorKind.ImplicitCast:
             case OperatorKind.ExplicitCast:
-                if (!isStatic)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
-                    return;
-                }
-                if (paramCount != 1)
+                if (totalParamCount != 1)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 1 parameter", source);
                     return;
@@ -175,9 +172,33 @@ internal sealed partial class IntrinsicDiscoveryPass
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors cannot accept parameters", source);
                     return;
                 }
+                if (method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.MutReference }])
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors must take a 'mut &this' receiver", source);
+                    return;
+                }
                 if (!isVoidReturn)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors must return void", source);
+                    return;
+                }
+                break;
+
+            // StaticConstructor
+            case OperatorKind.StaticConstructor:
+                if (hasReceiver)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors cannot have a receiver parameter", source);
+                    return;
+                }
+                if (totalParamCount != 0)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors cannot accept parameters", source);
+                    return;
+                }
+                if (!isVoidReturn)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "static constructors must return void", source);
                     return;
                 }
                 break;
@@ -326,54 +347,18 @@ internal sealed partial class IntrinsicDiscoveryPass
                 }
                 break;
 
-            // Put
-            case OperatorKind.Put:
-                if (!isStatic)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
-                    return;
-                }
-                if (paramCount < 1)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept at least 1 destination parameter", source);
-                    return;
-                }
-                if (!isVoidReturn)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
-                    return;
-                }
-                break;
-
             // Copy
             case OperatorKind.Copy:
-                if (!isStatic)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
-                    return;
-                }
-                if (paramCount != 2)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters (dest, source)", source);
-                    return;
-                }
-                if (!isVoidReturn)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type must be void", source);
-                    return;
-                }
-                break;
-
             // Move
             case OperatorKind.Move:
-                if (!isStatic)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared static", source);
-                    return;
-                }
-                if (paramCount != 2)
+                if (totalParamCount != 2)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters (dest, source)", source);
+                    return;
+                }
+                if (hasReceiver && method.Syntax?.Signature.Parameters[0].Declarator.ReceiverKind is not ReceiverKind.MutReference)
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, $"instance '{fullName}' operator must take a 'mut &this' receiver", source);
                     return;
                 }
                 if (!isVoidReturn)
@@ -385,9 +370,23 @@ internal sealed partial class IntrinsicDiscoveryPass
 
             // Callable
             case OperatorKind.Callable:
+            case OperatorKind.CallableMut:
+            case OperatorKind.CallableOnce:
                 if (isStatic)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (opKind == OperatorKind.CallableMut &&
+                    method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.MutReference }, ..])
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "receiver parameter must be 'this mut&'", source);
+                    return;
+                }
+                if (opKind == OperatorKind.CallableOnce &&
+                    method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.Value }, ..])
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "receiver parameter must be 'this'", source);
                     return;
                 }
                 break;
@@ -462,11 +461,57 @@ internal sealed partial class IntrinsicDiscoveryPass
     /// Validates that they are declared inside an intrinsic type and accept exactly one string literal argument
     /// describing the member signature (e.g. "Int32.Add(Int32, Int32)", "Int32.&lt;i32&gt;"). Sets <see cref="FunctionFlags.Intrinsic"/> on valid methods.
     /// </summary>
+    private bool TryExtractIntrinsicSignature(
+        AttributeApplication app,
+        string attributeName,
+        SourceText? source,
+        out string signature)
+    {
+        signature = string.Empty;
+        if (app.Arguments.Count != 1)
+        {
+            var span = app.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                span,
+                $"attribute '{attributeName}' requires exactly one argument",
+                source,
+                attributeName);
+            return false;
+        }
+
+        var argExpr = app.Arguments[0];
+        if (argExpr is not LiteralExpression lit || lit.Literal.Kind is not (TokenKind.String or TokenKind.SuffixedString))
+        {
+            var span = argExpr.GetSpan() ?? default;
+            context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
+                span,
+                $"argument to '{attributeName}' must be a string literal describing the member",
+                source,
+                attributeName);
+            return false;
+        }
+
+        signature = ExtractLiteralString(lit) ?? lit.Literal.Value;
+        return true;
+    }
+
+    private bool IsDeclaredInsideIntrinsicType(SymbolHandle parentHandle)
+    {
+        if (context.GetSymbol(parentHandle) is not TypeSymbol)
+            return false;
+
+        foreach (var (_, handle) in context.DiscoveredIntrinsics.All)
+        {
+            if (handle == parentHandle)
+                return true;
+        }
+
+        return false;
+    }
+
     private void DiscoverAndValidateIntrinsicFunctions()
     {
-        var allMethods = context.MethodSymbols;
-
-        foreach (var method in allMethods)
+        foreach (var method in context.MethodSymbols)
         {
             if (method.Syntax?.Attributes is not { Count: > 0 } attrLists)
                 continue;
@@ -478,48 +523,13 @@ internal sealed partial class IntrinsicDiscoveryPass
                     if (!MatchesAttributeName(app, KnownIntrinsics.IntrinsicFunctionAttribute, context.DiscoveredOperators.IntrinsicFunctionAttribute))
                         continue;
 
-                    if (app.Arguments.Count != 1)
-                    {
-                        var span = app.GetSpan() ?? default;
-                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                            span,
-                            "attribute 'IntrinsicFunction' requires exactly one argument",
-                            method.Syntax?.GetSource(),
-                            KnownIntrinsics.IntrinsicFunctionAttribute);
+                    if (!TryExtractIntrinsicSignature(app, KnownIntrinsics.IntrinsicFunctionAttribute, method.Syntax?.GetSource(), out var sig))
                         continue;
-                    }
-
-                    var argExpr = app.Arguments[0];
-                    if (argExpr is not LiteralExpression lit || lit.Literal.Kind is not (TokenKind.String or TokenKind.SuffixedString))
-                    {
-                        var span = argExpr.GetSpan() ?? default;
-                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                            span,
-                            "argument to 'IntrinsicFunction' must be a string literal describing the member",
-                            method.Syntax?.GetSource(),
-                            KnownIntrinsics.IntrinsicFunctionAttribute);
-                        continue;
-                    }
 
                     if (method.Parent is null)
                         continue;
 
-                    var parentSym = context.GetSymbol(method.Parent.Value);
-                    bool isIntrinsicType = false;
-
-                    if (parentSym is TypeSymbol)
-                    {
-                        foreach (var (_, handle) in context.DiscoveredIntrinsics.All)
-                        {
-                            if (handle == method.Parent.Value)
-                            {
-                                isIntrinsicType = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!isIntrinsicType)
+                    if (!IsDeclaredInsideIntrinsicType(method.Parent.Value))
                     {
                         var span = app.GetSpan() ?? default;
                         context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
@@ -531,7 +541,7 @@ internal sealed partial class IntrinsicDiscoveryPass
                     }
 
                     method.Flags |= FunctionFlags.Intrinsic;
-                    method.IntrinsicSignature = ExtractLiteralString(lit) ?? lit.Literal.Value;
+                    method.IntrinsicSignature = sig;
                 }
             }
         }
@@ -548,31 +558,47 @@ internal sealed partial class IntrinsicDiscoveryPass
                     if (!MatchesAttributeName(app, KnownIntrinsics.IntrinsicFunctionAttribute, context.DiscoveredOperators.IntrinsicFunctionAttribute))
                         continue;
 
-                    if (app.Arguments.Count != 1)
+                    if (!TryExtractIntrinsicSignature(app, KnownIntrinsics.IntrinsicFunctionAttribute, function.Syntax?.GetSource(), out var sig))
+                        continue;
+
+                    function.Flags |= FunctionFlags.Intrinsic;
+                    function.IntrinsicSignature = sig;
+                }
+            }
+        }
+    }
+
+    private void DiscoverAndValidateIntrinsicProperties()
+    {
+        foreach (var prop in context.PropertySymbols)
+        {
+            if (prop.Syntax?.Attributes is not { Count: > 0 } attrLists)
+                continue;
+
+            foreach (var list in attrLists)
+            {
+                foreach (var app in list.Attributes)
+                {
+                    if (!MatchesAttributeName(app, KnownIntrinsics.IntrinsicPropertyAttribute, context.DiscoveredOperators.IntrinsicPropertyAttribute))
+                        continue;
+
+                    if (!TryExtractIntrinsicSignature(app, KnownIntrinsics.IntrinsicPropertyAttribute, prop.Syntax?.GetSource(), out var sig))
+                        continue;
+
+                    if (prop.Parent is null || !IsDeclaredInsideIntrinsicType(prop.Parent.Value))
                     {
                         var span = app.GetSpan() ?? default;
                         context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                             span,
-                            "attribute 'IntrinsicFunction' requires exactly one argument",
-                            function.Syntax?.GetSource(),
-                            KnownIntrinsics.IntrinsicFunctionAttribute);
+                            $"property '{prop.Name.Text}' marked with [IntrinsicProperty] must be declared in an intrinsic type",
+                            prop.Syntax?.GetSource(),
+                            KnownIntrinsics.IntrinsicPropertyAttribute);
                         continue;
                     }
 
-                    var argExpr = app.Arguments[0];
-                    if (argExpr is not LiteralExpression lit || lit.Literal.Kind is not (TokenKind.String or TokenKind.SuffixedString))
-                    {
-                        var span = argExpr.GetSpan() ?? default;
-                        context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
-                            span,
-                            "argument to 'IntrinsicFunction' must be a string literal describing the member",
-                            function.Syntax?.GetSource(),
-                            KnownIntrinsics.IntrinsicFunctionAttribute);
-                        continue;
-                    }
-
-                    function.Flags |= FunctionFlags.Intrinsic;
-                    function.IntrinsicSignature = ExtractLiteralString(lit) ?? lit.Literal.Value;
+                    prop.Flags |= FunctionFlags.Intrinsic;
+                    prop.IntrinsicSignature = sig;
+                    prop.HasBacking = false;
                 }
             }
         }
@@ -580,22 +606,18 @@ internal sealed partial class IntrinsicDiscoveryPass
 
     private bool IsVoidType(TypeSyntax type, Scope scope)
     {
-        if (type is UnionType)
-            return false;
-
-        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitHandle))
-        {
-            var resolved = ResolveTypeSymbol(type, scope);
-            if (resolved == unitHandle)
-                return true;
-        }
+        if (type is TupleType tuple && tuple.Elements.Count == 0)
+            return true;
 
         return false;
     }
 
     private bool IsReferenceType(TypeSyntax type, Scope scope)
     {
-        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier or SpanTypeModifier)
+        while (type is GroupedType grouped)
+            type = grouped.InnerType;
+
+        if (type is ModifiedType modified && modified.Modifier is ReferenceTypeModifier)
             return true;
 
         if (type is PrefixModifiedType prefix && prefix.Modifier is SafeAliasTypeModifier or UnsafeAliasTypeModifier)

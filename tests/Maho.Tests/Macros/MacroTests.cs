@@ -5,17 +5,25 @@ namespace Maho.Tests;
 public sealed partial class MacroTests
 {
     private const string MacroPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
-        [IntrinsicType("Unit")]
-        public struct void;
+        intrinsic attribute OperatorFunction(Str& name);
+
 
         [IntrinsicType("NUInt")]
         public struct nuint;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("Int8")]
         public struct int8;
@@ -24,15 +32,22 @@ public sealed partial class MacroTests
         public struct int32 : Add<int32>, Mul<int32>
         {
             [IntrinsicFunction("Int32.Add(Int32, Int32)")]
-            public func Add.Add(int32 left, int32 right) -> int32;
+            func Add.Add(int32 left, int32 right) -> int32;
             [IntrinsicFunction("Int32.Multiply(Int32, Int32)")]
-            public func Mul.Mul(int32 left, int32 right) -> int32;
+            func Mul.Mul(int32 left, int32 right) -> int32;
         }
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Int64")]
@@ -41,14 +56,14 @@ public sealed partial class MacroTests
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -60,7 +75,7 @@ public sealed partial class MacroTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -68,28 +83,20 @@ public sealed partial class MacroTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public interface Add<T>
         {
             [OperatorFunction("Addition")]
-            public func Add(int32 left, int32 right) -> int32;
+            func Add(int32 left, int32 right) -> int32;
         }
 
         public interface Mul<T>
         {
             [OperatorFunction("Multiplication")]
-            public func Mul(int32 left, int32 right) -> int32;
+            func Mul(int32 left, int32 right) -> int32;
         }
         """;
 
@@ -169,7 +176,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -214,7 +221,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -252,7 +259,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 temp = 1;
                     int32 other = 2;
@@ -288,7 +295,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 1;
                     int32 y = 2;
@@ -357,7 +364,7 @@ public sealed partial class MacroTests
             {
                 public struct List;
 
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     List arr = $wrap(10, 20, 30);
                 }
@@ -389,7 +396,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     $call_all(print, 1, 2, 3);
                 }

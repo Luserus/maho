@@ -1,18 +1,21 @@
-using System.Linq;
-using Maho;
-using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class CallableResolutionTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -21,28 +24,33 @@ public sealed class CallableResolutionTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -54,7 +62,7 @@ public sealed class CallableResolutionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -62,24 +70,16 @@ public sealed class CallableResolutionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
         """;
 
     [Fact]
     public void StandaloneLiteralCall_WhenNotCallable_ReportsMH0611()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 123();
             }
@@ -101,9 +101,9 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func Callable.Invoke(&this) -> CustomTarget
+                func Callable.Invoke(this&) -> CustomTarget
                 {
-                    return this;
+                    return *this;
                 }
             }
 
@@ -129,9 +129,9 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func Callable.Invoke(&this) -> CustomTarget
+                func Callable.Invoke(this&) -> CustomTarget
                 {
-                    return this;
+                    return *this;
                 }
             }
 
@@ -163,9 +163,9 @@ public sealed class CallableResolutionTests
                     return res;
                 }
 
-                public func Callable.Invoke(&this) -> CustomTarget
+                func Callable.Invoke(this&) -> CustomTarget
                 {
-                    return this;
+                    return *this;
                 }
             }
 

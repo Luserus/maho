@@ -22,6 +22,7 @@ public sealed class SemanticModel
 
     internal Dictionary<SyntaxNode, SymbolHandle> NodeSymbols { get; }
     internal Dictionary<Expression, TypeRef> ExpressionTypes { get; }
+    internal Dictionary<LiteralExpression, ResolvedLiteralInfo> LiteralInfos { get; }
     internal Dictionary<SymbolHandle, ControlFlowGraph> ControlFlowGraphs { get; }
 
     /// <summary> Gets the syntax and semantic diagnostics reported for this syntax tree. </summary>
@@ -32,12 +33,14 @@ public sealed class SemanticModel
         SyntaxTree syntaxTree,
         Dictionary<SyntaxNode, SymbolHandle> nodeSymbols,
         Dictionary<Expression, TypeRef> expressionTypes,
+        Dictionary<LiteralExpression, ResolvedLiteralInfo> literalInfos,
         Dictionary<SymbolHandle, ControlFlowGraph> controlFlowGraphs)
     {
         Compilation = compilation;
         SyntaxTree = syntaxTree;
         NodeSymbols = nodeSymbols;
         ExpressionTypes = expressionTypes;
+        LiteralInfos = literalInfos;
         ControlFlowGraphs = controlFlowGraphs;
     }
 
@@ -53,6 +56,10 @@ public sealed class SemanticModel
     /// <summary> Gets the semantic type of an expression within this tree. </summary>
     internal TypeRef? GetTypeInfo(Expression expr) =>
         ExpressionTypes.TryGetValue(expr, out var type) ? type : null;
+
+    /// <summary> Gets the decoded literal payload, scalar count, and escape spans for a quoted literal expression. </summary>
+    internal ResolvedLiteralInfo? GetLiteralInfo(LiteralExpression literal) =>
+        LiteralInfos.TryGetValue(literal, out var info) ? info : null;
 
     /// <summary> Gets the control flow graph for a function declared in this tree. </summary>
     internal ControlFlowGraph? GetControlFlowGraph(SymbolHandle functionHandle) =>
@@ -360,7 +367,8 @@ public sealed class SemanticModel
     }
 
     /// <summary>
-    /// LSP Semantic Tokens: generates semantic classification tokens for the entire syntax tree.
+    /// LSP Semantic Tokens: generates non-overlapping semantic classification tokens for the entire syntax tree,
+    /// splitting quoted literals around escape sequences into <c>"string"</c> and <c>"escapeSequence"</c> spans.
     /// </summary>
     /// <returns>A list of classified semantic highlighting tokens ordered by line and column.</returns>
     public IReadOnlyList<SemanticTokenInfo> GetSemanticTokens()
@@ -372,9 +380,6 @@ public sealed class SemanticModel
             var span = node.GetSpan();
             if (!span.HasValue || span.Value.Length == 0)
                 continue;
-
-            int line = span.Value.GetStartLine(SyntaxTree.SourceText) + 1;
-            int col = span.Value.GetStartColumn(SyntaxTree.SourceText) + 1;
 
             string tokenType = handle.Kind switch
             {
@@ -389,10 +394,63 @@ public sealed class SemanticModel
                 _ => "variable"
             };
 
-            tokens.Add(new SemanticTokenInfo(line, col, span.Value.Length, tokenType));
+            if (node is LiteralExpression litExpr && LiteralInfos.ContainsKey(litExpr))
+            {
+                // Highlight only the attached suffix with the bound literal handler symbol so quoted segments stay separate.
+                int suffixLen = litExpr.HasSuffix ? litExpr.Literal.GetSuffixSpan().Length : 0;
+                if (suffixLen > 0 && suffixLen <= span.Value.Length)
+                    EmitTokenSpan(tokens, span.Value.End - suffixLen, suffixLen, tokenType);
+                continue;
+            }
+
+            EmitTokenSpan(tokens, span.Value.Start, span.Value.Length, tokenType);
         }
 
+        AddLiteralSemanticTokens(tokens);
+
         return tokens.OrderBy(t => t.Line).ThenBy(t => t.Column).ToList();
+    }
+
+    private void AddLiteralSemanticTokens(List<SemanticTokenInfo> tokens)
+    {
+        foreach (var (lit, info) in LiteralInfos)
+        {
+            var tokSpan = lit.Literal.Span;
+            if (tokSpan.Length == 0 || tokSpan.End > SyntaxTree.SourceText.Length)
+                continue;
+
+            int suffixLen = lit.HasSuffix && NodeSymbols.ContainsKey(lit)
+                ? lit.Literal.GetSuffixSpan().Length
+                : 0;
+            int litEnd = Math.Max(tokSpan.Start, tokSpan.End - suffixLen);
+            int cursor = tokSpan.Start;
+
+            foreach (var esc in info.EscapeSpans)
+            {
+                if (esc.Start < cursor || esc.End > litEnd)
+                    continue;
+
+                if (esc.Start > cursor)
+                    EmitTokenSpan(tokens, cursor, esc.Start - cursor, "string");
+
+                EmitTokenSpan(tokens, esc.Start, esc.Length, "escapeSequence");
+                cursor = esc.End;
+            }
+
+            if (litEnd > cursor)
+                EmitTokenSpan(tokens, cursor, litEnd - cursor, "string");
+        }
+    }
+
+    private void EmitTokenSpan(List<SemanticTokenInfo> tokens, int startOffset, int length, string tokenType)
+    {
+        if (length <= 0)
+            return;
+
+        var span = new TextSpan(startOffset, length);
+        int line = span.GetStartLine(SyntaxTree.SourceText) + 1;
+        int col = span.GetStartColumn(SyntaxTree.SourceText) + 1;
+        tokens.Add(new SemanticTokenInfo(line, col, length, tokenType));
     }
 
     // --- Private Helpers ---

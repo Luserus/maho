@@ -9,9 +9,17 @@ namespace Maho.Resolution;
 internal sealed class ResolvedTree
 {
     private readonly Dictionary<SyntaxNode, SymbolHandle> references = [];
+    private readonly Dictionary<SyntaxNode, SymbolHandle> allocationOperatorReferences = [];
+    private readonly Dictionary<SyntaxNode, InterfaceConformance> conformances = [];
 
     /// <summary> Gets all syntax-to-symbol bindings registered in this tree. </summary>
     public IReadOnlyDictionary<SyntaxNode, SymbolHandle> References => references;
+
+    /// <summary> Gets all allocation operator (<c>New</c>) bindings registered on object creation nodes. </summary>
+    public IReadOnlyDictionary<SyntaxNode, SymbolHandle> AllocationOperatorReferences => allocationOperatorReferences;
+
+    /// <summary> Gets all syntax-to-conformance bindings registered in this tree. </summary>
+    public IReadOnlyDictionary<SyntaxNode, InterfaceConformance> Conformances => conformances;
 
     internal System.Action<SyntaxNode, SymbolHandle>? OnReferenceAdded;
 
@@ -22,12 +30,87 @@ internal sealed class ResolvedTree
         OnReferenceAdded?.Invoke(syntax, symbol);
     }
 
+    /// <summary> Associates an object creation node with its resolved <c>New</c> operator symbol. </summary>
+    public void AddAllocationOperatorReference(SyntaxNode syntax, SymbolHandle symbol) => allocationOperatorReferences[syntax] = symbol;
+
+    /// <summary> Attempts to retrieve the resolved allocation operator handle for an object creation node. </summary>
+    public bool TryGetAllocationOperatorReference(SyntaxNode syntax, out SymbolHandle symbol) => allocationOperatorReferences.TryGetValue(syntax, out symbol);
+
     /// <summary> Attempts to retrieve the resolved symbol handle for a given AST node. </summary>
     public bool TryGetReference(SyntaxNode syntax, out SymbolHandle symbol) => references.TryGetValue(syntax, out symbol);
 
+    /// <summary> Associates an AST node (cast, call, return, or generic argument) with its selected interface conformance. </summary>
+    public void AddConformance(SyntaxNode syntax, InterfaceConformance conformance) => conformances[syntax] = conformance;
+
+    /// <summary> Attempts to retrieve the selected interface conformance for a given AST node. </summary>
+    public bool TryGetConformance(SyntaxNode syntax, out InterfaceConformance? conformance) => conformances.TryGetValue(syntax, out conformance);
+
     /// <summary> Removes the symbol reference associated with an AST node. </summary>
-    public void RemoveReference(SyntaxNode syntax) => references.Remove(syntax);
+    public void RemoveReference(SyntaxNode syntax)
+    {
+        references.Remove(syntax);
+        allocationOperatorReferences.Remove(syntax);
+        conformances.Remove(syntax);
+    }
+
+    public sealed record LambdaCaptureInfo(Symbol Symbol, bool IsMutable, bool IsMove = false);
+    public sealed record LambdaAnalysisEntry(LambdaExpression Lambda, Scope Scope, SymbolHandle ContainingFunction);
+    public sealed record BoundMethodClosureInfo(MethodSymbol Method, ReceiverKind ReceiverKind, TypeRef ReceiverType, SymbolHandle ClosureTypeHandle);
+
+    private readonly Dictionary<LambdaExpression, List<LambdaCaptureInfo>> lambdaCaptures = new();
+    private readonly Dictionary<LambdaExpression, TypeRef> lambdaClosureTypes = new();
+    private readonly Dictionary<MemberAccessExpression, BoundMethodClosureInfo> boundMethodClosures = new();
+    private readonly HashSet<MemberAccessExpression> boundMethodCalls = [];
+    private readonly HashSet<CallExpression> unboundTypeMethodCalls = [];
+    private readonly List<LambdaAnalysisEntry> resolvedLambdas = [];
+    private readonly HashSet<LambdaExpression> resolvedLambdaSet = new();
+
+    public IReadOnlyList<LambdaAnalysisEntry> ResolvedLambdas => resolvedLambdas;
+
+    public void AddResolvedLambda(LambdaExpression lambda, Scope scope, SymbolHandle containingFunction)
+    {
+        if (resolvedLambdaSet.Add(lambda))
+            resolvedLambdas.Add(new LambdaAnalysisEntry(lambda, scope, containingFunction));
+    }
+
+    public void SetLambdaCaptures(LambdaExpression lambda, List<LambdaCaptureInfo> captures)
+    {
+        lambdaCaptures[lambda] = captures;
+    }
+
+    public bool TryGetLambdaCaptures(LambdaExpression lambda, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<LambdaCaptureInfo>? captures) =>
+        lambdaCaptures.TryGetValue(lambda, out captures);
+
+    public void SetLambdaClosureType(LambdaExpression lambda, TypeRef closureType) => lambdaClosureTypes[lambda] = closureType;
+
+    public bool TryGetLambdaClosureType(LambdaExpression lambda, out TypeRef closureType) =>
+        lambdaClosureTypes.TryGetValue(lambda, out closureType);
+
+    public void SetBoundMethodClosure(MemberAccessExpression access, BoundMethodClosureInfo info) => boundMethodClosures[access] = info;
+
+    public bool TryGetBoundMethodClosure(MemberAccessExpression access, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out BoundMethodClosureInfo? info) =>
+        boundMethodClosures.TryGetValue(access, out info);
+
+    public void MarkBoundMethodCall(MemberAccessExpression access) => boundMethodCalls.Add(access);
+
+    public bool IsBoundMethodCall(MemberAccessExpression access) => boundMethodCalls.Contains(access);
+
+    public void MarkUnboundTypeMethodCall(CallExpression call) => unboundTypeMethodCalls.Add(call);
+
+    public bool IsUnboundTypeMethodCall(CallExpression call) => unboundTypeMethodCalls.Contains(call);
 
     /// <summary> Clears all resolved syntax-to-symbol bindings. </summary>
-    public void Clear() => references.Clear();
+    public void Clear()
+    {
+        references.Clear();
+        allocationOperatorReferences.Clear();
+        conformances.Clear();
+        lambdaCaptures.Clear();
+        lambdaClosureTypes.Clear();
+        boundMethodClosures.Clear();
+        boundMethodCalls.Clear();
+        unboundTypeMethodCalls.Clear();
+        resolvedLambdas.Clear();
+        resolvedLambdaSet.Clear();
+    }
 }

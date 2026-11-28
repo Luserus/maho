@@ -25,8 +25,8 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
     private SymbolHandle? hInt8, hInt16, hInt32, hInt64, hInt128, hNInt;
     private SymbolHandle? hUInt8, hUInt16, hUInt32, hUInt64, hUInt128, hNUInt;
     private SymbolHandle? hFloat16, hFloat32, hFloat64, hFloat128;
-    private SymbolHandle? hBool, hChar, hStr, hVoid;
-    private TypeRef voidType = TypeRef.Unresolved;
+    private SymbolHandle? hBool, hChar, hStr;
+    private TypeRef voidType = TypeRef.EmptyTuple;
     private TypeRef boolType = TypeRef.Unresolved;
 
     /// <summary>
@@ -136,12 +136,6 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
         if (intrinsics.TryGet(KnownIntrinsics.Char, out var c)) hChar = c;
         if (intrinsics.TryGet(KnownIntrinsics.Str, out var s)) hStr = s;
-
-        if (intrinsics.TryGet(KnownIntrinsics.Unit, out var v))
-        {
-            hVoid = v;
-            voidType = TypeRef.Resolved(v);
-        }
     }
 
     /// <summary>
@@ -230,6 +224,10 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     {
                         block = ProcessFor(forExpr, block, exit, newBlock);
                     }
+                    else if (exprStmt.Expression is TryExpression tryExpr)
+                    {
+                        block = ProcessTry(tryExpr, block, exit, newBlock);
+                    }
                     else
                     {
                         var exprType = context.GetExpressionType(exprStmt.Expression);
@@ -255,6 +253,13 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
                     block.Terminator = BlockTerminator.Return(retStmt.Statement.Expression);
                     block.AddSuccessor(exit);
                     // Code following a return begins in a new block (potentially unreachable)
+                    block = newBlock();
+                    break;
+
+                case LocalThrowStatement throwStmt:
+                    block.Instructions.Add(throwStmt.Statement);
+                    block.Terminator = BlockTerminator.Unreachable();
+                    block.AddSuccessor(exit);
                     block = newBlock();
                     break;
 
@@ -436,6 +441,57 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         return exitBlock;
     }
 
+    private BasicBlock ProcessTry(
+        TryExpression tryExpr,
+        BasicBlock current,
+        BasicBlock exit,
+        Func<BasicBlock> newBlock)
+    {
+        var tryEntry = newBlock();
+        var mergeBlock = newBlock();
+        var finallyEntry = tryExpr.FinallyClause is not null ? newBlock() : mergeBlock;
+
+        current.Terminator = BlockTerminator.Fallthrough(tryEntry);
+        current.AddSuccessor(tryEntry);
+
+        // 1. Process try block
+        tryEntry.Instructions.Add(tryExpr.TryBlock);
+        var endTry = ProcessLocals(tryExpr.TryBlock.Locals, tryEntry, exit, newBlock);
+        if (endTry.Terminator.Kind == BlockTerminatorKind.Unreachable && endTry.Successors.Count == 0)
+        {
+            endTry.Terminator = BlockTerminator.Fallthrough(finallyEntry);
+            endTry.AddSuccessor(finallyEntry);
+        }
+
+        // 2. Process catch clauses
+        foreach (var catchClause in tryExpr.CatchClauses)
+        {
+            var catchEntry = newBlock();
+            tryEntry.AddSuccessor(catchEntry);
+            catchEntry.Instructions.Add(catchClause.Block);
+            var endCatch = ProcessLocals(catchClause.Block.Locals, catchEntry, exit, newBlock);
+            if (endCatch.Terminator.Kind == BlockTerminatorKind.Unreachable && endCatch.Successors.Count == 0)
+            {
+                endCatch.Terminator = BlockTerminator.Fallthrough(finallyEntry);
+                endCatch.AddSuccessor(finallyEntry);
+            }
+        }
+
+        // 3. Process finally clause if present
+        if (tryExpr.FinallyClause is { } finallyClause)
+        {
+            finallyEntry.Instructions.Add(finallyClause.Block);
+            var endFinally = ProcessLocals(finallyClause.Block.Locals, finallyEntry, exit, newBlock);
+            if (endFinally.Terminator.Kind == BlockTerminatorKind.Unreachable && endFinally.Successors.Count == 0)
+            {
+                endFinally.Terminator = BlockTerminator.Fallthrough(mergeBlock);
+                endFinally.AddSuccessor(mergeBlock);
+            }
+        }
+
+        return mergeBlock;
+    }
+
     private static bool ContainsTryOperator(Expression expr)
     {
         switch (expr)
@@ -494,17 +550,11 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         // 2. If the function's declared return type IS Never (!), but Exit IS reachable
         if (returnType.IsNever(context))
         {
-            var unitQualified = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var uH))
-                ? ResolutionContext.GetQualifiedSymbolName(uH, context)
-                : KnownIntrinsics.Unit;
-            var unitLabel = (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out uH))
-                ? ResolutionContext.GetLabelSymbolName(uH, context, null)
-                : KnownIntrinsics.Unit;
             context.Diagnostics.ReportReturnTypeMismatch(
                 span,
-                unitQualified,
+                "()",
                 "!",
-                exprLabel: unitLabel,
+                exprLabel: "()",
                 returnLabel: "!",
                 source: source);
             return;
@@ -536,17 +586,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
         }
     }
 
-    private bool IsUnitType(TypeRef t)
-    {
-        if (t.Handle is { } h)
-        {
-            var unwrapped = context.UnwrapAlias(h);
-            if (hVoid is not null && unwrapped == hVoid.Value) return true;
-            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) && intrinsicName == KnownIntrinsics.Unit)
-                return true;
-        }
-        return false;
-    }
+    private bool IsUnitType(TypeRef t) => t.IsEmptyTuple;
 
     /// <summary>
     /// Performs reachability analysis via breadth-first search from the entry basic block.
@@ -627,7 +667,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
 
     /// <summary>
     /// Collapses an unconstrained scalar literal type into its canonical default intrinsic type
-    /// (Int -> int32, Float -> float64, Str -> Str, Char -> char).
+    /// (Int -> int32, Float -> float64, Str -> &amp;Str, Char -> char).
     /// </summary>
     private TypeRef CollapseToDefault(TypeRef type)
     {
@@ -637,7 +677,7 @@ internal sealed class ControlFlowAnalysisPass : ResolutionPass
             {
                 CompileTimeLiteralKind.Int => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
-                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Reference(TypeRef.Resolved(h)) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 _ => TypeRef.Inferred
             };

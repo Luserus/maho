@@ -1,80 +1,105 @@
-using System.Linq;
-using Maho.Resolution;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class ExplicitThisAndArrowTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Metadata")]
-        public struct Metadata<T>;
+        public struct Metadata<T> where T : Layout;
 
         public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> TReturn;
+            func Arrow(this&) -> TReturn;
         }
 
-        public interface Deref<T>
+        public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> &T;
+            func Deref(this&) -> TReturn;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<&T>, Deref<T>
+        public struct Reference<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
 
-            public func Address(&this) -> nuint
+            public func Address(this&) -> nuint
             {
-                return this.raw;
+                return this->raw;
+            }
+        }
+
+        [IntrinsicType("MutableReference")]
+        public struct MutableReference<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
+        {
+            nuint raw;
+            Metadata<T> metadata;
+
+            [IntrinsicFunction("MutableReference.Deref()")]
+            func Deref.Deref(this&) -> T mut&;
+
+            func Arrow.Arrow(this&) -> T mut&
+            {
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T*>, Deref<T>
+        public struct Pointer<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
+            }
+
+            public func Address(this&) -> nuint
+            {
+                return this->addr;
             }
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("ValueType")]
@@ -86,7 +111,7 @@ public sealed class ExplicitThisAndArrowTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -94,16 +119,7 @@ public sealed class ExplicitThisAndArrowTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
         public struct Point
@@ -116,25 +132,25 @@ public sealed class ExplicitThisAndArrowTests
                 return this.x;
             }
 
-            public func SumUnqualified(&this) -> Int32
+            public func SumUnqualified(this&) -> Int32
             {
                 return x;
             }
 
-            public func GetX(&this) -> Int32
+            public func GetX(this&) -> Int32
             {
-                return this.x;
+                return this->x;
             }
 
-            public func SetX(mut &this, Int32 val) -> Int32
+            public func SetX(this mut&, Int32 val) -> Int32
             {
-                this.x = val;
+                this->x = val;
                 return val;
             }
 
-            public func SetXWithShadowing(mut &this, Int32 x) -> Int32
+            public func SetXWithShadowing(this mut&, Int32 x) -> Int32
             {
-                this.x = x;
+                this->x = x;
                 return x;
             }
 
@@ -272,16 +288,16 @@ public sealed class ExplicitThisAndArrowTests
     }
 
     [Fact]
-    public void Arrow_Returning_Alias_SingleArrowAccess_Succeeds()
+    public void Arrow_Returning_Reference_SingleLevel_SingleArrowAccess_Succeeds()
     {
         var source = Prelude + """
-            public struct MyBox<T> : Arrow<&T>
+            public struct MyBox<T> : Arrow<T&>
             {
                 T value;
 
-                public func Arrow.Arrow(&this) -> &T
+                func Arrow.Arrow(this&) -> T&
                 {
-                    return this.value;
+                    return &this->value;
                 }
             }
 
@@ -296,25 +312,25 @@ public sealed class ExplicitThisAndArrowTests
     }
 
     [Fact]
-    public void Arrow_Returning_Reference_DoubleArrowAccess_Succeeds()
+    public void Arrow_Returning_NestedPointer_DoubleArrowAccess_Succeeds()
     {
         var source = Prelude + """
-            public struct RefWrapper<T> : Arrow<T&>
+            public struct PtrWrapper<T> : Arrow<T*> where T : Layout
             {
-                T& target;
+                T* target;
 
-                public func Arrow.Arrow(&this) -> T&
+                func Arrow.Arrow(this&) -> T*
                 {
-                    return this.target;
+                    return this->target;
                 }
             }
 
-            public func TestDoubleArrow(RefWrapper<Point> w) -> Int32
+            public func TestDoubleArrow(PtrWrapper<Point> w) -> Int32
             {
                 return w->->x;
             }
 
-            public func TestAccessWrapperDirectReferenceMember(RefWrapper<Point> w) -> nuint
+            public func TestAccessWrapperDirectPointerMember(PtrWrapper<Point> w) -> nuint
             {
                 return w->Address();
             }
@@ -325,20 +341,20 @@ public sealed class ExplicitThisAndArrowTests
     }
 
     [Fact]
-    public void Arrow_Returning_Reference_SingleArrowAccessToInnerMember_FailsWithMH2014()
+    public void Arrow_Returning_NestedPointer_SingleArrowAccessToInnerMember_FailsWithMH2014()
     {
         var source = Prelude + """
-            public struct RefWrapper<T> : Arrow<T&>
+            public struct PtrWrapper<T> : Arrow<T*> where T : Layout
             {
-                T& target;
+                T* target;
 
-                public func Arrow.Arrow(&this) -> T&
+                func Arrow.Arrow(this&) -> T*
                 {
-                    return this.target;
+                    return this->target;
                 }
             }
 
-            public func TestSingleArrow(RefWrapper<Point> w) -> Int32
+            public func TestSingleArrow(PtrWrapper<Point> w) -> Int32
             {
                 return w->x;
             }

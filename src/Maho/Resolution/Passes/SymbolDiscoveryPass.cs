@@ -56,7 +56,12 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 }
                 span ??= unit.EndToken.Span;
 
-                tree.DiagnosticsManager.ReportMultipleTopLevelSources(span.Value, tree.SourceText);
+                if (!context.Diagnostics.Diagnostics.Any(d =>
+                        d.DiagnosticCode == "MH0161" &&
+                        ReferenceEquals(d.Source, tree.SourceText)))
+                {
+                    context.Diagnostics.ReportMultipleTopLevelSources(span.Value, tree.SourceText);
+                }
             }
         }
 
@@ -103,6 +108,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         var fileScope = context.CreateScope(context.GlobalScope);
         context.RegisterSyntaxScope(unit, fileScope);
 
+        foreach (var externUsing in unit.ExternUsings)
+            ResolveExternUsingDirective(externUsing, fileScope);
+
         foreach (var usingDirective in unit.Usings)
             ResolveUsingDirective(usingDirective, fileScope);
 
@@ -144,6 +152,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                     ResolveTopLevelScope(block.Members, blockScope, containingNamespace, HasGlobalModifier(block) ? null : topLevelMain, topLevelMainScope);
                     return containingNamespace;
                 }
+            case TopLevelExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
+                return containingNamespace;
             case TopLevelUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);
                 return containingNamespace;
@@ -152,6 +163,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 return containingNamespace;
             case TopLevelTypeDeclaration declaration:
                 ResolveTopLevelTypeDeclaration(declaration.Type, scope, containingNamespace);
+                return containingNamespace;
+            case TopLevelExtensionDeclaration declaration:
+                ResolveTopLevelExtensionDeclaration(declaration.Extension, scope, containingNamespace);
                 return containingNamespace;
             case TopLevelLiteralMacroDeclaration:
                 return containingNamespace;
@@ -178,8 +192,11 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 else if (currentTree is not null)
                 {
                     var span = statement.GetSpan() ?? default;
-                    if (!currentTree.DiagnosticsManager.Diagnostics.Any(d => d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length))
-                        currentTree.DiagnosticsManager.ReportTopLevelPragmaRequired(span, currentTree.SourceText);
+                    bool alreadyReported =
+                        currentTree.SyntaxDiagnostics.Diagnostics.Any(d => d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length) ||
+                        context.Diagnostics.Diagnostics.Any(d => ReferenceEquals(d.Source, currentTree.SourceText) && d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length);
+                    if (!alreadyReported)
+                        context.Diagnostics.ReportTopLevelPragmaRequired(span, currentTree.SourceText);
                 }
                 return containingNamespace;
             default:
@@ -187,8 +204,41 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         }
     }
 
+    private void ResolveExternUsingDirective(ExternUsingDirective directive, Scope scope)
+    {
+        string alias = ResolutionContext.GetSymbolName(directive.AliasName).Last.Text;
+        if (context.ExternAliasesByName.TryGetValue(alias, out var moduleSym))
+        {
+            scope.ExternModuleAliases[alias] = moduleSym;
+        }
+        else
+        {
+            context.Diagnostics.ReportUndefinedExternModuleAlias(
+                directive.AliasName.GetSpan() ?? directive.GetSpan() ?? default,
+                alias,
+                directive.GetSource());
+        }
+    }
+
     private void ResolveUsingDirective(UsingDirective directive, Scope scope)
     {
+        if (directive.Namespace is ScopeQualifiedName scopeQualified)
+        {
+            var nsPath = context.GetScopedSymbolName(scopeQualified.MemberName);
+            var nodes = context.ResolveScopedNamespaces(
+                scopeQualified.Qualifier,
+                nsPath,
+                scope,
+                directive.Namespace.GetSpan() ?? default,
+                directive.GetSource(),
+                reportAmbiguity: true);
+
+            if (nodes.Count == 1 && !scope.UsingNamespaces.Contains(nodes[0].Node))
+                scope.UsingNamespaces.Add(nodes[0].Node);
+
+            return;
+        }
+
         var nsNode = GetOrDeclareNamespace(context.GlobalNamespace, directive.Namespace);
         if (!scope.UsingNamespaces.Contains(nsNode))
             scope.UsingNamespaces.Add(nsNode);
@@ -229,6 +279,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         var blockScope = context.CreateScope(scope);
         if (!blockScope.UsingNamespaces.Contains(declaredNamespace))
             blockScope.UsingNamespaces.Add(declaredNamespace);
+
+        foreach (var externUsing in body.ExternUsings)
+            ResolveExternUsingDirective(externUsing, blockScope);
 
         foreach (var usingDirective in body.Usings)
             ResolveUsingDirective(usingDirective, blockScope);
@@ -440,6 +493,56 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
         return symbol;
     }
 
+    private void ResolveTopLevelExtensionDeclaration(ExtensionDeclaration declaration, Scope enclosingScope, NamespaceTrieNode containingNamespace)
+    {
+        Scope ownerScope = containingNamespace == context.GlobalNamespace ? context.GlobalScope : enclosingScope;
+        var extScope = context.CreateScope(enclosingScope);
+
+        var accessibility = Accessibility.Internal;
+        foreach (var mod in declaration.Modifiers)
+        {
+            if (mod.MatchingKind == MatchingKeywordKind.Public)
+                accessibility = Accessibility.Public;
+            else if (mod.MatchingKind == MatchingKeywordKind.Internal)
+                accessibility = Accessibility.Internal;
+        }
+
+        var namePart = new SymbolPart($"$ext_{declaration.TargetType.GetSpan()?.Start ?? 0}");
+        var extSymbol = context.CreateExtensionSymbol(ownerScope, extScope, namePart, declaration.TargetType, declaration);
+        extSymbol.Accessibility = accessibility;
+
+        ResolutionContext.BindChildScope(ownerScope, extSymbol, extScope);
+        context.RegisterSyntaxScope(declaration.Body, extScope);
+
+        if (declaration.GenericParameters is not null)
+        {
+            extSymbol.GenericParameters = ResolveGenericParametersFromList(declaration.GenericParameters.Value, extScope, extSymbol);
+        }
+
+        if (declaration.Body is TypeBlockBody blockBody)
+        {
+            foreach (var member in blockBody.Members)
+            {
+                if (member is MemberFieldDeclaration fieldDecl)
+                {
+                    var span = fieldDecl.Declaration.Declarator.Identifier.GetSpan() ?? fieldDecl.Declaration.GetSpan() ?? default;
+                    context.Diagnostics.ReportExtensionCannotDeclareFields(span, fieldDecl.Declaration.GetSource());
+                }
+            }
+        }
+
+        var extHandle = ResolutionContext.GetHandle(extSymbol);
+        ResolveTypeBody(declaration.Body, extScope, extHandle);
+
+        foreach (var sym in extScope.Symbols.Values)
+        {
+            if (sym is MethodSymbol m)
+                extSymbol.Methods.Add(ResolutionContext.GetHandle(m));
+            else if (sym is PropertySymbol p)
+                extSymbol.Properties.Add(ResolutionContext.GetHandle(p));
+        }
+    }
+
     private void ResolveTypeBody(TypeBody body, Scope scope, SymbolHandle containingType)
     {
         if (body is TypeBlockBody block)
@@ -503,6 +606,9 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 break;
             case MemberMacroDeclaration declaration:
                 ResolveMemberMacroDeclaration(declaration.Macro, scope, containingType);
+                break;
+            case MemberExternUsingDirective externDirective:
+                ResolveExternUsingDirective(externDirective.Directive, scope);
                 break;
             case MemberUsingDirective directive:
                 ResolveUsingDirective(directive.Directive, scope);

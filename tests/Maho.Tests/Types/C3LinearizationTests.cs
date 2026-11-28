@@ -1,7 +1,5 @@
-using System.Linq;
 using Maho.Resolution;
 using Maho.Resolution.Layout;
-using Xunit;
 
 namespace Maho.Tests;
 
@@ -11,18 +9,33 @@ public sealed class C3LinearizationTests
     public void DiamondInheritance_LinearizesAndDeduplicatesBaseTypes()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
 
+            intrinsic attribute IntrinsicType(Str& name);
+
+            [IntrinsicType("UInt8")]
+            public struct uint8;
             [IntrinsicType("Int8")]
             public struct int8;
             [IntrinsicType("NUInt")]
             public struct nuint;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T> { nuint raw; }
+            public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
 
             [IntrinsicType("Str")]
-            public struct Str { int8& buffer; nuint length; }
+            public struct Str { uint8[] data; }
 
             [IntrinsicType("ValueType")]
             public struct ValType;

@@ -1,20 +1,24 @@
-using System.Linq;
-using Maho.Diagnostics;
 using Maho.Resolution;
 using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
 public class ExplicitInterfaceTests
 {
     private const string StandardPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        [IntrinsicType("Unit")]
-        public struct void;
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
 
         [IntrinsicType("NUInt")]
         public struct nuint;
@@ -28,24 +32,31 @@ public class ExplicitInterfaceTests
         [IntrinsicType("Int64")]
         public struct int64;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
-        intrinsic attribute IntrinsicFunction(Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -57,7 +68,7 @@ public class ExplicitInterfaceTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -65,16 +76,7 @@ public class ExplicitInterfaceTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
         """;
 
@@ -82,9 +84,16 @@ public class ExplicitInterfaceTests
     public void CustomVoidType_RecognizedAsVoidReturn_ForOperatorFunctions()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
 
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute IntrinsicType(Str& name);
+
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -95,39 +104,46 @@ public class ExplicitInterfaceTests
             [IntrinsicType("NUInt")]
             public struct nuint;
 
+            [IntrinsicType("UInt8")]
+            public struct uint8;
+
             [IntrinsicType("Int8")]
             public struct int8;
 
             [IntrinsicType("Int64")]
             public struct int64;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T>
+            public struct Reference<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                int8& buffer;
-                nuint length;
+                uint8[] data;
             }
 
             // Custom void type name: Unit
-            [IntrinsicType("Unit")]
-            public struct Unit;
 
             public interface Ctor<T>
             {
                 [OperatorFunction("Constructor")]
-                public func Construct(&this) -> Unit;
+                func Construct(this&) -> ();
             }
 
             public interface Dtor<T>
             {
                 [OperatorFunction("Destructor")]
-                public func Destruct(&this) -> Unit;
+                func Destruct(this mut&) -> ();
             }
             """);
 
@@ -143,9 +159,16 @@ public class ExplicitInterfaceTests
     public void CustomReferenceType_RecognizedAsReferenceReturn_ForDereference()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
 
-            intrinsic attribute OperatorFunction(Str name);
+            intrinsic attribute IntrinsicType(Str& name);
+
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -153,11 +176,12 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
 
-            [IntrinsicType("Unit")]
-            public struct void;
 
             [IntrinsicType("NUInt")]
             public struct nuint;
+
+            [IntrinsicType("UInt8")]
+            public struct uint8;
 
             [IntrinsicType("Int8")]
             public struct int8;
@@ -165,24 +189,30 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Int64")]
             public struct int64;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             // Custom reference type name: MyRef<T>
             [IntrinsicType("Reference")]
-            public struct MyRef<T>
+            public struct MyRef<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                MyRef<int8> buffer;
-                nuint length;
+                uint8[] data;
             }
 
             public interface Deref<TTarget>
             {
                 [OperatorFunction("Dereference")]
-                public func Deref(&this) -> MyRef<TTarget>;
+                func Deref(this&) -> MyRef<TTarget>;
             }
             """);
 
@@ -201,17 +231,17 @@ public class ExplicitInterfaceTests
             public interface Add<T>
             {
                 [OperatorFunction("Addition")]
-                public func Add(int32 left, int32 right) -> int32;
+                func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add<Int32>
             {
-                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add<Int32>>.Add(1, 2);
                 }
@@ -242,17 +272,17 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public func Add(int32 left, int32 right) -> int32;
+                func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     // Int32.Add should NOT resolve because Add.Add is interface-scoped!
                     Int32.Add(1, 2);
@@ -283,17 +313,17 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public func Add(int32 left, int32 right) -> int32;
+                func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
-                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                func Add.Add(int32 left, int32 right) -> int32 { return left; }
             }
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -326,13 +356,13 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public func Add(int32 left, int32 right) -> int32;
+                func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
             {
                 // Explicit interface implementation (priority 1)
-                public func Add.Add(int32 left, int32 right) -> int32 { return left; }
+                func Add.Add(int32 left, int32 right) -> int32 { return left; }
 
                 // Ordinary method with same name (priority 2)
                 public func Add(int32 left, int32 right) -> int32 { return right; }
@@ -340,7 +370,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -373,7 +403,7 @@ public class ExplicitInterfaceTests
             public interface Add
             {
                 [OperatorFunction("Addition")]
-                public func Add(int32 left, int32 right) -> int32;
+                func Add(int32 left, int32 right) -> int32;
             }
 
             public struct Int32 : Add
@@ -384,7 +414,7 @@ public class ExplicitInterfaceTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Add>.Add(1, 2);
                 }
@@ -417,34 +447,34 @@ public class ExplicitInterfaceTests
             public interface Rot<T>
             {
                 [OperatorFunction("RotateLeft")]
-                public func RotL(int32 val, int32 count) -> int32;
+                func RotL(int32 val, int32 count) -> int32;
 
                 [OperatorFunction("RotateRight")]
-                public func RotR(int32 val, int32 count) -> int32;
+                func RotR(int32 val, int32 count) -> int32;
             }
 
             public interface Mut<T>
             {
                 [OperatorFunction("PrefixIncrement")]
-                public func Inc(&this) -> int32;
+                func Inc(this mut&) -> int32;
 
                 [OperatorFunction("AdditionAssignment")]
-                public func AddAssign(&this, int32 rhs) -> void;
+                func AddAssign(this mut&, int32 rhs) -> ();
             }
 
             public interface Idx<T, TIdx>
             {
                 [OperatorFunction("IndexerGetter")]
-                public func Get(&this, int32 index) -> int32;
+                func Get(this&, int32 index) -> int32;
 
                 [OperatorFunction("IndexerSetter")]
-                public func Set(&this, int32 val, int32 index) -> void;
+                func Set(this mut&, int32 val, int32 index) -> ();
             }
 
             public interface Cast<TFrom, TTo>
             {
                 [OperatorFunction("ImplicitCast")]
-                public func ToInt64(int32 val) -> int64;
+                func ToInt64(int32 val) -> int64;
             }
             """);
 
@@ -485,18 +515,18 @@ public class ExplicitInterfaceTests
                 public interface Add
                 {
                     [OperatorFunction("Addition")]
-                    public func Add(int32 a, int32 b) -> int32;
+                    func Add(int32 a, int32 b) -> int32;
                 }
             }
 
             public struct Int32 : Ops.Add
             {
-                public func Ops.Add.Add(int32 a, int32 b) -> int32 { return a; }
+                func Ops.Add.Add(int32 a, int32 b) -> int32 { return a; }
             }
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     <Int32 as Ops.Add>.Add(1, 2);
                 }
@@ -519,5 +549,62 @@ public class ExplicitInterfaceTests
         Assert.True(boundMethod.Flags.HasFlag(FunctionFlags.InterfaceScoped));
         Assert.Equal("Add", boundMethod.Name.Text);
         Assert.Equal("Add", boundMethod.ExplicitInterfaceName?.Last.Text);
+    }
+
+    [Fact]
+    public void CoexistingOrdinaryAndExplicitInterfaceMethod_IsolatesDirectAndInterfaceCalls()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{StandardPrelude}}
+
+            public interface IRender
+            {
+                func Draw(this&) -> int32;
+                func Tag(this&) -> int32 { return 7; }
+            }
+
+            public struct Widget : IRender
+            {
+                public int32 id;
+                public func Draw(this&) -> int32 { return 1; }
+                func IRender.Draw(this&) -> int32 { return 100; }
+            }
+
+            public func Run() -> int32
+            {
+                Widget w = new Widget { id = 1 };
+                int32 direct = w.Draw();
+                int32 explicitCall = (w as IRender).Draw();
+                int32 defaultTag = (w as IRender).Tag();
+                return direct;
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var hiddenDirectCalls = Compilation.FromSource($$"""
+            {{StandardPrelude}}
+
+            public interface IRender
+            {
+                func Draw(this&) -> int32;
+                func Tag(this&) -> int32 { return 7; }
+            }
+
+            public struct Widget : IRender
+            {
+                public int32 id;
+                func IRender.Draw(&this) -> int32 { return 100; }
+            }
+
+            public func Bad() -> ()
+            {
+                Widget w = new Widget { id = 1 };
+                w.Draw();
+                w.Tag();
+            }
+            """);
+
+        Assert.Equal(2, hiddenDirectCalls.Diagnostics.Count(d => d.Code == "MH2014"));
     }
 }

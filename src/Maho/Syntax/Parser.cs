@@ -30,6 +30,9 @@ internal sealed partial class Parser
         /// <summary> Right binding power used while parsing the operator's operand or right-hand side. </summary>
         public int RightBindingPower { get; }
 
+        /// <summary> Right binding power used while parsing a prefix operator's operand. </summary>
+        public int PrefixBindingPower { get; }
+
         /// <summary> Indicates whether the operator can begin a prefix expression. </summary>
         public bool IsPrefix => (Role & OperatorRole.Prefix) != 0;
         /// <summary> Indicates whether the operator can appear between two expressions. </summary>
@@ -38,12 +41,13 @@ internal sealed partial class Parser
         public bool IsPostfix => (Role & OperatorRole.Postfix) != 0;
 
         /// <summary> Creates one operator-table entry with its role and binding powers. </summary>
-        public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp)
+        public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp, int prefixBp = 85)
         {
             Kind = kind;
             Role = role;
             LeftBindingPower = lbp;
             RightBindingPower = rbp;
+            PrefixBindingPower = prefixBp;
         }
     }
 
@@ -161,8 +165,9 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
-                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Global or MatchingKeywordKind.Mut ||
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Override or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Unsafe or MatchingKeywordKind.Mut or MatchingKeywordKind.Ext ||
+                                                   (CurrentToken.MatchingKind is MatchingKeywordKind.Global && !LooksLikeColonColonAt(1)) ||
                                                    (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged && IsUntaggedDeclarationModifierAt(current));
     /// <summary> Indicates whether the current token is the contextual <c>intrinsic</c> modifier for an attribute declaration. </summary>
     private bool IsCurrentTokenIntrinsicAttributeModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Intrinsic && IsIntrinsicAttributeModifierAt(current);
@@ -174,16 +179,18 @@ internal sealed partial class Parser
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
     /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
     private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
-        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put
+        matchingKind is not MatchingKeywordKind.New
         and not MatchingKeywordKind.Operator
         and not MatchingKeywordKind.If and not MatchingKeywordKind.While
         and not MatchingKeywordKind.Match
         and not MatchingKeywordKind.Return and not MatchingKeywordKind.Goto
+        and not MatchingKeywordKind.Throw
+        and not MatchingKeywordKind.Try and not MatchingKeywordKind.Catch and not MatchingKeywordKind.Finally
         and not MatchingKeywordKind.True and not MatchingKeywordKind.False
-        and not MatchingKeywordKind.Null and not MatchingKeywordKind.This
-        and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
+        and not MatchingKeywordKind.Null and not MatchingKeywordKind.Default and not MatchingKeywordKind.This
+        and not MatchingKeywordKind.Func
         and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
-        and not MatchingKeywordKind.Mut;
+        and not MatchingKeywordKind.Mut and not MatchingKeywordKind.Ext and not MatchingKeywordKind.Extension;
 
     /// <summary> Tests whether <c>untagged</c> at a given token index is acting as a declaration modifier rather than a type modifier. </summary>
     private bool IsUntaggedDeclarationModifierAt(int tokenIndex)
@@ -274,6 +281,7 @@ internal sealed partial class Parser
     static Parser() => operatorTrie = BuildOperatorTrie();
 
     private readonly bool allowImplicitTopLevel;
+    private bool containsMacroSyntax;
 
     /// <summary> Creates a parser over one token stream and shared diagnostics sink. </summary>
     public Parser(SourceText text, DiagnosticsManager diagnostics, bool allowImplicitTopLevel = false)
@@ -289,6 +297,7 @@ internal sealed partial class Parser
     {
         this.tokens = FilterTokens(tokens);
         current = default;
+        containsMacroSyntax = false;
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
@@ -319,8 +328,9 @@ internal sealed partial class Parser
         var filtered = FilterTokens(sourceTokens);
         if (filtered.Count == 0 || filtered[^1].Kind is not TokenKind.EndToken)
         {
-            var endSpan = filtered.Count > 0 ? new TextSpan(filtered[^1].Span.End, 0) : new TextSpan(text.Length, 0);
-            filtered.Add(new Token(text, endSpan, TokenKind.EndToken, [], []));
+            var endSource = filtered.Count > 0 ? (filtered[^1].Source ?? text) : text;
+            var endSpan = filtered.Count > 0 ? new TextSpan(filtered[^1].Span.End, 0) : new TextSpan(endSource.Length, 0);
+            filtered.Add(new Token(endSource, endSpan, TokenKind.EndToken, [], []));
         }
         return filtered;
     }
@@ -416,7 +426,7 @@ internal sealed partial class Parser
 
         while (CurrentToken.Kind is not TokenKind.EndToken)
         {
-            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective())
+            if (CurrentToken.Kind is TokenKind.Octothorpe || IsUsingDirective() || IsExternUsingDirective())
             {
                 var parsedDirectives = ParseDirectives(out bool enabled, topLevelStatementsEnabled);
                 directives.AddRange(parsedDirectives);
@@ -432,7 +442,7 @@ internal sealed partial class Parser
 
         var eofToken = Consume();
 
-        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled);
+        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled, containsMacroSyntax);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -461,6 +471,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next top-level construct based on the current token's grammar role. </summary>
     private TopLevel ParseTopLevel(bool topLevelStatementsEnabled)
     {
+        if (IsExternUsingDirective())
+            return new TopLevelExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -483,7 +496,7 @@ internal sealed partial class Parser
         else if (LooksLikeAttributeListInStatement() || IsCurrentTokenModifier || IsCurrentTokenTypeDeclarationStart || (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is not TokenKind.LeftParen) || (CurrentToken.MatchingKind is MatchingKeywordKind.Const && Peek().Kind is not TokenKind.LeftBrace))
             return ParseTopLevelDeclaration(topLevelStatementsEnabled);
         else if (CurrentToken.MatchingKind is MatchingKeywordKind.If or MatchingKeywordKind.While or MatchingKeywordKind.Return or MatchingKeywordKind.Goto ||
-                 CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon)
+                 (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1)))
             return ParseTopLevelStatementWithValidation(topLevelStatementsEnabled);
         else if (LooksLikeVariableDeclaration() is (var success, var context))
         {
@@ -497,6 +510,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next member declaration inside a type body. </summary>
     private Member ParseMember(IReadOnlyList<AttributeListSyntax>? initialAttributes = null)
     {
+        if (IsExternUsingDirective())
+            return new MemberExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -551,6 +567,9 @@ internal sealed partial class Parser
     /// <summary> Parses the next local construct inside a block or function body. </summary>
     private Local ParseLocal(StatementParseMode parseMode = StatementParseMode.Normal)
     {
+        if (IsExternUsingDirective())
+            return new LocalExternUsingDirective(ParseExternUsingDirective());
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Using)
         {
             if (IsUsingDirective())
@@ -593,7 +612,13 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
 
-    /// <summary>Parses either a type argument or a compile-time expression argument.</summary>
+    /// <summary> Checks whether the current token starts a contextual <c>derived Type</c> generic argument. </summary>
+    private bool IsDerivedGenericArgumentStart() =>
+        CurrentToken.MatchingKind is MatchingKeywordKind.Derived &&
+        Peek().Kind is not (TokenKind.Comma or TokenKind.GreaterThanSign or TokenKind.RightParen or TokenKind.Colon or TokenKind.ColonColon or TokenKind.Dot or TokenKind.LessThanSign or TokenKind.EndToken) &&
+        Peek().MatchingKind is not MatchingKeywordKind.As;
+
+    /// <summary>Parses either a type argument, a <c>derived Type</c> base-clause argument, a <c>Type as Interface</c> conformance argument, or a compile-time expression argument.</summary>
     private TypeSyntax ParseGenericArgument()
     {
         if (IsLiteralTokenKind(CurrentToken.Kind))
@@ -602,7 +627,19 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
             return new NamedExpressionGenericArgument(new IdentifierNameExpression(Consume()));
 
-        return ParseTypeSyntax();
+        Token? derivedKeyword = IsDerivedGenericArgumentStart() ? Consume() : null;
+        var type = ParseTypeSyntax();
+        if (derivedKeyword is { } dk)
+            type = new DerivedGenericArgumentSyntax(dk, type);
+
+        if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
+        {
+            var asKeyword = Consume();
+            var interfaceType = ParseTypeSyntax();
+            return new ConformanceQualifiedType(type, asKeyword, interfaceType);
+        }
+
+        return type;
     }
 
     /// <summary> Parses one complete generic argument clause, including the surrounding angle brackets. </summary>
@@ -633,12 +670,15 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
-            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+            var tokenSource = token.Source ?? text;
+
+            if (prevToken is not null && ((prevToken.Source ?? text) != tokenSource ||
+                                          prevToken.Span.End != token.Span.Start ||
                                           prevToken.TrailingTrivia.Length > 0 ||
                                           token.LeadingTrivia.Length > 0))
-                break; // trivia between operator characters
+                break; // trivia or source boundary between operator characters
 
-            if (!node.Next.TryGetValue(text[token.Span.Start], out node))
+            if ((uint)token.Span.Start >= (uint)tokenSource.Length || !node.Next.TryGetValue(tokenSource[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
@@ -658,7 +698,7 @@ internal sealed partial class Parser
         Token token = default!;
 
         if (length == 0)
-            return new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
+            return new Token(CurrentToken.Source ?? text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {
@@ -670,13 +710,13 @@ internal sealed partial class Parser
 
         Token last = token;
 
-        return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+        return new Token(first.Source ?? text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
     {
         if (!topLevelStatementsEnabled)
-            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span);
+            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span, CurrentToken.Source);
 
         return ParseTopLevelStatement();
     }

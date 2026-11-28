@@ -9,25 +9,32 @@ namespace Maho.Tests;
 public sealed class InterfaceValidationTests
 {
     private const string StdPrelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")] public interface Layout;
+        [IntrinsicType("Sized")] public interface Sized : Layout;
+        [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")] public struct UInt8;
         [IntrinsicType("Int8")] public struct Int8;
         [IntrinsicType("Int32")] public struct Int32;
         [IntrinsicType("Int64")] public struct Int64;
         [IntrinsicType("NUInt")] public struct NUInt;
-        [IntrinsicType("Unit")] public struct void;
         [IntrinsicType("Bool")] public struct Bool;
 
+        [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+        [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T> { NUInt raw; }
+        public struct Reference<T> where T : Layout { NUInt raw; Metadata<T> metadata; }
 
         [IntrinsicType("Str")]
-        public struct Str { Int8& buffer; NUInt length; }
+        public struct Str { UInt8[] data; }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> { NUInt addr; }
+        public struct Pointer<T> where T : Layout { NUInt addr; Metadata<T> metadata; }
 
         [IntrinsicType("ValueType")] public struct ValType;
         [IntrinsicType("Struct")] public struct Struct : ValType;
@@ -35,7 +42,7 @@ public sealed class InterfaceValidationTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -43,16 +50,7 @@ public sealed class InterfaceValidationTests
         {
             NUInt codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            NUInt codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
         """;
 
@@ -62,7 +60,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo;
@@ -79,8 +77,8 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func First();
-                public func Second();
+                func First();
+                func Second();
             }
 
             public struct MyStruct : IFoo;
@@ -101,11 +99,11 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo
             {
-                public func MethodWithBlock()
+                func MethodWithBlock()
                 {
                 }
 
-                public func MethodWithLambda() => 42;
+                func MethodWithLambda() => 42;
             }
 
             public struct MyStruct : IFoo;
@@ -121,12 +119,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo
             {
-                public func IFoo.Bar()
+                func IFoo.Bar()
                 {
                 }
             }
@@ -142,7 +140,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct MyStruct : IFoo
@@ -166,7 +164,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo
             {
-                public func Bar(Int32 x) -> Int32;
+                func Bar(Int32 x) -> Int32;
             }
 
             public struct MyStruct : IFoo
@@ -189,7 +187,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct InstanceStruct : IFoo
@@ -222,7 +220,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo<T>
             {
-                public func Bar(T x);
+                func Bar(T x);
             }
 
             public struct MyStruct : IFoo<Int32>
@@ -246,7 +244,7 @@ public sealed class InterfaceValidationTests
 
             public interface IFoo<T>
             {
-                public func Bar(T x);
+                func Bar(T x);
             }
 
             public struct MyStruct : IFoo<Int32>
@@ -268,12 +266,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IBase
             {
-                public func A();
+                func A();
             }
 
             public interface IDerived : IBase
             {
-                public func B();
+                func B();
             }
 
             public struct PartialStruct : IDerived
@@ -295,7 +293,7 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IFoo
             {
-                public func Bar();
+                func Bar();
             }
 
             public struct Base
@@ -318,12 +316,12 @@ public sealed class InterfaceValidationTests
         var compilation = Compilation.FromSource("""
             public interface IBase
             {
-                public func A();
+                func A();
             }
 
             public interface IDerived : IBase
             {
-                public func B();
+                func B();
             }
             """);
 

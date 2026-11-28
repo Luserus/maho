@@ -1,0 +1,14 @@
+EntryFile : "src/Main.mh";
+
+Sources : {
+    SourceFiles : [
+        "../Std.Core.mh",
+        "src/Alloc.mh",
+        "src/List.mh",
+        "src/Map.mh",
+        "src/Shapes.mh",
+        "src/Functional.mh",
+        "src/Macros.mh",
+        "src/Main.mh"
+    ]
+};

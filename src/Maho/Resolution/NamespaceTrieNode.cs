@@ -37,17 +37,78 @@ internal sealed class NamespaceTrieNode
                 {
                     foreach (var sym in symbols)
                     {
-                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp &&
-                            gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                        if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
                         {
-                            return symbols;
+                            if (gp[^1].IsVariadic && name.Arity >= gp.Count - 1)
+                                return symbols;
+
+                            if (key.Arity > name.Arity)
+                            {
+                                bool allDefaults = true;
+                                for (int p = name.Arity; p < gp.Count; p++)
+                                {
+                                    if (gp[p].DefaultType == null)
+                                    {
+                                        allDefaults = false;
+                                        break;
+                                    }
+                                }
+                                if (allDefaults)
+                                    return symbols;
+                            }
                         }
+                    }
+                }
+            }
+        }
+        else
+        {
+            foreach (var (key, symbols) in SymbolsByName)
+            {
+                if (key.Text != name.Text)
+                    continue;
+
+                foreach (var sym in symbols)
+                {
+                    if (sym is TypeSymbol ts && ts.Syntax?.Name is GenericName gn && gn.GenericParameters is { Count: > 0 } gp)
+                    {
+                        bool allThis = true;
+                        for (int p = 0; p < gp.Count; p++)
+                        {
+                            if (gp[p].Kind is not GenericParameterKind.This)
+                            {
+                                allThis = false;
+                                break;
+                            }
+                        }
+                        if (allThis)
+                            return symbols;
                     }
                 }
             }
         }
 
         return [];
+    }
+
+    public IReadOnlyList<Symbol> GetCallableSymbolsAnyArity(string name)
+    {
+        List<Symbol>? matches = null;
+        foreach (var (key, symbols) in SymbolsByName)
+        {
+            if (key.Text != name)
+                continue;
+
+            foreach (var sym in symbols)
+            {
+                if (sym is FunctionSymbol or MethodSymbol)
+                {
+                    matches ??= [];
+                    matches.Add(sym);
+                }
+            }
+        }
+        return matches ?? (IReadOnlyList<Symbol>)[];
     }
 
     public Symbol? GetSymbol(SymbolHandle handle)

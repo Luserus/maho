@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using Xunit;
-
 namespace Maho.Tests;
 
 public class IncrementalCompilationTests : IDisposable
@@ -25,6 +21,8 @@ public class IncrementalCompilationTests : IDisposable
                 Directory.Delete(testDir, recursive: true);
         }
         catch { }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -198,5 +196,152 @@ public class IncrementalCompilationTests : IDisposable
         var comp1 = MahoCompiler.AnalyzeFiles(files, samplesDir);
         var comp2 = MahoCompiler.AnalyzeFiles(files, samplesDir, cachedCompilation: comp1);
         Assert.Same(comp1, comp2);
+    }
+
+    [Fact]
+    public void FromFiles_MacroEdit_ReexpandsUnchangedCallerAndClearsDiagnostics()
+    {
+        string macrosPath = Path.Combine(testDir, "Macros.mh");
+        string callerPath = Path.Combine(testDir, "Caller.mh");
+
+        // Run 1: Macro emits a broken expression causing a snippet parse error and type mismatch in unchanged Caller.mh
+        File.WriteAllText(macrosPath, """
+            public macro $Value {
+                () => "not_an_int";
+            }
+            """);
+        File.WriteAllText(callerPath, "func Compute() -> int32 { return $Value(); }");
+
+        var comp1 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, callerPath]);
+        Assert.True(comp1.HasErrors);
+        Assert.NotEmpty(comp1.GetSyntaxTree(callerPath)!.Diagnostics);
+
+        // Run 2: Fix Macros.mh WITHOUT touching Caller.mh
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(macrosPath, """
+            public macro $Value {
+                () => 42;
+            }
+            """);
+
+        var comp2 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, callerPath], cachedCompilation: comp1);
+        Assert.False(comp2.HasErrors, string.Join("\n", comp2.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Empty(comp2.GetSyntaxTree(callerPath)!.Diagnostics);
+        Assert.Empty(comp2.GetSyntaxTree(macrosPath)!.Diagnostics);
+
+        // Prior compilation snapshot remains unmutated
+        Assert.True(comp1.HasErrors);
+        Assert.NotEmpty(comp1.GetSyntaxTree(callerPath)!.Diagnostics);
+
+        // Run 3: Break Macros.mh again with invalid syntax WITHOUT touching Caller.mh -> caller must re-expand from unexpanded AST
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(macrosPath, """
+            public macro $Value {
+                () => 1 + ;
+            }
+            """);
+
+        var comp3 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, callerPath], cachedCompilation: comp2);
+        Assert.True(comp3.HasErrors);
+        Assert.NotEmpty(comp3.Diagnostics);
+    }
+
+    [Fact]
+    public void FromFiles_MacroAddedLater_ResolvesPreviouslyUnresolvedMacroInUnchangedCaller()
+    {
+        string macrosPath = Path.Combine(testDir, "Macros.mh");
+        string callerPath = Path.Combine(testDir, "Caller.mh");
+
+        File.WriteAllText(macrosPath, "");
+        File.WriteAllText(callerPath, """
+            func Id(int32 x) -> int32 { return x; }
+            func Calc() -> int32 { return $Wrap(42); }
+            """);
+
+        var comp1 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, callerPath]);
+        Assert.True(comp1.HasErrors);
+        Assert.Contains(comp1.GetSyntaxTree(callerPath)!.Diagnostics, d => d.Code == "MH0602");
+
+        // Define $Wrap in Macros.mh without touching Caller.mh
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(macrosPath, """
+            public macro $Wrap {
+                (@x: expr) => Id(@x);
+            }
+            """);
+
+        var comp2 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, callerPath], cachedCompilation: comp1);
+        Assert.False(comp2.HasErrors, string.Join("\n", comp2.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Empty(comp2.GetSyntaxTree(callerPath)!.Diagnostics);
+
+        // Earlier snapshot still retains its MH0602 error
+        Assert.Contains(comp1.GetSyntaxTree(callerPath)!.Diagnostics, d => d.Code == "MH0602");
+    }
+
+    [Fact]
+    public void FromFiles_UnchangedFileDiagnostics_DoNotDuplicateOrStayStaleAcrossIncrementalBuilds()
+    {
+        string libPath = Path.Combine(testDir, "Lib.mh");
+        string mainPath = Path.Combine(testDir, "Main.mh");
+
+        File.WriteAllText(libPath, "func NeedArg(int32 x) -> int32 { return x; }");
+        File.WriteAllText(mainPath, "func Run() -> int32 { return NeedArg(); }");
+
+        var comp1 = MahoCompiler.AnalyzeFiles([preludePath, libPath, mainPath]);
+        Assert.Single(comp1.GetSyntaxTree(mainPath)!.Diagnostics);
+
+        // Edit Lib.mh in a way that keeps the same error in unchanged Main.mh -> must NOT duplicate
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(libPath, "func NeedArg(int32 y) -> int32 { return y + 1; }");
+
+        var comp2 = MahoCompiler.AnalyzeFiles([preludePath, libPath, mainPath], cachedCompilation: comp1);
+        Assert.Single(comp2.GetSyntaxTree(mainPath)!.Diagnostics);
+
+        // Fix Lib.mh without touching Main.mh -> stale diagnostic in Main.mh must clear completely
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(libPath, "func NeedArg() -> int32 { return 1; }");
+
+        var comp3 = MahoCompiler.AnalyzeFiles([preludePath, libPath, mainPath], cachedCompilation: comp2);
+        Assert.False(comp3.HasErrors, string.Join("\n", comp3.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Empty(comp3.GetSyntaxTree(mainPath)!.Diagnostics);
+        Assert.Single(comp1.GetSyntaxTree(mainPath)!.Diagnostics);
+        Assert.Single(comp2.GetSyntaxTree(mainPath)!.Diagnostics);
+    }
+
+    [Fact]
+    public void FromFiles_BlockMacroBodyEdit_ClearsMacroDiagnosticsAcrossFilesInSameServerCache()
+    {
+        string macrosPath = Path.Combine(testDir, "Macros.mh");
+        string mainPath = Path.Combine(testDir, "Main.mh");
+
+        File.WriteAllText(macrosPath, """
+            public macro $box_val {
+                (@x: expr) => {
+                    MissingType __tmp = @x;
+                    __tmp
+                };
+            }
+            """);
+        File.WriteAllText(mainPath, "func Run() -> int32 { return $box_val(10); }");
+
+        var comp1 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, mainPath]);
+        Assert.True(comp1.HasErrors);
+        Assert.Contains(comp1.Diagnostics, d => d.Code == "MH0500");
+
+        // Fix MissingType -> int32 in Macros.mh without touching Main.mh
+        System.Threading.Thread.Sleep(50);
+        File.WriteAllText(macrosPath, """
+            public macro $box_val {
+                (@x: expr) => {
+                    int32 __tmp = @x;
+                    __tmp
+                };
+            }
+            """);
+
+        var comp2 = MahoCompiler.AnalyzeFiles([preludePath, macrosPath, mainPath], cachedCompilation: comp1);
+        Assert.False(comp2.HasErrors, string.Join("\n", comp2.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Empty(comp2.GetSyntaxTree(macrosPath)!.Diagnostics);
+        Assert.Empty(comp2.GetSyntaxTree(mainPath)!.Diagnostics);
     }
 }

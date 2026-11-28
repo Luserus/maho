@@ -1,6 +1,4 @@
 using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
@@ -25,14 +23,20 @@ public sealed class ImplicitStructDerivingTests
     public void UserStruct_ImplicitlyDerivesFromStruct_WhenIntrinsicExists()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+            intrinsic attribute IntrinsicType(Str& name);
+
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Unit")] public struct void : ValType;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -55,51 +59,60 @@ public sealed class ImplicitStructDerivingTests
         var userPointSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "UserPoint");
         Assert.Contains(TypeRef.Resolved(hStruct), userPointSym.BaseTypes);
 
-        var voidSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "void");
-        Assert.Contains(TypeRef.Resolved(hValType), voidSym.BaseTypes);
     }
 
     [Fact]
-    public void Hierarchy_Void_DerivesFromValueType()
+    public void Hierarchy_Struct_DerivesFromValueType()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+            intrinsic attribute IntrinsicType(Str& name);
+
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
 
             [IntrinsicType("ValueType")]
             public struct ValType;
 
             [IntrinsicType("Struct")]
             public struct Struct : ValType;
-
-            [IntrinsicType("Unit")]
-            public struct void : ValType;
             """);
 
         Assert.False(compilation.HasErrors);
         var context = compilation.Context!;
 
         Assert.True(context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var hValType));
-        var voidSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "void");
-        Assert.Contains(TypeRef.Resolved(hValType), voidSym.BaseTypes);
+        var structSym = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Struct");
+        Assert.Contains(TypeRef.Resolved(hValType), structSym.BaseTypes);
     }
 
     [Fact]
     public void Hierarchy_Enum_DerivesFromValType_AndUserEnumDerivesFromEnum()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+            intrinsic attribute IntrinsicType(Str& name);
+
+            [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Reference")] public struct Reference<T> { nuint raw; }
-            [IntrinsicType("Str")] public struct Str { int8& buffer; nuint length; }
             [IntrinsicType("NUInt")] public struct nuint;
+            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
+            [IntrinsicType("Str")] public struct Str { uint8[] data; }
 
             [IntrinsicType("ValueType")]
             public struct ValType;

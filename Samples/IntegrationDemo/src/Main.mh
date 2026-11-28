@@ -1,0 +1,265 @@
+// Main entry point: wires together all modules.
+// Demonstrates: top-level statements, cross-module calls, ownership,
+// pattern matching on Optional, turbofish syntax, for loops,
+// Box construction, macros, dyn references, closures.
+using Std;
+
+namespace Demo;
+
+
+// --- Allocator usage ---
+
+func TestAllocator() -> Int32
+{
+    BumpAllocator alloc = new BumpAllocator { capacity = 1024, offset = 0, allocationCount = 0 };
+
+    // Simulate allocations.
+    alloc.Allocate(64, 8);
+    alloc.Allocate(128, 16);
+    alloc.Allocate(256, 32);
+
+    Int32 remaining = alloc.Remaining();
+    Int32 count = alloc.Count();
+
+    // Test statistics tracker.
+    AllocStats stats = new AllocStats { totalAllocated = 0, peakUsage = 0 };
+    stats.Record(64);
+    stats.Record(128);
+    Int32 peak = stats.Peak;
+
+    // Reset and verify.
+    alloc.Reset();
+    Bool isEmpty = alloc.IsEmpty();
+
+    return remaining + count + peak;
+}
+
+// --- Linked list usage ---
+
+func TestLinkedList() -> Int32
+{
+    LinkedList<Int32> list = LinkedList::<Int32>.Empty();
+    list.Prepend(10);
+    list.Prepend(20);
+    list.Prepend(30);
+
+    Int32 len = list.Length;
+
+    // Test single-element factory.
+    LinkedList<Int32> single = LinkedList::<Int32>.Of(42);
+    Int32 singleLen = single.Length;
+
+    return len + singleLen;
+}
+
+// --- Association list usage ---
+
+func TestAssocList() -> Int32
+{
+    AssocList<Int32, Int32> map = AssocList::<Int32, Int32>.Empty();
+    map.Insert(1, 100);
+    map.Insert(2, 200);
+    map.Insert(3, 300);
+
+    return map.Count();
+}
+
+// --- Shape hierarchy usage ---
+
+func TestShapes() -> Int32
+{
+    Rect r = new Rect { width = 5, height = 3 };
+    Square s = new Square { side = 4 };
+    Circle c = new Circle { radius = 7 };
+
+    Int32 rectArea = r.Area();
+    Int32 squareArea = s.Area();
+    Int32 circleArea = c.Area();
+
+    // Generic constrained function: combine two shapes' areas.
+    Int32 combined = CombinedArea::<Rect, Square>(&r, &s);
+
+    // Scaling a shape.
+    Rect mutableRect = new Rect { width = 2, height = 3 };
+    Int32 beforeScale = mutableRect.Area();
+
+    // Enum pattern matching.
+    ShapeCategory cat = ShapeCategory.Rectangular;
+    Int32 catCode = match (cat)
+    {
+        Rectangular => 1,
+        Circular => 2,
+        Unknown => 0
+    };
+
+    return rectArea + squareArea + circleArea + combined + catCode;
+}
+
+// --- Functional programming usage ---
+
+func TestFunctional() -> Int32
+{
+    // Function pointers.
+    func(Int32) -> Int32 id = Identity;
+    func(Int32) -> Int32 dbl = Double;
+    func(Int32) -> Int32 neg = Negate;
+
+    Int32 idResult = Apply::<func(Int32) -> Int32, Int32, Int32>(&id, 5);
+    Int32 dblResult = Apply::<func(Int32) -> Int32, Int32, Int32>(&dbl, 7);
+
+    // MapAndAdd: apply Double to 3 and 4, then add.
+    Int32 mapped = MapAndAdd::<func(Int32) -> Int32>(&dbl, 3, 4);
+
+    // Stateful accumulator via CallableMut.
+    Accumulator acc = new Accumulator { total = 0 };
+    acc(10);
+    acc(20);
+    Int32 accTotal = acc.total;
+
+    // Predicate-based counting: count positive values.
+    func(Int32) -> Bool isPositive = IsPositive;
+    Int32 positiveCount = CountWhere::<func(Int32) -> Bool>(-1, 5, 3, &isPositive);
+
+    return idResult + dblResult + mapped + accTotal + positiveCount;
+}
+
+// Helper predicate for CountWhere.
+func IsPositive(Int32 x) -> Bool
+{
+    return x > 0;
+}
+
+// --- Macro usage ---
+
+func TestMacros() -> Int32
+{
+    Int32 squared = $sq(5);
+    Int32 maxVal = $max(10, 20);
+    Int32 minVal = $min(10, 20);
+    Int32 absVal = $abs(-7);
+    Int32 clamped = $clamp(15, 0, 10);
+
+    return squared + maxVal + minVal + absVal + clamped;
+}
+
+// --- Box and ownership ---
+
+func TestBoxOwnership() -> Int32
+{
+    // Box construction: heap-allocate an Int32.
+    Box<Int32> boxed = new Box<Int32>(42);
+    Int32 val = *boxed;
+
+    // Box with struct value.
+    Box<Rect> boxedRect = new Box<Rect>(new Rect { width = 10, height = 5 });
+    Int32 area = boxedRect->Area();
+
+    return val + area;
+}
+
+// --- Optional pattern matching ---
+
+func TestOptional() -> Int32
+{
+    Int32? some = Optional::<Int32>.Some(42);
+    Int32? none = Optional::<Int32>.None;
+
+    Int32 fromSome = match (some)
+    {
+        Some(v) => v,
+        None => 0
+    };
+
+    Int32 fromNone = match (none)
+    {
+        Some(v) => v,
+        None => -1
+    };
+
+    return fromSome + fromNone;
+}
+
+// --- Closures and borrowing ---
+
+func TestClosures() -> Int32
+{
+    // Non-capturing closure (becomes Function pointer).
+    var addOne = (Int32 x) => x + 1;
+    Int32 r1 = addOne(9);
+
+    // Capturing closure.
+    Int32 base = 100;
+    var addBase = (Int32 x) => x + base;
+    Int32 r2 = addBase(5);
+
+    return r1 + r2;
+}
+
+// --- Properties ---
+
+func TestProperties() -> Int32
+{
+    LinkedList<Int32> list = LinkedList::<Int32>.Empty();
+    list.Prepend(1);
+    list.Prepend(2);
+    Int32 len = list.Length;
+
+    AssocList<Int32, Int32> map = AssocList::<Int32, Int32>.Empty();
+    map.Insert(10, 20);
+    Int32 cnt = map.Count();
+
+    return len + cnt;
+}
+
+// --- Arithmetic and bitwise operators ---
+
+func TestOperators() -> Int32
+{
+    Int32 a = 15;
+    Int32 b = 4;
+
+    Int32 sum = a + b;
+    Int32 diff = a - b;
+    Int32 prod = a * b;
+    Int32 quot = a / b;
+    Int32 rem = a % b;
+
+    Int32 band = a & b;
+    Int32 bor = a | b;
+    Int32 bxor = a ^ b;
+    Int32 lsh = a << 1;
+    Int32 rsh = a >> 1;
+
+    Int32 neg = -a;
+    Int32 bnot = ~a;
+
+    Bool eq = a == b;
+    Bool ne = a != b;
+    Bool lt = a < b;
+    Bool le = a <= b;
+    Bool gt = a > b;
+    Bool ge = a >= b;
+
+    return sum + diff + prod + quot + rem;
+}
+
+// --- Entry point: run all tests ---
+
+func Main()
+{
+    Int32 allocResult = TestAllocator();
+    Int32 listResult = TestLinkedList();
+    Int32 mapResult = TestAssocList();
+    Int32 shapeResult = TestShapes();
+    Int32 funcResult = TestFunctional();
+    Int32 macroResult = TestMacros();
+    Int32 boxResult = TestBoxOwnership();
+    Int32 optResult = TestOptional();
+    Int32 closureResult = TestClosures();
+    Int32 propResult = TestProperties();
+    Int32 opResult = TestOperators();
+
+    Int32 total = allocResult + listResult + mapResult + shapeResult + funcResult
+                + macroResult + boxResult + optResult + closureResult
+                + propResult + opResult;
+}

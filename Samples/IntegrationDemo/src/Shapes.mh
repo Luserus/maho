@@ -1,0 +1,137 @@
+// Interface hierarchy for geometric shapes.
+// Demonstrates: interfaces, dyn trait objects, this generic params,
+// default interface methods, explicit interface implementations,
+// ExplicitCast, enum as sum type.
+using Std;
+
+namespace Demo;
+
+
+// Core shape interface: every shape has an area and perimeter.
+public interface Shape
+{
+    func Area(this&) -> Int32;
+    func Perimeter(this&) -> Int32;
+
+    // Default method: returns a simple classification code.
+    func Kind(this&) -> Int32
+    {
+        return 0;
+    }
+}
+
+// A shape that can be scaled.
+public interface Scalable
+{
+    func Scale(this mut&, Int32 factor) -> ();
+}
+
+// Rectangle: concrete shape.
+public struct Rect : Shape, Scalable
+{
+    public Int32 width;
+    public Int32 height;
+
+    public func Area(this&) -> Int32
+    {
+        return this->width * this->height;
+    }
+
+    public func Perimeter(this&) -> Int32
+    {
+        return (this->width + this->height) * 2;
+    }
+
+    func Shape.Kind(this&) -> Int32
+    {
+        return 1;
+    }
+
+    func Scalable.Scale(this mut&, Int32 factor) -> ()
+    {
+        this->width = this->width * factor;
+        this->height = this->height * factor;
+    }
+
+    // Explicit cast from Rect to Int32 (area).
+    public func AsArea(this&) -> Int32
+    {
+        return this->Area();
+    }
+}
+
+// Square: derived from Rect with equal sides.
+public struct Square : Shape, Scalable
+{
+    public Int32 side;
+
+    public func Area(this&) -> Int32
+    {
+        return this->side * this->side;
+    }
+
+    public func Perimeter(this&) -> Int32
+    {
+        return this->side * 4;
+    }
+
+    func Shape.Kind(this&) -> Int32
+    {
+        return 2;
+    }
+
+    func Scalable.Scale(this mut&, Int32 factor) -> ()
+    {
+        this->side = this->side * factor;
+    }
+}
+
+// Circle: another concrete shape.
+public struct Circle : Shape
+{
+    public Int32 radius;
+
+    public func Area(this&) -> Int32
+    {
+        // Approximation: pi ~ 3, area ~ 3 * r * r
+        return 3 * this->radius * this->radius;
+    }
+
+    public func Perimeter(this&) -> Int32
+    {
+        // Approximation: circumference ~ 6 * r
+        return 6 * this->radius;
+    }
+
+    func Shape.Kind(this&) -> Int32
+    {
+        return 3;
+    }
+}
+
+// Enum representing shape categories — demonstrates enum as sum type.
+public enum ShapeCategory
+{
+    Rectangular,
+    Circular,
+    Unknown;
+}
+
+// Utility function working with dyn Shape& trait objects.
+public func ClassifyShape(Shape& shape) -> ShapeCategory
+{
+    Int32 kind = shape->Kind();
+    return match (kind == 1)
+    {
+        true => ShapeCategory.Rectangular,
+        false => ShapeCategory.Unknown
+    };
+}
+
+// Generic function constrained on Shape: computes combined area of two shapes.
+public func CombinedArea<S1, S2>(S1& a, S2& b) -> Int32
+    where S1 : Shape where S2 : Shape
+{
+    return a->Area() + b->Area();
+}
+

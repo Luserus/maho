@@ -150,6 +150,8 @@ public sealed class MahoProjectFileParser
 
     private MahoProjectConfiguration ParseConfiguration()
     {
+        string? moduleName = null;
+        string? artifactName = null;
         string? entryFile = null;
         bool globalUnsafeEnabled = false;
         bool implicitTopLevel = false;
@@ -173,6 +175,12 @@ public sealed class MahoProjectFileParser
 
             switch (name)
             {
+                case "ModuleName":
+                    moduleName = ParseString("for ModuleName");
+                    break;
+                case "ArtifactName":
+                    artifactName = ParseString("for ArtifactName");
+                    break;
                 case "EntryFile":
                     entryFile = ParseString("for EntryFile");
                     break;
@@ -203,6 +211,8 @@ public sealed class MahoProjectFileParser
 
         return new MahoProjectConfiguration
         {
+            ModuleName = moduleName,
+            ArtifactName = artifactName,
             EntryFile = entryFile,
             GlobalUnsafeEnabled = globalUnsafeEnabled,
             ImplicitTopLevel = implicitTopLevel,

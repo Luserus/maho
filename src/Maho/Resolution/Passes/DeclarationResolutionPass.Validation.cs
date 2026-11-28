@@ -446,6 +446,47 @@ internal sealed partial class DeclarationResolutionPass
         if (group.Count <= 1)
             return;
 
+        // Check for conflicting methods differing solely by receiver
+        for (int i = 0; i < group.Count; i++)
+        {
+            var fnA = group[i];
+            bool hasReceiverA = fnA.Parameters.Count > 0 &&
+                                context.GetParameterSymbol(fnA.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+            if (!hasReceiverA)
+                continue;
+
+            var nonReceiverA = fnA.Parameters.Skip(1).ToList();
+
+            for (int j = i + 1; j < group.Count; j++)
+            {
+                var fnB = group[j];
+                bool hasReceiverB = fnB.Parameters.Count > 0 &&
+                                    context.GetParameterSymbol(fnB.Parameters[0])?.Syntax?.Declarator.IsReceiver == true;
+                if (!hasReceiverB)
+                    continue;
+
+                var nonReceiverB = fnB.Parameters.Skip(1).ToList();
+
+                if (SignaturesMatch(fnA.GenericParameters, nonReceiverA, fnB.GenericParameters, nonReceiverB))
+                {
+                    var recvA = context.GetParameterSymbol(fnA.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+                    var recvB = context.GetParameterSymbol(fnB.Parameters[0])?.Syntax?.Declarator.ReceiverKind;
+
+                    if (recvA != recvB)
+                    {
+                        var firstSpan = fnA.Syntax?.Signature.Identifier.GetSpan() ?? fnA.Syntax?.GetSpan() ?? default;
+                        var redeclSpan = fnB.Syntax?.Signature.Identifier.GetSpan() ?? fnB.Syntax?.GetSpan() ?? default;
+                        context.Diagnostics.ReportMethodOverloadSolelyByReceiver(
+                            fnB.Symbol.Name.ToString(),
+                            redeclSpan,
+                            firstSpan,
+                            fnB.Syntax?.GetSource(),
+                            fnA.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+
         // Partition into sub-groups by parameter signature
         var subGroups = new List<List<FunctionSignatureInfo>>();
 
@@ -531,8 +572,19 @@ internal sealed partial class DeclarationResolutionPass
                 for (int i = 1; i < subGroup.Count; i++)
                 {
                     var redecl = subGroup[i];
-                    var redeclSpan = redecl.Syntax?.Signature.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
                     var fnName = redecl.Symbol.Name.ToString();
+
+                    if (fnName == "Main")
+                    {
+                        var earlierInSameFile = subGroup.Take(i).FirstOrDefault(prev => prev.Syntax?.GetSource() == redecl.Syntax?.GetSource());
+                        if (earlierInSameFile.Symbol is null)
+                        {
+                            // First declaration of 'Main' in this file; multi-file Main is disambiguated by ValidateMainEntryPoints.
+                            continue;
+                        }
+                    }
+
+                    var redeclSpan = redecl.Syntax?.Signature.Identifier.GetSpan() ?? redecl.Syntax?.GetSpan() ?? default;
                     context.Diagnostics.ReportDuplicateFunctionDeclaration(
                         fnName,
                         redeclSpan,
@@ -596,6 +648,23 @@ internal sealed partial class DeclarationResolutionPass
         if (genIndexA >= 0 || genIndexB >= 0)
             return genIndexA == genIndexB;
 
+        // An immutable safe alias &T at call-site Foo(v) can refer to both T and &T, causing ambiguity.
+        if (unwrappedA.SpecialType is AliasSemanticType aliasA && !aliasA.IsMutable)
+        {
+            if (unwrappedB.SpecialType is AliasSemanticType aliasB)
+            {
+                if (aliasA.IsMutable == aliasB.IsMutable)
+                    return ParameterTypesMatch(aliasA.TargetType, genericParamsA, aliasB.TargetType, genericParamsB, null, null);
+                return false;
+            }
+            return ParameterTypesMatch(aliasA.TargetType, genericParamsA, unwrappedB, genericParamsB, null, null);
+        }
+
+        if (unwrappedB.SpecialType is AliasSemanticType aliasB2 && !aliasB2.IsMutable)
+        {
+            return ParameterTypesMatch(unwrappedA, genericParamsA, aliasB2.TargetType, genericParamsB, null, null);
+        }
+
         if (unwrappedA.IsSpecial || unwrappedB.IsSpecial)
         {
             if (unwrappedA.Kind != unwrappedB.Kind)
@@ -604,22 +673,23 @@ internal sealed partial class DeclarationResolutionPass
             return (unwrappedA.SpecialType, unwrappedB.SpecialType) switch
             {
                 (PointerSemanticType pA, PointerSemanticType pB) =>
-                    ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
+                    pA.IsMutable == pB.IsMutable && ParameterTypesMatch(pA.ElementType, genericParamsA, pB.ElementType, genericParamsB, null, null),
                 (ReferenceSemanticType rA, ReferenceSemanticType rB) =>
-                    ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
-                (SpanSemanticType sA, SpanSemanticType sB) =>
-                    ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
+                    rA.IsMutable == rB.IsMutable && ParameterTypesMatch(rA.ElementType, genericParamsA, rB.ElementType, genericParamsB, null, null),
+                (SliceSemanticType sA, SliceSemanticType sB) =>
+                    sA.Dimension == sB.Dimension && ParameterTypesMatch(sA.ElementType, genericParamsA, sB.ElementType, genericParamsB, null, null),
                 (ArraySemanticType aA, ArraySemanticType aB) =>
-                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null),
-                (FixedArraySemanticType fA, FixedArraySemanticType fB) =>
-                    ParameterTypesMatch(fA.ElementType, genericParamsA, fB.ElementType, genericParamsB, null, null) &&
-                    (fA.Size == fB.Size || Nullable.Equals(fA.Size.GetSpan(), fB.Size.GetSpan())),
+                    aA.Dimension == aB.Dimension &&
+                    ParameterTypesMatch(aA.ElementType, genericParamsA, aB.ElementType, genericParamsB, null, null) &&
+                    (aA.Size == aB.Size || Nullable.Equals(aA.Size.GetSpan(), aB.Size.GetSpan())),
                 (OptionalSemanticType oA, OptionalSemanticType oB) =>
                     ParameterTypesMatch(oA.ElementType, genericParamsA, oB.ElementType, genericParamsB, null, null),
                 (TupleSemanticType tA, TupleSemanticType tB) when tA.Elements.Count == tB.Elements.Count =>
                     tA.Elements.Zip(tB.Elements).All(pair =>
                         ParameterTypesMatch(pair.First.Type, genericParamsA, pair.Second.Type, genericParamsB, null, null) &&
                         string.Equals(pair.First.Name, pair.Second.Name, StringComparison.Ordinal)),
+                (AliasSemanticType alA, AliasSemanticType alB) =>
+                    alA.IsMutable == alB.IsMutable && ParameterTypesMatch(alA.TargetType, genericParamsA, alB.TargetType, genericParamsB, null, null),
                 _ => unwrappedA.Equals(unwrappedB)
             };
         }
@@ -788,4 +858,535 @@ internal sealed partial class DeclarationResolutionPass
         }
     }
 
+    private void ValidateMainEntryPoints()
+    {
+        // 1. Ensure 'Main' is not declared on any type (method)
+        foreach (var m in context.MethodSymbols)
+        {
+            if (m.Name.Text == "Main" && m.Syntax is not null)
+            {
+                var span = m.Syntax.Signature.Identifier.GetSpan() ?? m.Syntax.GetSpan() ?? default;
+                context.Diagnostics.ReportMainMustBeTopLevel(span, m.Syntax.GetSource());
+            }
+        }
+
+        // 2. Discover and validate top-level Main functions
+        var validMainCandidates = new List<FunctionSymbol>();
+
+        foreach (var fn in context.FunctionSymbols)
+        {
+            if (fn.Name.Text != "Main")
+                continue;
+
+            // Synthetic top-level statements Main (syntax is null)
+            if (fn.Syntax is null)
+                continue;
+
+            var span = fn.Syntax.Signature.Identifier.GetSpan() ?? fn.Syntax.GetSpan() ?? default;
+            var source = fn.Syntax.GetSource();
+
+            // Must not be generic
+            if (fn.GenericParameters.Count > 0)
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+                continue;
+            }
+
+            // Return type must be void (Unit) or int32 (Int32)
+            bool isValidReturn = IsVoidType(fn.ReturnType) || IsInt32Type(fn.ReturnType);
+            if (!isValidReturn)
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+                continue;
+            }
+
+            // Parameters: 0 or 1 parameter of Array<Str> / Span<Str>
+            if (fn.Parameters.Count == 0)
+            {
+                validMainCandidates.Add(fn);
+            }
+            else if (fn.Parameters.Count == 1)
+            {
+                var param = context.GetParameterSymbol(fn.Parameters[0]);
+                var paramType = param?.Type ?? TypeRef.Error;
+                if (IsValidStringCollectionParam(paramType))
+                {
+                    validMainCandidates.Add(fn);
+                }
+                else
+                {
+                    context.Diagnostics.ReportInvalidMainSignature(span, source);
+                }
+            }
+            else
+            {
+                context.Diagnostics.ReportInvalidMainSignature(span, source);
+            }
+        }
+
+        // 3. Disambiguate entry point
+        if (validMainCandidates.Count == 1)
+        {
+            context.EntryPoint = ResolutionContext.GetHandle(validMainCandidates[0]);
+        }
+        else if (validMainCandidates.Count > 1)
+        {
+            var entryFileOption = context.Options.EntryFile;
+            if (entryFileOption is not null)
+            {
+                var matching = validMainCandidates.Where(fn => MatchesEntryFile(fn, entryFileOption)).ToList();
+                if (matching.Count == 1)
+                {
+                    context.EntryPoint = ResolutionContext.GetHandle(matching[0]);
+                }
+                else if (matching.Count > 1)
+                {
+                    var span = matching[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                    context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                        span,
+                        $"ambiguous entry point: multiple 'Main' functions found in entry file '{entryFileOption}'",
+                        matching[0].Syntax?.GetSource());
+                }
+                else
+                {
+                    var span = validMainCandidates[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                    context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                        span,
+                        $"entry file '{entryFileOption}' does not declare a valid 'Main' entry point",
+                        validMainCandidates[0].Syntax?.GetSource());
+                }
+            }
+            else
+            {
+                var span = validMainCandidates[0].Syntax?.Signature.Identifier.GetSpan() ?? default;
+                context.Diagnostics.ReportAmbiguousMainEntryPoint(
+                    span,
+                    "ambiguous entry point: multiple valid 'Main' functions found across compilation units; specify an entry file using the EntryFile configuration",
+                    validMainCandidates[0].Syntax?.GetSource());
+            }
+        }
+    }
+
+    private bool IsVoidType(TypeRef t) => t.IsEmptyTuple;
+
+    private bool IsInt32Type(TypeRef t)
+    {
+        if (t.Handle is { } h)
+        {
+            var unwrapped = context.UnwrapAlias(h);
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var intrinsicName) &&
+                (intrinsicName == KnownIntrinsics.Int32 || intrinsicName == "int32"))
+                return true;
+            if (context.GetTypeSymbol(unwrapped) is { } ts &&
+                (ts.Name.Text == "Int32" || ts.Name.Text == "int32" || ts.Name.Text == "int"))
+                return true;
+        }
+        return false;
+    }
+
+    private bool IsValidStringCollectionParam(TypeRef paramType)
+    {
+        TypeRef inner = paramType.SpecialType is DynSemanticType d ? d.TargetType : paramType;
+
+        TypeRef? collectionTarget = inner.SpecialType switch
+        {
+            AliasSemanticType al => al.TargetType,
+            ReferenceSemanticType rf => rf.ElementType,
+            _ => null
+        };
+
+        if (collectionTarget is not { } target)
+            return false;
+
+        if (target.SpecialType is SliceSemanticType { Dimension: 1 } slice)
+            return IsStrAliasType(slice.ElementType);
+
+        if (target.SpecialType is GenericSemanticType gen &&
+            context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH) &&
+            context.UnwrapAlias(gen.TargetHandle) == sliceH &&
+            gen.TypeArguments.Count >= 1)
+            return IsStrAliasType(gen.TypeArguments[0]);
+
+        return false;
+    }
+
+    private bool IsStrAliasType(TypeRef type) =>
+        (type.SpecialType is AliasSemanticType al && IsStrType(al.TargetType)) ||
+        (type.SpecialType is ReferenceSemanticType rf && IsStrType(rf.ElementType));
+
+    private bool IsStrType(TypeRef t)
+    {
+        if (t.Handle is { } h)
+        {
+            var unwrapped = context.UnwrapAlias(h);
+            if (context.DiscoveredIntrinsics.TryGetIntrinsicName(unwrapped, out var name) &&
+                (name == KnownIntrinsics.Str || name == "str"))
+                return true;
+            if (context.GetTypeSymbol(unwrapped) is { } ts &&
+                (ts.Name.Text == "Str" || ts.Name.Text == "str"))
+                return true;
+        }
+        return t.SpecialType?.ToString() == "Str" || t.SpecialType?.ToString() == "str";
+    }
+
+    private static bool MatchesEntryFile(FunctionSymbol fn, string entryOption)
+    {
+        var path = fn.Syntax?.GetSource()?.FilePath;
+        if (path is null)
+            return false;
+
+        return string.Equals(path, entryOption, System.StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(System.IO.Path.GetFileName(path), entryOption, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ValidateThisGenericParameters()
+    {
+        foreach (var gp in context.GenericParameterSymbols)
+        {
+            if (gp.ParameterKind is not GenericParameterKind.This)
+                continue;
+
+            bool validOwner = gp.GenericSymbol switch
+            {
+                TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
+                NestedTypeSymbol nts => nts.TypeKind == TypeKind.Interface,
+                MethodSymbol => true,
+                _ => false
+            };
+
+            if (!validOwner)
+            {
+                var span = gp.Syntax?.ValueKindToken?.Span ?? gp.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportInvalidThisGenericParameterPlacement(span, gp.Name.Text, gp.Syntax?.GetSource());
+            }
+        }
+    }
+
+    private void ValidateGenericParameterDefaults()
+    {
+        foreach (var gp in context.GenericParameterSymbols)
+        {
+            if (gp.DefaultType is not { } def || !def.IsResolved)
+                continue;
+
+            var span = gp.Syntax?.DefaultType?.GetSpan() ?? gp.Syntax?.GetSpan() ?? default;
+            if (gp.ParameterKind is GenericParameterKind.Type or GenericParameterKind.This && gp.RequiresSized(context) && !def.IsSized(context))
+            {
+                context.Diagnostics.ReportGenericConstraintNotSized(
+                    span,
+                    def.ToDisplayString(context),
+                    gp.Name.ToString(),
+                    gp.GenericSymbol.Name.ToString(),
+                    "Sized",
+                    gp.Syntax?.GetSource());
+            }
+
+            if (gp.ParameterKind is GenericParameterKind.Type or GenericParameterKind.This && gp.RequiresUnsized(context) && !def.IsKnownUnsized(context))
+            {
+                context.Diagnostics.ReportGenericConstraintNotSized(
+                    span,
+                    def.ToDisplayString(context),
+                    gp.Name.ToString(),
+                    gp.GenericSymbol.Name.ToString(),
+                    "Unsized",
+                    gp.Syntax?.GetSource());
+            }
+
+            foreach (var constraint in gp.Constraints)
+            {
+                if (constraint.Handle is { } ch && context.IsBuiltInLayoutInterface(ch))
+                    continue;
+
+                if (constraint.Handle is { } trCh &&
+                    DeclarationResolutionPass.TrySatisfiesTransferHierarchyConstraint(context, def, trCh, out bool trSatisfied))
+                {
+                    if (!trSatisfied)
+                    {
+                        context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                            span,
+                            gp.Name.ToString(),
+                            def.ToDisplayString(context),
+                            constraint.ToDisplayString(context),
+                            gp.Syntax?.GetSource());
+                    }
+                    continue;
+                }
+
+                if (!constraint.IsAssignableFrom(def, context))
+                {
+                    context.Diagnostics.ReportDefaultGenericConstraintViolation(
+                        span,
+                        gp.Name.ToString(),
+                        def.ToDisplayString(context),
+                        constraint.ToDisplayString(context),
+                        gp.Syntax?.GetSource());
+                }
+                else
+                {
+                    var lookup = context.ResolveInterfaceConformance(def, constraint, null, gp.EnclosingScope, default);
+                    if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Inaccessible)
+                    {
+                        context.Diagnostics.ReportInaccessibleInterfaceConformance(
+                            span,
+                            def.ToDisplayString(context),
+                            lookup.Conformance!.InterfaceType.ToDisplayString(context),
+                            lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
+                            gp.Syntax?.GetSource());
+                    }
+                    else if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Ambiguous)
+                    {
+                        context.Diagnostics.ReportAmbiguousInterfaceConformance(
+                            span,
+                            def.ToDisplayString(context),
+                            constraint.ToDisplayString(context),
+                            lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList(),
+                            gp.Syntax?.GetSource());
+                    }
+                }
+            }
+        }
+    }
+
+    private void ValidateTypeLayoutsAndSizedness()
+    {
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedHandle);
+
+        foreach (var type in context.TypeSymbols)
+        {
+            ValidateTypeSymbolLayout(type, ResolutionContext.GetHandle(type), sizedHandle);
+        }
+
+        foreach (var nested in context.NestedTypeSymbols)
+        {
+            ValidateTypeSymbolLayout(nested, ResolutionContext.GetHandle(nested), sizedHandle);
+        }
+
+        foreach (var global in context.GlobalVariableSymbols)
+        {
+            if (!global.Type.IsError && !global.Type.IsUnresolved && !global.Type.IsSized(context))
+            {
+                var span = global.Syntax?.Type.GetSpan() ?? global.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, global.Type.ToDisplayString(context), "as a global variable", global.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var constant in context.ConstantSymbols)
+        {
+            if (!constant.Type.IsError && !constant.Type.IsUnresolved && !constant.Type.IsInferred && !constant.Type.IsSized(context))
+            {
+                var span = constant.Syntax?.Type?.GetSpan() ?? constant.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, constant.Type.ToDisplayString(context), "as a constant", constant.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var fn in context.FunctionSymbols)
+        {
+            ValidateCallableSizedness(fn.Parameters, fn.ReturnType, fn.Syntax?.Signature.ReturnType, fn.Syntax?.GetSource());
+        }
+
+        foreach (var method in context.MethodSymbols)
+        {
+            ValidateCallableSizedness(method.Parameters, method.ReturnType, method.Syntax?.Signature.ReturnType, method.Syntax?.GetSource());
+        }
+
+        foreach (var prop in context.PropertySymbols)
+        {
+            if (!prop.Type.IsError && !prop.Type.IsUnresolved && !prop.Type.IsSized(context))
+            {
+                var span = prop.Syntax?.Type.GetSpan() ?? prop.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, prop.Type.ToDisplayString(context), "as a property type", prop.Syntax?.GetSource());
+            }
+        }
+
+        foreach (var attr in context.AttributeSymbols)
+            ValidateParameterListSizedness(attr.Parameters, "as an attribute parameter", attr.Syntax?.GetSource());
+
+        foreach (var nestedAttr in context.NestedAttributeSymbols)
+            ValidateParameterListSizedness(nestedAttr.Parameters, "as an attribute parameter", nestedAttr.Syntax?.GetSource());
+    }
+
+    private void ValidateCallableSizedness(
+        IReadOnlyList<SymbolHandle> paramHandles,
+        TypeRef returnType,
+        TypeSyntax? returnSyntax,
+        SourceText? source)
+    {
+        ValidateParameterListSizedness(paramHandles, "as a parameter", source);
+
+        if (!returnType.IsError && !returnType.IsUnresolved && !returnType.IsSized(context))
+        {
+            var span = returnSyntax?.GetSpan() ?? default;
+            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, returnType.ToDisplayString(context), "as a return type", returnSyntax?.GetSource() ?? source);
+        }
+    }
+
+    private void ValidateParameterListSizedness(
+        IReadOnlyList<SymbolHandle> paramHandles,
+        string contextDescription,
+        SourceText? fallbackSource)
+    {
+        foreach (var ph in paramHandles)
+        {
+            var param = context.GetParameterSymbol(ph);
+            if (param is null || param.Type.IsError || param.Type.IsUnresolved)
+                continue;
+
+            // An interface method's `this` receiver represents the abstract implementing self type
+            // (e.g. `CallableOnce.Invoke(this, ...)`), not an unsized value parameter at runtime.
+            if (param.IsReceiver &&
+                param.ContainingSymbol is { } mH &&
+                context.GetMethodSymbol(mH) is { Parent: { } pH } &&
+                context.GetSymbol(context.UnwrapAlias(pH)) is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+            {
+                continue;
+            }
+
+            if (!param.Type.IsSized(context))
+            {
+                var span = param.Syntax?.Declarator.Type.GetSpan() ?? param.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, param.Type.ToDisplayString(context), contextDescription, param.Syntax?.GetSource() ?? fallbackSource);
+            }
+        }
+    }
+
+    private void ValidateTypeSymbolLayout(Symbol typeSym, SymbolHandle handle, SymbolHandle sizedHandle)
+    {
+        TypeKind kind = typeSym switch
+        {
+            TypeSymbol ts => ts.TypeKind,
+            NestedTypeSymbol nts => nts.TypeKind,
+            _ => TypeKind.Struct
+        };
+
+        if (typeSym is ISumTypeSymbol sumType)
+        {
+            foreach (var vh in sumType.EnumVariants)
+            {
+                if (context.GetSymbol(vh) is EnumVariantSymbol ev)
+                {
+                    foreach (var ph in ev.Parameters)
+                    {
+                        var param = context.GetParameterSymbol(ph);
+                        if (param is not null && !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsSized(context))
+                        {
+                            var span = param.Syntax?.Declarator.Type.GetSpan() ?? param.Syntax?.GetSpan() ?? ev.Syntax?.GetSpan() ?? default;
+                            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, param.Type.ToDisplayString(context), "as an enum variant payload", param.Syntax?.GetSource() ?? ev.Syntax?.GetSource());
+                        }
+                    }
+                    foreach (var fh in ev.Fields)
+                    {
+                        var f = context.GetFieldSymbol(fh);
+                        if (f is not null && !f.Type.IsError && !f.Type.IsUnresolved && !f.Type.IsSized(context))
+                        {
+                            var span = f.Syntax?.Type.GetSpan() ?? f.Syntax?.GetSpan() ?? ev.Syntax?.GetSpan() ?? default;
+                            context.Diagnostics.ReportUnsizedTypeNotAllowed(span, f.Type.ToDisplayString(context), "as an enum variant payload", f.Syntax?.GetSource() ?? ev.Syntax?.GetSource());
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        if (kind is not (TypeKind.Struct or TypeKind.Class))
+            return;
+
+        IReadOnlyList<TypeRef> baseTypes = typeSym switch
+        {
+            TypeSymbol ts => ts.BaseTypes,
+            NestedTypeSymbol nts => nts.BaseTypes,
+            _ => []
+        };
+
+        IReadOnlyList<SymbolHandle> fieldHandles = typeSym switch
+        {
+            ProductTypeSymbol p => p.Fields,
+            MemberProductTypeSymbol mp => mp.Fields,
+            _ => []
+        };
+
+        var syntax = (typeSym as TypeSymbol)?.Syntax ?? (typeSym as NestedTypeSymbol)?.Syntax;
+        var source = syntax?.GetSource();
+
+        var instanceFields = new List<FieldSymbol>();
+        foreach (var fh in fieldHandles)
+        {
+            var field = context.GetFieldSymbol(fh);
+            if (field is null) continue;
+
+            if (field.Flags.HasFlag(VariableFlags.Static))
+            {
+                if (!field.Type.IsError && !field.Type.IsUnresolved && !field.Type.IsSized(context))
+                {
+                    var span = field.Syntax?.Type.GetSpan() ?? field.Syntax?.GetSpan() ?? default;
+                    context.Diagnostics.ReportUnsizedTypeNotAllowed(span, field.Type.ToDisplayString(context), "as a static field", field.Syntax?.GetSource());
+                }
+            }
+            else
+            {
+                instanceFields.Add(field);
+            }
+        }
+
+        for (int i = 0; i < instanceFields.Count - 1; i++)
+        {
+            var field = instanceFields[i];
+            if (!field.Type.IsError && !field.Type.IsUnresolved && !field.Type.IsSized(context))
+            {
+                var span = field.Syntax?.Type.GetSpan() ?? field.Syntax?.GetSpan() ?? default;
+                context.Diagnostics.ReportUnsizedTypeNotAllowed(span, field.Type.ToDisplayString(context), "as a non-tail field (only the final field of a struct may be unsized)", field.Syntax?.GetSource());
+            }
+        }
+
+        var unsizedBases = new List<TypeRef>();
+        foreach (var b in baseTypes)
+        {
+            if (b.IsError || b.IsUnresolved || b.Handle is not { } bh)
+                continue;
+
+            var unwrappedB = context.UnwrapAlias(bh);
+            var bSym = context.GetSymbol(unwrappedB);
+            TypeKind bKind = bSym switch
+            {
+                TypeSymbol bts => bts.TypeKind,
+                NestedTypeSymbol bnts => bnts.TypeKind,
+                _ => TypeKind.Struct
+            };
+
+            if (bKind is TypeKind.Interface)
+            {
+                if (sizedHandle != default &&
+                    !TypeRef.Resolved(handle).IsSized(context) &&
+                    DeclarationResolutionPass.SatisfiesConstraint(context, unwrappedB, sizedHandle, []))
+                {
+                    var span = syntax?.Base?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+                    context.Diagnostics.ReportGenericConstraintNotSized(span, typeSym.Name.ToString(), "Self", b.ToDisplayString(context), "Sized", source);
+                }
+            }
+            else if (!b.IsSized(context))
+            {
+                unsizedBases.Add(b);
+            }
+        }
+
+        if (unsizedBases.Count > 1)
+        {
+            var span = syntax?.Base?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+                span,
+                typeSym.Name.ToString(),
+                unsizedBases[1].ToDisplayString(context),
+                "a type cannot inherit from multiple unsized base types",
+                source);
+        }
+        else if (unsizedBases.Count == 1 && instanceFields.Count > 0)
+        {
+            var span = instanceFields[0].Syntax?.GetSpan() ?? syntax?.Name.GetSpan() ?? default;
+            context.Diagnostics.ReportDerivedTypeAddsFieldsAfterUnsizedBase(
+                span,
+                typeSym.Name.ToString(),
+                unsizedBases[0].ToDisplayString(context),
+                "derived types cannot declare additional instance fields after an unsized base",
+                instanceFields[0].Syntax?.GetSource() ?? source);
+        }
+    }
 }

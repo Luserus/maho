@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Maho.Resolution.Passes;
 
 namespace Maho.Resolution.Ownership;
 
@@ -14,47 +15,61 @@ internal sealed class MoveAnalysis
     private readonly OwnershipBody body;
     private readonly OwnershipTypeClassifier ownership;
     private readonly List<Place> allTrackedPlaces;
+    private readonly Dictionary<Place, TypeRef> placeTypes = [];
+    private readonly SymbolHandle? callerType;
+    private readonly ExtensionSymbol? callerExtension;
     private readonly Dictionary<OwnershipBlock, Dictionary<Place, InitializationState>> incoming = [];
     private readonly Dictionary<OwnershipBlock, Dictionary<Place, InitializationState>> outgoing = [];
+    private readonly Dictionary<OwnershipBlock, HashSet<Place>> incomingMoved = [];
+    private readonly Dictionary<OwnershipBlock, HashSet<Place>> outgoingMoved = [];
 
     public MoveAnalysis(ResolutionContext context, OwnershipBody body)
     {
         this.context = context;
         this.body = body;
         ownership = new OwnershipTypeClassifier(context);
+        VisibilityAnalysisPass.ResolveEnclosingContext(context, body.ContainingSymbol, out callerType, out callerExtension);
         allTrackedPlaces = DiscoverTrackedPlaces();
     }
 
     /// <summary>
-    /// Solves forward initialization state to a fixed point, reports invalid post-move uses, and
-    /// returns an immutable snapshot for later analyses.
+    /// Solves forward initialization state to a fixed point, reports invalid uninitialized or
+    /// post-move uses, and returns an immutable snapshot for later analyses.
     /// </summary>
     public OwnershipFacts Analyze()
     {
+        var reachable = ComputeReachableBlocks();
         bool changed;
         do
         {
             changed = false;
             foreach (var block in body.Blocks)
             {
-                var input = JoinPredecessors(block);
-                if (!incoming.TryGetValue(block, out var currentInput) || !StatesEqual(currentInput, input))
+                if (!reachable.Contains(block))
+                    continue;
+
+                var (input, inMoved) = JoinPredecessors(block, reachable);
+                if (!incoming.TryGetValue(block, out var currentInput) || !StatesEqual(currentInput, input) ||
+                    !incomingMoved.TryGetValue(block, out var currentInMoved) || !currentInMoved.SetEquals(inMoved))
                 {
                     incoming[block] = input;
+                    incomingMoved[block] = inMoved;
                     changed = true;
                 }
 
-                var output = Transfer(input, block.Statements);
-                if (!outgoing.TryGetValue(block, out var currentOutput) || !StatesEqual(currentOutput, output))
+                var (output, outMoved) = Transfer(input, inMoved, block.Statements);
+                if (!outgoing.TryGetValue(block, out var currentOutput) || !StatesEqual(currentOutput, output) ||
+                    !outgoingMoved.TryGetValue(block, out var currentOutMoved) || !currentOutMoved.SetEquals(outMoved))
                 {
                     outgoing[block] = output;
+                    outgoingMoved[block] = outMoved;
                     changed = true;
                 }
             }
         }
         while (changed);
 
-        ReportInvalidUses();
+        ReportInvalidUses(reachable);
         return new OwnershipFacts(body, CloneMap(incoming), CloneMap(outgoing));
     }
 
@@ -66,6 +81,7 @@ internal sealed class MoveAnalysis
         {
             var rootPlace = new Place(root);
             result.Add(rootPlace);
+            placeTypes[rootPlace] = type;
             visited.Clear();
             CollectFieldPlaces(rootPlace, type, result, visited);
         }
@@ -85,20 +101,24 @@ internal sealed class MoveAnalysis
         {
             var derefPlace = parent.Dereference();
             result.Add(derefPlace);
+            placeTypes[derefPlace] = pointeeType;
             CollectFieldPlaces(derefPlace, pointeeType, result, visited);
         }
 
+        Dictionary<SymbolHandle, TypeRef> genericSubs = BuildGenericSubstitutionMap(type);
         foreach (var fieldHandle in GetTypeFields(type))
         {
             if (context.GetFieldSymbol(fieldHandle) is { } fieldSym)
             {
                 var fieldPlace = parent.ProjectField(fieldHandle);
+                var fieldType = genericSubs.Count > 0 ? fieldSym.Type.Substitute(genericSubs) : fieldSym.Type;
                 result.Add(fieldPlace);
+                placeTypes[fieldPlace] = fieldType;
 
                 // Only recurse into by-value structs that do not have custom Move/Destructor
-                if (fieldSym.Type.SpecialType is null && !ownership.HasExplicitLifecycle(fieldSym.Type))
+                if ((fieldType.SpecialType is null or GenericSemanticType) && !ownership.HasExplicitLifecycle(fieldType))
                 {
-                    CollectFieldPlaces(fieldPlace, fieldSym.Type, result, visited);
+                    CollectFieldPlaces(fieldPlace, fieldType, result, visited);
                 }
             }
         }
@@ -106,28 +126,97 @@ internal sealed class MoveAnalysis
         visited.Remove(unwrap);
     }
 
-    private IReadOnlyList<SymbolHandle> GetTypeFields(TypeRef type)
+    private Dictionary<SymbolHandle, TypeRef> BuildGenericSubstitutionMap(TypeRef targetType)
     {
-        if (type.Handle is { } h)
+        var subs = new Dictionary<SymbolHandle, TypeRef>();
+        if (targetType.SpecialType is GenericSemanticType gst && targetType.Handle is { } h)
         {
-            var unwrap = context.UnwrapAlias(h);
-            var sym = context.GetSymbol(unwrap);
-            if (sym is ProductTypeSymbol p) return p.Fields;
-            if (sym is MemberProductTypeSymbol mp) return mp.Fields;
+            var sym = context.GetSymbol(context.UnwrapAlias(h));
+            IReadOnlyList<SymbolHandle> gpHandles = sym switch
+            {
+                TypeSymbol ts => ts.GenericParameters,
+                NestedTypeSymbol nts => nts.GenericParameters,
+                _ => []
+            };
+            for (int i = 0; i < gpHandles.Count && i < gst.TypeArguments.Count; i++)
+                subs[gpHandles[i]] = gst.TypeArguments[i];
         }
-        return System.Array.Empty<SymbolHandle>();
+        return subs;
     }
 
-    private Dictionary<Place, InitializationState> JoinPredecessors(OwnershipBlock block)
+    private IReadOnlyList<SymbolHandle> GetTypeFields(TypeRef type) =>
+        ownership.GetAllStructFields(type);
+
+    private bool IsPlaceAlwaysInitialized(Place place) =>
+        placeTypes.TryGetValue(place, out var type) && ownership.IsZeroSizedEmptyStruct(type);
+
+    private static InitializationState GetEffectiveState(
+        IReadOnlyDictionary<Place, InitializationState> state,
+        IReadOnlySet<Place> mayBeMoved,
+        Place place,
+        out bool placeMayBeMoved)
+    {
+        if (state.TryGetValue(place, out var exact))
+        {
+            placeMayBeMoved = mayBeMoved.Contains(place);
+            return exact;
+        }
+
+        for (int depth = place.Projections.Count - 1; depth >= 0; depth--)
+        {
+            var prefix = depth == 0
+                ? new Place(place.Root)
+                : new Place(place.Root, place.Projections.Take(depth).ToArray());
+
+            if (state.TryGetValue(prefix, out var prefixState))
+            {
+                placeMayBeMoved = mayBeMoved.Contains(prefix);
+                return prefixState;
+            }
+        }
+
+        placeMayBeMoved = false;
+        return InitializationState.Uninitialized;
+    }
+
+    private HashSet<OwnershipBlock> ComputeReachableBlocks()
+    {
+        var reachable = new HashSet<OwnershipBlock>();
+        var queue = new Queue<OwnershipBlock>();
+        queue.Enqueue(body.Entry);
+        reachable.Add(body.Entry);
+        while (queue.Count > 0)
+        {
+            var block = queue.Dequeue();
+            foreach (var successor in block.Successors)
+            {
+                if (reachable.Add(successor))
+                    queue.Enqueue(successor);
+            }
+        }
+        return reachable;
+    }
+
+    private (Dictionary<Place, InitializationState> Init, HashSet<Place> MayBeMoved) JoinPredecessors(OwnershipBlock block, HashSet<OwnershipBlock> reachable)
     {
         if (ReferenceEquals(block, body.Entry) || block.Predecessors.Count == 0)
-            return NewDefaultState();
+            return (NewDefaultState(), []);
 
         var result = NewDefaultState();
+        var movedResult = new HashSet<Place>();
         bool first = true;
         foreach (var predecessor in block.Predecessors)
         {
-            var state = GetOrEmpty(outgoing, predecessor);
+            if (!reachable.Contains(predecessor))
+                continue;
+
+            if (!outgoing.TryGetValue(predecessor, out var state))
+                continue;
+
+            var predMoved = outgoingMoved.GetValueOrDefault(predecessor);
+            if (predMoved is not null)
+                movedResult.UnionWith(predMoved);
+
             if (first)
             {
                 result = CopyState(state);
@@ -138,48 +227,82 @@ internal sealed class MoveAnalysis
             foreach (var place in allTrackedPlaces)
                 result[place] = Join(result.GetValueOrDefault(place), state.GetValueOrDefault(place));
         }
-        return result;
+        return (result, movedResult);
     }
 
-    private Dictionary<Place, InitializationState> Transfer(
+    private (Dictionary<Place, InitializationState> Init, HashSet<Place> MayBeMoved) Transfer(
         IReadOnlyDictionary<Place, InitializationState> input,
+        IReadOnlyCollection<Place> inMoved,
         IReadOnlyList<OwnershipStatement> statements)
     {
         var result = CopyState(input);
+        var moved = new HashSet<Place>(inMoved);
         foreach (var statement in statements)
-            Apply(result, statement);
-        return result;
+            Apply(result, moved, statement);
+        return (result, moved);
     }
 
-    private void Apply(Dictionary<Place, InitializationState> state, OwnershipStatement statement)
+    private void Apply(Dictionary<Place, InitializationState> state, HashSet<Place> mayBeMoved, OwnershipStatement statement)
     {
         var targetPlace = statement.Place;
         switch (statement.Kind)
         {
             case OwnershipStatementKind.StorageLive:
+                SetPlaceAndDescendantsForStorageLive(state, mayBeMoved, targetPlace);
+                break;
+
             case OwnershipStatementKind.StorageDead:
             case OwnershipStatementKind.Drop:
-                SetPlaceAndDescendants(state, targetPlace, InitializationState.Uninitialized);
+                SetPlaceAndDescendants(state, mayBeMoved, targetPlace, InitializationState.Uninitialized, markMoved: false);
                 break;
 
             case OwnershipStatementKind.Assign:
-                SetPlaceAndDescendants(state, targetPlace, InitializationState.Initialized);
-                UpdateAncestorStates(state, targetPlace);
+                SetPlaceAndDescendants(state, mayBeMoved, targetPlace, InitializationState.Initialized, markMoved: false);
+                UpdateAncestorStates(state, mayBeMoved, targetPlace);
                 break;
 
             case OwnershipStatementKind.Use when statement.UseKind == OwnershipUseKind.Move:
-                SetPlaceAndDescendants(state, targetPlace, InitializationState.Moved);
+                SetPlaceAndDescendants(state, mayBeMoved, targetPlace, InitializationState.Moved, markMoved: true);
                 break;
         }
     }
 
-    private void SetPlaceAndDescendants(Dictionary<Place, InitializationState> state, Place target, InitializationState newState)
+    private void SetPlaceAndDescendantsForStorageLive(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        Place target)
     {
-        state[target] = newState;
+        state[target] = IsPlaceAlwaysInitialized(target) ? InitializationState.Initialized : InitializationState.Uninitialized;
+        mayBeMoved.Remove(target);
         foreach (var place in allTrackedPlaces)
         {
             if (IsStrictDescendant(place, target))
+            {
+                state[place] = IsPlaceAlwaysInitialized(place) ? InitializationState.Initialized : InitializationState.Uninitialized;
+                mayBeMoved.Remove(place);
+            }
+        }
+    }
+
+    private void SetPlaceAndDescendants(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        Place target,
+        InitializationState newState,
+        bool markMoved)
+    {
+        state[target] = newState;
+        if (markMoved) mayBeMoved.Add(target);
+        else mayBeMoved.Remove(target);
+
+        foreach (var place in allTrackedPlaces)
+        {
+            if (IsStrictDescendant(place, target))
+            {
                 state[place] = newState;
+                if (markMoved) mayBeMoved.Add(place);
+                else mayBeMoved.Remove(place);
+            }
         }
     }
 
@@ -198,37 +321,75 @@ internal sealed class MoveAnalysis
         return true;
     }
 
-    private void UpdateAncestorStates(Dictionary<Place, InitializationState> state, Place target)
+    private void UpdateAncestorStates(Dictionary<Place, InitializationState> state, HashSet<Place> mayBeMoved, Place target)
     {
-        var rootPlace = new Place(target.Root);
-        if (body.PlaceTypes.TryGetValue(target.Root, out var rootType))
+        for (int depth = target.Projections.Count - 1; depth >= 0; depth--)
         {
-            var fields = GetTypeFields(rootType);
-            if (fields.Count > 0)
+            var ancestor = depth == 0
+                ? new Place(target.Root)
+                : new Place(target.Root, target.Projections.Take(depth).ToArray());
+
+            if (!placeTypes.TryGetValue(ancestor, out var ancestorType))
+                continue;
+
+            var fields = GetTypeFields(ancestorType);
+            if (fields.Count == 0)
+                continue;
+
+            bool allInit = true;
+            foreach (var f in fields)
             {
-                bool allInit = true;
-                foreach (var f in fields)
+                var fPlace = ancestor.ProjectField(f);
+                if (state.GetValueOrDefault(fPlace) != InitializationState.Initialized)
                 {
-                    var fPlace = rootPlace.ProjectField(f);
-                    if (state.GetValueOrDefault(fPlace) != InitializationState.Initialized)
-                    {
-                        allInit = false;
-                        break;
-                    }
+                    allInit = false;
+                    break;
                 }
-                if (allInit)
-                    state[rootPlace] = InitializationState.Initialized;
+            }
+            if (allInit)
+            {
+                state[ancestor] = InitializationState.Initialized;
+                mayBeMoved.Remove(ancestor);
             }
         }
     }
 
-    private void ReportInvalidUses()
+    private void ReportInvalidUses(HashSet<OwnershipBlock> reachable)
     {
         foreach (var block in body.Blocks)
         {
+            if (!reachable.Contains(block))
+                continue;
+
             var state = CopyState(GetOrEmpty(incoming, block));
+            var mayBeMoved = new HashSet<Place>(incomingMoved.GetValueOrDefault(block) ?? []);
             foreach (var statement in block.Statements)
             {
+                if (statement.Kind == OwnershipStatementKind.Assign && statement.Place.Projections.Count > 0)
+                {
+                    for (int depth = 0; depth < statement.Place.Projections.Count; depth++)
+                    {
+                        if (statement.Place.Projections[depth].Kind != PlaceProjectionKind.Field)
+                            continue;
+
+                        var containerPlace = depth == 0
+                            ? new Place(statement.Place.Root)
+                            : new Place(statement.Place.Root, statement.Place.Projections.Take(depth).ToArray());
+
+                        if (GetEffectiveState(state, mayBeMoved, containerPlace, out _) != InitializationState.Initialized &&
+                            placeTypes.TryGetValue(containerPlace, out var containerType) &&
+                            VisibilityAnalysisPass.TryFindInaccessibleField(context, containerType, callerType, callerExtension, out var inaccessibleField))
+                        {
+                            context.Diagnostics.ReportStructCannotBePiecewiseInitialized(
+                                statement.Span,
+                                containerType.ToDisplayString(context),
+                                inaccessibleField!.Name.Text,
+                                statement.Source);
+                            break;
+                        }
+                    }
+                }
+
                 if (statement.Kind == OwnershipStatementKind.Use && statement.UseKind == OwnershipUseKind.Move)
                 {
                     // Check 1: If moving a field projection out of a type with custom Move or Destructor
@@ -273,7 +434,8 @@ internal sealed class MoveAnalysis
                                     ? statement.Place.Dereference().ProjectField(f)
                                     : statement.Place.ProjectField(f);
                                 var fState = state.GetValueOrDefault(fPlace, InitializationState.Uninitialized);
-                                if (fState is InitializationState.Moved or InitializationState.MaybeInitialized)
+                                if (fState is InitializationState.Moved ||
+                                    (fState == InitializationState.MaybeInitialized && mayBeMoved.Contains(fPlace)))
                                 {
                                     hasPartialMove = true;
                                     break;
@@ -292,16 +454,79 @@ internal sealed class MoveAnalysis
 
                 if (statement.Kind is OwnershipStatementKind.Use or OwnershipStatementKind.Borrow)
                 {
-                    var current = state.GetValueOrDefault(statement.Place, InitializationState.Uninitialized);
-                    if (current is InitializationState.Moved or InitializationState.MaybeInitialized)
+                    var current = GetEffectiveState(state, mayBeMoved, statement.Place, out var placeMoved);
+                    if (statement.IsReturnUse &&
+                        ownership.IsAllocationOperatorMethod(body.ContainingSymbol, out var allocTargetType) &&
+                        TryHandleAllocationOperatorReturnUse(state, mayBeMoved, statement, current, placeMoved, allocTargetType))
+                    {
+                        Apply(state, mayBeMoved, statement);
+                        continue;
+                    }
+
+                    if (current == InitializationState.Moved)
                     {
                         context.Diagnostics.ReportUseAfterMove(statement.Span, GetPlaceName(statement.Place), statement.Source);
                     }
+                    else if (current == InitializationState.MaybeInitialized)
+                    {
+                        if (placeMoved)
+                            context.Diagnostics.ReportUseAfterMove(statement.Span, GetPlaceName(statement.Place), statement.Source);
+                        else
+                            context.Diagnostics.ReportUseOfPossiblyUninitializedValue(statement.Span, GetPlaceName(statement.Place), statement.Source);
+                    }
+                    else if (current == InitializationState.Uninitialized && !IsPlaceAlwaysInitialized(statement.Place))
+                    {
+                        context.Diagnostics.ReportUseOfUninitializedValue(statement.Span, GetPlaceName(statement.Place), statement.Source);
+                    }
                 }
 
-                Apply(state, statement);
+                Apply(state, mayBeMoved, statement);
             }
         }
+    }
+
+    private bool TryHandleAllocationOperatorReturnUse(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        OwnershipStatement statement,
+        InitializationState current,
+        bool placeMoved,
+        TypeRef allocTargetType)
+    {
+        if (current == InitializationState.Moved || placeMoved || HasMovedDescendant(state, mayBeMoved, statement.Place))
+            return false;
+
+        if (current == InitializationState.Initialized)
+            return false;
+
+        if (!placeTypes.TryGetValue(statement.Place, out var placeType))
+            return false;
+
+        return MatchesAllocationTargetType(placeType, allocTargetType);
+    }
+
+    private bool HasMovedDescendant(
+        Dictionary<Place, InitializationState> state,
+        HashSet<Place> mayBeMoved,
+        Place ancestor)
+    {
+        foreach (var candidate in allTrackedPlaces)
+        {
+            if (!IsStrictDescendant(candidate, ancestor))
+                continue;
+            if (GetEffectiveState(state, mayBeMoved, candidate, out var moved) == InitializationState.Moved || moved)
+                return true;
+        }
+        return false;
+    }
+
+    private bool MatchesAllocationTargetType(TypeRef actual, TypeRef target)
+    {
+        if (actual.Equals(target))
+            return true;
+        if (actual.Handle is { } ah && target.Handle is { } th)
+            return context.UnwrapAlias(ah) == context.UnwrapAlias(th);
+        return false;
     }
 
     private string GetPlaceName(Place place)
@@ -329,7 +554,11 @@ internal sealed class MoveAnalysis
     {
         var dict = new Dictionary<Place, InitializationState>(allTrackedPlaces.Count);
         foreach (var place in allTrackedPlaces)
-            dict[place] = InitializationState.Uninitialized;
+        {
+            dict[place] = IsPlaceAlwaysInitialized(place)
+                ? InitializationState.Initialized
+                : InitializationState.Uninitialized;
+        }
         return dict;
     }
 

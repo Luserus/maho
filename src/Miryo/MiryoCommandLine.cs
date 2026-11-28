@@ -542,8 +542,9 @@ public static class MiryoCommandLine
             }
 
             // If there are referenced projects, build them first
-            foreach (string refProj in project.Configuration.ProjectsReferenced)
+            foreach (string refSpec in project.Configuration.ProjectsReferenced)
             {
+                MiryoBuildSystem.ParseReferenceSpec(refSpec, out _, out string refProj);
                 string refPath = Path.IsPathRooted(refProj)
                     ? refProj
                     : Path.GetFullPath(Path.Combine(project.ProjectDirectory, refProj));
@@ -597,19 +598,20 @@ public static class MiryoCommandLine
                 mahocArgs.Add($"{aliasName}={target}");
             }
 
-            foreach (string referencedProject in project.ProjectsReferenced)
+            foreach (string refSpec in project.ProjectsReferenced)
             {
+                MiryoBuildSystem.ParseReferenceSpec(refSpec, out string? refAlias, out string referencedProject);
                 string referencePath = Path.IsPathRooted(referencedProject)
                     ? referencedProject
                     : Path.GetFullPath(Path.Combine(project.ProjectDirectory, referencedProject));
                 mahocArgs.Add("--reference-project");
-                mahocArgs.Add(referencePath);
+                mahocArgs.Add(refAlias is not null ? $"{refAlias}={referencePath}" : referencePath);
             }
 
             mahocArgs.Add("--project-name");
             mahocArgs.Add(project.ProjectName);
             mahocArgs.Add("--module-name");
-            mahocArgs.Add(ToKebabCase(project.ProjectName));
+            mahocArgs.Add(project.ModuleName);
             mahocArgs.Add("--project-directory");
             mahocArgs.Add(project.ProjectDirectory);
             mahocArgs.Add("--source-paths-stdin");
@@ -1119,19 +1121,20 @@ public static class MiryoCommandLine
             mahocArgs.Add($"{aliasName}={target}");
         }
 
-        foreach (string referencedProject in project.ProjectsReferenced)
+        foreach (string refSpec in project.ProjectsReferenced)
         {
+            MiryoBuildSystem.ParseReferenceSpec(refSpec, out string? refAlias, out string referencedProject);
             string referencePath = Path.IsPathRooted(referencedProject)
                 ? referencedProject
                 : Path.GetFullPath(Path.Combine(project.ProjectDirectory, referencedProject));
             mahocArgs.Add("--reference-project");
-            mahocArgs.Add(referencePath);
+            mahocArgs.Add(refAlias is not null ? $"{refAlias}={referencePath}" : referencePath);
         }
 
         mahocArgs.Add("--project-name");
         mahocArgs.Add(project.ProjectName);
         mahocArgs.Add("--module-name");
-        mahocArgs.Add(ToKebabCase(project.ProjectName));
+        mahocArgs.Add(project.ModuleName);
         mahocArgs.Add("--project-directory");
         mahocArgs.Add(project.ProjectDirectory);
         mahocArgs.Add("--source-paths-stdin");

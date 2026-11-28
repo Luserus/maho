@@ -15,7 +15,9 @@ internal sealed partial class Parser
                     return ParseTopLevelReturnStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Goto)
                     return ParseTopLevelGotoStatement();
-                else if (Peek().Kind is TokenKind.Colon)
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Throw)
+                    return ParseTopLevelThrowStatement();
+                else if (Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1))
                     return ParseTopLevelLabelStatement();
                 break;
 
@@ -78,7 +80,9 @@ internal sealed partial class Parser
                     return ParseLocalGotoStatement();
                 else if (CurrentToken.MatchingKind is MatchingKeywordKind.Yield)
                     return ParseLocalYieldStatement();
-                else if (Peek().Kind is TokenKind.Colon)
+                else if (CurrentToken.MatchingKind is MatchingKeywordKind.Throw)
+                    return ParseLocalThrowStatement();
+                else if (Peek().Kind is TokenKind.Colon && !LooksLikeColonColonAt(1))
                     return ParseLocalLabelStatement();
                 else if (LooksLikeVariableDeclaration() is (var success, var context))
                 {
@@ -197,6 +201,8 @@ internal sealed partial class Parser
             return EndsWithBlock(whileExpr.Body);
         if (expr is ForExpression forExpr)
             return EndsWithBlock(forExpr.Body);
+        if (expr is TryExpression)
+            return true;
 
         return false;
     }
@@ -251,5 +257,30 @@ internal sealed partial class Parser
         var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the return statement", MissingTokenAnchor.AfterPrevious);
 
         return new ReturnStatement(returnKeyword, expression, semicolon);
+    }
+
+    private TopLevelThrowStatement ParseTopLevelThrowStatement()
+    {
+        var statement = ParseThrowStatement();
+        return new TopLevelThrowStatement(statement);
+    }
+
+    private LocalThrowStatement ParseLocalThrowStatement()
+    {
+        var statement = ParseThrowStatement();
+        return new LocalThrowStatement(statement);
+    }
+
+    private ThrowStatement ParseThrowStatement()
+    {
+        var throwKeyword = Consume();
+        Expression? expression = null;
+
+        if (CurrentToken.Kind is not TokenKind.Semicolon)
+            expression = ParseExpectedExpression("after 'throw'", MissingTokenAnchor.AfterPrevious);
+
+        var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after the throw statement", MissingTokenAnchor.AfterPrevious);
+
+        return new ThrowStatement(throwKeyword, expression, semicolon);
     }
 }

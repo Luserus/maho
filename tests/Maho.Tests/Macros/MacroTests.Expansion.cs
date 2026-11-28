@@ -328,7 +328,7 @@ public sealed partial class MacroTests
 
             public macro $MakeMethod {
                 (@prefix: ident, @suffix: ident) => {
-                    public func @prefix##@suffix() -> void {}
+                    public func @prefix##@suffix() -> () {}
                 }
             }
 
@@ -395,7 +395,6 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public struct void;
                 $BadPaste(12, @);
             }
             """);
@@ -418,7 +417,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     $MakeSuffixed(123, i32);
                 }
@@ -461,7 +460,7 @@ public sealed partial class MacroTests
 
             public struct Host
             {
-                public func Test() -> void
+                public func Test() -> ()
                 {
                     int32 x = 42;
                     var name = nameof(x);

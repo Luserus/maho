@@ -48,10 +48,15 @@ internal sealed class MacroExpansionPass : ResolutionPass
             foreach (var tree in context.SyntaxTrees)
             {
                 var root = tree.Root;
-                var sourceText = root.GetSource() ?? (root.Members.Count > 0 ? root.Members[0].GetSource() : null) ?? new SourceText(string.Empty);
+                var sourceText = tree.FilePath != "<single-file>"
+                    ? tree.SourceText
+                    : (root.GetSource() ?? (root.Members.Count > 0 ? root.Members[0].GetSource() : null) ?? tree.SourceText);
 
                 if (ExpandCompilationUnit(root, expander, literalMacroTable, currentDepth, sourceText))
+                {
+                    tree.WasMacroExpanded = true;
                     anyExpanded = true;
+                }
             }
 
             if (anyExpanded)

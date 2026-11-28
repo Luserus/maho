@@ -14,9 +14,9 @@ public sealed class VisibilityAnalysisTests
             {
                 private int32 secret;
 
-                public func Read(&this) -> int32
+                public func Read(this&) -> int32
                 {
-                    return this.secret;
+                    return this->secret;
                 }
             }
             """);
@@ -56,7 +56,7 @@ public sealed class VisibilityAnalysisTests
 
             public struct SecretBox
             {
-                private func Compute(&this) -> int32
+                private func Compute(this&) -> int32
                 {
                     return 42;
                 }
@@ -88,9 +88,9 @@ public sealed class VisibilityAnalysisTests
 
             public struct DerivedBox : BaseBox
             {
-                public func GetValue(&this) -> int32
+                public func GetValue(this&) -> int32
                 {
-                    return this.sharedValue;
+                    return this->sharedValue;
                 }
             }
             """);
@@ -250,7 +250,7 @@ public sealed class VisibilityAnalysisTests
                     return c.Setting;
                 }
 
-                public func Writer(mut Config c) -> void
+                public func Writer(mut Config c) -> ()
                 {
                     c.Setting = 10;
                 }
@@ -308,7 +308,7 @@ public sealed class VisibilityAnalysisTests
         var compilation = Compilation.FromSource($$"""
             {{VisibilityPrelude}}
 
-            protected func TopLevelProtected() -> void { }
+            protected func TopLevelProtected() -> () { }
             """);
 
         Assert.True(compilation.HasErrors);

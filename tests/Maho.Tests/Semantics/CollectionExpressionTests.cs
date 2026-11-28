@@ -1,18 +1,24 @@
-using System.Linq;
-using Maho;
 using Maho.Resolution;
 using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
 public sealed class CollectionExpressionTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -21,28 +27,33 @@ public sealed class CollectionExpressionTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
         }
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -51,13 +62,13 @@ public sealed class CollectionExpressionTests
         [IntrinsicType("Struct")]
         public struct Struct : ValType;
 
-        [IntrinsicType("FixedArray")]
-        public struct FixedArray<T, N : int32> : ValType;
+        [IntrinsicType("Array")]
+        public struct Array<T, N : int, D : int = 1> : ValType;
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -65,24 +76,16 @@ public sealed class CollectionExpressionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
         """;
 
     [Fact]
     public void CollectionExpression_Unconstrained_InfersFixedArray()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
             }
@@ -91,49 +94,63 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => d.Message)));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        Assert.Equal(TypeRefKind.FixedArray, local.Type.Kind);
+        Assert.Equal(TypeRefKind.Array, local.Type.Kind);
         Assert.NotNull(local.Type.SpecialType);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        var lit = Assert.IsType<LiteralExpression>(fixedArr.Size);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        var lit = Assert.IsType<LiteralExpression>(arrSem.Size);
         Assert.Equal("3", lit.Literal.Value);
     }
 
     [Fact]
-    public void CollectionExpression_MissingFixedArrayIntrinsic_ReportsDiagnostic()
+    public void CollectionExpression_MissingArrayIntrinsic_ReportsDiagnostic()
     {
-        const string PreludeWithoutFixedArray = """
-            intrinsic attribute IntrinsicType(Str name);
-            intrinsic attribute IntrinsicFunction(Str signature);
-            intrinsic attribute OperatorFunction(Str name);
+        const string PreludeWithoutArray = """
+            intrinsic attribute IntrinsicType(Str& name);
+            intrinsic attribute IntrinsicFunction(Str& signature);
+            intrinsic attribute OperatorFunction(Str& name);
 
+            [IntrinsicType("Layout")]
+            public interface Layout;
+            [IntrinsicType("Sized")]
+            public interface Sized : Layout;
+            [IntrinsicType("Unsized")]
+            public interface Unsized : Layout;
+
+            [IntrinsicType("UInt8")]
+            public struct uint8;
             [IntrinsicType("Int8")]
             public struct int8;
             [IntrinsicType("Int32")]
             public struct int32;
             [IntrinsicType("NUInt")]
             public struct nuint;
-            [IntrinsicType("Unit")]
-            public struct Unit;
             [IntrinsicType("Bool")]
             public struct bool;
 
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T>
+            public struct Reference<T> where T : Layout
             {
                 nuint raw;
+                Metadata<T> metadata;
             }
+
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
 
             [IntrinsicType("Str")]
             public struct Str
             {
-                int8& buffer;
-                nuint length;
+                uint8[] data;
             }
 
             [IntrinsicType("Pointer")]
-            public struct Pointer<T>
+            public struct Pointer<T> where T : Layout
             {
                 nuint addr;
+                Metadata<T> metadata;
             }
 
             [IntrinsicType("ValueType")]
@@ -143,8 +160,8 @@ public sealed class CollectionExpressionTests
             public struct Struct : ValType;
             """;
 
-        var compilation = Compilation.FromSource(PreludeWithoutFixedArray + """
-            public func Test() -> Unit
+        var compilation = Compilation.FromSource(PreludeWithoutArray + """
+            public func Test() -> ()
             {
                 var arr = [1, 2, 3];
             }
@@ -160,7 +177,7 @@ public sealed class CollectionExpressionTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct CustomFixedArray : Callable<int32>
             {
-                public func Callable.Invoke(&this) -> int32
+                func Callable.Invoke(this&) -> int32
                 {
                     return 42;
                 }
@@ -181,7 +198,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_MultiTerm_UntypedInfersFixedArrayOfTuples()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var map = [1 : 2, 3 : 4];
             }
@@ -190,10 +207,10 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        Assert.Equal(TypeRefKind.FixedArray, local.Type.Kind);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        Assert.Equal(TypeRefKind.Tuple, fixedArr.ElementType.Kind);
-        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        Assert.Equal(TypeRefKind.Array, local.Type.Kind);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Tuple, arrSem.ElementType.Kind);
+        var tupleSem = Assert.IsType<TupleSemanticType>(arrSem.ElementType.SpecialType);
         Assert.Equal(2, tupleSem.Elements.Count);
     }
 
@@ -201,7 +218,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_FourTerms_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var quads = [1 : 2 : 3 : 4, 5 : 6 : 7 : 8];
             }
@@ -210,8 +227,8 @@ public sealed class CollectionExpressionTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
         var local = Assert.Single(fn.LocalVariables);
-        var fixedArr = Assert.IsType<FixedArraySemanticType>(local.Type.SpecialType);
-        var tupleSem = Assert.IsType<TupleSemanticType>(fixedArr.ElementType.SpecialType);
+        var arrSem = Assert.IsType<ArraySemanticType>(local.Type.SpecialType);
+        var tupleSem = Assert.IsType<TupleSemanticType>(arrSem.ElementType.SpecialType);
         Assert.Equal(4, tupleSem.Elements.Count);
     }
 
@@ -219,7 +236,7 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_InconsistentTermCount_ReportsMH0568()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var bad = [1 : 2, 3];
             }
@@ -236,15 +253,15 @@ public sealed class CollectionExpressionTests
             public interface Collection<TKey, TValue>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, TKey key, TValue value) -> Unit;
+                func Add(this mut&, TKey key, TValue value) -> ();
             }
 
             public struct MyMap : Collection<int32, int64>
             {
-                public func Add(mut &this, int32 key, int64 value) -> Unit {}
+                public func Add(this mut&, int32 key, int64 value) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyMap m = [1 : 100, 2 : 200];
             }
@@ -260,12 +277,12 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                func Add(this mut&, T item) -> ();
             }
 
             public struct NotACollection;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 NotACollection c = [1, 2, 3];
             }
@@ -282,15 +299,15 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                func Add(this mut&, T item) -> ();
             }
 
             public struct MyList : Collection<int32>
             {
-                public func Add(mut &this, int32 item) -> Unit {}
+                public func Add(this mut&, int32 item) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyList list = [1, 2] with(10);
             }
@@ -307,22 +324,22 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                public func Add(mut &this, T item) -> Unit;
+                func Add(this mut&, T item) -> ();
             }
 
             public interface CollectionWith<TCount>
             {
                 [OperatorFunction("CollectionWith")]
-                public func With(mut &this, TCount capacity) -> Unit;
+                func With(this mut&, TCount capacity) -> ();
             }
 
             public struct MyList : Collection<int32>, CollectionWith<int32>
             {
-                public func Add(mut &this, int32 item) -> Unit {}
-                public func With(mut &this, int32 capacity) -> Unit {}
+                public func Add(this mut&, int32 item) -> () {}
+                public func With(this mut&, int32 capacity) -> () {}
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyList list = [1, 2] with(10);
             }
@@ -332,33 +349,29 @@ public sealed class CollectionExpressionTests
     }
 
     [Fact]
-    public void MultidimensionalArray_RankAndIndexer_Succeeds()
+    public void MultidimensionalSlice_RankAndIndexer_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            [IntrinsicType("Array")]
-            public struct Array<T, D : int32>
+            public func Test(int32[,]& grid, int32[,,]& cube) -> int32
             {
-                T* data;
-                nuint len;
-            }
-
-            public func Test(int32[,] grid, int32[,,] cube) -> int32
-            {
-                int32 x = grid[1, 2];
+                &int32[,] localGrid = *grid;
+                int32 x = localGrid[1, 2];
                 return x;
             }
             """);
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
-        var gridParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
-        Assert.Equal(TypeRefKind.Array, gridParam.Type.Kind);
-        var arrSem = Assert.IsType<ArraySemanticType>(gridParam.Type.SpecialType);
-        Assert.Equal(2, arrSem.Dimension);
+        var localGridVar = Assert.Single(fn.LocalVariables, v => v.Name.Text == "localGrid");
+        var gridAlias = Assert.IsType<AliasSemanticType>(localGridVar.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, gridAlias.TargetType.Kind);
+        var gridSlice = Assert.IsType<SliceSemanticType>(gridAlias.TargetType.SpecialType);
+        Assert.Equal(2, gridSlice.Dimension);
 
         var cubeParam = compilation.Context.GetParameterSymbol(fn.Parameters[1])!;
-        Assert.Equal(TypeRefKind.Array, cubeParam.Type.Kind);
-        var cubeSem = Assert.IsType<ArraySemanticType>(cubeParam.Type.SpecialType);
-        Assert.Equal(3, cubeSem.Dimension);
+        var cubeRef = Assert.IsType<ReferenceSemanticType>(cubeParam.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Slice, cubeRef.ElementType.Kind);
+        var cubeSlice = Assert.IsType<SliceSemanticType>(cubeRef.ElementType.SpecialType);
+        Assert.Equal(3, cubeSlice.Dimension);
     }
 }

@@ -387,18 +387,17 @@ Maho establishes an intrinsic type hierarchy with topological memory layout veri
 - **Root Value Type (`Std.ValType`)**: Marked with `[IntrinsicType("ValueType")]`. The base type of all value representations.
 - **Implicit Struct Deriving (`Std.Struct`)**: Marked with `[IntrinsicType("Struct")]`, deriving from `Std.ValType`. All user-declared structs implicitly inherit from `Std.Struct` (and transitively from `Std.ValType`).
 - **Unit (`Unit`)**: Marked with `[IntrinsicType("Unit")]`, deriving from `Std.ValType` as a compiler-known 0-layout type with zero instance fields.
-- **Function Pointers & Delegates (`Std.Function`, `Std.Delegate`)**: Marked with `[IntrinsicType("Function")]` and `[IntrinsicType("Delegate")]`, deriving from `Std.ValType`.
+- **Function Pointers (`Std.Function`)**: Marked with `[IntrinsicType("Function")]`, deriving from `Std.ValType` and implementing `Callable`, `CallableMut`, and `CallableOnce`.
   - `Std.Function<TReturn, TParams...>` ABI: exactly 1 instance field: `nuint` (function code address).
-  - `Std.Delegate<TReturn, TParams...>` ABI: exactly 2 instance fields: `nuint` (code address) and `Pointer<ValType>` (environment pointer).
-- **Lazy Intrinsic Requirement (`MH0240`)**: Compiler intrinsics are lazily required. Minimal compilations that do not use functions, delegates, or structs do not fail intrinsic verification; `MH0240` is reported only when source code uses a syntactic construct whose backing intrinsic type was not declared.
+- **Lazy Intrinsic Requirement (`MH0240`)**: Compiler intrinsics are lazily required. Minimal compilations that do not use functions or structs do not fail intrinsic verification; `MH0240` is reported only when source code uses a syntactic construct whose backing intrinsic type was not declared.
 
 ### 6.3 Declaration-resolution pass (`DeclarationResolutionPass`)
 
 The declaration pass records successful, unambiguous references in `ResolvedTree` and enforces semantic declaration invariants:
 
 - **Type Reference Binding**: Resolves type base clauses, declared types, parameter types, return types, property types, field types, variable types, attribute names, and generic constraint types. Modified and compound syntax types are represented as first-class structural semantic types: pointers (`T*`), references (`T&`), unsized spans (`T[]`), fixed-size arrays (`T[n]`), optionals (`T?`), and tuples (`(T1, T2)` / `T (a, b)`).
-- **Function Types & Aliases**: Binds `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>` and `DelegateTypeSyntax` (`delegate(...) -> R`) to `Std.Delegate<TReturn, TParams...>`.
-- **Unified Function Typing**: Assigns first-class types to all function declarations: static and global functions receive `Std.Function`, while instance methods receive `Std.Delegate`. Functions implement `Callable` and can access members directly from their type (`Func.Member`).
+- **Function Types**: Binds `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>`.
+- **Unified Function Typing**: Assigns first-class `Std.Function` types to all functions and methods (with explicit receiver parameters as parameter 0 for instance methods). Functions implement `Callable`, `CallableMut`, and `CallableOnce`, while bound method values synthesize anonymous closure structs.
 - **Non-Partial Duplicate Type Declarations (`MH0530`)**: Detects duplicate type declarations sharing the same containing scope, name, and generic arity. If any declaration is non-partial, reports `MH0530` with primary and secondary labels.
 - **Partial Type Canonical Merging**: Merges multiple partial declarations in the same scope into a canonical symbol, verifying kind consistency (`MH0531`).
 - **Partial Function Declarations (`MH0532`, `MH0533`, `MH0534`)**: Permits bodyless partial declarations, enforces that at most one declaration contains an implementation body (`MH0533`), matches signatures, and verifies return type consistency (`MH0534`).
@@ -422,7 +421,7 @@ The expression pass resolves types, operators, and control-flow invariants:
 - **Zero Frontend Constant Folding**: The frontend preserves operator calls without constant folding, allowing the backend to fold expressions with full semantic layout knowledge.
 - **Lambda Expressions & Closures**:
   - Non-capturing lambdas evaluate to `Std.Function<TReturn, TParams...>`.
-  - Capturing lambdas evaluate to `Std.Delegate<TReturn, TParams...>`.
+  - Capturing lambdas synthesize anonymous closure structs (`__Closure_N : Struct, Move`) implementing `Callable`, `CallableMut`, and/or `CallableOnce`.
   - Block bodies strictly require an explicit `return` statement; trailing expressions are rejected with `MH2016`.
   - Bidirectional contextual typing infers parameter types when assigned to typed variables or passed as function arguments; un-inferrable parameters emit `MH2015`.
 - **Operator Overload Resolution**: Operators resolve to explicit interface implementations on operand types (`MH2001`, `MH2002`).

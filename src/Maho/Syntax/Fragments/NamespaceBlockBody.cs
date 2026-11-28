@@ -11,6 +11,8 @@ internal sealed class NamespaceBlockBody : NamespaceBody
     public IReadOnlyList<Directive> Directives { get; }
     /// <summary> Using directives declared within this namespace block. </summary>
     public IReadOnlyList<UsingDirective> Usings { get; }
+    /// <summary> External module alias directives declared within this namespace block. </summary>
+    public IReadOnlyList<ExternUsingDirective> ExternUsings { get; }
     /// <summary> Top-level members contained in the namespace block. </summary>
     public IReadOnlyList<TopLevel> Members { get; internal set; }
     /// <summary> Closing brace token. </summary>
@@ -22,14 +24,18 @@ internal sealed class NamespaceBlockBody : NamespaceBody
         OpenBrace = openBrace;
         Directives = directives;
         var usings = new List<UsingDirective>();
+        var externUsings = new List<ExternUsingDirective>();
 
         foreach (var directive in directives)
         {
             if (directive is UsingDirective @using)
                 usings.Add(@using);
+            else if (directive is ExternUsingDirective externUsing)
+                externUsings.Add(externUsing);
         }
 
         Usings = usings;
+        ExternUsings = externUsings;
         Members = members;
         CloseBrace = closeBrace;
     }

@@ -292,6 +292,14 @@ internal sealed class ConstantFoldingPass : ResolutionPass
                 Evaluate(whileExpr.Body, context);
                 return ConstantValue.None;
 
+            case TryExpression tryExpr:
+                Evaluate(tryExpr.TryBlock, context);
+                foreach (var catchClause in tryExpr.CatchClauses)
+                    Evaluate(catchClause.Block, context);
+                if (tryExpr.FinallyClause is { } finallyClause)
+                    Evaluate(finallyClause.Block, context);
+                return ConstantValue.None;
+
             case BlockExpression blockExpr:
                 EvaluateLocals(blockExpr.Locals, context);
                 ConstantValue last = ConstantValue.None;
@@ -324,15 +332,17 @@ internal sealed class ConstantFoldingPass : ResolutionPass
         }
         else if (token.Kind is TokenKind.String or TokenKind.SuffixedString)
         {
-            return ConstantValue.FromStr(UnescapeString(text));
+            var parsed = Text.LiteralEscapeParser.Parse(token);
+            return ConstantValue.FromStr(parsed.DecodedValue);
         }
         else if (token.Kind is TokenKind.Char or TokenKind.SuffixedChar)
         {
-            var unquoted = UnescapeString(text);
-            if (unquoted.Length > 0)
+            var parsed = Text.LiteralEscapeParser.Parse(token);
+            if (!parsed.HasErrors &&
+                parsed.ScalarCount == 1 &&
+                System.Text.Rune.DecodeFromUtf16(parsed.DecodedValue, out var rune, out _) == System.Buffers.OperationStatus.Done)
             {
-                uint codePoint = (uint)char.ConvertToUtf32(unquoted, 0);
-                return ConstantValue.FromChar(codePoint);
+                return ConstantValue.FromChar((uint)rune.Value);
             }
         }
 
@@ -367,14 +377,6 @@ internal sealed class ConstantFoldingPass : ResolutionPass
         }
 
         return BigInteger.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out val);
-    }
-
-    private static string UnescapeString(string text)
-    {
-        if (text.Length >= 2 && ((text.StartsWith('"') && text.EndsWith('"')) || (text.StartsWith('\'') && text.EndsWith('\''))))
-            text = text.Substring(1, text.Length - 2);
-
-        return text;
     }
 
     private static ConstantValue EvaluateUnary(UnaryExpression unary, ResolutionContext context)

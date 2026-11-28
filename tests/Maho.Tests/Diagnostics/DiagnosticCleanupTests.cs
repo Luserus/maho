@@ -1,8 +1,4 @@
-using System.Linq;
 using Maho.Diagnostics;
-using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
 
 namespace Maho.Tests;
 
@@ -11,26 +7,36 @@ public sealed class DiagnosticCleanupTests
     private const string StdPrelude = """
         namespace Std
         {
-            intrinsic attribute IntrinsicType(Str name);
-            intrinsic attribute IntrinsicFunction(Str signature);
-            intrinsic attribute OperatorFunction(Str name);
+            [IntrinsicType("Layout")] public interface Layout;
+            [IntrinsicType("Sized")] public interface Sized : Layout;
+            [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+            intrinsic attribute IntrinsicType(Str& name);
+            intrinsic attribute IntrinsicFunction(Str& signature);
+            intrinsic attribute OperatorFunction(Str& name);
+
+            [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int16")] public struct Int16;
             [IntrinsicType("Int32")] public struct Int32;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("NUInt")] public struct NUInt;
-            [IntrinsicType("Unit")] public struct Unit;
             [IntrinsicType("Bool")] public struct Bool;
 
+            [IntrinsicType("Slice")]
+            public struct Slice<T, D : int = 1>;
+
+            [IntrinsicType("Metadata")]
+            public struct Metadata<T> where T : Layout;
+
             [IntrinsicType("Reference")]
-            public struct Reference<T> { NUInt raw; }
+            public struct Reference<T> where T : Layout { NUInt raw; Metadata<T> metadata; }
 
             [IntrinsicType("Str")]
-            public struct Str { Int8& buffer; NUInt length; }
+            public struct Str { UInt8[] data; }
 
             [IntrinsicType("Pointer")]
-            public struct Pointer<T> { NUInt addr; }
+            public struct Pointer<T> where T : Layout { NUInt addr; Metadata<T> metadata; }
 
             [IntrinsicType("ValueType")] public struct ValType;
             [IntrinsicType("Struct")] public struct Struct : ValType;
@@ -40,7 +46,7 @@ public sealed class DiagnosticCleanupTests
             public interface Callable<TReturn, TParams...>
             {
                 [OperatorFunction("Callable")]
-                public func Invoke(&this, TParams args) -> TReturn;
+                func Invoke(this&, TParams args) -> TReturn;
             }
 
             [IntrinsicType("Function")]
@@ -48,16 +54,7 @@ public sealed class DiagnosticCleanupTests
             {
                 NUInt codeAddress;
                 [IntrinsicFunction("Function.Invoke(TParams...)")]
-                public func Callable.Invoke(&this, TParams args) -> TReturn;
-            }
-
-            [IntrinsicType("Delegate")]
-            public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-            {
-                NUInt codeAddress;
-                Pointer<ValType> env;
-                [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-                public func Callable.Invoke(&this, TParams args) -> TReturn;
+                func Callable.Invoke(this&, TParams args) -> TReturn;
             }
         }
         """;
@@ -68,7 +65,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 Int32 x;
                 Int64 y = x;
@@ -90,7 +87,7 @@ public sealed class DiagnosticCleanupTests
             using MyInt = Std.Int32;
             using MyLong = Std.Int64;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 MyInt x;
                 MyLong y = x;
@@ -110,7 +107,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test(func(Int32) -> Int64 fp) -> Unit
+            public func Test(func(Int32) -> Int64 fp) -> ()
             {
                 fp.NonExistent;
             }
@@ -135,7 +132,7 @@ public sealed class DiagnosticCleanupTests
                 return res;
             }
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 TargetFn.NonExistent;
             }
@@ -154,7 +151,7 @@ public sealed class DiagnosticCleanupTests
         var compilation = Compilation.FromSource(StdPrelude + """
             using Std;
 
-            public func Test(Function<Int64, Int32> f) -> Unit
+            public func Test(Function<Int64, Int32> f) -> ()
             {
                 f.NonExistent;
             }
@@ -168,38 +165,44 @@ public sealed class DiagnosticCleanupTests
     }
 
     [Fact]
-    public void CustomNamespace_IntrinsicDelegate_QualifiesToCustomNamespace()
+    public void CustomNamespace_IntrinsicFunction_QualifiesToCustomNamespace()
     {
         var compilation = Compilation.FromSource("""
             namespace TestLib
             {
-                intrinsic attribute IntrinsicType(Str name);
-                intrinsic attribute IntrinsicFunction(Str signature);
-                intrinsic attribute OperatorFunction(Str name);
+                [IntrinsicType("Layout")] public interface Layout;
+                [IntrinsicType("Sized")] public interface Sized : Layout;
+                [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
+                intrinsic attribute IntrinsicType(Str& name);
+                intrinsic attribute IntrinsicFunction(Str& signature);
+                intrinsic attribute OperatorFunction(Str& name);
+
+                [IntrinsicType("UInt8")] public struct MyUInt8;
                 [IntrinsicType("Int8")] public struct MyInt8;
                 [IntrinsicType("NUInt")] public struct MyNUInt;
-                [IntrinsicType("Reference")] public struct Reference<T> { MyNUInt raw; }
-                [IntrinsicType("Str")] public struct Str { MyInt8& buffer; MyNUInt length; }
-                [IntrinsicType("Pointer")] public struct Pointer<T> { MyNUInt addr; }
+                [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
+                [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
+                [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { MyNUInt raw; Metadata<T> metadata; }
+                [IntrinsicType("Str")] public struct Str { MyUInt8[] data; }
+                [IntrinsicType("Pointer")] public struct Pointer<T> where T : Layout { MyNUInt addr; Metadata<T> metadata; }
                 [IntrinsicType("ValueType")] public struct ValType;
 
-                [IntrinsicType("Unit")] public struct MyUnit;
                 [IntrinsicType("Int32")] public struct MyInt32;
+                public struct MyUnit;
 
                 public interface Callable<TReturn, TParams...>
                 {
                     [OperatorFunction("Callable")]
-                    public func Invoke(&this, TParams args) -> TReturn;
+                    func Invoke(this&, TParams args) -> TReturn;
                 }
 
-                [IntrinsicType("Delegate")]
-                public struct MyDelegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+                [IntrinsicType("Function")]
+                public struct MyFunction<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
                 {
                     MyNUInt codeAddress;
-                    Pointer<ValType> env;
-                    [IntrinsicFunction("MyDelegate.Invoke(TParams...)")]
-                    public func Callable.Invoke(&this, TParams args) -> TReturn;
+                    [IntrinsicFunction("MyFunction.Invoke(TParams...)")]
+                    func Callable.Invoke(this&, TParams args) -> TReturn;
                 }
             }
 
@@ -207,18 +210,18 @@ public sealed class DiagnosticCleanupTests
 
             public struct Host
             {
-                public func Test(delegate(MyInt32) -> MyUnit del) -> MyUnit
+                public func Test(func(MyInt32) -> MyUnit fn) -> MyUnit
                 {
-                    del.NonExistent;
+                    fn.NonExistent;
                 }
             }
             """);
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH2014");
-        Assert.Contains("type 'TestLib.MyDelegate<MyUnit, MyInt32>' does not contain a definition for 'NonExistent'", diag.Message);
+        Assert.Contains("type 'TestLib.MyFunction<MyUnit, MyInt32>' does not contain a definition for 'NonExistent'", diag.Message);
         var primary = diag.Labels.First(l => l.Style == DiagnosticLabelStyle.Primary);
-        Assert.Equal("'NonExistent' not found on 'delegate(MyInt32) -> MyUnit'", primary.Message);
+        Assert.Equal("'NonExistent' not found on 'func(MyInt32) -> MyUnit'", primary.Message);
     }
 
     [Fact]
@@ -229,7 +232,7 @@ public sealed class DiagnosticCleanupTests
 
             public struct CustomPoint;
 
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 CustomPoint a;
                 CustomPoint b;

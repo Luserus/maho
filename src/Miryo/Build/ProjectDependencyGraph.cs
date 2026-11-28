@@ -33,17 +33,7 @@ public sealed class ProjectDependencyGraph
         {
             string canonicalPath = Path.GetFullPath(project.ProjectFilePath);
             projectsByPath[canonicalPath] = project;
-
-            if (projectsByName.TryGetValue(project.ProjectName, out MahoProject? existing))
-            {
-                throw new InvalidOperationException(
-                    $"Duplicate project name '{project.ProjectName}' found in workspace:\n" +
-                    $"  - {existing.ProjectFilePath}\n" +
-                    $"  - {project.ProjectFilePath}\n" +
-                    $"Project names in a workspace must be unique.");
-            }
-
-            projectsByName[project.ProjectName] = project;
+            projectsByName.TryAdd(project.ProjectName, project);
             directDependencies[project] = [];
             directDependents[project] = [];
         }
@@ -51,8 +41,9 @@ public sealed class ProjectDependencyGraph
         // Build edges
         foreach (var project in AllProjects)
         {
-            foreach (string refPath in project.ProjectsReferenced)
+            foreach (string refSpec in project.ProjectsReferenced)
             {
+                MiryoBuildSystem.ParseReferenceSpec(refSpec, out _, out string refPath);
                 string resolvedPath = Path.IsPathRooted(refPath)
                     ? Path.GetFullPath(refPath)
                     : Path.GetFullPath(Path.Combine(project.ProjectDirectory, refPath));

@@ -1,4 +1,3 @@
-using Maho.Server;
 using Maho;
 using DiagnosticColorMode = Maho.Server.CompilerDiagnosticColorMode;
 using DiagnosticPathStyle = Maho.Server.CompilerDiagnosticPathStyle;

@@ -1,75 +1,80 @@
-using System.Linq;
-using Maho.Resolution;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class IndirectMemberAccessTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
         public struct Int32;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
+
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
 
         [IntrinsicType("Metadata")]
-        public struct Metadata<T>;
+        public struct Metadata<T> where T : Layout;
 
-        public interface Deref<T>
+        public interface Deref<T> where T : Layout
         {
             [OperatorFunction("Dereference")]
-            public func Deref(&this) -> &T;
+            func Deref(this&) -> T&;
         }
 
-        public interface Arrow<T>
+        public interface Arrow<T> where T : Layout
         {
             [OperatorFunction("IndirectMemberAccess")]
-            public func Arrow(&this) -> &T;
+            func Arrow(this&) -> T&;
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<T>, Deref<T>
+        public struct Reference<T> : Arrow<T>, Deref<T> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<T>, Deref<T>
+        public struct Pointer<T> : Arrow<T>, Deref<T> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            public func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            public func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("ValueType")]
@@ -81,7 +86,7 @@ public sealed class IndirectMemberAccessTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -89,17 +94,9 @@ public sealed class IndirectMemberAccessTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public struct Point
         {

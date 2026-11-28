@@ -26,8 +26,9 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private ResolutionContext context = null!;
     private Symbol? currentTypeSymbol;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
-    private readonly Dictionary<(TypeSyntax, Scope, bool, bool), TypeRef> resolvedTypes = [];
+    private readonly Dictionary<(TypeSyntax, Scope, bool, bool, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
+    private readonly HashSet<AliasSymbol> resolvingAliases = [];
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 
@@ -74,10 +75,22 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             ResolveAlias(alias);
         }
 
+        foreach (var field in context.FieldSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
+            ResolveVariable(field, field.Syntax);
+        }
+
         foreach (var function in context.FunctionSymbols)
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
             ResolveFunction(function);
+        }
+
+        foreach (var extension in context.ExtensionSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(extension));
+            ResolveExtension(extension);
         }
 
         foreach (var method in context.MethodSymbols)
@@ -102,12 +115,6 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
             ResolveConstant(constant);
-        }
-
-        foreach (var field in context.FieldSymbols)
-        {
-            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
-            ResolveVariable(field, field.Syntax);
         }
 
         foreach (var local in context.LocalVariableSymbols)
@@ -213,11 +220,18 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckCyclicTypeHierarchies();
         LinearizeAndDeduplicateAllBases();
         ValidateConstructorBaseInitializers();
+        ValidateTypeLayoutsAndSizedness();
         CheckDuplicateAndPartialFunctions();
         CheckDuplicateVariables();
         CheckDuplicateProperties();
+        ValidateModuleConformanceUniqueness();
+        SynthesizeDerivedConformances();
         ValidateInterfaceImplementations();
         ValidateModifiers();
+        ValidateMethodOverrides();
+        ValidateThisGenericParameters();
+        ValidateGenericParameterDefaults();
+        ValidateMainEntryPoints();
     }
 
     private void ResolveTopLevelStatements(CompilationUnit root)
@@ -307,19 +321,245 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         currentTypeSymbol = symbol;
 
         var scope = GetOwnedScope(symbol);
+        var ownerHandle = ResolutionContext.GetHandle(symbol);
+        var ownerSelfType = BuildSelfTypeRef(ownerHandle, symbol.Name.Text, symbol.GenericParameters);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope, isTraitBoundContext: true);
+        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, ownerSelfType);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters, scope);
 
         if (symbol is ISumTypeSymbol sumType)
             ResolveSumType(sumType, symbol, syntax, scope);
         else
             PopulateProductMembers(symbol);
+    }
+
+    private void ValidateThisArgumentsOnTarget(
+        TypeRef ifaceRef,
+        SymbolHandle ifaceHandle,
+        TypeRef targetSelfType,
+        IReadOnlyList<SymbolHandle>? ownerInterfaceParams,
+        TextSpan span,
+        SourceText? source)
+    {
+        if (ifaceRef.SpecialType is not GenericSemanticType gst)
+            return;
+
+        var ifaceGps = GetGenericParameters(ifaceHandle);
+        if (ifaceGps.Count == 0)
+            return;
+
+        string targetName = ResolutionContext.GetTargetDisplayName(context, ifaceHandle);
+        for (int i = 0; i < ifaceGps.Count && i < gst.TypeArguments.Count; i++)
+        {
+            if (context.GetGenericParameterSymbol(ifaceGps[i]) is not { ParameterKind: GenericParameterKind.This } gp)
+                continue;
+
+            var arg = gst.TypeArguments[i];
+            if (arg.IsError || arg.IsUnresolved)
+                continue;
+
+            if (arg.Equals(targetSelfType))
+                continue;
+
+            if (ownerInterfaceParams is not null &&
+                arg.Handle is { } argH &&
+                ownerInterfaceParams.Contains(argH) &&
+                context.GetGenericParameterSymbol(argH) is { ParameterKind: GenericParameterKind.This })
+            {
+                continue;
+            }
+
+            context.Diagnostics.ReportThisGenericArgumentMismatch(
+                span,
+                gp.Name.Text,
+                targetName,
+                targetSelfType.ToDisplayString(context),
+                arg.ToDisplayString(context),
+                source);
+        }
+    }
+
+    private TypeRef BuildSelfTypeRef(SymbolHandle handle, string name, IReadOnlyList<SymbolHandle> genericParams) =>
+        genericParams.Count == 0
+            ? TypeRef.Resolved(handle)
+            : TypeRef.Generic(handle, name, [.. genericParams.Select(TypeRef.Resolved)]);
+
+    private List<TypeRef> ResolveBaseTypes(
+        TypeBaseClause? baseClause,
+        Scope scope,
+        SymbolHandle ownerHandle,
+        string ownerName,
+        bool isExtension,
+        TypeRef ownerTargetType)
+    {
+        if (baseClause is null || baseClause.BaseTypes.Count == 0)
+            return [];
+
+        var result = new List<TypeRef>(baseClause.BaseTypes.Count);
+        var seenInterfacesInClause = new List<(SymbolHandle IfaceH, TypeRef InterfaceType)>();
+        bool isOwnerInterface = !isExtension && context.GetSymbol(ownerHandle) switch
+        {
+            TypeSymbol ots => ots.TypeKind == TypeKind.Interface,
+            NestedTypeSymbol onts => onts.TypeKind == TypeKind.Interface,
+            _ => false
+        };
+
+        for (int i = 0; i < baseClause.BaseTypes.Count; i++)
+        {
+            var item = baseClause.BaseTypes[i];
+            bool hasDerivedSyntax = ContainsDerivedGenericArgument(item.Type);
+            TypeRef baseRef;
+            activeDerivedBaseContext = (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                ? (context.UnwrapAlias(ownerHandle), ownerTargetType)
+                : null;
+            try
+            {
+                baseRef = ResolveType(item.Type, scope, isTraitBoundContext: true, implicitThisTarget: ownerTargetType, isConformanceOrConstraintContext: true);
+            }
+            finally
+            {
+                activeDerivedBaseContext = null;
+            }
+            result.Add(baseRef);
+
+            if (baseRef.IsError || baseRef.Handle is not { } rawBaseH)
+                continue;
+
+            var unwrappedBaseH = context.UnwrapAlias(rawBaseH);
+            bool isInterface = context.GetSymbol(unwrappedBaseH) switch
+            {
+                TypeSymbol ts => ts.TypeKind == TypeKind.Interface,
+                NestedTypeSymbol nts => nts.TypeKind == TypeKind.Interface,
+                _ => false
+            };
+
+            if (!isInterface)
+            {
+                if (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                {
+                    context.Diagnostics.ReportInheritanceOrOverrideError(
+                        item.Type.GetSpan() ?? default,
+                        "'derived' generic type argument can only be used inside a base interface's generic arguments",
+                        item.GetSource());
+                }
+                continue;
+            }
+
+            ValidateThisArgumentsOnTarget(
+                baseRef,
+                unwrappedBaseH,
+                ownerTargetType,
+                isOwnerInterface ? GetGenericParameters(ownerHandle) : null,
+                item.Type.GetSpan() ?? default,
+                item.GetSource());
+
+            // Clarification #1: A single type or extension definition cannot implement the same interface twice
+            // in its base list (even with different visibilities).
+            bool duplicateInClause = false;
+            foreach (var (prevH, prevType) in seenInterfacesInClause)
+            {
+                if (prevH == unwrappedBaseH && prevType.Equals(baseRef))
+                {
+                    duplicateInClause = true;
+                    break;
+                }
+            }
+
+            if (duplicateInClause)
+            {
+                context.Diagnostics.ReportConflictingInterfaceConformance(
+                    item.GetSpan() ?? default,
+                    ownerName,
+                    baseRef.ToDisplayString(context),
+                    "an interface cannot appear more than once in the same base list",
+                    item.GetSource());
+                continue;
+            }
+
+            seenInterfacesInClause.Add((unwrappedBaseH, baseRef));
+
+            Accessibility acc = item.VisibilityModifier?.MatchingKind switch
+            {
+                MatchingKeywordKind.Public => Accessibility.Public,
+                MatchingKeywordKind.Internal => Accessibility.Internal,
+                MatchingKeywordKind.Protected => Accessibility.Protected,
+                MatchingKeywordKind.Private => Accessibility.Private,
+                _ => Accessibility.Public
+            };
+
+            TypeRef? derivedTemplate = (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                ? BuildDerivedInterfaceTemplate(item.Type, baseRef, context.UnwrapAlias(ownerHandle))
+                : null;
+
+            context.RegisterConformance(
+                ownerTargetType,
+                baseRef,
+                unwrappedBaseH,
+                acc,
+                ownerHandle,
+                isExtension,
+                item,
+                derivedTemplate);
+        }
+
+        return result;
+    }
+
+    private void ValidateModuleConformanceUniqueness()
+    {
+        // Clarification #2 & #3: Within a single module, at most one non-private implementation of a given
+        // (targetType, interface) may exist; multiple separate 'private' extensions are allowed.
+        var nonPrivateByKey = new Dictionary<(SymbolHandle TargetH, SymbolHandle IfaceH), List<InterfaceConformance>>();
+
+        foreach (var conf in context.Conformances)
+        {
+            if (conf.Accessibility == Accessibility.Private)
+                continue;
+
+            if (conf.TargetType.Handle is not { } rawTargetH)
+                continue;
+
+            var targetH = context.UnwrapAlias(rawTargetH);
+            var key = (targetH, conf.InterfaceHandle);
+            if (!nonPrivateByKey.TryGetValue(key, out var list))
+            {
+                list = [];
+                nonPrivateByKey[key] = list;
+            }
+            list.Add(conf);
+        }
+
+        foreach (var (_, list) in nonPrivateByKey)
+        {
+            if (list.Count <= 1)
+                continue;
+
+            // Group further by exact interface instantiation so Foo : Bar<int32>, Bar<Str> remains distinct.
+            var seen = new List<InterfaceConformance>();
+            foreach (var conf in list)
+            {
+                bool matchesExisting = seen.Any(prev => prev.InterfaceType.Equals(conf.InterfaceType));
+                if (!matchesExisting)
+                {
+                    seen.Add(conf);
+                    continue;
+                }
+
+                var span = conf.Syntax?.GetSpan() ?? default;
+                var source = conf.Syntax?.GetSource();
+                context.Diagnostics.ReportConflictingInterfaceConformance(
+                    span,
+                    conf.TargetType.ToDisplayString(context),
+                    conf.InterfaceType.ToDisplayString(context),
+                    $"multiple non-private implementations visible within module '{context.ModuleName}'",
+                    source);
+            }
+        }
     }
 
     private void ApplyImplicitBases(TypeSymbol symbol, TypeDeclaration? syntax)
@@ -363,20 +603,18 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isValueType = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && handle == valTypeH;
         bool isNever = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Never, out var neverH) && handle == neverH;
         bool isStruct = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Struct, out var structH) && handle == structH;
+        bool isSlice = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var sliceH) && handle == sliceH;
         bool isArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrayH) && handle == arrayH;
-        bool isFixedArray = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var fixedArrH) && handle == fixedArrH;
         bool isMetadata = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Metadata, out var metaH) && handle == metaH;
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
-        bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
-        bool isUnit = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unit, out var unitH) && handle == unitH;
         bool isTuple = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleH) && handle == tupleH;
         bool isPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH) && handle == ptrH;
         bool isMutPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrH) && handle == mutPtrH;
         bool isReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) && handle == refH;
         bool isMutReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefH) && handle == mutRefH;
 
-        if (isValueType || isNever || isStruct || isArray || isFixedArray || isMetadata || isEnum || isFunction || isDelegate || isUnit || isTuple || isPointer || isMutPointer || isReference || isMutReference)
+        if (isValueType || isNever || isStruct || isSlice || isArray || isMetadata || isEnum || isFunction || isTuple || isPointer || isMutPointer || isReference || isMutReference)
             return;
 
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
@@ -435,16 +673,20 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool hasCopy = false;
         bool hasMove = false;
 
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyIntrinsicH);
+        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveIntrinsicH);
+
         foreach (var baseType in baseTypes)
         {
             if (!baseType.IsResolved || baseType.Handle is not { } ifaceHandle)
                 continue;
 
+            var unwrappedBaseH = context.UnwrapAlias(ifaceHandle);
             if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Destructor))
                 hasDestructor = true;
-            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy))
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Copy) || (copyIntrinsicH != default && unwrappedBaseH == copyIntrinsicH))
                 hasCopy = true;
-            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move))
+            if (HasOperatorOnInterface(ifaceHandle, OperatorKind.Move) || (moveIntrinsicH != default && unwrappedBaseH == moveIntrinsicH))
                 hasMove = true;
         }
 
@@ -457,8 +699,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         if (hasDestructor && hasCopy)
             context.Diagnostics.ReportDestructorNandCopy(span, typeName, source);
-
-        if (hasCopy && hasMove)
+        else if (hasCopy && hasMove)
             context.Diagnostics.ReportCopyNandMove(span, typeName, source);
     }
 
@@ -468,9 +709,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private void ValidateCallableImplementation(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
     {
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && typeHandle == fnH;
-        bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && typeHandle == delH;
-
-        if (!isFunction && !isDelegate)
+        if (!isFunction)
             return;
 
         bool implementsCallable = false;
@@ -485,8 +724,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         if (!implementsCallable)
         {
-            string intrinsicName = isFunction ? KnownIntrinsics.Function : KnownIntrinsics.Delegate;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, typeName, intrinsicName, "must implement an operator interface marked with [OperatorFunction(\"Callable\")]", source);
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, typeName, KnownIntrinsics.Function, "must implement an operator interface marked with [OperatorFunction(\"Callable\")]", source);
         }
     }
 
@@ -520,14 +758,16 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         currentTypeSymbol = symbol;
 
         var scope = GetOwnedScope(symbol);
+        var ownerHandle = ResolutionContext.GetHandle(symbol);
+        var ownerSelfType = BuildSelfTypeRef(ownerHandle, symbol.Name.Text, symbol.GenericParameters);
         symbol.Attributes = ResolveAttributes(syntax.Attributes, symbol.EnclosingScope);
-        symbol.BaseTypes = ResolveTypes(syntax.Base?.BaseTypes ?? new SeparatedSyntaxList<TypeSyntax>([]), scope, isTraitBoundContext: true);
+        symbol.BaseTypes = ResolveBaseTypes(syntax.Base, scope, ownerHandle, symbol.Name.Text, isExtension: false, ownerSelfType);
         ApplyImplicitBases(symbol, syntax);
         ValidateLifecycleOperatorCombinations(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
         ValidateCallableImplementation(symbol.BaseTypes, ResolutionContext.GetHandle(symbol), symbol.Name.Text, syntax.Name.GetSpan() ?? default, syntax.GetSource());
 
         ResolveTypeConstraints(syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(syntax.Name, symbol.GenericParameters, scope);
 
         if (symbol is ISumTypeSymbol sumType)
             ResolveSumType(sumType, symbol, syntax, scope);
@@ -581,7 +821,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         }
 
         ResolveTypeConstraints(symbol.Syntax.Constraints, symbol.GenericParameters, scope);
-        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters);
+        ResolveGenericParameterDeclarations(symbol.Syntax.Name, symbol.GenericParameters, scope);
         var target = ResolveType(symbol.Syntax.Target, scope, reportDiagnostics: !symbol.IsGlobalAlias);
 
         symbol.HasCompatibleConstraints = target.IsResolved &&
@@ -602,18 +842,29 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         for (int index = 0; index < targetParameters.Count; index++)
         {
-            if (targetParameters[index].Kind is not SymbolKind.GenericParameter)
+            if (targetParameters[index].Kind is not SymbolKind.GenericParameter ||
+                context.GetGenericParameterSymbol(targetParameters[index]) is not { } parameter)
                 return false;
 
-            GenericParameterSymbol parameter = context.GenericParameterSymbols[targetParameters[index].ID];
-
-            if (parameter.ParameterKind is not GenericParameterKind.Type || targetArguments[index] is LiteralGenericArgument)
+            if (parameter.ParameterKind is not (GenericParameterKind.Type or GenericParameterKind.This) || targetArguments[index] is LiteralGenericArgument)
                 continue;
 
             SymbolHandle? argument = ResolveGenericArgumentAsType(targetArguments[index], scope);
 
             if (argument is null || !SatisfiesAllConstraints(argument.Value, parameter.Constraints))
                 return false;
+
+            var argType = ResolveType(targetArguments[index], scope, reportDiagnostics: false);
+            foreach (var constraint in parameter.Constraints)
+            {
+                var lookup = context.ResolveInterfaceConformance(argType, constraint, explicitModuleQualifier: null, scope, containingFunction: default);
+                if (lookup.Status is ResolutionContext.ConformanceLookupStatus.Inaccessible or
+                    ResolutionContext.ConformanceLookupStatus.Ambiguous or
+                    ResolutionContext.ConformanceLookupStatus.AmbiguousModule)
+                {
+                    return false;
+                }
+            }
         }
 
         return true;
@@ -644,6 +895,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 return GetGenericArguments(modified.Type);
             case PrefixModifiedType prefixModified:
                 return GetGenericArguments(prefixModified.Type);
+            case GroupedType grouped:
+                return GetGenericArguments(grouped.InnerType);
             default:
                 return [];
         }
@@ -656,52 +909,199 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             if (constraint.IsError)
                 continue;
 
-            if (constraint.IsResolved && constraint.Handle is { } constraintHandle && !SatisfiesConstraint(candidate, constraintHandle, []))
+            if (constraint.IsResolved && constraint.Handle is { } constraintHandle && !SatisfiesConstraint(context, candidate, constraintHandle, []))
                 return false;
         }
 
         return true;
     }
 
-    private bool SatisfiesConstraint(SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
+    internal static bool SatisfiesConstraint(ResolutionContext context, SymbolHandle candidate, SymbolHandle required, HashSet<SymbolHandle> visited)
     {
         if (candidate == required)
             return true;
 
+        var unwrappedCandidate = candidate.Kind == SymbolKind.GenericParameter ? candidate : context.UnwrapAlias(candidate);
+        var unwrappedRequired = required.Kind == SymbolKind.GenericParameter ? required : context.UnwrapAlias(required);
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && unwrappedRequired == layoutH)
+            return true;
+
         if (!visited.Add(candidate))
             return false;
+
+        var candidateSym = context.GetSymbol(unwrappedCandidate);
+        bool candidateIsInterface = candidateSym is TypeSymbol { TypeKind: TypeKind.Interface }
+            or NestedTypeSymbol { TypeKind: TypeKind.Interface };
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedH) && unwrappedRequired == sizedH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+                return context.GetGenericParameterSymbol(unwrappedCandidate)?.RequiresSized(context) ?? true;
+            if (!candidateIsInterface)
+                return TypeRef.Resolved(unwrappedCandidate).IsSized(context);
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out var unsizedH) && unwrappedRequired == unsizedH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+            {
+                var gpUnsized = context.GetGenericParameterSymbol(unwrappedCandidate);
+                if (gpUnsized is null || gpUnsized.RequiresSized(context))
+                    return false;
+                if (gpUnsized.HasExplicitUnsized)
+                    return true;
+            }
+            else if (!candidateIsInterface)
+            {
+                return TypeRef.Resolved(unwrappedCandidate).IsKnownUnsized(context);
+            }
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Transfer, out var transferH) && unwrappedRequired == transferH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter || !candidateIsInterface)
+                return true;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyH) && unwrappedRequired == copyH)
+        {
+            if (!candidateIsInterface && unwrappedCandidate.Kind != SymbolKind.GenericParameter)
+                return new Ownership.OwnershipTypeClassifier(context).Classify(TypeRef.Resolved(unwrappedCandidate)) == Ownership.OwnershipKind.Copy;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveH) && unwrappedRequired == moveH)
+        {
+            if (unwrappedCandidate.Kind == SymbolKind.GenericParameter)
+            {
+                if (context.GetGenericParameterSymbol(unwrappedCandidate)?.RequiresCopy(context) == true)
+                    return false;
+            }
+            else if (!candidateIsInterface)
+            {
+                return new Ownership.OwnershipTypeClassifier(context).Classify(TypeRef.Resolved(unwrappedCandidate)) == Ownership.OwnershipKind.Move;
+            }
+        }
 
         switch (candidate.Kind)
         {
             case SymbolKind.GenericParameter:
                 if (context.GetGenericParameterSymbol(candidate) is { } gp)
                 {
+                    if (gp.ParameterKind == GenericParameterKind.This &&
+                        gp.GenericSymbol is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+                    {
+                        var ownerIfaceH = ResolutionContext.GetHandle(gp.GenericSymbol);
+                        if (SatisfiesConstraint(context, ownerIfaceH, required, visited))
+                            return true;
+                    }
                     foreach (var constraint in gp.Constraints)
-                        if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(constraintHandle, required, visited))
+                        if (constraint.IsResolved && constraint.Handle is { } constraintHandle && SatisfiesConstraint(context, constraintHandle, required, visited))
                             return true;
                 }
                 break;
-            case SymbolKind.Type:
-                if (context.GetTypeSymbol(candidate) is { } typeSym)
-                {
-                    foreach (var baseType in typeSym.BaseTypes)
-                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
-                            return true;
-                }
-                break;
-            case SymbolKind.NestedType:
-                if (context.GetNestedTypeSymbol(candidate) is { } nestedTypeSym)
-                {
-                    foreach (var baseType in nestedTypeSym.BaseTypes)
-                        if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(baseHandle, required, visited))
-                            return true;
-                }
-                break;
+                case SymbolKind.Type:
+                    if (context.GetTypeSymbol(candidate) is { } typeSym)
+                    {
+                        foreach (var baseType in typeSym.BaseTypes)
+                            if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(context, baseHandle, required, visited))
+                                return true;
+                    }
+                    if (context.HasAnyConformance(candidate, required))
+                        return true;
+                    break;
+                case SymbolKind.NestedType:
+                    if (context.GetNestedTypeSymbol(candidate) is { } nestedTypeSym)
+                    {
+                        foreach (var baseType in nestedTypeSym.BaseTypes)
+                            if (baseType.IsResolved && baseType.Handle is { } baseHandle && SatisfiesConstraint(context, baseHandle, required, visited))
+                                return true;
+                    }
+                    if (context.HasAnyConformance(candidate, required))
+                        return true;
+                    break;
             case SymbolKind.Alias when context.GetAliasSymbol(candidate)?.Target is { IsResolved: true, Handle: { } target }:
-                return SatisfiesConstraint(target, required, visited);
+                return SatisfiesConstraint(context, target, required, visited);
         }
 
         return false;
+    }
+
+    internal static bool TrySatisfiesTransferHierarchyConstraint(
+        ResolutionContext context,
+        TypeRef argType,
+        SymbolHandle requiredHandle,
+        out bool satisfied)
+    {
+        var unwrappedRequired = context.UnwrapAlias(requiredHandle);
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Transfer, out var transferH) && unwrappedRequired == transferH)
+        {
+            satisfied = true;
+            return true;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Copy, out var copyH) && unwrappedRequired == copyH)
+        {
+            if (argType.Handle is { Kind: SymbolKind.GenericParameter } gpH)
+                satisfied = context.GetGenericParameterSymbol(gpH)?.RequiresCopy(context) == true;
+            else
+                satisfied = new Ownership.OwnershipTypeClassifier(context).Classify(argType) == Ownership.OwnershipKind.Copy;
+            return true;
+        }
+
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Move, out var moveH) && unwrappedRequired == moveH)
+        {
+            if (argType.Handle is { Kind: SymbolKind.GenericParameter } gpH)
+                satisfied = context.GetGenericParameterSymbol(gpH)?.RequiresMoveOnly(context) == true;
+            else
+                satisfied = new Ownership.OwnershipTypeClassifier(context).Classify(argType) == Ownership.OwnershipKind.Move;
+            return true;
+        }
+
+        satisfied = false;
+        return false;
+    }
+
+    private void ResolveExtension(ExtensionSymbol ext)
+    {
+        if (ext.Syntax is null)
+            return;
+
+        if (ext.Syntax.Constraints.Count > 0)
+        {
+            ResolveTypeConstraints(ext.Syntax.Constraints, ext.GenericParameters, ext.Scope);
+        }
+
+        var resolvedTarget = ResolveType(ext.Syntax.TargetType, ext.Scope, allowInference: false, allowAlias: true);
+        if (!resolvedTarget.IsError && TypeRef.UnwrapDyn(resolvedTarget).SpecialType is AliasSemanticType)
+        {
+            context.Diagnostics.ReportAliasNotAllowedAsExtensionTarget(
+                ext.Syntax.TargetType.GetSpan() ?? ext.Syntax.GetSpan() ?? default,
+                ext.Syntax.GetSource());
+            resolvedTarget = TypeRef.Error;
+        }
+        ext.TargetTypeRef = resolvedTarget;
+        ext.TargetTypeHandle = ext.TargetTypeRef.Handle;
+
+        if (ext.Syntax.Base is not null)
+        {
+            var extHandle = ResolutionContext.GetHandle(ext);
+            var resolvedBases = ResolveBaseTypes(ext.Syntax.Base, ext.Scope, extHandle, ext.Name.Text, isExtension: true, ext.TargetTypeRef);
+            foreach (var b in resolvedBases)
+            {
+                if (b.Handle is { } bHandle && context.GetSymbol(bHandle) is TypeSymbol bTypeSym)
+                {
+                    if (bTypeSym.TypeKind != TypeKind.Interface)
+                    {
+                        var span = ext.Syntax.Base.GetSpan() ?? default;
+                        context.Diagnostics.ReportExtensionCannotSpecifyBaseStruct(span, bTypeSym.Name.Text, ext.Syntax.GetSource());
+                        continue;
+                    }
+                }
+
+                ext.BaseInterfaces.Add(b);
+            }
+        }
     }
 
 }

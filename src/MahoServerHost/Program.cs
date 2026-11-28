@@ -188,6 +188,7 @@ public static class MahoServerDaemon
                     EntryFile = request.Options.EntryFile,
                     ImplicitTopLevel = request.Options.ImplicitTopLevel,
                     RootDirectory = request.Options.RootDirectory,
+                    ModuleName = string.IsNullOrWhiteSpace(request.ModuleName) ? null : request.ModuleName,
                     ReferencedProjects = request.Options.ReferencedProjects,
                     GlobalAliases = request.Options.GlobalAliases,
                     ProjectFilePath = request.Options.ProjectFilePath,

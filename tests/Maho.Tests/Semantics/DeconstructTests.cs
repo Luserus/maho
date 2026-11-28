@@ -1,18 +1,21 @@
-using System.Linq;
-using Maho;
-using Maho.Resolution;
-using Maho.Syntax;
-using Xunit;
-
 namespace Maho.Tests;
 
 public sealed class DeconstructTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(Str name);
-        intrinsic attribute IntrinsicFunction(Str signature);
-        intrinsic attribute OperatorFunction(Str name);
+        [IntrinsicType("Layout")]
+        public interface Layout;
+        [IntrinsicType("Sized")]
+        public interface Sized : Layout;
+        [IntrinsicType("Unsized")]
+        public interface Unsized : Layout;
 
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
+
+        [IntrinsicType("UInt8")]
+        public struct uint8;
         [IntrinsicType("Int8")]
         public struct int8;
         [IntrinsicType("Int32")]
@@ -21,28 +24,44 @@ public sealed class DeconstructTests
         public struct int64;
         [IntrinsicType("NUInt")]
         public struct nuint;
-        [IntrinsicType("Unit")]
-        public struct Unit;
         [IntrinsicType("Bool")]
         public struct bool;
 
+        [IntrinsicType("Slice")]
+        public struct Slice<T, D : int = 1>;
+
+        [IntrinsicType("Metadata")]
+        public struct Metadata<T> where T : Layout;
+
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            func Arrow(this&) -> TReturn;
+        }
+
         [IntrinsicType("Reference")]
-        public struct Reference<T>
+        public struct Reference<T> : Arrow<T&> where T : Layout
         {
             nuint raw;
+            Metadata<T> metadata;
+
+            func Arrow.Arrow(this&) -> T&
+            {
+                return &(*(*this));
+            }
         }
 
         [IntrinsicType("Str")]
         public struct Str
         {
-            int8& buffer;
-            nuint length;
+            uint8[] data;
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T>
+        public struct Pointer<T> where T : Layout
         {
             nuint addr;
+            Metadata<T> metadata;
         }
 
         [IntrinsicType("ValueType")]
@@ -54,7 +73,7 @@ public sealed class DeconstructTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            public func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -62,29 +81,21 @@ public sealed class DeconstructTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            public func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public interface Deconstruct<T...>
         {
             [OperatorFunction("Deconstruct")]
-            func Deconstruct(&this) -> (T...);
+            func Deconstruct(this&) -> (T...);
         }
 
         [IntrinsicType("Tuple")]
         public struct Tuple<T...> : ValType, Deconstruct<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            public func Deconstruct.Deconstruct(&this) -> (T...);
+            func Deconstruct.Deconstruct(this&) -> (T...);
         }
         """;
 
@@ -92,7 +103,7 @@ public sealed class DeconstructTests
     public void TupleDeconstruction_Declaration_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var (a, b) = (10, 20);
             }
@@ -114,13 +125,13 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 var (px, py) = pt;
             }
@@ -142,13 +153,13 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 int32 px = 0;
                 int32 py = 0;
@@ -163,7 +174,7 @@ public sealed class DeconstructTests
     public void TupleDeconstruction_ElementCountMismatch_ReportsMH0530()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test() -> Unit
+            public func Test() -> ()
             {
                 var (a, b, c) = (10, 20);
             }
@@ -182,13 +193,13 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                public func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 
-            public func Test(Point pt) -> Unit
+            public func Test(Point pt) -> ()
             {
                 var (a, b, c) = pt;
             }
@@ -207,7 +218,7 @@ public sealed class DeconstructTests
                 public int32 x;
             }
 
-            public func Test(NonDeconstructable item) -> Unit
+            public func Test(NonDeconstructable item) -> ()
             {
                 var (a, b) = item;
             }

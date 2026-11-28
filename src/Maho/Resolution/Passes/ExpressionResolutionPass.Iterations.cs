@@ -12,19 +12,28 @@ internal sealed partial class ExpressionResolutionPass
 
         // 1. Resolve the collection expression
         var colType = ResolveExpression(forExpr.Collection, scope, containingFunction);
+        var unwrappedCol = colType;
+        while (unwrappedCol.SpecialType is AliasSemanticType or ReferenceSemanticType or DynSemanticType)
+        {
+            unwrappedCol = unwrappedCol.SpecialType switch
+            {
+                AliasSemanticType al => al.TargetType,
+                ReferenceSemanticType rf => rf.ElementType,
+                DynSemanticType d => d.TargetType,
+                _ => unwrappedCol
+            };
+        }
 
         // 2. Determine element/item type
         TypeRef itemType = TypeRef.Unresolved;
 
-        var handle = colType.Handle;
+        var handle = unwrappedCol.Handle;
         if (!handle.HasValue)
         {
-            if (colType.SpecialType is ArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+            if (unwrappedCol.SpecialType is SliceSemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
+                handle = hSlice;
+            else if (unwrappedCol.SpecialType is ArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
                 handle = hArr;
-            else if (colType.SpecialType is FixedArraySemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.FixedArray, out var hFix))
-                handle = hFix;
-            else if (colType.SpecialType is SpanSemanticType && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Span, out var hSpan))
-                handle = hSpan;
         }
 
         var colSym = handle.HasValue ? context.GetSymbol(handle.Value) : null;
@@ -32,6 +41,7 @@ internal sealed partial class ExpressionResolutionPass
         {
             TypeSymbol ts => ts.BaseTypes,
             NestedTypeSymbol nts => nts.BaseTypes,
+            GenericParameterSymbol gp => gp.Constraints,
             _ => []
         };
 
@@ -39,19 +49,15 @@ internal sealed partial class ExpressionResolutionPass
         Dictionary<SymbolHandle, TypeRef> typeArgs = [];
         if (colSym is TypeSymbol typeSymbol)
         {
-            if (colType.SpecialType is FixedArraySemanticType fix && typeSymbol.GenericParameters.Count >= 1)
-            {
-                typeArgs[typeSymbol.GenericParameters[0]] = fix.ElementType;
-            }
-            else if (colType.SpecialType is ArraySemanticType arr && typeSymbol.GenericParameters.Count >= 1)
+            if (unwrappedCol.SpecialType is ArraySemanticType arr && typeSymbol.GenericParameters.Count >= 1)
             {
                 typeArgs[typeSymbol.GenericParameters[0]] = arr.ElementType;
             }
-            else if (colType.SpecialType is SpanSemanticType sp && typeSymbol.GenericParameters.Count >= 1)
+            else if (unwrappedCol.SpecialType is SliceSemanticType slice && typeSymbol.GenericParameters.Count >= 1)
             {
-                typeArgs[typeSymbol.GenericParameters[0]] = sp.ElementType;
+                typeArgs[typeSymbol.GenericParameters[0]] = slice.ElementType;
             }
-            else if (colType.SpecialType is GenericSemanticType gstCol)
+            else if (unwrappedCol.SpecialType is GenericSemanticType gstCol)
             {
                 for (int i = 0; i < typeSymbol.GenericParameters.Count && i < gstCol.TypeArguments.Count; i++)
                 {
@@ -60,40 +66,19 @@ internal sealed partial class ExpressionResolutionPass
             }
         }
 
-        // Check Iterable<TItem, TIterator> (OperatorKind.Iterable)
-        if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterable, out var iterableCandidates))
+        // Check Iterable<TItem, TIterator> (OperatorKind.Iterable) across BaseTypes and extensions
+        if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterable, out var iterableCandidates) &&
+            TryFindIterationItemType(unwrappedCol, handle, baseTypes, typeArgs, iterableCandidates, argIndex: 0, out var foundIterableItem))
         {
-            foreach (var cand in iterableCandidates)
-            {
-                var match = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
-                if (match.Handle.HasValue)
-                {
-                    var effMatch = typeArgs.Count > 0 ? SubstituteTypeRef(match, typeArgs) : match;
-                    if (effMatch.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count >= 1)
-                    {
-                        itemType = gst.TypeArguments[0];
-                        break;
-                    }
-                }
-            }
+            itemType = foundIterableItem;
         }
 
-        // Check Iterator<TItem> (OperatorKind.Iterator)
-        if (itemType.IsUnresolved && context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterator, out var iteratorCandidates))
+        // Check Iterator<TItem> (OperatorKind.Iterator) across BaseTypes and extensions
+        if (itemType.IsUnresolved &&
+            context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterator, out var iteratorCandidates) &&
+            TryFindIterationItemType(unwrappedCol, handle, baseTypes, typeArgs, iteratorCandidates, argIndex: 0, out var foundIteratorItem))
         {
-            foreach (var cand in iteratorCandidates)
-            {
-                var match = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
-                if (match.Handle.HasValue)
-                {
-                    var effMatch = typeArgs.Count > 0 ? SubstituteTypeRef(match, typeArgs) : match;
-                    if (effMatch.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count >= 1)
-                    {
-                        itemType = gst.TypeArguments[0];
-                        break;
-                    }
-                }
-            }
+            itemType = foundIteratorItem;
         }
 
         if (itemType.IsUnresolved && !colType.IsError && !colType.IsInferred && !colType.IsUnresolved)
@@ -256,42 +241,49 @@ internal sealed partial class ExpressionResolutionPass
         };
 
         TypeRef expectedItemType = TypeRef.Unresolved;
-        if (returnType.Handle.HasValue)
+        var unwrappedReturnType = returnType;
+        while (unwrappedReturnType.SpecialType is AliasSemanticType or ReferenceSemanticType or DynSemanticType)
         {
-            var retSym = context.GetSymbol(returnType.Handle.Value);
+            unwrappedReturnType = unwrappedReturnType.SpecialType switch
+            {
+                AliasSemanticType al => al.TargetType,
+                ReferenceSemanticType rf => rf.ElementType,
+                DynSemanticType d => d.TargetType,
+                _ => unwrappedReturnType
+            };
+        }
+
+        if (unwrappedReturnType.Handle.HasValue)
+        {
+            var retSym = context.GetSymbol(unwrappedReturnType.Handle.Value);
             IReadOnlyList<TypeRef> baseTypes = retSym switch
             {
                 TypeSymbol ts => ts.BaseTypes,
                 NestedTypeSymbol nts => nts.BaseTypes,
+                GenericParameterSymbol gp => gp.Constraints,
                 _ => []
             };
 
-            // Check Iterator<TItem>
-            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterator, out var itCandidates))
+            Dictionary<SymbolHandle, TypeRef> yieldTypeArgs = [];
+            if (retSym is TypeSymbol retTypeSym && unwrappedReturnType.SpecialType is GenericSemanticType gstRet)
             {
-                foreach (var cand in itCandidates)
-                {
-                    var match = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
-                    if (match.Handle.HasValue && match.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count >= 1)
-                    {
-                        expectedItemType = gst.TypeArguments[0];
-                        break;
-                    }
-                }
+                for (int i = 0; i < retTypeSym.GenericParameters.Count && i < gstRet.TypeArguments.Count; i++)
+                    yieldTypeArgs[retTypeSym.GenericParameters[i]] = gstRet.TypeArguments[i];
             }
 
-            // Check Iterable<TItem, TIterator>
-            if (expectedItemType.IsUnresolved && context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterable, out var iterableCandidates))
+            // Check Iterator<TItem> across BaseTypes and extensions
+            if (context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterator, out var itCandidates) &&
+                TryFindIterationItemType(unwrappedReturnType, unwrappedReturnType.Handle, baseTypes, yieldTypeArgs, itCandidates, argIndex: 0, out var foundYieldIterator))
             {
-                foreach (var cand in iterableCandidates)
-                {
-                    var match = baseTypes.FirstOrDefault(b => b.Handle == cand.InterfaceHandle);
-                    if (match.Handle.HasValue && match.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count >= 1)
-                    {
-                        expectedItemType = gst.TypeArguments[0];
-                        break;
-                    }
-                }
+                expectedItemType = foundYieldIterator;
+            }
+
+            // Check Iterable<TItem, TIterator> across BaseTypes and extensions
+            if (expectedItemType.IsUnresolved &&
+                context.DiscoveredOperators.TryGetOperators(OperatorKind.Iterable, out var iterableCandidates) &&
+                TryFindIterationItemType(unwrappedReturnType, unwrappedReturnType.Handle, baseTypes, yieldTypeArgs, iterableCandidates, argIndex: 0, out var foundYieldIterable))
+            {
+                expectedItemType = foundYieldIterable;
             }
         }
 
@@ -323,5 +315,160 @@ internal sealed partial class ExpressionResolutionPass
                     yieldStmt.GetSource());
             }
         }
+    }
+
+    private bool TryFindIterationItemType(
+        TypeRef targetType,
+        SymbolHandle? targetHandle,
+        IReadOnlyList<TypeRef> baseTypes,
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        IReadOnlyList<DiscoveredOperatorMethod> candidates,
+        int argIndex,
+        out TypeRef itemType)
+    {
+        foreach (var cand in candidates)
+        {
+            foreach (var b in baseTypes)
+            {
+                if (TryExtractGenericInterfaceArg(b, cand.InterfaceHandle, typeArgs, argIndex, out itemType))
+                    return true;
+            }
+        }
+
+        if (targetHandle is { } rawHandle)
+        {
+            var normalizedHandle = context.UnwrapAlias(rawHandle);
+            List<InterfaceConformance> conformances = [];
+            CollectTypeHierarchyConformances(normalizedHandle, conformances);
+
+            foreach (var cand in candidates)
+            {
+                foreach (var conf in conformances)
+                {
+                    if (conf.Accessibility == Accessibility.Internal && conf.ModuleProjectId != context.ProjectId)
+                        continue;
+
+                    if (conf.InterfaceHandle != cand.InterfaceHandle &&
+                        !TypeRef.IsSubtypeOf(conf.InterfaceHandle, cand.InterfaceHandle, context))
+                    {
+                        continue;
+                    }
+
+                    var effectiveSubst = new Dictionary<SymbolHandle, TypeRef>(typeArgs);
+                    if (conf.IsExtension && context.GetSymbol(conf.OwnerHandle) is ExtensionSymbol ext)
+                    {
+                        if (!TryUnifyIterationExtensionTarget(ext, targetType, normalizedHandle, effectiveSubst))
+                            continue;
+                    }
+
+                    if (TryExtractGenericInterfaceArg(conf.InterfaceType, cand.InterfaceHandle, effectiveSubst, argIndex, out itemType))
+                        return true;
+                }
+            }
+        }
+
+        itemType = TypeRef.Unresolved;
+        return false;
+    }
+
+    private void CollectTypeHierarchyConformances(SymbolHandle targetHandle, List<InterfaceConformance> destination)
+    {
+        var visited = new HashSet<SymbolHandle>();
+        Walk(targetHandle);
+
+        void Walk(SymbolHandle current)
+        {
+            if (!visited.Add(current))
+                return;
+
+            context.CollectConformancesForTarget(current, destination);
+            if (context.GetTypeSymbol(current) is not { } typeSym)
+                return;
+
+            foreach (var b in typeSym.BaseTypes)
+            {
+                if (b.Handle is { } bh)
+                {
+                    var unwrapped = context.UnwrapAlias(bh);
+                    if (context.GetTypeSymbol(unwrapped) is not { TypeKind: TypeKind.Interface })
+                        Walk(unwrapped);
+                }
+            }
+        }
+    }
+
+    private bool TryUnifyIterationExtensionTarget(
+        ExtensionSymbol ext,
+        TypeRef actualType,
+        SymbolHandle normalizedHandle,
+        Dictionary<SymbolHandle, TypeRef> extArgs)
+    {
+        if (ext.GenericParameters.Count == 0)
+            return actualType.Handle is { } ah && context.UnwrapAlias(ah) == normalizedHandle;
+
+        if (TryUnifyExtensionTarget(ext.TargetTypeRef, actualType, ext.GenericParameters, extArgs))
+            return true;
+
+        if (ext.TargetTypeRef.SpecialType is GenericSemanticType extGst && extGst.TypeArguments.Count >= 1)
+        {
+            TypeRef? elementType = actualType.SpecialType switch
+            {
+                ArraySemanticType arr => arr.ElementType,
+                SliceSemanticType sl => sl.ElementType,
+                _ => null
+            };
+            if (elementType is { } elem &&
+                TryUnifyExtensionTarget(extGst.TypeArguments[0], elem, ext.GenericParameters, extArgs))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryExtractGenericInterfaceArg(
+        TypeRef ifaceRef,
+        SymbolHandle targetInterfaceHandle,
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        int argIndex,
+        out TypeRef extracted,
+        HashSet<SymbolHandle>? visited = null)
+    {
+        var effMatch = typeArgs.Count > 0 ? SubstituteTypeRef(ifaceRef, typeArgs) : ifaceRef;
+        if (effMatch.Handle == targetInterfaceHandle &&
+            effMatch.SpecialType is GenericSemanticType gst &&
+            gst.TypeArguments.Count > argIndex)
+        {
+            extracted = gst.TypeArguments[argIndex];
+            return true;
+        }
+
+        if (effMatch.Handle is { } subHandle &&
+            context.GetTypeSymbol(subHandle) is { TypeKind: TypeKind.Interface } subIface)
+        {
+            visited ??= [];
+            if (!visited.Add(subHandle))
+            {
+                extracted = TypeRef.Unresolved;
+                return false;
+            }
+
+            Dictionary<SymbolHandle, TypeRef> subArgs = [];
+            if (effMatch.SpecialType is GenericSemanticType subGst)
+            {
+                for (int i = 0; i < subIface.GenericParameters.Count && i < subGst.TypeArguments.Count; i++)
+                    subArgs[subIface.GenericParameters[i]] = subGst.TypeArguments[i];
+            }
+
+            foreach (var baseRef in subIface.BaseTypes)
+            {
+                if (TryExtractGenericInterfaceArg(baseRef, targetInterfaceHandle, subArgs, argIndex, out extracted, visited))
+                    return true;
+            }
+        }
+
+        extracted = TypeRef.Unresolved;
+        return false;
     }
 }

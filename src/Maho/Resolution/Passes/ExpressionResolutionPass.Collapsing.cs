@@ -256,7 +256,7 @@ internal sealed partial class ExpressionResolutionPass
                         }
                         if (litOverloads.Count == 1)
                         {
-                            if (TryResolveCallableOperator(call, targetType, argTypes, out var ret1) && targetType.IsAssignableFrom(ret1, context))
+                            if (TryResolveCallableOperator(call, targetType, argTypes, scope, containingFunction, out var ret1) && targetType.IsAssignableFrom(ret1, context))
                             {
                                 if (context.ResolvedTree.TryGetReference(call, out var mHandle) && context.GetMethodSymbol(mHandle) is { } m1)
                                     cand1 = m1;
@@ -266,7 +266,7 @@ internal sealed partial class ExpressionResolutionPass
 
                     MethodSymbol? cand2 = null;
                     var defaultType = CollapseLiteralToDefault(TypeRef.Literal(CompileTimeLiteralKind.Int, litCallee.Literal.Value));
-                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var ret2) && targetType.IsAssignableFrom(ret2, context))
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, scope, containingFunction, out var ret2) && targetType.IsAssignableFrom(ret2, context))
                     {
                         if (context.ResolvedTree.TryGetReference(call, out var mHandle2) && context.GetMethodSymbol(mHandle2) is { } m2)
                             cand2 = m2;
@@ -288,7 +288,7 @@ internal sealed partial class ExpressionResolutionPass
                         return chosenMethod.ReturnType;
                     }
 
-                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var defRet))
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, scope, containingFunction, out var defRet))
                     {
                         context.SetExpressionType(call, defRet);
                         return defRet;
@@ -333,9 +333,10 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (targetType.Handle is not { } targetHandle)
+        if (targetType.Handle is not { } rawTargetHandle)
             return false;
 
+        var targetHandle = context.UnwrapAlias(rawTargetHandle);
         var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
         if (targetSym is null)
             return false;
@@ -390,10 +391,11 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (targetType.Handle is not { } targetHandle)
+        if (targetType.Handle is not { } rawTargetHandle2)
             return false;
 
-        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
+        var targetHandle2 = context.UnwrapAlias(rawTargetHandle2);
+        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle2) ?? context.GetSymbol(targetHandle2);
         if (targetSym is null)
             return false;
 
@@ -433,18 +435,46 @@ internal sealed partial class ExpressionResolutionPass
     /// <param name="to">The destination semantic type.</param>
     /// <param name="castMethod">The matching implicit cast method if found.</param>
     /// <returns><see langword="true"/> if a matching implicit conversion was found; otherwise <see langword="false"/>.</returns>
-    private bool TryResolveImplicitCast(TypeRef from, TypeRef to, out MethodSymbol? castMethod)
+    private bool TryResolveImplicitCast(TypeRef from, TypeRef to, out MethodSymbol? castMethod) =>
+        TryResolveCastOperator(OperatorKind.ImplicitCast, from, to, out castMethod);
+
+    /// <summary>
+    /// Searches for a user-defined conversion operator (<see cref="OperatorKind.ImplicitCast"/> or
+    /// <see cref="OperatorKind.ExplicitCast"/>) converting <paramref name="from"/> to <paramref name="to"/>.
+    /// </summary>
+    private bool TryResolveCastOperator(OperatorKind kind, TypeRef from, TypeRef to, out MethodSymbol? castMethod)
     {
         castMethod = null;
-        if (!context.DiscoveredOperators.TryGetOperators(OperatorKind.ImplicitCast, out var candidates))
+        if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
         var operandHandles = new List<SymbolHandle>();
-        if (from.Handle is { } fh) operandHandles.Add(fh);
-        else if (from.Kind is TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optFromH)) operandHandles.Add(optFromH);
+        void TryAddOperand(TypeRef tr)
+        {
+            if (tr.Handle is { } h)
+            {
+                if (!operandHandles.Contains(h)) operandHandles.Add(h);
+                return;
+            }
+            SymbolHandle mapped = default;
+            if (tr.SpecialType is OptionalSemanticType)
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out mapped);
+            else if (tr.SpecialType is ReferenceSemanticType r)
+                context.DiscoveredIntrinsics.TryGet(r.IsMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference, out mapped);
+            else if (tr.SpecialType is PointerSemanticType p)
+                context.DiscoveredIntrinsics.TryGet(p.IsMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer, out mapped);
+            else if (tr.SpecialType is ArraySemanticType)
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out mapped);
+            else if (tr.SpecialType is SliceSemanticType)
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out mapped);
+            else if (tr.SpecialType is TupleSemanticType)
+                context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out mapped);
+            if (mapped != default && !operandHandles.Contains(mapped))
+                operandHandles.Add(mapped);
+        }
 
-        if (to.Handle is { } th && !operandHandles.Contains(th)) operandHandles.Add(th);
-        else if (to.Kind is TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var optToH) && !operandHandles.Contains(optToH)) operandHandles.Add(optToH);
+        TryAddOperand(from);
+        TryAddOperand(to);
 
         foreach (var candidate in candidates)
         {
@@ -458,36 +488,47 @@ internal sealed partial class ExpressionResolutionPass
                 if (operandTypeSym is null)
                     continue;
 
-                Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
-                if (to.SpecialType is OptionalSemanticType optTo && operandTypeSym is TypeSymbol toSym && toSym.GenericParameters.Count == 1)
-                {
-                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [toSym.GenericParameters[0]] = optTo.ElementType };
-                }
-                else if (from.SpecialType is OptionalSemanticType optFrom && operandTypeSym is TypeSymbol fromSym && fromSym.GenericParameters.Count == 1)
-                {
-                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [fromSym.GenericParameters[0]] = optFrom.ElementType };
-                }
+                Dictionary<SymbolHandle, TypeRef>? typeArgs = BuildOperandGenericSubstitutions(from, to, operandTypeSym);
 
-                var scope = GetOwnedScope(operandTypeSym);
-                foreach (var sym in scope.Symbols.Values)
+                var candidateScopes = new List<Scope> { GetOwnedScope(operandTypeSym) };
+                foreach (var conf in context.Conformances)
                 {
-                    if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    if (conf.InterfaceHandle != candidate.InterfaceHandle && !TypeRef.IsSubtypeOf(conf.InterfaceHandle, candidate.InterfaceHandle, context))
+                        continue;
+                    if (conf.TargetType.Handle is { } cth && context.UnwrapAlias(cth) == context.UnwrapAlias(opHandle) &&
+                        context.GetSymbol(conf.OwnerHandle) is ExtensionSymbol ext)
                     {
-                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
-                        {
-                            if (method.Parameters.Count == 1)
-                            {
-                                var paramType = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
-                                var effectiveParam = typeArgs is not null ? SubstituteTypeRef(paramType, typeArgs) : paramType;
-                                var effectiveReturn = typeArgs is not null ? SubstituteTypeRef(method.ReturnType, typeArgs) : method.ReturnType;
+                        candidateScopes.Add(GetOwnedScope(ext));
+                    }
+                }
 
-                                if ((effectiveParam.Equals(from) || effectiveParam.IsAssignableFrom(from, context)) &&
-                                    (to.Equals(effectiveReturn) || to.IsAssignableFrom(effectiveReturn, context)))
-                                {
-                                    castMethod = method;
-                                    return true;
-                                }
-                            }
+                foreach (var scope in candidateScopes)
+                {
+                    foreach (var sym in scope.Symbols.Values)
+                    {
+                        if (sym is not MethodSymbol method || method.Parameters.Count != 1)
+                            continue;
+
+                        bool isInterfaceMatch = method.Flags.HasFlag(FunctionFlags.InterfaceScoped)
+                            ? method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text)
+                            : context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod && method.Name.Text == opMethod.Name.Text;
+                        if (!isInterfaceMatch)
+                            continue;
+
+                        var paramType = context.GetParameterSymbol(method.Parameters[0])?.Type ?? TypeRef.Unresolved;
+                        var effectiveParam = typeArgs is not null ? SubstituteTypeRef(paramType, typeArgs) : paramType;
+                        var effectiveReturn = typeArgs is not null ? SubstituteTypeRef(method.ReturnType, typeArgs) : method.ReturnType;
+
+                        bool paramMatches = effectiveParam.Equals(from) ||
+                            effectiveParam.IsAssignableFrom(from, context) ||
+                            (effectiveParam.SpecialType is AliasSemanticType { IsMutable: false } paramAlias &&
+                             paramAlias.TargetType.IsAssignableFrom(from, context));
+                        bool returnMatches = to.Equals(effectiveReturn) || to.IsAssignableFrom(effectiveReturn, context);
+
+                        if (paramMatches && returnMatches)
+                        {
+                            castMethod = method;
+                            return true;
                         }
                     }
                 }
@@ -495,6 +536,44 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         return false;
+    }
+
+    private static Dictionary<SymbolHandle, TypeRef>? BuildOperandGenericSubstitutions(TypeRef from, TypeRef to, Symbol operandTypeSym)
+    {
+        IReadOnlyList<SymbolHandle> gps = operandTypeSym switch
+        {
+            TypeSymbol ts => ts.GenericParameters,
+            NestedTypeSymbol nts => nts.GenericParameters,
+            _ => []
+        };
+        if (gps.Count == 0)
+            return null;
+
+        void TryPopulateFromTypeRef(TypeRef tr, ref Dictionary<SymbolHandle, TypeRef>? subs)
+        {
+            if (tr.SpecialType is OptionalSemanticType opt && gps.Count == 1)
+                subs ??= new Dictionary<SymbolHandle, TypeRef> { [gps[0]] = opt.ElementType };
+            else if (tr.SpecialType is ReferenceSemanticType r && gps.Count == 1)
+                subs ??= new Dictionary<SymbolHandle, TypeRef> { [gps[0]] = r.ElementType };
+            else if (tr.SpecialType is PointerSemanticType p && gps.Count == 1)
+                subs ??= new Dictionary<SymbolHandle, TypeRef> { [gps[0]] = p.ElementType };
+            else if (tr.SpecialType is SliceSemanticType s && gps.Count >= 1)
+                subs ??= new Dictionary<SymbolHandle, TypeRef> { [gps[0]] = s.ElementType };
+            else if (tr.SpecialType is ArraySemanticType a && gps.Count >= 1)
+                subs ??= new Dictionary<SymbolHandle, TypeRef> { [gps[0]] = a.ElementType };
+            else if (tr.SpecialType is GenericSemanticType gst && gst.TypeArguments.Count == gps.Count)
+            {
+                subs ??= new Dictionary<SymbolHandle, TypeRef>(gps.Count);
+                for (int i = 0; i < gps.Count; i++)
+                    subs[gps[i]] = gst.TypeArguments[i];
+            }
+        }
+
+        Dictionary<SymbolHandle, TypeRef>? result = null;
+        TryPopulateFromTypeRef(from, ref result);
+        if (result is null)
+            TryPopulateFromTypeRef(to, ref result);
+        return result;
     }
 
     /// <summary>
@@ -506,9 +585,10 @@ internal sealed partial class ExpressionResolutionPass
     /// <returns>The matching symbol if found; otherwise <see langword="null"/>.</returns>
     private Symbol? LookupMemberOnType(TypeRef targetType, string memberName)
     {
-        if (targetType.Handle is not { } handle)
+        if (targetType.Handle is not { } rawHandle)
             return null;
 
+        var handle = context.UnwrapAlias(rawHandle);
         var sym = (Symbol?)context.GetTypeSymbol(handle) ?? context.GetSymbol(handle);
         if (sym is not null)
         {
@@ -543,11 +623,11 @@ internal sealed partial class ExpressionResolutionPass
         }
         else if (lit.Literal.Kind is TokenKind.String)
         {
-            if (hStr is { } hs && targetType.Handle == hs) return true;
+            if (IsStringAliasOrRefTarget(targetType)) return true;
         }
         else if (lit.Literal.Kind is TokenKind.Char)
         {
-            if (hChar is { } hc && targetType.Handle == hc) return true;
+            if (hChar is { } hc && targetType.Handle is { } hcRaw && context.UnwrapAlias(hcRaw) == hc) return true;
         }
 
         if (targetType.Handle is { } th)
@@ -567,6 +647,27 @@ internal sealed partial class ExpressionResolutionPass
         return false;
     }
 
+    private bool IsStringAliasOrRefTarget(TypeRef targetType)
+    {
+        if (hStr is not { } hs)
+            return false;
+
+        if (targetType.Handle is { } dh && context.UnwrapAlias(dh) == hs)
+            return true;
+
+        if (targetType.SpecialType is AliasSemanticType { IsMutable: false } al &&
+            al.TargetType.Handle is { } ah &&
+            context.UnwrapAlias(ah) == hs)
+            return true;
+
+        if (targetType.SpecialType is ReferenceSemanticType { IsMutable: false } rf &&
+            rf.ElementType.Handle is { } rh &&
+            context.UnwrapAlias(rh) == hs)
+            return true;
+
+        return false;
+    }
+
     /// <summary>
     /// Checks whether an uncollapsed compile-time literal semantic type is compatible with a destination target type.
     /// </summary>
@@ -582,8 +683,8 @@ internal sealed partial class ExpressionResolutionPass
         {
             if (lit.LiteralKind is CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
             if (lit.LiteralKind is CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
-            if (lit.LiteralKind is CompileTimeLiteralKind.Str && hStr is { } hs && targetType.Handle == hs) return true;
-            if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Str && IsStringAliasOrRefTarget(targetType)) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle is { } hcRaw2 && context.UnwrapAlias(hcRaw2) == hc) return true;
         }
 
         if (targetType.Handle is { } th)

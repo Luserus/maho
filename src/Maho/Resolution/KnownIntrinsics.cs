@@ -7,6 +7,7 @@ internal static class KnownIntrinsics
 {
     public const string IntrinsicTypeAttribute = "IntrinsicType";
     public const string IntrinsicFunctionAttribute = "IntrinsicFunction";
+    public const string IntrinsicPropertyAttribute = "IntrinsicProperty";
     public const string OperatorFunctionAttribute = "OperatorFunction";
 
     // Signed Integers
@@ -35,15 +36,15 @@ internal static class KnownIntrinsics
     public const string Bool = "Bool";
     public const string Char = "Char";
     public const string Str = "Str";
-    public const string Unit = "Unit";
     public const string Never = "Never";
+    public const string Throwable = "Throwable";
+    public const string Box = "Box";
 
     // Value types and Callables
     public const string ValueType = "ValueType";
     public const string Struct = "Struct";
     public const string Enum = "Enum";
     public const string Function = "Function";
-    public const string Delegate = "Delegate";
     public const string Tuple = "Tuple";
 
     // Pointer and Reference
@@ -53,10 +54,19 @@ internal static class KnownIntrinsics
     public const string MutableReference = "MutableReference";
     public const string Metadata = "Metadata";
 
-    // Arrays and Spans
-    public const string FixedArray = "FixedArray";
+    // Layout constraints
+    public const string Layout = "Layout";
+    public const string Sized = "Sized";
+    public const string Unsized = "Unsized";
+
+    // Ownership transfer constraints
+    public const string Transfer = "Transfer";
+    public const string Move = "Move";
+    public const string Copy = "Copy";
+
+    // Slices and Arrays
+    public const string Slice = "Slice";
     public const string Array = "Array";
-    public const string Span = "Span";
     public const string Optional = "Optional";
 
     // Operator Full Names
@@ -115,10 +125,11 @@ internal static class KnownIntrinsics
     public const string OpImplicitCast = "ImplicitCast";
     public const string OpExplicitCast = "ExplicitCast";
     public const string OpNew = "New";
-    public const string OpPut = "Put";
     public const string OpCopy = "Copy";
     public const string OpMove = "Move";
     public const string OpCallable = "Callable";
+    public const string OpCallableMut = "CallableMut";
+    public const string OpCallableOnce = "CallableOnce";
     public const string OpUnwrap = "Unwrap";
     public const string OpTry = "Try";
     public const string OpCollectionAdd = "CollectionAdd";
@@ -128,10 +139,11 @@ internal static class KnownIntrinsics
     public const string OpIterable = "Iterable";
     public const string OpIterator = "Iterator";
     public const string OpOwningDeref = "OwningDeref";
+    public const string OpStaticConstructor = "StaticConstructor";
+    public const string StaticConstructor = "StaticConstructor";
 
     // Standard Intrinsic Function Contract Literals
     public const string FnFunctionInvoke = "Function.Invoke(TParams...)";
-    public const string FnDelegateInvoke = "Delegate.Invoke(TParams...)";
     public const string FnReferenceDeref = "Reference.Deref()";
     public const string FnMutableReferenceDeref = "MutableReference.Deref()";
     public const string FnPointerDeref = "Pointer.Deref()";
@@ -141,6 +153,7 @@ internal static class KnownIntrinsics
     public const string FnTupleDeconstruct = "Tuple.Deconstruct()";
     public const string FnTupleDeconstructMut = "Tuple.DeconstructMut()";
     public const string FnDropInPlace = "Memory.DropInPlace";
+    public const string FnWriteUninit = "Ptr.WriteUninit";
     public const string FnInt32Add = "Int32.Add(Int32, Int32)";
     public const string FnInt32Sub = "Int32.Subtract(Int32, Int32)";
     public const string FnInt32Mul = "Int32.Multiply(Int32, Int32)";
@@ -148,8 +161,6 @@ internal static class KnownIntrinsics
     public const string FnInt32Rem = "Int32.Remainder(Int32, Int32)";
     public const string FnInt32Equals = "Int32.Equals(Int32, Int32)";
     public const string FnInt32NotEquals = "Int32.NotEquals(Int32, Int32)";
-    public const string FnInt32Equality = FnInt32Equals;
-    public const string FnInt32Inequality = FnInt32NotEquals;
     public const string FnInt32LessThan = "Int32.LessThan(Int32, Int32)";
     public const string FnInt32LessThanOrEqual = "Int32.LessThanOrEqual(Int32, Int32)";
     public const string FnInt32GreaterThan = "Int32.GreaterThan(Int32, Int32)";
@@ -168,10 +179,12 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Str, Unit, Never,
-        ValueType, Struct, Enum, Function, Delegate, Tuple,
+        Bool, Char, Str, Box, Never,
+        Layout, Sized, Unsized,
+        Transfer, Move, Copy,
+        ValueType, Struct, Enum, Function, Tuple,
         Pointer, MutablePointer, Reference, MutableReference, Metadata,
-        FixedArray, Array, Span, Optional
+        Slice, Array, Optional, Throwable
     ];
 
     public static readonly HashSet<string> IntegerTypes =
@@ -193,9 +206,9 @@ internal static class KnownIntrinsics
         Int8, Int16, Int32, Int64, Int128, NInt,
         UInt8, UInt16, UInt32, UInt64, UInt128, NUInt,
         Float16, Float32, Float64, Float128,
-        Bool, Char, Unit, Never,
+        Bool, Char, Never,
         ValueType, Struct, Enum, Tuple,
-        Metadata
+        Metadata, Throwable
     ];
 
     public static readonly HashSet<string> AllOperatorNames =
@@ -216,11 +229,12 @@ internal static class KnownIntrinsics
         OpLeftShiftAssignment, OpRightShiftAssignment,
         OpRotateLeftAssignment, OpRotateRightAssignment,
         OpConstructor, OpDestructor, OpImplicitCast, OpExplicitCast,
-        OpNew, OpPut, OpCopy, OpMove, OpCallable,
+        OpNew, OpCopy, OpMove, OpCallable, OpCallableMut, OpCallableOnce,
         OpUnwrap, OpTry,
         OpCollectionAdd, OpCollectionWith,
         OpDeconstruct, OpDeconstructMut,
-        OpIterable, OpIterator, OpOwningDeref
+        OpIterable, OpIterator, OpOwningDeref,
+        OpStaticConstructor
     ];
 
     public static bool TryGetOperatorKind(ReadOnlySpan<char> name, out OperatorKind kind)
@@ -278,10 +292,11 @@ internal static class KnownIntrinsics
             case OpImplicitCast: kind = OperatorKind.ImplicitCast; return true;
             case OpExplicitCast: kind = OperatorKind.ExplicitCast; return true;
             case OpNew: kind = OperatorKind.New; return true;
-            case OpPut: kind = OperatorKind.Put; return true;
             case OpCopy: kind = OperatorKind.Copy; return true;
             case OpMove: kind = OperatorKind.Move; return true;
             case OpCallable: kind = OperatorKind.Callable; return true;
+            case OpCallableMut: kind = OperatorKind.CallableMut; return true;
+            case OpCallableOnce: kind = OperatorKind.CallableOnce; return true;
             case OpUnwrap: kind = OperatorKind.Unwrap; return true;
             case OpTry: kind = OperatorKind.Try; return true;
             case OpCollectionAdd: kind = OperatorKind.CollectionAdd; return true;
@@ -291,6 +306,7 @@ internal static class KnownIntrinsics
             case OpIterable: kind = OperatorKind.Iterable; return true;
             case OpIterator: kind = OperatorKind.Iterator; return true;
             case OpOwningDeref: kind = OperatorKind.OwningDeref; return true;
+            case OpStaticConstructor: kind = OperatorKind.StaticConstructor; return true;
             default:
                 kind = OperatorKind.None;
                 return false;
@@ -350,10 +366,11 @@ internal static class KnownIntrinsics
         OperatorKind.ImplicitCast => OpImplicitCast,
         OperatorKind.ExplicitCast => OpExplicitCast,
         OperatorKind.New => OpNew,
-        OperatorKind.Put => OpPut,
         OperatorKind.Copy => OpCopy,
         OperatorKind.Move => OpMove,
         OperatorKind.Callable => OpCallable,
+        OperatorKind.CallableMut => OpCallableMut,
+        OperatorKind.CallableOnce => OpCallableOnce,
         OperatorKind.Unwrap => OpUnwrap,
         OperatorKind.Try => OpTry,
         OperatorKind.CollectionAdd => OpCollectionAdd,
@@ -363,6 +380,7 @@ internal static class KnownIntrinsics
         OperatorKind.Iterable => OpIterable,
         OperatorKind.Iterator => OpIterator,
         OperatorKind.OwningDeref => OpOwningDeref,
+        OperatorKind.StaticConstructor => OpStaticConstructor,
         _ => string.Empty
     };
 }
