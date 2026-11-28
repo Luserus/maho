@@ -32,7 +32,6 @@ internal enum MatchingKeywordKind : byte
     Static,
     For,
     New,
-    Put,
     Const,
     Where,
     With,
@@ -64,7 +63,6 @@ internal enum MatchingKeywordKind : byte
     Default,
     This,
     Func,
-    Delegate,
     Mut,
     In,
     Yield,
@@ -74,5 +72,7 @@ internal enum MatchingKeywordKind : byte
     Catch,
     Finally,
     Ext,
-    Extension
+    Extension,
+    Derived,
+    Override
 }

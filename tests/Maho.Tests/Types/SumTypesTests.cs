@@ -503,8 +503,8 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> () { }
-                public func UntaggedMethod(untagged &this) -> () { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {
@@ -527,8 +527,8 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> () { }
-                public func UntaggedMethod(untagged &this) -> () { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {
@@ -552,8 +552,8 @@ public sealed class SumTypesTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> () { }
-                public func UntaggedMethod(untagged &this) -> () { }
+                public func NormalMethod(this&) -> () { }
+                public func UntaggedMethod(untagged this&) -> () { }
             }
             public struct Test
             {

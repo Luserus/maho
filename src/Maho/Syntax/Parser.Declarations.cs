@@ -1099,26 +1099,6 @@ internal sealed partial class Parser
         return new FunctionTypeSyntax(funcKeyword, openParen, parameterTypes, closeParen, arrowToken, returnType);
     }
 
-    private DelegateTypeSyntax ParseDelegateType()
-    {
-        var delegateKeyword = Consume();
-        var openParen = ExpectToken(TokenKind.LeftParen, "'('", "after 'delegate' in delegate type");
-        var parameterTypes = ParseFunctionTypeParameterList();
-        var closeParen = ExpectToken(TokenKind.RightParen, "')'", "to close the delegate parameter list");
-        Token? arrowToken = null;
-        TypeSyntax returnType;
-        if (IsMinusGreaterThan())
-        {
-            arrowToken = ConsumeOperator();
-            returnType = ParseTypeSyntax();
-        }
-        else
-        {
-            returnType = new SimpleType(new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.Identifier, Array.Empty<SyntaxTrivia>(), Array.Empty<SyntaxTrivia>(), MatchingKeywordKind.None, "Unit"));
-        }
-        return new DelegateTypeSyntax(delegateKeyword, openParen, parameterTypes, closeParen, arrowToken, returnType);
-    }
-
     private SeparatedSyntaxList<TypeSyntax> ParseFunctionTypeParameterList()
     {
         var nodesAndSeparators = new List<SyntaxNode>();
@@ -1141,9 +1121,6 @@ internal sealed partial class Parser
     {
         if (CurrentToken.MatchingKind is MatchingKeywordKind.Func && Peek().Kind is TokenKind.LeftParen)
             return ParseFunctionType();
-
-        if (CurrentToken.MatchingKind is MatchingKeywordKind.Delegate && Peek().Kind is TokenKind.LeftParen)
-            return ParseDelegateType();
 
         List<PrefixTypeModifier> prefixModifiers = [];
         while (true)

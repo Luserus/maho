@@ -13,11 +13,11 @@ public sealed class FunctionPointerAndDelegateTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")]
         public struct uint8;
@@ -70,33 +70,40 @@ public sealed class FunctionPointerAndDelegateTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
+        }
+
+        public interface CallableMut<TReturn, TParams...>
+        {
+            [OperatorFunction("CallableMut")]
+            func Invoke(this mut&, TParams args) -> TReturn;
+        }
+
+        public interface CallableOnce<TReturn, TParams...>
+        {
+            [OperatorFunction("CallableOnce")]
+            func Invoke(this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
-        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>, CallableMut<TReturn, TParams...>, CallableOnce<TReturn, TParams...>
         {
             public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            public nuint codeAddress;
-            public ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            func CallableMut.Invoke(this mut&, TParams args) -> TReturn;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            func CallableOnce.Invoke(this, TParams args) -> TReturn;
         }
         """;
 
     [Fact]
-    public void Parse_FunctionAndDelegateTypeSyntax_ParsesCorrectly()
+    public void Parse_FunctionTypeSyntax_ParsesCorrectly()
     {
         var (_, diagnostics, _, root) = CompilerTestBed.Parse("""
             func(int, int) -> int fnPtr;
-            delegate(string) -> () del;
+            func(string) -> () fnUnit;
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
@@ -108,24 +115,31 @@ public sealed class FunctionPointerAndDelegateTests
         Assert.NotNull(fnType.ReturnType);
         Assert.Equal("int", Assert.IsType<SimpleType>(fnType.ReturnType).Name.Value);
 
-        var topDel = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
-        var delType = Assert.IsType<DelegateTypeSyntax>(topDel.Declaration.Type);
-        Assert.Single(delType.ParameterTypes);
-        Assert.NotNull(delType.ReturnType);
-        var tupleRet = Assert.IsType<TupleType>(delType.ReturnType);
+        var topUnit = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
+        var fnUnit = Assert.IsType<FunctionTypeSyntax>(topUnit.Declaration.Type);
+        Assert.Single(fnUnit.ParameterTypes);
+        Assert.NotNull(fnUnit.ReturnType);
+        var tupleRet = Assert.IsType<TupleType>(fnUnit.ReturnType);
         Assert.Empty(tupleRet.Elements);
     }
 
     [Fact]
-    public void Resolve_FunctionAndDelegateVariables_ResolvesToFunctionAndDelegateTypes()
+    public void Resolve_FunctionVariablesAndMethods_IncludeExplicitReceiverInMethodType()
     {
-        var compilation = Compilation.FromSource($$"""
-            {{StdPrelude}}
+        var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public struct Counter
+            {
+                public int32 val;
+                public func Read(this&) -> int32 { return this->val; }
+                public func Inc(this mut&) -> int32 { this->val = 1; return this->val; }
+                public func Create() -> Counter { Counter c; c.val = 0; return c; }
+            }
 
             public struct Host
             {
                 public func(int32, int32) -> int32 fnVar;
-                public delegate(int32) -> () delVar;
+                public func(Counter&) -> int32 unboundRead = Counter.Read;
+                public func(Counter mut&) -> int32 unboundInc = Counter.Inc;
             }
             """);
 
@@ -134,17 +148,17 @@ public sealed class FunctionPointerAndDelegateTests
 
         var host = Assert.Single(context.TypeSymbols, t => t.Name.ToString() == "Host");
         var fields = context.FieldSymbols.Where(f => f.Parent == ResolutionContext.GetHandle(host)).ToList();
-        Assert.Equal(2, fields.Count);
+        Assert.Equal(3, fields.Count);
 
         var fnField = fields.First(f => f.Name.ToString() == "fnVar");
         Assert.Equal(TypeRefKind.Function, fnField.Type.Kind);
         var fnSem = Assert.IsType<FunctionSemanticType>(fnField.Type.SpecialType);
         Assert.Equal(2, fnSem.ParameterTypes.Count);
 
-        var delField = fields.First(f => f.Name.ToString() == "delVar");
-        Assert.Equal(TypeRefKind.Delegate, delField.Type.Kind);
-        var delSem = Assert.IsType<DelegateSemanticType>(delField.Type.SpecialType);
-        Assert.Single(delSem.ParameterTypes);
+        var readField = fields.First(f => f.Name.ToString() == "unboundRead");
+        var readSem = Assert.IsType<FunctionSemanticType>(readField.Type.SpecialType);
+        Assert.Single(readSem.ParameterTypes);
+        Assert.Equal(TypeRefKind.Reference, readSem.ParameterTypes[0].Kind);
     }
 
     [Fact]
@@ -154,7 +168,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
             [IntrinsicType("Int64")] public struct int64;
@@ -173,28 +187,38 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Resolve_DelegateType_WhenIntrinsicMissing_ReportsMH0021()
+    public void UnboundInstanceMethod_WithExplicitReceiverArg_Succeeds_AndOmitted_ReportsMH2019()
     {
-        var compilation = Compilation.FromSource("""
-            [IntrinsicType("Layout")] public interface Layout;
-            [IntrinsicType("Sized")] public interface Sized : Layout;
-            [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
-            [IntrinsicType("UInt8")] public struct uint8;
-            [IntrinsicType("Int8")] public struct int8;
-            [IntrinsicType("Int64")] public struct int64;
-            [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
-            [IntrinsicType("Metadata")] public struct Metadata<T> where T : Layout;
-            [IntrinsicType("Reference")] public struct Reference<T> where T : Layout { nuint raw; Metadata<T> metadata; }
-            [IntrinsicType("Str")] public struct Str { uint8[] data; }
-            [IntrinsicType("NUInt")] public struct nuint;
-            [IntrinsicType("Int32")] public struct int32;
+        var valid = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public struct Counter
+            {
+                public int32 val;
+                public func Inc(this mut&, int32 delta) -> int32 { this->val = delta; return this->val; }
+            }
 
-            public delegate(int32) -> int32 del;
+            public func Test() -> int32
+            {
+                Counter c;
+                c.val = 0;
+                return Counter.Inc(&c, 5);
+            }
             """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
-        Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0021" && d.Message.Contains("Delegate"));
+        var missingRecv = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public struct Counter
+            {
+                public int32 val;
+                public func Read(this&) -> int32 { return this->val; }
+            }
+
+            public func Test() -> int32
+            {
+                return Counter.Read();
+            }
+            """);
+        Assert.True(missingRecv.HasErrors);
+        Assert.Contains(missingRecv.Diagnostics, d => d.Code == "MH2019");
     }
 
     [Fact]
@@ -216,21 +240,35 @@ public sealed class FunctionPointerAndDelegateTests
     }
 
     [Fact]
-    public void Invocation_Delegate_ResolvesInvocation()
+    public void Invocation_CallableInterfaces_ResolveWithMatchingMutability()
     {
-        var compilation = Compilation.FromSource($$"""
-            {{StdPrelude}}
-
+        var valid = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public struct Host
             {
-                public func Test(delegate(int32) -> () d, int32 a) -> ()
+                public func CallShared(Callable<int32, int32>& f, int32 a) -> int32
                 {
-                    d(a);
+                    return f(a);
+                }
+
+                public func CallMut(CallableMut<int32, int32> mut& f, int32 a) -> int32
+                {
+                    return f(a);
                 }
             }
             """);
+        Assert.False(valid.HasErrors, string.Join("\n", valid.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
-        Assert.False(compilation.HasErrors);
+        var immutCallingMut = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public struct Host
+            {
+                public func Bad(CallableMut<int32, int32>& f, int32 a) -> int32
+                {
+                    return f(a);
+                }
+            }
+            """);
+        Assert.True(immutCallingMut.HasErrors);
+        Assert.Contains(immutCallingMut.Diagnostics, d => d.Code == "MH0611");
     }
 
     [Fact]
@@ -258,7 +296,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
@@ -288,7 +326,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
@@ -318,7 +356,7 @@ public sealed class FunctionPointerAndDelegateTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;

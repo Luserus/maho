@@ -142,7 +142,6 @@ internal sealed partial class Parser
     private static string GetObjectCreationContext(MatchingKeywordKind keywordKind) => keywordKind switch
     {
         MatchingKeywordKind.New => "after 'new'",
-        MatchingKeywordKind.Put => "after 'put'",
         _ => "after the object creation keyword"
     };
 }

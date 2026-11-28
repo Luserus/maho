@@ -1043,14 +1043,14 @@ public sealed partial class ParserTests
     }
 
     [Fact]
-    public void Parse_ConstructorCall_PutWithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
+    public void Parse_ConstructorCall_NewWithAllocationTypeArgumentsAndArguments_ParsesCorrectly()
     {
         LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
-            var p = put<StackFrame>(offset) Point(10, 20);
+            var p = new<StackFrame>(offset) Point(10, 20);
             """, typeof(LocalVariableDeclarationStatement)));
 
         ConstructorCallExpression constructor = Assert.IsType<ConstructorCallExpression>(local.Declaration.Declarator.Initializer?.Initializer);
-        Assert.Equal(ObjectCreationKind.Put, constructor.Kind);
+        Assert.Equal(ObjectCreationKind.New, constructor.Kind);
         Assert.NotNull(constructor.AllocationTypeArguments);
         Assert.Single(constructor.AllocationTypeArguments.Value);
         NamedExpressionGenericArgument genericArg = Assert.IsType<NamedExpressionGenericArgument>(constructor.AllocationTypeArguments.Value[0]);
@@ -1086,7 +1086,7 @@ public sealed partial class ParserTests
     public void Parse_ObjectCreationWithClause_AttachesToArrayCreation()
     {
         LocalVariableDeclarationStatement local = Assert.IsType<LocalVariableDeclarationStatement>(ParseSingleLocal("""
-            int[] arr = put int[10] with { SomeProp = someVal };
+            int[] arr = new int[10] with { SomeProp = someVal };
             """, typeof(LocalVariableDeclarationStatement)));
 
         Assert.NotNull(local.Declaration.Declarator);

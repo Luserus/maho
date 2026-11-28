@@ -38,7 +38,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                func Destructor.Drop(mut &this) -> () {}
+                func Destructor.Drop(this mut&) -> () {}
             }
 
             public struct Pair
@@ -84,7 +84,7 @@ public sealed class DropInPlaceAndOwningDerefTests
             public struct Resource : Destructor
             {
                 public int32 id;
-                func Destructor.Drop(mut &this) -> () {}
+                func Destructor.Drop(this mut&) -> () {}
             }
 
             public struct Pair

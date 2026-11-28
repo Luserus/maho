@@ -62,6 +62,12 @@ internal sealed partial class Parser
         return result;
     }
 
+    /// <summary> Checks whether the lookahead cursor starts a contextual <c>derived Type</c> generic argument. </summary>
+    private bool LookaheadIsDerivedGenericArgumentStart() =>
+        LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Derived &&
+        LookaheadPeek().Kind is not (TokenKind.Comma or TokenKind.GreaterThanSign or TokenKind.RightParen or TokenKind.Colon or TokenKind.ColonColon or TokenKind.Dot or TokenKind.LessThanSign or TokenKind.EndToken) &&
+        LookaheadPeek().MatchingKind is not MatchingKeywordKind.As;
+
     /// <summary> Checks whether the upcoming tokens form a plausible generic type-argument clause. </summary>
     private (bool Success, LookaheadResultContext Context) LooksLikeGenericArguments(bool fromLookahead = false)
     {
@@ -78,6 +84,9 @@ internal sealed partial class Parser
                 LookaheadConsume();
             else
             {
+                if (LookaheadIsDerivedGenericArgumentStart())
+                    LookaheadConsume();
+
                 var (_, success, _) = LookaheadParseTypeSyntax();
 
                 if (!success)
@@ -136,6 +145,9 @@ internal sealed partial class Parser
                 LookaheadConsume();
             else
             {
+                if (LookaheadIsDerivedGenericArgumentStart())
+                    LookaheadConsume();
+
                 var (_, success, _) = LookaheadParseTypeSyntax();
                 if (!success)
                 {
@@ -427,10 +439,14 @@ internal sealed partial class Parser
                 nodesAndSeparators.Add(new NamedExpressionGenericArgument(new IdentifierNameExpression(LookaheadConsume())));
             else
             {
+                Token? derivedKeyword = LookaheadIsDerivedGenericArgumentStart() ? LookaheadConsume() : null;
                 var (type, success, _) = LookaheadParseTypeSyntax();
 
                 if (!success)
                     return (new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), false);
+
+                if (derivedKeyword is { } dk)
+                    type = new DerivedGenericArgumentSyntax(dk, type);
 
                 if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.As)
                 {
@@ -520,57 +536,11 @@ internal sealed partial class Parser
         return (new FunctionTypeSyntax(funcKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
     }
 
-    private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseDelegateType()
-    {
-        var delKeyword = LookaheadConsume();
-        if (LookaheadCurrentToken.Kind is not TokenKind.LeftParen)
-            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
-        var openParen = LookaheadConsume();
-
-        var nodesAndSeparators = new List<SyntaxNode>();
-        while (LookaheadCurrentToken.Kind is not TokenKind.RightParen and not TokenKind.EndToken)
-        {
-            var (paramType, success, ctx) = LookaheadParseTypeSyntax();
-            if (!success)
-                return (new SimpleType(delKeyword), false, ctx);
-            nodesAndSeparators.Add(paramType);
-
-            if (LookaheadCurrentToken.Kind is TokenKind.Comma)
-                nodesAndSeparators.Add(LookaheadConsume());
-            else
-                break;
-        }
-
-        if (LookaheadCurrentToken.Kind is not TokenKind.RightParen)
-            return (new SimpleType(delKeyword), false, LookaheadResultContext.MissingDelimeter);
-        var closeParen = LookaheadConsume();
-
-        Token? arrowToken = null;
-        TypeSyntax returnType;
-        if (LookaheadGetCombinedOperatorData().Kind is TokenKind.MinusGreaterThan)
-        {
-            arrowToken = LookaheadConsumeOperator();
-            var (retType, retSuccess, retCtx) = LookaheadParseTypeSyntax();
-            if (!retSuccess)
-                return (new SimpleType(delKeyword), false, retCtx);
-            returnType = retType;
-        }
-        else
-        {
-            returnType = new SimpleType(new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.Identifier, [], [], MatchingKeywordKind.None, "Unit"));
-        }
-
-        return (new DelegateTypeSyntax(delKeyword, openParen, new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators), closeParen, arrowToken, returnType), true, LookaheadResultContext.Success);
-    }
-
     /// <summary> Speculatively parses type syntax, including postfix modifiers and qualification chains. </summary>
     private (TypeSyntax Type, bool Success, LookaheadResultContext Context) LookaheadParseTypeSyntax()
     {
         if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Func && LookaheadPeek().Kind is TokenKind.LeftParen)
             return LookaheadParseFunctionType();
-
-        if (LookaheadCurrentToken.MatchingKind is MatchingKeywordKind.Delegate && LookaheadPeek().Kind is TokenKind.LeftParen)
-            return LookaheadParseDelegateType();
 
         List<PrefixTypeModifier> prefixModifiers = [];
         while (true)
@@ -1044,6 +1014,8 @@ internal sealed partial class Parser
                 case MatchingKeywordKind.Internal:
                 case MatchingKeywordKind.Public:
                 case MatchingKeywordKind.Static:
+                case MatchingKeywordKind.Virtual:
+                case MatchingKeywordKind.Override:
                 case MatchingKeywordKind.Unsealed:
                 case MatchingKeywordKind.Unsafe:
                 case MatchingKeywordKind.Mut:

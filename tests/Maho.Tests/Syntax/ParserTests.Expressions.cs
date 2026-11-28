@@ -401,8 +401,8 @@ public sealed partial class ParserTests
                     local = { int last = 2; 3 };
                     local = [1, 2, 3] with(capacity: 10)[0];
                     local = new Box<int>(local) with { Value = local }.Value;
-                    numbers = put int[3] with { Length = local };
-                    local = put Box<int>(local).Value;
+                    numbers = new int[3] with { Length = local };
+                    local = new Box<int>(local).Value;
                     local = if (local) local else 0;
                     local = identity<int>(value: local);
                     (int | string) anonUnion;
@@ -1231,10 +1231,10 @@ public sealed partial class ParserTests
     {
         Local local = ParseSingleLocal("&T + 1;", typeof(LocalExpressionStatement));
         var stmt = Assert.IsType<LocalExpressionStatement>(local);
-        var unary = Assert.IsType<UnaryExpression>(stmt.Expression);
+        var bin = Assert.IsType<BinaryExpression>(stmt.Expression);
+        var unary = Assert.IsType<UnaryExpression>(bin.LeftExpression);
         Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
-        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
-        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(unary.Operand).Identifier.Value);
     }
 
     [Fact]
@@ -1243,10 +1243,10 @@ public sealed partial class ParserTests
         Local local = ParseSingleLocal("var x = &T + 1;", typeof(LocalVariableDeclarationStatement));
         var variable = Assert.IsType<LocalVariableDeclarationStatement>(local);
         var init = variable.Declaration.Declarator.Initializer!.Initializer;
-        var unary = Assert.IsType<UnaryExpression>(init);
+        var bin = Assert.IsType<BinaryExpression>(init);
+        var unary = Assert.IsType<UnaryExpression>(bin.LeftExpression);
         Assert.Equal(TokenKind.Ampersand, unary.OperatorToken.Kind);
-        var bin = Assert.IsType<BinaryExpression>(unary.Operand);
-        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(bin.LeftExpression).Identifier.Value);
+        Assert.Equal("T", Assert.IsType<IdentifierNameExpression>(unary.Operand).Identifier.Value);
     }
 
     [Fact]
@@ -1284,7 +1284,7 @@ public sealed partial class ParserTests
                 ModA::Ns.Item mut& b = y;
                 global::MyStruct c = default;
                 var d = default(ModA::Point);
-                var e = put Point { x = 1, y = 2 };
+                var e = new Point { x = 1, y = 2 };
                 var f = new(alloc) Point { x = 3, y = 4 };
                 HashSet<Foo as ModA::Hash> hs = default;
                 var g = (ob as ModA::Bar).Step();
@@ -1337,7 +1337,7 @@ public sealed partial class ParserTests
         var defD = Assert.IsType<DefaultExpression>(varD.Declaration.Declarator.Initializer!.Initializer);
         Assert.IsType<ScopeQualifiedType>(defD.ExplicitType);
 
-        // put Point { x = 1, y = 2 } and new(alloc) Point { ... }
+        // new Point { x = 1, y = 2 } and new(alloc) Point { ... }
         var varE = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[4]);
         Assert.IsType<ObjectInitializerExpression>(varE.Declaration.Declarator.Initializer!.Initializer);
         var varF = Assert.IsType<LocalVariableDeclarationStatement>(body.Locals[5]);

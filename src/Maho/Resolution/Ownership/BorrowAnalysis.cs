@@ -213,6 +213,7 @@ internal sealed class BorrowAnalysis
                 case OwnershipStatementKind.Assign:
                     live.Remove(statement.Place.Root);
                     break;
+                case OwnershipStatementKind.Borrow:
                 case OwnershipStatementKind.Use:
                     live.Add(statement.Place.Root);
                     break;

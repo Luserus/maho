@@ -119,23 +119,16 @@ internal sealed partial class DeclarationResolutionPass
         foreach (var handle in symbol.Parameters)
         {
             if (context.GetParameterSymbol(handle) is { } parameter)
-            {
-                if (symbol.Flags.HasFlag(FunctionFlags.Static) || parameter.Syntax?.Declarator.ReceiverKind == ReceiverKind.None)
-                    fnParamTypes.Add(parameter.Type);
-            }
+                fnParamTypes.Add(parameter.Type);
         }
 
-
-        if (symbol.Flags.HasFlag(FunctionFlags.Static))
-            symbol.Type = TypeRef.Function(symbol.ReturnType, fnParamTypes);
-        else
-            symbol.Type = TypeRef.Delegate(symbol.ReturnType, fnParamTypes);
+        symbol.Type = TypeRef.Function(symbol.ReturnType, fnParamTypes);
 
         var parentSym = symbol.Parent is { } pH ? context.GetSymbol(pH) : null;
         if (parentSym is ExtensionSymbol)
         {
             bool hasReceiver = symbol.Parameters.Count > 0 &&
-                context.GetParameterSymbol(symbol.Parameters[0])?.Syntax?.Declarator.ReceiverKind != ReceiverKind.None;
+                context.GetParameterSymbol(symbol.Parameters[0])?.IsReceiver == true;
             if (!hasReceiver)
             {
                 symbol.Flags |= FunctionFlags.Static;
@@ -155,21 +148,10 @@ internal sealed partial class DeclarationResolutionPass
         if (!isParentInterface && !isParentIntrinsic && context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null)
         {
             bool isCallableDeclared = context.DiscoveredOperators.TryGetOperators(OperatorKind.Callable, out _);
-            if (symbol.Flags.HasFlag(FunctionFlags.Static))
+            if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Function))
             {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Function))
-                {
-                    var span = symbol.Syntax.Signature.Identifier.GetSpan() ?? default;
-                    context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "function declaration", KnownIntrinsics.Function, symbol.Syntax.GetSource());
-                }
-            }
-            else
-            {
-                if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Delegate))
-                {
-                    var span = symbol.Syntax.Signature.Identifier.GetSpan() ?? default;
-                    context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "method declaration", KnownIntrinsics.Delegate, symbol.Syntax.GetSource());
-                }
+                var span = symbol.Syntax.Signature.Identifier.GetSpan() ?? default;
+                context.Diagnostics.ReportMissingIntrinsicForSyntax(span, "method declaration", KnownIntrinsics.Function, symbol.Syntax.GetSource());
             }
 
             if (!isCallableDeclared)
@@ -266,10 +248,7 @@ internal sealed partial class DeclarationResolutionPass
                 symbol.Type = symbol.Syntax.Declarator.ReceiverKind switch
                 {
                     ReceiverKind.Value => baseType,
-                    ReceiverKind.Alias => TypeRef.Alias(baseType, isMutable: false, isUnsafe: false),
-                    ReceiverKind.MutAlias => TypeRef.Alias(baseType, isMutable: true, isUnsafe: false),
-                    ReceiverKind.UnsafeAlias => TypeRef.Alias(baseType, isMutable: false, isUnsafe: true),
-                    ReceiverKind.MutUnsafeAlias => TypeRef.Alias(baseType, isMutable: true, isUnsafe: true),
+                    ReceiverKind.Alias or ReceiverKind.MutAlias or ReceiverKind.UnsafeAlias or ReceiverKind.MutUnsafeAlias => ReportInvalidAliasReceiver(symbol),
                     ReceiverKind.Reference => TypeRef.Reference(baseType, isMutable: false),
                     ReceiverKind.MutReference => TypeRef.Reference(baseType, isMutable: true),
                     ReceiverKind.Pointer => TypeRef.Pointer(baseType, isMutable: false),
@@ -346,7 +325,8 @@ internal sealed partial class DeclarationResolutionPass
                 resolvedType = ResolveType(matchedElement.Type, symbol.EnclosingScope, allowInference: false, isUntaggedContext: isUntagged);
         }
 
-        var actualType = resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference, isUntaggedContext: isUntagged);
+        bool allowLocalAlias = symbol is LocalVariableSymbol && !isTupleDestructuring;
+        var actualType = resolvedType ?? ResolveType(syntax.Type, symbol.EnclosingScope, allowInference: allowInference, isUntaggedContext: isUntagged, allowAlias: allowLocalAlias);
         if (isUntagged)
             actualType = TypeRef.Untagged(actualType);
         setType(actualType);
@@ -445,9 +425,21 @@ internal sealed partial class DeclarationResolutionPass
         }
     }
 
+    private TypeRef ReportInvalidAliasReceiver(ParameterSymbol symbol)
+    {
+        if (symbol.Syntax is not null)
+        {
+            context.Diagnostics.ReportAliasNotAllowedOutsideLocal(
+                symbol.Syntax.GetSpan() ?? default,
+                "as a receiver parameter; use 'this&', 'this mut&', 'this*', or 'this mut*'",
+                symbol.Syntax.GetSource());
+        }
+        return TypeRef.Error;
+    }
+
     private void ResolveDeclarationSyntax(VariableDeclaration syntax, Scope scope, SymbolHandle containingFunction)
     {
-        var resolvedType = ResolveType(syntax.Type, scope, allowInference: true);
+        var resolvedType = ResolveType(syntax.Type, scope, allowInference: true, allowAlias: syntax.Declarator.Identifier is not TupleName);
         bool isInferred = resolvedType.IsInferred;
 
         if (!resolvedVariableAttributes.TryGetValue((syntax, scope), out _))

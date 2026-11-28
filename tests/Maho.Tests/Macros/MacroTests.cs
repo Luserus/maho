@@ -12,11 +12,11 @@ public sealed partial class MacroTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
 
         [IntrinsicType("NUInt")]
@@ -75,7 +75,7 @@ public sealed partial class MacroTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -83,17 +83,9 @@ public sealed partial class MacroTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public interface Add<T>
         {

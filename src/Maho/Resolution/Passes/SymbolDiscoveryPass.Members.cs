@@ -650,13 +650,18 @@ internal sealed partial class SymbolDiscoveryPass
         };
     }
 
-    // TODO: Define order in which modifiers should appear and add diagnostic otherwise.
     private static TypeFlags ResolveTypeFlags(IReadOnlyList<Token> modifiers)
     {
-        var flags = TypeFlags.None;
+        var flags = TypeFlags.Sealed;
 
         foreach (var mod in modifiers)
         {
+            if (mod.MatchingKind == MatchingKeywordKind.Unsealed)
+            {
+                flags &= ~TypeFlags.Sealed;
+                continue;
+            }
+
             flags |= mod.MatchingKind switch
             {
                 MatchingKeywordKind.Public => TypeFlags.Public,
@@ -664,7 +669,6 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Private => TypeFlags.Private,
                 MatchingKeywordKind.Protected => TypeFlags.Protected,
                 MatchingKeywordKind.Unsafe => TypeFlags.Unsafe,
-                MatchingKeywordKind.Unsealed => ~TypeFlags.Sealed,
                 MatchingKeywordKind.Static => TypeFlags.Static,
                 MatchingKeywordKind.Partial => TypeFlags.Partial,
                 MatchingKeywordKind.Untagged => TypeFlags.Untagged,
@@ -750,6 +754,7 @@ internal sealed partial class SymbolDiscoveryPass
                 MatchingKeywordKind.Internal => FunctionFlags.Internal,
                 MatchingKeywordKind.Static => FunctionFlags.Static,
                 MatchingKeywordKind.Virtual => FunctionFlags.Virtual,
+                MatchingKeywordKind.Override => FunctionFlags.Override,
                 MatchingKeywordKind.Unsafe => FunctionFlags.Unsafe,
                 MatchingKeywordKind.Partial => FunctionFlags.Partial,
                 _ => FunctionFlags.None

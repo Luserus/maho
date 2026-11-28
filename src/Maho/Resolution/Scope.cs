@@ -137,6 +137,26 @@ internal sealed class Scope
         return [];
     }
 
+    public IReadOnlyList<Symbol> GetLocalCallableSymbolsAnyArity(string name, HygieneId hygiene = default)
+    {
+        List<Symbol>? matches = null;
+        foreach (var (key, list) in SymbolsByName)
+        {
+            if (key.Text != name || key.Hygiene != hygiene)
+                continue;
+
+            foreach (var sym in list)
+            {
+                if (sym is FunctionSymbol or MethodSymbol)
+                {
+                    matches ??= [];
+                    matches.Add(sym);
+                }
+            }
+        }
+        return matches ?? (IReadOnlyList<Symbol>)[];
+    }
+
     private static bool IsTypeSymbol(Symbol s) =>
         s is TypeSymbol or NestedTypeSymbol or GenericParameterSymbol or AliasSymbol;
 
@@ -308,6 +328,57 @@ internal sealed class Scope
                     }
                 }
 
+                if (imported != null)
+                    return imported;
+            }
+        }
+
+        return [];
+    }
+
+    public IReadOnlyList<Symbol> GetCallableSymbolsAnyArity(string name, HygieneId hygiene = default)
+    {
+        for (var current = this; current != null; current = current.Parent)
+        {
+            var locals = current.GetLocalCallableSymbolsAnyArity(name, hygiene);
+            if (locals.Count != 0)
+                return locals;
+        }
+
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.UsingNamespaces.Count != 0)
+            {
+                List<Symbol>? found = null;
+                for (int i = 0; i < current.UsingNamespaces.Count; i++)
+                {
+                    var matches = current.UsingNamespaces[i].GetCallableSymbolsAnyArity(name);
+                    if (matches.Count != 0)
+                    {
+                        found ??= [];
+                        found.AddRange(matches);
+                    }
+                }
+                if (found != null)
+                    return found;
+            }
+        }
+
+        for (var current = this; current != null; current = current.Parent)
+        {
+            if (current.ImportedScopes.Count != 0)
+            {
+                List<Symbol>? imported = null;
+                for (int i = 0; i < current.ImportedScopes.Count; i++)
+                {
+                    var matches = current.ImportedScopes[i].GetCallableSymbolsAnyArity(name, hygiene);
+                    for (int j = 0; j < matches.Count; j++)
+                    {
+                        imported ??= [];
+                        if (!imported.Contains(matches[j]))
+                            imported.Add(matches[j]);
+                    }
+                }
                 if (imported != null)
                     return imported;
             }

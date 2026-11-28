@@ -6,9 +6,9 @@ namespace Maho.Tests;
 public sealed class CollectionExpressionTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("Layout")]
         public interface Layout;
@@ -68,7 +68,7 @@ public sealed class CollectionExpressionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -76,17 +76,9 @@ public sealed class CollectionExpressionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
         """;
 
     [Fact]
@@ -113,9 +105,9 @@ public sealed class CollectionExpressionTests
     public void CollectionExpression_MissingArrayIntrinsic_ReportsDiagnostic()
     {
         const string PreludeWithoutArray = """
-            intrinsic attribute IntrinsicType(&Str name);
-            intrinsic attribute IntrinsicFunction(&Str signature);
-            intrinsic attribute OperatorFunction(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
+            intrinsic attribute IntrinsicFunction(Str& signature);
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("Layout")]
             public interface Layout;
@@ -185,7 +177,7 @@ public sealed class CollectionExpressionTests
         var compilation = Compilation.FromSource(Prelude + """
             public struct CustomFixedArray : Callable<int32>
             {
-                func Callable.Invoke(&this) -> int32
+                func Callable.Invoke(this&) -> int32
                 {
                     return 42;
                 }
@@ -261,12 +253,12 @@ public sealed class CollectionExpressionTests
             public interface Collection<TKey, TValue>
             {
                 [OperatorFunction("CollectionAdd")]
-                func Add(mut &this, TKey key, TValue value) -> ();
+                func Add(this mut&, TKey key, TValue value) -> ();
             }
 
             public struct MyMap : Collection<int32, int64>
             {
-                public func Add(mut &this, int32 key, int64 value) -> () {}
+                public func Add(this mut&, int32 key, int64 value) -> () {}
             }
 
             public func Test() -> ()
@@ -285,7 +277,7 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                func Add(mut &this, T item) -> ();
+                func Add(this mut&, T item) -> ();
             }
 
             public struct NotACollection;
@@ -307,12 +299,12 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                func Add(mut &this, T item) -> ();
+                func Add(this mut&, T item) -> ();
             }
 
             public struct MyList : Collection<int32>
             {
-                public func Add(mut &this, int32 item) -> () {}
+                public func Add(this mut&, int32 item) -> () {}
             }
 
             public func Test() -> ()
@@ -332,19 +324,19 @@ public sealed class CollectionExpressionTests
             public interface Collection<T>
             {
                 [OperatorFunction("CollectionAdd")]
-                func Add(mut &this, T item) -> ();
+                func Add(this mut&, T item) -> ();
             }
 
             public interface CollectionWith<TCount>
             {
                 [OperatorFunction("CollectionWith")]
-                func With(mut &this, TCount capacity) -> ();
+                func With(this mut&, TCount capacity) -> ();
             }
 
             public struct MyList : Collection<int32>, CollectionWith<int32>
             {
-                public func Add(mut &this, int32 item) -> () {}
-                public func With(mut &this, int32 capacity) -> () {}
+                public func Add(this mut&, int32 item) -> () {}
+                public func With(this mut&, int32 capacity) -> () {}
             }
 
             public func Test() -> ()
@@ -360,17 +352,18 @@ public sealed class CollectionExpressionTests
     public void MultidimensionalSlice_RankAndIndexer_Succeeds()
     {
         var compilation = Compilation.FromSource(Prelude + """
-            public func Test(&int32[,] grid, int32[,,]& cube) -> int32
+            public func Test(int32[,]& grid, int32[,,]& cube) -> int32
             {
-                int32 x = grid[1, 2];
+                &int32[,] localGrid = *grid;
+                int32 x = localGrid[1, 2];
                 return x;
             }
             """);
 
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         var fn = Assert.Single(compilation.Context!.FunctionSymbols, f => f.Name.Text == "Test");
-        var gridParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
-        var gridAlias = Assert.IsType<AliasSemanticType>(gridParam.Type.SpecialType);
+        var localGridVar = Assert.Single(fn.LocalVariables, v => v.Name.Text == "localGrid");
+        var gridAlias = Assert.IsType<AliasSemanticType>(localGridVar.Type.SpecialType);
         Assert.Equal(TypeRefKind.Slice, gridAlias.TargetType.Kind);
         var gridSlice = Assert.IsType<SliceSemanticType>(gridAlias.TargetType.SpecialType);
         Assert.Equal(2, gridSlice.Dimension);

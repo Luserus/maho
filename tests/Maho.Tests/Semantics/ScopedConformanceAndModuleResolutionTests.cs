@@ -10,7 +10,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     private const string SharedIfaceModule = CompilerTestBed.FullPrelude + """
         public interface Bar
         {
-            func Baz(&this) -> int32;
+            func Baz(this&) -> int32;
         }
 
         public struct Foo
@@ -30,13 +30,13 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modA = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Greetable
             {
-                func Greet(&this) -> int32;
+                func Greet(this&) -> int32;
             }
 
             public struct Person : Greetable
             {
                 public int32 id;
-                public func Greet(&this) -> int32 { return this.id; }
+                public func Greet(this&) -> int32 { return this->id; }
             }
             """,
             "ModA.mh",
@@ -45,15 +45,15 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         Assert.False(modA.HasErrors);
 
         var modB = Compilation.FromSource("""
-            public func ReadGreeting(dyn &Greetable g) -> int32
+            public func ReadGreeting(Greetable& g) -> int32
             {
-                return g.Greet();
+                return g->Greet();
             }
 
             public func Run() -> int32
             {
-                Person p = put Person { id = 42 };
-                return ReadGreeting(p);
+                Person p = new Person { id = 42 };
+                return ReadGreeting(&p);
             }
             """,
             "ModB.mh",
@@ -67,11 +67,11 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     public void SingleDefinitionDuplicateInterface_ReportsMH0565()
     {
         var onStruct = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Bar { func Baz(&this) -> int32; }
+            public interface Bar { func Baz(this&) -> int32; }
 
             public struct Foo : private Bar, public Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
             """);
 
@@ -81,7 +81,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var onExt = Compilation.FromSource(SharedIfaceModule + """
             public extension Foo : private Bar, Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
             """);
 
@@ -93,16 +93,16 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     public void MultipleNonPrivateConformancesInSameModule_ReportMH0565()
     {
         var structAndExt = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Bar { func Baz(&this) -> int32; }
+            public interface Bar { func Baz(this&) -> int32; }
 
             public struct Foo : Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
 
             public extension Foo : internal Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
+                func Bar.Baz(this&) -> int32 { return 2; }
             }
             """);
 
@@ -112,12 +112,12 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var twoExts = Compilation.FromSource(SharedIfaceModule + """
             public extension Foo : Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
 
             public extension Foo : internal Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
+                func Bar.Baz(this&) -> int32 { return 2; }
             }
             """);
 
@@ -129,20 +129,20 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     public void MultipleSeparatePrivateExtensions_CoexistWithDistinctSemanticConformances()
     {
         var compilation = Compilation.FromSource(SharedIfaceModule + """
-            public func Consume(dyn &Bar b) -> int32 { return b.Baz(); }
+            public func Consume(Bar& b) -> int32 { return b->Baz(); }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 10; }
-                private func RunA(&this) -> int32 { return Consume(this); }
-                private func CallBazA(&this) -> int32 { return (this as Bar).Baz(); }
+                func Bar.Baz(this&) -> int32 { return 10; }
+                private func RunA(this&) -> int32 { return Consume(this); }
+                private func CallBazA(this&) -> int32 { return (this as Bar&)->Baz(); }
             }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 20; }
-                private func RunB(&this) -> int32 { return Consume(this); }
-                private func CallBazB(&this) -> int32 { return (this as Bar).Baz(); }
+                func Bar.Baz(this&) -> int32 { return 20; }
+                private func RunB(this&) -> int32 { return Consume(this); }
+                private func CallBazB(this&) -> int32 { return (this as Bar&)->Baz(); }
             }
             """,
             "MyMod.mh",
@@ -163,20 +163,20 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     public void PrivateConformance_StrictlyBodyScoped_ShadowsOuterAndRejectsOutside_MH0566()
     {
         var shadowsOuter = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Bar { func Baz(&this) -> int32; }
+            public interface Bar { func Baz(this&) -> int32; }
 
             public struct Foo : Bar
             {
                 public int32 v;
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
 
-            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
+            public func TakeBar(Bar& b) -> int32 { return b->Baz(); }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
-                public func InsideShadow(&this) -> int32
+                func Bar.Baz(this&) -> int32 { return 2; }
+                public func InsideShadow(this&) -> int32
                 {
                     return TakeBar(this);
                 }
@@ -184,8 +184,8 @@ public sealed class ScopedConformanceAndModuleResolutionTests
 
             public func OutsidePublic() -> int32
             {
-                Foo f = put Foo { v = 0 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 0 };
+                return TakeBar(&f);
             }
             """,
             "ModShadow.mh",
@@ -204,17 +204,17 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         Assert.Contains(publicConf, boundConfs);
 
         var outsideInaccessible = Compilation.FromSource(SharedIfaceModule + """
-            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
+            public func TakeBar(Bar& b) -> int32 { return b->Baz(); }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
+                func Bar.Baz(this&) -> int32 { return 2; }
             }
 
             public func Run() -> int32
             {
-                Foo f = put Foo { v = 0 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 0 };
+                return TakeBar(&f);
             }
             """);
 
@@ -223,57 +223,57 @@ public sealed class ScopedConformanceAndModuleResolutionTests
     }
 
     [Fact]
-    public void LowerVisibilityConformanceReturn_WithoutDyn_ReportsMH0583_WithDyn_Succeeds()
+    public void LowerVisibilityConformanceReturn_WithoutDyn_Succeeds_WhileDynOnInterface_ReportsMH0583()
     {
-        var badAliasReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Bar { func Baz(&this) -> int32; }
+        var validReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { func Baz(this&) -> int32; }
 
             public struct Foo : Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
-                public func Escape(&this) -> &Bar
+                func Bar.Baz(this&) -> int32 { return 2; }
+                public func Escape(this&) -> Bar&
                 {
                     return this;
                 }
             }
             """);
 
-        Assert.True(badAliasReturn.HasErrors);
-        Assert.Contains(badAliasReturn.Diagnostics, d => d.Code == "MH0583");
+        Assert.False(validReturn.HasErrors, string.Join("\n", validReturn.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
-        var validDynReturn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public interface Bar { func Baz(&this) -> int32; }
+        var badDynOnInterface = Compilation.FromSource(CompilerTestBed.FullPrelude + """
+            public interface Bar { func Baz(this&) -> int32; }
 
             public struct Foo : Bar
             {
-                func Bar.Baz(&this) -> int32 { return 1; }
+                func Bar.Baz(this&) -> int32 { return 1; }
             }
 
             public extension Foo : private Bar
             {
-                func Bar.Baz(&this) -> int32 { return 2; }
+                func Bar.Baz(this&) -> int32 { return 2; }
 
-                public func EscapeDynAlias(&this) -> dyn &Bar
+                public func EscapeDynRef(this&) -> dyn Bar&
                 {
                     return this;
                 }
             }
             """);
 
-        Assert.False(validDynReturn.HasErrors);
+        Assert.True(badDynOnInterface.HasErrors);
+        Assert.Contains(badDynOnInterface.Diagnostics, d => d.Code == "MH0583");
     }
 
     [Fact]
     public void CrossModuleConformances_InternalIsolated_AndPublicDisambiguatedWithModuleQualifier()
     {
         var baseTypes = Compilation.FromSource(SharedIfaceModule + """
-            public func TakeBar(dyn &Bar b) -> int32 { return b.Baz(); }
-            public func Pick<T : Bar>(&T item) -> int32 { return 1; }
+            public func TakeBar(Bar& b) -> int32 { return b->Baz(); }
+            public func Pick<T : Bar>(T& item) -> int32 { return 1; }
             """,
             "Core.mh",
             new CompilationOptions { ModuleName = "Core" });
@@ -282,13 +282,13 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modInternalA = Compilation.FromSource("""
             public extension Foo : internal Bar
             {
-                func Bar.Baz(&this) -> int32 { return 100; }
+                func Bar.Baz(this&) -> int32 { return 100; }
             }
 
             public func RunA() -> int32
             {
-                Foo f = put Foo { v = 1 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 1 };
+                return TakeBar(&f);
             }
             """,
             "ModInternalA.mh",
@@ -299,13 +299,13 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modInternalB = Compilation.FromSource("""
             public extension Foo : internal Bar
             {
-                func Bar.Baz(&this) -> int32 { return 200; }
+                func Bar.Baz(this&) -> int32 { return 200; }
             }
 
             public func RunB() -> int32
             {
-                Foo f = put Foo { v = 2 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 2 };
+                return TakeBar(&f);
             }
             """,
             "ModInternalB.mh",
@@ -316,7 +316,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modPubA = Compilation.FromSource("""
             public extension Foo : public Bar
             {
-                func Bar.Baz(&this) -> int32 { return 10; }
+                func Bar.Baz(this&) -> int32 { return 10; }
             }
             """,
             "ModPubA.mh",
@@ -327,7 +327,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modPubB = Compilation.FromSource("""
             public extension Foo : public Bar
             {
-                func Bar.Baz(&this) -> int32 { return 20; }
+                func Bar.Baz(this&) -> int32 { return 20; }
             }
             """,
             "ModPubB.mh",
@@ -338,8 +338,8 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modCAmbiguous = Compilation.FromSource("""
             public func Run() -> int32
             {
-                Foo f = put Foo { v = 0 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 0 };
+                return TakeBar(&f);
             }
             """,
             "ModC.mh",
@@ -358,10 +358,10 @@ public sealed class ScopedConformanceAndModuleResolutionTests
 
             public func Run() -> int32
             {
-                Foo f = put Foo { v = 0 };
+                Foo f = new Foo { v = 0 };
                 int32 a = (f as ModPubA::Bar).Baz();
-                int32 b = TakeBar(f as ModPubB::Bar);
-                int32 c = Pick<Foo as ModPubA::Bar>(f);
+                int32 b = TakeBar(&f as ModPubB::Bar&);
+                int32 c = Pick::<Foo as ModPubA::Bar>(&f);
                 return a;
             }
             """,
@@ -380,13 +380,13 @@ public sealed class ScopedConformanceAndModuleResolutionTests
         var modCLocalOverride = Compilation.FromSource("""
             public extension Foo : internal Bar
             {
-                func Bar.Baz(&this) -> int32 { return 30; }
+                func Bar.Baz(this&) -> int32 { return 30; }
             }
 
             public func Run() -> int32
             {
-                Foo f = put Foo { v = 0 };
-                return TakeBar(f);
+                Foo f = new Foo { v = 0 };
+                return TakeBar(&f);
             }
             """,
             "ModCOverride.mh",
@@ -445,7 +445,7 @@ public sealed class ScopedConformanceAndModuleResolutionTests
 
             public func Test() -> int32
             {
-                SameMod local = put SameMod { localField = 3 };
+                SameMod local = new SameMod { localField = 3 };
                 int32 LocalHelper = 1;
                 int32 a = SameMod::OnlyOne();
                 int32 b = SameMod::OnlyTwo();

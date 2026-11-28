@@ -38,6 +38,8 @@ internal sealed partial class ExpressionResolutionPass
                 break;
 
             case ParenthesizedExpression paren:
+                if (expectedExpressionTypes.TryGetValue(paren, out var parenExpected))
+                    expectedExpressionTypes[paren.Expression] = parenExpected;
                 result = ResolveExpression(paren.Expression, scope, containingFunction);
                 break;
 
@@ -151,7 +153,7 @@ internal sealed partial class ExpressionResolutionPass
 
             case NameofExpression nameofExpr:
                 ResolveExpression(nameofExpr.Argument, scope, containingFunction);
-                result = hStr is { } hs ? TypeRef.Alias(TypeRef.Resolved(hs)) : TypeRef.Unresolved;
+                result = hStr is { } hs ? TypeRef.Reference(TypeRef.Resolved(hs)) : TypeRef.Unresolved;
                 break;
 
             case LambdaExpression lambda:
@@ -184,7 +186,13 @@ internal sealed partial class ExpressionResolutionPass
         if (lit.Literal.MatchingKind is MatchingKeywordKind.True or MatchingKeywordKind.False)
             return boolType;
 
-        // 2. Suffixed literals dispatch to custom literal conversion methods or functions
+        // 2. Validate escape sequences and Unicode scalar counts uniformly for unsuffixed & suffixed quoted literals
+        if (lit.Literal.Kind is TokenKind.String or TokenKind.SuffixedString or TokenKind.Char or TokenKind.SuffixedChar)
+        {
+            ValidateAndRecordQuotedLiteral(lit);
+        }
+
+        // 3. Suffixed literals dispatch to custom literal conversion methods or functions
         if (lit.HasSuffix)
         {
             var suffix = lit.Literal.GetSuffixSpan().ToString();
@@ -236,7 +244,7 @@ internal sealed partial class ExpressionResolutionPass
             return TypeRef.Unresolved;
         }
 
-        // 3. Unsuffixed literals yield uncollapsed compile-time literal types
+        // 4. Unsuffixed literals yield uncollapsed compile-time literal types
         return lit.Literal.Kind switch
         {
             TokenKind.Integer => TypeRef.Literal(CompileTimeLiteralKind.Int, lit.Literal.Value),
@@ -245,6 +253,29 @@ internal sealed partial class ExpressionResolutionPass
             TokenKind.Char => TypeRef.Literal(CompileTimeLiteralKind.Char, lit.Literal.Value),
             _ => TypeRef.Unresolved
         };
+    }
+
+    private void ValidateAndRecordQuotedLiteral(LiteralExpression lit)
+    {
+        var info = Text.LiteralEscapeParser.Parse(lit.Literal);
+        context.SetLiteralInfo(lit, info);
+
+        var source = lit.GetSource();
+        foreach (var err in info.Errors)
+        {
+            if (err.Kind == Text.LiteralEscapeErrorKind.InvalidUnicodeEscape)
+                context.Diagnostics.ReportInvalidUnicodeEscape(err.Span, err.Detail, source);
+            else
+                context.Diagnostics.ReportInvalidEscapeSequence(err.Span, err.Detail, source);
+        }
+
+        if (lit.Literal.Kind is TokenKind.Char or TokenKind.SuffixedChar && info.ScalarCount > 1)
+        {
+            context.Diagnostics.ReportInvalidCharacterLiteralLength(
+                lit.Literal.Span,
+                info.ScalarCount,
+                source);
+        }
     }
 
     /// <summary>
@@ -328,6 +359,8 @@ internal sealed partial class ExpressionResolutionPass
             : new SymbolPart(named.Identifier, 0, hygiene);
 
         var syms = scope[new SymbolName(part)];
+        if (syms.Count == 0 && named is not GenericNameExpression)
+            syms = scope.GetCallableSymbolsAnyArity(named.Identifier.Value, hygiene);
         var sym = syms.FirstOrDefault(static s =>
             s is MethodSymbol m ? !m.Flags.HasFlag(FunctionFlags.InterfaceScoped) :
             s is PropertySymbol p ? !p.Flags.HasFlag(FunctionFlags.InterfaceScoped) : true);
@@ -454,7 +487,9 @@ internal sealed partial class ExpressionResolutionPass
         IReadOnlyList<TypeRef> resolvedArgs,
         TypeRef symbolType,
         Scope scope,
-        SymbolHandle containingFunction)
+        SymbolHandle containingFunction,
+        SyntaxNode? fallbackSyntax = null,
+        IReadOnlyDictionary<SymbolHandle, TypeRef>? outerSubst = null)
     {
         context.ValidateGenericTypeArgumentConformances(
             symHandle,
@@ -462,7 +497,16 @@ internal sealed partial class ExpressionResolutionPass
             resolvedArgs,
             scope,
             containingFunction,
-            reportDiagnostics: true);
+            reportDiagnostics: true,
+            fallbackSyntax: fallbackSyntax,
+            initialSubst: outerSubst);
+
+        if (sym is TypeSymbol or NestedTypeSymbol)
+        {
+            if (resolvedArgs.Count == 0)
+                return symbolType;
+            return TypeRef.Generic(symHandle, sym.Name.Text, [.. resolvedArgs]);
+        }
 
         IReadOnlyList<SymbolHandle> genericParams = sym switch
         {
@@ -528,7 +572,7 @@ internal sealed partial class ExpressionResolutionPass
         GlobalVariableSymbol global => global.Type,
         ConstantSymbol constant => constant.Type,
         TypeSymbol typeSymbol => TypeRef.Resolved(ResolutionContext.GetHandle(typeSymbol)),
-        MethodSymbol method => method.Type != default && method.Type.Kind != TypeRefKind.Unresolved ? method.Type : (method.Flags.HasFlag(FunctionFlags.Static) ? TypeRef.Function(method.ReturnType, Array.Empty<TypeRef>()) : TypeRef.Delegate(method.ReturnType, Array.Empty<TypeRef>())),
+        MethodSymbol method => method.Type != default && method.Type.Kind != TypeRefKind.Unresolved ? method.Type : TypeRef.Function(method.ReturnType, Array.Empty<TypeRef>()),
         FunctionSymbol fn => fn.Type != default && fn.Type.Kind != TypeRefKind.Unresolved ? fn.Type : TypeRef.Function(fn.ReturnType, Array.Empty<TypeRef>()),
         PropertySymbol prop => prop.Type,
         _ => TypeRef.Unresolved
@@ -548,7 +592,7 @@ internal sealed partial class ExpressionResolutionPass
                 arrayCreation.Type.GetSpan() ?? arrayCreation.GetSpan() ?? default,
                 elemType.ToDisplayString(context),
                 "T",
-                arrayCreation.Size is null || arrayCreation.Kind == ObjectCreationKind.New ? KnownIntrinsics.Slice : KnownIntrinsics.Array,
+                arrayCreation.Size is null ? KnownIntrinsics.Slice : KnownIntrinsics.Array,
                 "Sized",
                 arrayCreation.GetSource());
         }
@@ -568,9 +612,8 @@ internal sealed partial class ExpressionResolutionPass
                 ResolveExpression(item, scope, containingFunction);
         }
 
-        bool isPut = arrayCreation.Kind == ObjectCreationKind.Put;
         TypeRef targetType;
-        if (isPut && arrayCreation.Size is not null)
+        if (arrayCreation.Size is not null)
         {
             context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var arrH);
             targetType = TypeRef.Array(elemType, arrayCreation.Size, arrH != default ? arrH : null);
@@ -582,7 +625,6 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         ResolveAllocationAndTarget(
-            isPut,
             targetType,
             null,
             null,

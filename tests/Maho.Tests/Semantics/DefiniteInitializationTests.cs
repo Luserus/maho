@@ -5,7 +5,7 @@ public sealed class DefiniteInitializationTests
     private const string StructPrelude = CompilerTestBed.FullPrelude + """
         public struct Empty
         {
-            public func Ping(&this) -> int32 { return 7; }
+            public func Ping(this&) -> int32 { return 7; }
         }
 
         public struct Pair
@@ -13,8 +13,8 @@ public sealed class DefiniteInitializationTests
             public int32 a;
             public int32 b;
 
-            public func First(&this) -> int32 { return this.a; }
-            public func Second(&this) -> int32 { return this.b; }
+            public func First(this&) -> int32 { return this->a; }
+            public func Second(this&) -> int32 { return this->b; }
         }
 
         public struct Cell<T>
@@ -86,7 +86,7 @@ public sealed class DefiniteInitializationTests
                 Empty e;
                 () u;
                 Empty d = default;
-                Empty c = put Empty();
+                Empty c = new Empty();
                 return e.Ping();
             }
             """);
@@ -118,8 +118,8 @@ public sealed class DefiniteInitializationTests
         var valid = Compilation.FromSource(StructPrelude + """
             public func Test() -> int32
             {
-                Pair p = put Pair { a = 3, b = 4 };
-                Cell<int32> bx = put Cell<int32> { val = 5 };
+                Pair p = new Pair { a = 3, b = 4 };
+                Cell<int32> bx = new Cell<int32> { val = 5 };
                 return p.First();
             }
             """);
@@ -129,7 +129,7 @@ public sealed class DefiniteInitializationTests
         var missing = Compilation.FromSource(StructPrelude + """
             public func Test() -> Pair
             {
-                return put Pair { a = 3 };
+                return new Pair { a = 3 };
             }
             """);
 
@@ -139,7 +139,7 @@ public sealed class DefiniteInitializationTests
         var duplicate = Compilation.FromSource(StructPrelude + """
             public func Test() -> Pair
             {
-                return put Pair { a = 3, a = 4, b = 5 };
+                return new Pair { a = 3, a = 4, b = 5 };
             }
             """);
 
@@ -156,7 +156,7 @@ public sealed class DefiniteInitializationTests
                 private int32 hidden;
                 public int32 shown;
 
-                public func MakeInside(&this) -> Secret
+                public func MakeInside(this&) -> Secret
                 {
                     Secret s;
                     s.hidden = 1;
@@ -192,7 +192,7 @@ public sealed class DefiniteInitializationTests
         var directInitOutside = Compilation.FromSource(sourceWithSecret + """
             public func BadDirect() -> Secret
             {
-                return put Secret { hidden = 1, shown = 2 };
+                return new Secret { hidden = 1, shown = 2 };
             }
             """);
 
@@ -246,7 +246,7 @@ public sealed class DefiniteInitializationTests
 
             public func Test(bool cond) -> ()
             {
-                Handle h = put Handle { id = 1 };
+                Handle h = new Handle { id = 1 };
                 if (cond)
                 {
                     Consume(h);

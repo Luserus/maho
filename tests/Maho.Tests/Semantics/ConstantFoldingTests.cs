@@ -9,9 +9,9 @@ public sealed class ConstantFoldingTests
         [IntrinsicType("Sized")] public interface Sized : Layout;
         [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("ValueType")]
         public struct ValType;
@@ -26,7 +26,7 @@ public sealed class ConstantFoldingTests
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            func Deref(&this) -> TReturn;
+            func Deref(this&) -> TReturn;
         }
 
         [IntrinsicType("Int8")]
@@ -69,7 +69,7 @@ public sealed class ConstantFoldingTests
             public nuint raw;
             public Metadata<T> metadata;
             [IntrinsicFunction("Reference.Deref()")]
-            func Deref.Deref(&this) -> T&;
+            func Deref.Deref(this&) -> T&;
         }
 
         public interface LogicalAnd<T> { [OperatorFunction("LogicalAnd")] func And(bool l, bool r) -> bool; }
@@ -97,17 +97,17 @@ public sealed class ConstantFoldingTests
         public interface Ge<T> { [OperatorFunction("GreaterThanOrEqual")] func Ge(T l, T r) -> bool; }
 
         [IntrinsicType("Str")]
-        public struct Str : Add<&Str>, Eq<&Str>
+        public struct Str : Add<Str&>, Eq<Str&>
         {
             public uint8[] data;
-            [IntrinsicFunction("Str.Add(&Str, &Str)")] func Add.Add(&Str l, &Str r) -> &Str;
-            [IntrinsicFunction("Str.Eq(&Str, &Str)")] func Eq.Eq(&Str l, &Str r) -> bool;
+            [IntrinsicFunction("Str.Add(Str&, Str&)")] func Add.Add(Str& l, Str& r) -> Str&;
+            [IntrinsicFunction("Str.Eq(Str&, Str&)")] func Eq.Eq(Str& l, Str& r) -> bool;
         }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -115,17 +115,9 @@ public sealed class ConstantFoldingTests
         {
             public nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            public nuint codeAddress;
-            public Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         [IntrinsicType("Int32")]
         public struct int32 : Add<int32>, Sub<int32>, Mul<int32>, Div<int32>, Rem<int32>,
@@ -467,5 +459,32 @@ public sealed class ConstantFoldingTests
         var sym = compilation.Context.GetSymbol(topConst.Type.Handle.Value) as TypeSymbol;
         Assert.NotNull(sym);
         Assert.Equal("int32", sym.Name.Text);
+    }
+
+    [Fact]
+    public void Const_StringAndCharEscapes_DecodeUnicodeScalars()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            [IntrinsicType("Char")] public struct char;
+
+            public const EscStr = "line1\n\x41\u{1F600}";
+            public const char EscChar = '\u{1F600}';
+            public const char NewLine = '\n';
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var escStr = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "EscStr");
+        Assert.Equal(ConstantValueKind.Str, escStr.Value.Kind);
+        Assert.Equal("line1\nA\U0001F600", escStr.Value.AsStr);
+
+        var escChar = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "EscChar");
+        Assert.Equal(ConstantValueKind.Char, escChar.Value.Kind);
+        Assert.Equal((uint)0x1F600, escChar.Value.AsChar);
+
+        var newLine = compilation.Context.ConstantSymbols.First(c => c.Name.Text == "NewLine");
+        Assert.Equal(ConstantValueKind.Char, newLine.Value.Kind);
+        Assert.Equal((uint)'\n', newLine.Value.AsChar);
     }
 }

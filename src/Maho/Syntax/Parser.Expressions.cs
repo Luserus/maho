@@ -20,7 +20,7 @@ internal sealed partial class Parser
         {
             // consume the prefix operator (combined)
             var opToken = ConsumeOperator();
-            int rbp = prefixEntry.RightBindingPower;
+            int rbp = prefixEntry.PrefixBindingPower;
             var right = ParseExpectedExpression(anchor: MissingTokenAnchor.AfterPrevious, minBindingPower: rbp);
             left = new UnaryExpression(opToken, right, UnaryPosition.Prefix);
         }
@@ -100,7 +100,10 @@ internal sealed partial class Parser
                 }
 
                 var identifier = ExpectIdentifierToken("after '->'");
-                left = new MemberAccessExpression(left, arrow, identifier);
+                if (TryParseOptionalExpressionGenerics(out var colonColon, out var lessThan, out var genericArguments, out var greaterThan))
+                    left = new MemberAccessExpression(left, arrow, identifier, colonColon, lessThan, genericArguments, greaterThan);
+                else
+                    left = new MemberAccessExpression(left, arrow, identifier);
                 continue;
             }
 
@@ -279,7 +282,7 @@ internal sealed partial class Parser
             TokenKind.LessThanSign => ParseTypeAsExpression(),
             TokenKind.Identifier => CurrentToken.MatchingKind switch
             {
-                MatchingKeywordKind.New or MatchingKeywordKind.Put => ParseObjectCreationExpression(),
+                MatchingKeywordKind.New => ParseObjectCreationExpression(),
                 MatchingKeywordKind.If => ParseIfExpression(),
                 MatchingKeywordKind.While => ParseWhileExpression(),
                 MatchingKeywordKind.For => ParseForExpression(),
@@ -684,7 +687,6 @@ internal sealed partial class Parser
         var kind = keyword.MatchingKind switch
         {
             MatchingKeywordKind.New => ObjectCreationKind.New,
-            MatchingKeywordKind.Put => ObjectCreationKind.Put,
             _ => throw new ArgumentOutOfRangeException(nameof(keyword), keyword.MatchingKind, "Unhandled object creation keyword.")
         };
 

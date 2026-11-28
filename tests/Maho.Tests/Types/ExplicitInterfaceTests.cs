@@ -13,9 +13,9 @@ public class ExplicitInterfaceTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")]
         public struct uint8;
@@ -50,7 +50,7 @@ public class ExplicitInterfaceTests
         {
             uint8[] data;
         }
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
         [IntrinsicType("Pointer")]
         public struct Pointer<T> where T : Layout
@@ -68,7 +68,7 @@ public class ExplicitInterfaceTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -76,16 +76,7 @@ public class ExplicitInterfaceTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
         """;
 
@@ -100,9 +91,9 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Unsized")]
             public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
-            intrinsic attribute OperatorFunction(&Str name);
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -146,13 +137,13 @@ public class ExplicitInterfaceTests
             public interface Ctor<T>
             {
                 [OperatorFunction("Constructor")]
-                func Construct(&this) -> ();
+                func Construct(this&) -> ();
             }
 
             public interface Dtor<T>
             {
                 [OperatorFunction("Destructor")]
-                func Destruct(mut &this) -> ();
+                func Destruct(this mut&) -> ();
             }
             """);
 
@@ -175,9 +166,9 @@ public class ExplicitInterfaceTests
             [IntrinsicType("Unsized")]
             public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
-            intrinsic attribute OperatorFunction(&Str name);
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("ValueType")]
             public struct ValType;
@@ -221,7 +212,7 @@ public class ExplicitInterfaceTests
             public interface Deref<TTarget>
             {
                 [OperatorFunction("Dereference")]
-                func Deref(&this) -> MyRef<TTarget>;
+                func Deref(this&) -> MyRef<TTarget>;
             }
             """);
 
@@ -465,19 +456,19 @@ public class ExplicitInterfaceTests
             public interface Mut<T>
             {
                 [OperatorFunction("PrefixIncrement")]
-                func Inc(&this) -> int32;
+                func Inc(this mut&) -> int32;
 
                 [OperatorFunction("AdditionAssignment")]
-                func AddAssign(&this, int32 rhs) -> ();
+                func AddAssign(this mut&, int32 rhs) -> ();
             }
 
             public interface Idx<T, TIdx>
             {
                 [OperatorFunction("IndexerGetter")]
-                func Get(&this, int32 index) -> int32;
+                func Get(this&, int32 index) -> int32;
 
                 [OperatorFunction("IndexerSetter")]
-                func Set(&this, int32 val, int32 index) -> ();
+                func Set(this mut&, int32 val, int32 index) -> ();
             }
 
             public interface Cast<TFrom, TTo>
@@ -568,20 +559,20 @@ public class ExplicitInterfaceTests
 
             public interface IRender
             {
-                func Draw(&this) -> int32;
-                func Tag(&this) -> int32 { return 7; }
+                func Draw(this&) -> int32;
+                func Tag(this&) -> int32 { return 7; }
             }
 
             public struct Widget : IRender
             {
                 public int32 id;
-                public func Draw(&this) -> int32 { return 1; }
-                func IRender.Draw(&this) -> int32 { return 100; }
+                public func Draw(this&) -> int32 { return 1; }
+                func IRender.Draw(this&) -> int32 { return 100; }
             }
 
             public func Run() -> int32
             {
-                Widget w = put Widget { id = 1 };
+                Widget w = new Widget { id = 1 };
                 int32 direct = w.Draw();
                 int32 explicitCall = (w as IRender).Draw();
                 int32 defaultTag = (w as IRender).Tag();
@@ -596,8 +587,8 @@ public class ExplicitInterfaceTests
 
             public interface IRender
             {
-                func Draw(&this) -> int32;
-                func Tag(&this) -> int32 { return 7; }
+                func Draw(this&) -> int32;
+                func Tag(this&) -> int32 { return 7; }
             }
 
             public struct Widget : IRender
@@ -608,7 +599,7 @@ public class ExplicitInterfaceTests
 
             public func Bad() -> ()
             {
-                Widget w = put Widget { id = 1 };
+                Widget w = new Widget { id = 1 };
                 w.Draw();
                 w.Tag();
             }

@@ -97,28 +97,8 @@ internal sealed class OwnershipTypeClassifier
         TryResolveDerefOperator(type, OperatorKind.OwningDeref, out pointeeType, out _);
 
     /// <summary>
-    /// Checks whether a type implements <see cref="OperatorKind.AllocDeref"/> and returns its
-    /// dereferenced pointee type together with any container fields whose addresses are returned
-    /// by <c>AllocDeref</c> (permitted to start uninitialized when returned from an allocation operator).
-    /// </summary>
-    public bool TryGetAllocDerefInfo(
-        TypeRef type,
-        out TypeRef pointeeType,
-        out HashSet<SymbolHandle> allowedUninitFields)
-    {
-        allowedUninitFields = [];
-        if (!TryResolveDerefOperator(type, OperatorKind.AllocDeref, out pointeeType, out var implMethod))
-            return false;
-
-        if (implMethod?.Syntax?.Body is { } bodySyntax && type.Handle is { } rawH)
-            CollectReturnedFieldHandles(bodySyntax, context.UnwrapAlias(rawH), allowedUninitFields);
-
-        return true;
-    }
-
-    /// <summary>
     /// Determines whether <paramref name="callableHandle"/> implements an allocation operator
-    /// (<see cref="OperatorKind.New"/> or <see cref="OperatorKind.Put"/>) and yields its target type.
+    /// (<see cref="OperatorKind.New"/>) and yields its target type.
     /// </summary>
     public bool IsAllocationOperatorMethod(SymbolHandle callableHandle, out TypeRef targetType)
     {
@@ -127,9 +107,7 @@ internal sealed class OwnershipTypeClassifier
         if (callableSym is not MethodSymbol method)
             return false;
 
-        var allocOps = context.DiscoveredOperators.GetOperators(OperatorKind.New)
-            .Concat(context.DiscoveredOperators.GetOperators(OperatorKind.Put))
-            .ToList();
+        var allocOps = context.DiscoveredOperators.GetOperators(OperatorKind.New).ToList();
         if (allocOps.Count == 0)
             return false;
 
@@ -599,8 +577,6 @@ internal sealed class OwnershipTypeClassifier
                 return union.Variants.Any(RequiresDrop);
             case SliceSemanticType slice:
                 return RequiresDrop(slice.ElementType);
-            case DelegateSemanticType:
-                return false;
             case DynSemanticType dyn:
                 return dyn.TargetType.SpecialType is not (ReferenceSemanticType or AliasSemanticType or PointerSemanticType);
         }
@@ -667,11 +643,6 @@ internal sealed class OwnershipTypeClassifier
 
             case SliceSemanticType slice:
                 return Classify(slice.ElementType);
-
-            case DelegateSemanticType:
-                // Closure environments may own an allocation/captured Drop value.
-                // Treat them conservatively until their intrinsic ownership contracts exist.
-                return OwnershipKind.Move;
         }
 
         if (type.Handle is not { } handle)

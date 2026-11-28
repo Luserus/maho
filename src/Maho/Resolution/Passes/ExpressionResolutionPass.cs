@@ -84,14 +84,14 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         ResolveTopLevelStatements();
 
         // 1.5. Resolve constants
-        foreach (var constant in context.ConstantSymbols)
+        foreach (var constant in context.ConstantSymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
             ResolveConstant(constant);
         }
 
         // 2. Resolve global variable initializers
-        foreach (var global in context.GlobalVariableSymbols)
+        foreach (var global in context.GlobalVariableSymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(global));
             if (global.Syntax is { } varDecl && visitedDeclarations.Add(varDecl))
@@ -99,7 +99,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         }
 
         // 3. Resolve field initializers
-        foreach (var field in context.FieldSymbols)
+        foreach (var field in context.FieldSymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
             if (field.Syntax is { } varDecl && visitedDeclarations.Add(varDecl))
@@ -107,7 +107,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         }
 
         // 4. Resolve function bodies
-        foreach (var function in context.FunctionSymbols)
+        foreach (var function in context.FunctionSymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
             if (function.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
@@ -118,7 +118,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         }
 
         // 5. Resolve method bodies
-        foreach (var method in context.MethodSymbols)
+        foreach (var method in context.MethodSymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(method));
             if (method.Syntax is { } syntax && visitedBodies.Add(syntax.Body))
@@ -137,7 +137,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
         }
 
         // 6. Resolve property accessors
-        foreach (var property in context.PropertySymbols)
+        foreach (var property in context.PropertySymbols.ToArray())
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(property));
             if (property.Syntax is { } syntax)
@@ -607,7 +607,7 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
             {
                 CompileTimeLiteralKind.Int => hInt32 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Float => hFloat64 is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
-                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Alias(TypeRef.Resolved(h)) : TypeRef.Inferred,
+                CompileTimeLiteralKind.Str => hStr is { } h ? TypeRef.Reference(TypeRef.Resolved(h)) : TypeRef.Inferred,
                 CompileTimeLiteralKind.Char => hChar is { } h ? TypeRef.Resolved(h) : TypeRef.Inferred,
                 _ => TypeRef.Inferred
             };

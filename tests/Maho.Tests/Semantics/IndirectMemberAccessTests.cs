@@ -10,9 +10,9 @@ public sealed class IndirectMemberAccessTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")]
         public struct uint8;
@@ -32,13 +32,13 @@ public sealed class IndirectMemberAccessTests
         public interface Deref<T> where T : Layout
         {
             [OperatorFunction("Dereference")]
-            func Deref(&this) -> &T;
+            func Deref(this&) -> T&;
         }
 
         public interface Arrow<T> where T : Layout
         {
             [OperatorFunction("IndirectMemberAccess")]
-            func Arrow(&this) -> &T;
+            func Arrow(this&) -> T&;
         }
 
         [IntrinsicType("Reference")]
@@ -48,11 +48,11 @@ public sealed class IndirectMemberAccessTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
@@ -63,11 +63,11 @@ public sealed class IndirectMemberAccessTests
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
@@ -86,7 +86,7 @@ public sealed class IndirectMemberAccessTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -94,17 +94,9 @@ public sealed class IndirectMemberAccessTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public struct Point
         {

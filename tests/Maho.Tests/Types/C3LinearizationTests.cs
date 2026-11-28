@@ -16,7 +16,7 @@ public sealed class C3LinearizationTests
             [IntrinsicType("Unsized")]
             public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")]
             public struct uint8;

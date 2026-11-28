@@ -10,9 +10,9 @@ public sealed class DeconstructTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")]
         public struct uint8;
@@ -33,11 +33,22 @@ public sealed class DeconstructTests
         [IntrinsicType("Metadata")]
         public struct Metadata<T> where T : Layout;
 
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            func Arrow(this&) -> TReturn;
+        }
+
         [IntrinsicType("Reference")]
-        public struct Reference<T> where T : Layout
+        public struct Reference<T> : Arrow<T&> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
+
+            func Arrow.Arrow(this&) -> T&
+            {
+                return &(*(*this));
+            }
         }
 
         [IntrinsicType("Str")]
@@ -62,7 +73,7 @@ public sealed class DeconstructTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -70,29 +81,21 @@ public sealed class DeconstructTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public interface Deconstruct<T...>
         {
             [OperatorFunction("Deconstruct")]
-            func Deconstruct(&this) -> (T...);
+            func Deconstruct(this&) -> (T...);
         }
 
         [IntrinsicType("Tuple")]
         public struct Tuple<T...> : ValType, Deconstruct<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            func Deconstruct.Deconstruct(&this) -> (T...);
+            func Deconstruct.Deconstruct(this&) -> (T...);
         }
         """;
 
@@ -122,9 +125,9 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 
@@ -150,9 +153,9 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 
@@ -190,9 +193,9 @@ public sealed class DeconstructTests
                 public int32 x;
                 public int32 y;
 
-                func Deconstruct.Deconstruct(&this) -> (int32, int32)
+                func Deconstruct.Deconstruct(this&) -> (int32, int32)
                 {
-                    return (this.x, this.y);
+                    return (this->x, this->y);
                 }
             }
 

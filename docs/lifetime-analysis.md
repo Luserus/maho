@@ -40,7 +40,7 @@ At every value use the compiler selects Copy or Move; source code does not write
 | Safe alias, safe reference, raw pointer, function value | Copy the handle, never its referent |
 | Generic parameter (`Transfer` default or `: Move`) | Move in generic body; call site uses concrete arg Copy/Move |
 | Generic parameter constrained with `: Copy` | Copy |
-| `delegate(...) -> R` (`Std.Delegate`) | Move (with no `Destructor` cleanup); tracks captured/bound referent loans |
+| Synthesized closure (`__Closure_N`) / bound method value | Move (with synthesized `Destructor` when owning move/drop state); tracks borrowed captures and moves consumed captures |
 | Fixed-size array or slice | Follows element ownership |
 | Bare `dyn Trait` | Conservatively Move |
 | `dyn Trait&` / `dyn Trait*` | Behavior belongs to the reference/pointer wrapper |
@@ -64,7 +64,7 @@ Roots use `Symbol` identity rather than `SymbolHandle`, because local handles ar
 
 Safe aliases and references create loans. Shared loans coexist; a mutable loan conflicts with every overlapping loan. Any live safe loan prevents moving or assigning its referent. For example, `&Resource view = value;` lowers to an initialized alias handle plus `Borrow(value, owner: view)`. Reborrows keep original provenance, so `&Resource second = first;` loans the original `value`, not the stack storage of `first`.
 
-`this` is the receiver parameter's storage alias, never an implicit pointer, so `this.field` remains normal member syntax. A type member with no first `this` receiver parameter is implicitly static; spelling `static` is optional documentation. The pre-existing receiverless `Callable` operator spelling remains a compatibility exception until its standard-library declarations migrate to explicit `&this`. `T*` is the explicit unsafe escape hatch: it is Copy as a handle, but dereferencing it is intentionally outside safe borrow tracking.
+`this` is the receiver parameter's explicit handle/value (`this` for by-value ownership, `this&` / `this mut&` for safe references, `this*` / `this mut*` for raw pointers). A type member with no first `this` receiver parameter is implicitly static; spelling `static` is optional documentation. Callable interfaces (`Callable`, `CallableMut`, `CallableOnce`) use explicit receivers (`this&`, `this mut&`, and `this`) matching invocation capabilities. `T*` is the explicit unsafe escape hatch: it is Copy as a handle, but dereferencing it is intentionally outside safe borrow tracking.
 
 An alias or safe-reference result supplies its referent at an owned-value destination. Thus `int32 copy = alias;` and `int32 copy = *reference;` both perform an implicit Copy of `int32`; neither needs a source-level dereference binding. This is never an implicit Move: assigning a move-only referent through an alias/reference reports `MH1005`, preserving the access path's promise to continue referring to valid storage.
 
@@ -100,10 +100,10 @@ Properties are deferred because their synthetic receiver/value storage roots are
 
 - `Lower` creates entry/exit blocks, opens the function scope, and lowers the body.
 - `RegisterParameters` makes every parameter a storage root and retains the receiver root for `this` lookup.
-- `LowerDeclaration` emits local storage effects and recognizes safe alias/reference declarations as named loans rather than value moves, while recording `OwnershipBody.ReferentMap` provenance for delegates and borrow-holding composites (`Tuple`, `ObjectInitializer`, `ConstructorCall`).
-- `LowerValue` dispatches place uses, assignments, calls, value-returning `put`/`new` creation expressions (tracking `IsReturnUse` on return leaves and Phase 2 construction on `AllocDeref` targets), `for` loops (shared collection borrow across loop iteration), lambdas/bound instance method delegates, address-of, aggregates, and nested CFG expressions.
+- `LowerDeclaration` emits local storage effects and recognizes safe alias/reference declarations as named loans rather than value moves, while recording `OwnershipBody.ReferentMap` provenance for closures, bound-method closures, and borrow-holding composites (`Tuple`, `ObjectInitializer`, `ConstructorCall`).
+- `LowerValue` dispatches place uses, assignments, calls, value-returning `new` creation expressions (tracking `IsReturnUse` on return leaves and constructor targets), `for` loops (shared collection borrow across loop iteration), lambdas (consuming move captures), bound instance method closures (consuming `this` by-value receivers or borrowing ref receivers), address-of, aggregates, and nested CFG expressions.
 - `LowerValueForDestination` applies destination-boundary ownership: owned values Copy or Move normally (consulting the caller's concrete argument type when passing into an unsubstituted generic parameter), while an alias/reference result is always materialized as a Copy of its referent and diagnoses a move-only referent with `MH1005`.
-- `LowerCall` consults resolved parameter types: a safe-reference/alias parameter creates an ephemeral borrow; value and composite delegate/borrow arguments keep ephemeral loans alive through the call statement.
+- `LowerCall` consults resolved parameter types and callable capabilities: `CallableOnce` moves the closure, `CallableMut`/`Callable` borrow it mutably/shared; safe-reference parameters create ephemeral borrows; value/borrow-holding arguments keep ephemeral loans alive through the call statement.
 - `TryGetPlace` recognizes names, fields, indices, and safe dereferences. Raw dereferences stop there deliberately.
 - `LowerIf`, `LowerWhile`, `LowerFor`, and `LowerTry` build CFG edges (including catch scopes and `throw` terminators). `BeginScope`, `EndScope`, and `ExitAllScopes` add storage-death points including normal-return and throw cleanup points.
 
@@ -111,7 +111,7 @@ The lowerer only emits the local, type-directed `MH1005` materialization error; 
 
 ### `OwnershipTypeClassifier`
 
-`Classify` answers Copy or Move and caches by `TypeRef` (using `Transfer`/`Move`/`Copy` constraints and generic parameter bounds). `RequiresDrop` is separate because Move does not imply Destructor (`Delegate` classifies as `Move` with `RequiresDrop => false`). Both use visitation sets to prevent recursive structural types from recursing forever. `HasLifecycleOperator` reads intrinsic lifecycle interfaces, then checks direct and C3-linearized bases. `TryGetAllocDerefInfo` and `IsAllocationOperatorMethod` identify `[OperatorFunction("New")]`/`[OperatorFunction("Put")]` bodies and any fields directly returned by `AllocDeref<mut &T>`.
+`Classify` answers Copy or Move and caches by `TypeRef` (using `Transfer`/`Move`/`Copy` constraints and generic parameter bounds). `RequiresDrop` is separate because Move does not imply Destructor (closures without owned move/drop captures classify as `Move` with `RequiresDrop => false`, while move-capturing closures with drop state synthesize `Destructor`). Both use visitation sets to prevent recursive structural types from recursing forever. `HasLifecycleOperator` reads intrinsic lifecycle interfaces, then checks direct and C3-linearized bases. `IsAllocationOperatorMethod` identifies `[OperatorFunction("New")]` allocation operators.
 
 ### `MoveAnalysis`
 

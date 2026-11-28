@@ -82,31 +82,30 @@ The intrinsic discovery pass validates compiler intrinsic types and catalogs ope
   - `[IntrinsicProperty("...")]`: declares runtime-computed get-only properties on intrinsic types without generating backing fields (e.g. `"Slice.Length"` on `Slice<T, D>`).
 - **Intrinsic Hierarchy & Implicit Deriving**:
   - *ValueType* (`Std.ValType`, `[IntrinsicType("ValueType")]`): root value type for all value representations; has zero base types.
-  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Delegate`, `Unit`, `Tuple`, `Slice`, `Array`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
+  - *Direct Inheritors of ValueType*: Direct value-kind abstractions explicitly inherit `: ValType` in library source: `Struct`, `Enum`, `Function`, `Unit`, `Tuple`, `Slice`, `Array`, `Metadata`, `Pointer`, `MutablePointer`, `Reference`, `MutableReference`.
   - *Layout Markers*: `Layout`, `Sized : Layout`, and `Unsized : Layout` govern compile-time sizedness; generic type parameters default to `Sized` unless relaxed via `where T : Layout` or `where T : Unsized`.
   - *Implicit Struct Deriving*: User-defined structs, primitive scalars (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`), and `Str` implicitly inherit `Struct` (and transitively `ValType`) without explicit base declarations.
   - *Implicit Enum Deriving*: User-defined enums and `Optional<T>` implicitly inherit `Enum` (and transitively `ValType`).
   - *Never* (`Never`, `[IntrinsicType("Never")]`): bottom type assignable to any type; has zero base types and implements no constructors or operations.
 - **Topological ABI Verification**: Enforces memory layout and field requirements on types marked with `[IntrinsicType]`:
   - *Primitive Scalars* (`Int8`-`Int128`, `UInt8`-`UInt128`, `Float16`-`Float128`, `Bool`, `Char`, `Unit`, `Never`): must have zero instance fields and zero generic parameters (`MH0020`). `Char` represents a 4-byte Unicode scalar value.
-  - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0020`).
-  - *Delegates* (`Std.Delegate<TReturn, TParams...>`): exactly 2 instance fields: `nuint` code address and `ValType&` (`Reference<ValType>`) environment reference (`MH0020`).
+  - *Function Pointers* (`Std.Function<TReturn, TParams...>`): exactly 1 instance field: `nuint` code address (`MH0020`), implementing `Callable`, `CallableMut`, and `CallableOnce`.
   - *Transfer & Lifecycle Interfaces*: `Transfer` is the root transfer marker inherited by `Move<T : this = this>` and `Copy<T : this = this>`. Unconstrained generic parameters default to `Transfer` (`Move` in generic body, zero drop on `Copy` instantiations), while `Destructor : Move` strictly requires a `mut &this` receiver (`MH0560`).
   - *Pointers & References* (`Pointer<T>`, `MutablePointer<T>`, `Reference<T>`, `MutableReference<T>`): require `NUInt` and `Metadata<T>` (constrained by `where T : Layout`) to represent thin/fat pointer metadata uniformly for `Sized` and `Unsized` pointees.
   - *Str*: unsized struct requiring `UInt8` and `Slice`; must have 1 instance field of type `UInt8[]` (or `Slice<UInt8>`).
   - *Slice & Array*: zero-field intrinsic structs parameterized by `<T, D : int = 1>` (`Slice`) and `<T, N : int, D : int = 1>` (`Array`).
 - **Lazy Intrinsic Requirement (`MH0240`)**: Intrinsics are lazily required. Minimal or empty compilations do not fail verification; `MH0240` is reported only when a syntactic construct requiring an intrinsic is used without declaration.
-- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `Put`, `AllocDeref`, `OwningDeref`, `Callable`, `IndexerGetter`) and registers them in the operator registry.
-  - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `&this` for immutable access, while `MutDeref<TReturn>` / `MutArrow<TReturn>` declare `mut &this` for mutable access.
-  - *AddressOf*: every type is implicitly populated with an `AddressOf(&this) -> T&` operator overload.
+- **Operator Function Cataloging (`DiscoveredOperators`)**: Discovers operator methods declared on interfaces with `[OperatorFunction]` (e.g., `Addition`, `Subtraction`, `Multiplication`, `Division`, `Remainder`, `Equality`, `Inequality`, `LessThan`, `LessThanOrEqual`, `GreaterThan`, `GreaterThanOrEqual`, `Dereference`, `IndirectMemberAccess`, `AddressOf`, `New`, `OwningDeref`, `Callable`, `CallableMut`, `CallableOnce`, `IndexerGetter`) and registers them in the operator registry.
+  - *Receiver APIs*: `Deref<TReturn>` / `Arrow<TReturn>` declare `this&` for immutable access, while `OwningDeref<TReturn>` / `MutArrow<TReturn>` declare `this mut&` for mutable access.
+  - *AddressOf*: every type is implicitly populated with an `AddressOf(this&) -> T&` operator overload.
 
 ---
 
 ### 2.4 Declaration Resolution Pass (`DeclarationResolutionPass`)
 The declaration resolution pass validates and binds declarations across the discovered symbol table:
 - **Type Reference Binding**: Resolves type annotations in base clauses, fields, variables, parameters, return types, properties, and generic constraints.
-- **Function Pointer & Delegate Types**: Resolves `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>` and `DelegateTypeSyntax` (`delegate(...) -> R`) to `Std.Delegate<TReturn, TParams...>`.
-- **Unified Function Typing**: Assigns first-class types to all functions: static and global functions receive `Std.Function`, while instance methods receive `Std.Delegate`. Functions implement `Callable` and can access members on their type directly (`Func.Member`).
+- **Function Types**: Resolves `FunctionTypeSyntax` (`func(...) -> R`) to `Std.Function<TReturn, TParams...>`.
+- **Unified Function Typing**: Assigns first-class `Std.Function` types to all functions and methods; instance methods include their explicit receiver parameter (`this`/`this&`/`this mut&`/`this*`/`this mut*`) as parameter 0. Functions and methods implement `Callable`, `CallableMut`, and `CallableOnce`, while accessing an instance method on a type (`Type.Method`) yields an unbound `Function` and accessing it on an instance (`instance.Method`) outside a direct call synthesizes a bound closure struct.
 - **Non-Partial Duplicate Types (`MH0530`)**: Verifies that types sharing the same containing scope, name, and generic arity are all declared with `partial`.
 - **Partial Types & Functions (`MH0531`, `MH0532`, `MH0533`, `MH0534`)**: Merges partial declarations, validates kind consistency, enforces that at most one declaration supplies an implementation body, and matches signatures.
 - **Duplicate Variables, Fields & Properties (`MH0535`, `MH0536`)**: Detects collisions in enclosing scopes.
@@ -135,9 +134,9 @@ The expression resolution pass types AST expressions and enforces Maho's operato
   - The compiler frontend does not perform constant folding (e.g. `10 + 20` is not folded to `30`). Operator calls remain as AST operator nodes resolving to operator interface methods (`<T as Add>::Add`), leaving optimization to the backend with full semantic knowledge.
 - **Lambda Expressions & Closures**:
   - Non-capturing lambdas evaluate to `Std.Function<TReturn, TParams...>`.
-  - Capturing lambdas evaluate to `Std.Delegate<TReturn, TParams...>`.
+  - Capturing lambdas synthesize anonymous move-only closure structs (`__Closure_N : Struct, Move`) implementing the appropriate callable interface (`Callable`, `CallableMut`, and/or `CallableOnce`), plus `Destructor` if capturing owned move/drop state.
   - Block bodies strictly require an explicit `return` statement; trailing expressions are rejected with `MH2016`.
-  - Bidirectional contextual typing infers untyped parameter types when assigned to typed variables or passed as arguments to functions expecting function/delegate types; un-inferrable parameters emit `MH2015`.
+  - Bidirectional contextual typing infers untyped parameter types when assigned to typed variables or passed to functions/methods expecting `Function` or `Callable*` constraints; un-inferrable parameters emit `MH2015`.
 - **Universal L-Values & Reference Aliasing**:
   - Any expression returning a mutable alias (`mut &T` or `mut *T`) is recognized as a valid, assignable L-value location.
   - Safe (`&T`) and unsafe (`*T`) reference aliases must be initialized at their declaration site (`MH0125`).

@@ -156,7 +156,7 @@ public sealed class ModifierValidationTests
                 Active,
                 Inactive;
 
-                public func Process(untagged &this) -> () { }
+                public func Process(untagged this&) -> () { }
             }
 
             public untagged union Shape
@@ -164,7 +164,7 @@ public sealed class ModifierValidationTests
                 int32 circle;
                 int32 square;
 
-                public func Describe(untagged &this) -> () { }
+                public func Describe(untagged this&) -> () { }
             }
             """);
 
@@ -197,7 +197,7 @@ public sealed class ModifierValidationTests
 
             public struct S
             {
-                public untagged func MemberMethod(&this) -> () { }
+                public untagged func MemberMethod(this&) -> () { }
             }
             """);
 
@@ -214,7 +214,7 @@ public sealed class ModifierValidationTests
 
             public struct S
             {
-                public func Method(untagged &this) -> () { }
+                public func Method(untagged this&) -> () { }
             }
             """);
 
@@ -266,8 +266,8 @@ public sealed class ModifierValidationTests
 
             public interface IService
             {
-                public func Run(&this) -> ();
-                internal func Helper(&this) -> ();
+                public func Run(this&) -> ();
+                internal func Helper(this&) -> ();
                 public int32 Value { public get; }
             }
 
@@ -275,8 +275,8 @@ public sealed class ModifierValidationTests
             {
                 private int32 raw;
 
-                public func IService.Run(&this) -> () { }
-                internal func IService.Helper(&this) -> () { }
+                public func IService.Run(this&) -> () { }
+                internal func IService.Helper(this&) -> () { }
                 public int32 IService.Value { protected get { return this.raw; } }
             }
             """);
@@ -290,7 +290,7 @@ public sealed class ModifierValidationTests
 
             public interface IService
             {
-                func Run(&this) -> ();
+                func Run(this&) -> ();
                 int32 Value { get; }
             }
 
@@ -298,7 +298,7 @@ public sealed class ModifierValidationTests
             {
                 private int32 raw;
 
-                public func Run(&this) -> () { }
+                public func Run(this&) -> () { }
                 public int32 Value { public get { return this.raw; } }
             }
             """);

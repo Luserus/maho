@@ -10,17 +10,13 @@ internal sealed class ResolvedTree
 {
     private readonly Dictionary<SyntaxNode, SymbolHandle> references = [];
     private readonly Dictionary<SyntaxNode, SymbolHandle> allocationOperatorReferences = [];
-    private readonly Dictionary<SyntaxNode, SymbolHandle> allocDerefReferences = [];
     private readonly Dictionary<SyntaxNode, InterfaceConformance> conformances = [];
 
     /// <summary> Gets all syntax-to-symbol bindings registered in this tree. </summary>
     public IReadOnlyDictionary<SyntaxNode, SymbolHandle> References => references;
 
-    /// <summary> Gets all allocation operator (<c>New</c>/<c>Put</c>) bindings registered on object creation nodes. </summary>
+    /// <summary> Gets all allocation operator (<c>New</c>) bindings registered on object creation nodes. </summary>
     public IReadOnlyDictionary<SyntaxNode, SymbolHandle> AllocationOperatorReferences => allocationOperatorReferences;
-
-    /// <summary> Gets all <c>AllocDeref</c> operator bindings registered on object creation nodes. </summary>
-    public IReadOnlyDictionary<SyntaxNode, SymbolHandle> AllocDerefReferences => allocDerefReferences;
 
     /// <summary> Gets all syntax-to-conformance bindings registered in this tree. </summary>
     public IReadOnlyDictionary<SyntaxNode, InterfaceConformance> Conformances => conformances;
@@ -34,17 +30,11 @@ internal sealed class ResolvedTree
         OnReferenceAdded?.Invoke(syntax, symbol);
     }
 
-    /// <summary> Associates an object creation node with its resolved <c>New</c> or <c>Put</c> operator symbol. </summary>
+    /// <summary> Associates an object creation node with its resolved <c>New</c> operator symbol. </summary>
     public void AddAllocationOperatorReference(SyntaxNode syntax, SymbolHandle symbol) => allocationOperatorReferences[syntax] = symbol;
 
     /// <summary> Attempts to retrieve the resolved allocation operator handle for an object creation node. </summary>
     public bool TryGetAllocationOperatorReference(SyntaxNode syntax, out SymbolHandle symbol) => allocationOperatorReferences.TryGetValue(syntax, out symbol);
-
-    /// <summary> Associates an object creation node with the <c>AllocDeref</c> method used to reach its constructed target. </summary>
-    public void AddAllocDerefReference(SyntaxNode syntax, SymbolHandle symbol) => allocDerefReferences[syntax] = symbol;
-
-    /// <summary> Attempts to retrieve the resolved <c>AllocDeref</c> method handle for an object creation node. </summary>
-    public bool TryGetAllocDerefReference(SyntaxNode syntax, out SymbolHandle symbol) => allocDerefReferences.TryGetValue(syntax, out symbol);
 
     /// <summary> Attempts to retrieve the resolved symbol handle for a given AST node. </summary>
     public bool TryGetReference(SyntaxNode syntax, out SymbolHandle symbol) => references.TryGetValue(syntax, out symbol);
@@ -60,14 +50,18 @@ internal sealed class ResolvedTree
     {
         references.Remove(syntax);
         allocationOperatorReferences.Remove(syntax);
-        allocDerefReferences.Remove(syntax);
         conformances.Remove(syntax);
     }
 
-    public sealed record LambdaCaptureInfo(Symbol Symbol, bool IsMutable);
+    public sealed record LambdaCaptureInfo(Symbol Symbol, bool IsMutable, bool IsMove = false);
     public sealed record LambdaAnalysisEntry(LambdaExpression Lambda, Scope Scope, SymbolHandle ContainingFunction);
+    public sealed record BoundMethodClosureInfo(MethodSymbol Method, ReceiverKind ReceiverKind, TypeRef ReceiverType, SymbolHandle ClosureTypeHandle);
 
     private readonly Dictionary<LambdaExpression, List<LambdaCaptureInfo>> lambdaCaptures = new();
+    private readonly Dictionary<LambdaExpression, TypeRef> lambdaClosureTypes = new();
+    private readonly Dictionary<MemberAccessExpression, BoundMethodClosureInfo> boundMethodClosures = new();
+    private readonly HashSet<MemberAccessExpression> boundMethodCalls = [];
+    private readonly HashSet<CallExpression> unboundTypeMethodCalls = [];
     private readonly List<LambdaAnalysisEntry> resolvedLambdas = [];
     private readonly HashSet<LambdaExpression> resolvedLambdaSet = new();
 
@@ -87,14 +81,35 @@ internal sealed class ResolvedTree
     public bool TryGetLambdaCaptures(LambdaExpression lambda, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out List<LambdaCaptureInfo>? captures) =>
         lambdaCaptures.TryGetValue(lambda, out captures);
 
+    public void SetLambdaClosureType(LambdaExpression lambda, TypeRef closureType) => lambdaClosureTypes[lambda] = closureType;
+
+    public bool TryGetLambdaClosureType(LambdaExpression lambda, out TypeRef closureType) =>
+        lambdaClosureTypes.TryGetValue(lambda, out closureType);
+
+    public void SetBoundMethodClosure(MemberAccessExpression access, BoundMethodClosureInfo info) => boundMethodClosures[access] = info;
+
+    public bool TryGetBoundMethodClosure(MemberAccessExpression access, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out BoundMethodClosureInfo? info) =>
+        boundMethodClosures.TryGetValue(access, out info);
+
+    public void MarkBoundMethodCall(MemberAccessExpression access) => boundMethodCalls.Add(access);
+
+    public bool IsBoundMethodCall(MemberAccessExpression access) => boundMethodCalls.Contains(access);
+
+    public void MarkUnboundTypeMethodCall(CallExpression call) => unboundTypeMethodCalls.Add(call);
+
+    public bool IsUnboundTypeMethodCall(CallExpression call) => unboundTypeMethodCalls.Contains(call);
+
     /// <summary> Clears all resolved syntax-to-symbol bindings. </summary>
     public void Clear()
     {
         references.Clear();
         allocationOperatorReferences.Clear();
-        allocDerefReferences.Clear();
         conformances.Clear();
         lambdaCaptures.Clear();
+        lambdaClosureTypes.Clear();
+        boundMethodClosures.Clear();
+        boundMethodCalls.Clear();
+        unboundTypeMethodCalls.Clear();
         resolvedLambdas.Clear();
         resolvedLambdaSet.Clear();
     }

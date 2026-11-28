@@ -385,6 +385,24 @@ internal sealed class DiagnosticsManager
     public void ReportUnterminatedMultiLineComment(TextSpan span, SourceText? source = null) =>
         ReportError("MH0104", "unterminated multi-line comment", span, source);
 
+    /// <summary> Reports an unrecognized or malformed escape sequence inside a string or character literal. </summary>
+    public void ReportInvalidEscapeSequence(TextSpan span, string detail, SourceText? source = null) =>
+        BuildError("MH0105", detail, span, source)
+            .WithPrimaryLabel(span, "invalid escape sequence", source)
+            .Report();
+
+    /// <summary> Reports an out-of-range or surrogate Unicode escape inside a string or character literal. </summary>
+    public void ReportInvalidUnicodeEscape(TextSpan span, string detail, SourceText? source = null) =>
+        BuildError("MH0106", detail, span, source)
+            .WithPrimaryLabel(span, "invalid Unicode scalar value", source)
+            .Report();
+
+    /// <summary> Reports a character literal (unsuffixed or suffixed) that does not decode to a single Unicode scalar value. </summary>
+    public void ReportInvalidCharacterLiteralLength(TextSpan span, int scalarCount, SourceText? source = null) =>
+        BuildError("MH0107", $"character literal must contain exactly one Unicode scalar value (found {scalarCount})", span, source)
+            .WithPrimaryLabel(span, $"expected 1 Unicode scalar value, found {scalarCount}", source)
+            .Report();
+
     /// <summary> Reports a parser recovery site where a specific token kind was required. </summary>
     public void ReportExpectedToken(TextSpan span, string expected, DiagnosticText found, string? context = null, SourceText? source = null, TextSpan? unexpectedSpan = null) =>
         ReportExpected("MH0120", expected, found, span, context, source, unexpectedSpan);
@@ -1206,7 +1224,7 @@ internal sealed class DiagnosticsManager
     public void ReportUseOfUninitializedValue(TextSpan span, string name, SourceText? source = null) =>
         BuildError("MH1000", $"use of uninitialized variable '{name}'", span, source)
             .WithPrimaryLabel(span, $"'{name}' is used before it has been initialized", source)
-            .WithHelp("initialize the variable via a constructor, direct initializer 'put T { ... }', 'default', or piecewise field assignment")
+            .WithHelp("initialize the variable via a constructor, direct initializer 'new T { ... }', 'default', or piecewise field assignment")
             .Report();
 
     /// <summary> Reports an attempt to piecewise initialize a struct containing inaccessible fields. </summary>
@@ -1332,7 +1350,7 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, reason, source)
             .Report();
 
-    /// <summary> Reports raw interface usage without <c>dyn</c> or an invalid indirection prefix before <c>dyn</c>. </summary>
+    /// <summary> Reports invalid <c>dyn</c> placement (e.g. wrapping <c>Unsized</c> types or inside <c>&amp;dyn</c>/<c>*dyn</c>). </summary>
     public void ReportInvalidInterfaceOrDynUsage(
         TextSpan span,
         string message,
@@ -1389,7 +1407,7 @@ internal sealed class DiagnosticsManager
             .WithHelp($"declare the ': this' parameter on interface '{ifaceName}<T : this>' or call '{methodName}' on a statically known type")
             .Report();
 
-    /// <summary> Reports <c>new</c>/<c>put</c> creation when allocation arguments or type arguments do not match any user operator and no compiler fallback applies. </summary>
+    /// <summary> Reports <c>new</c> creation when allocation arguments or type arguments do not match any user operator and no compiler fallback applies. </summary>
     public void ReportNoMatchingAllocationOperator(
         TextSpan span,
         string keyword,
@@ -1401,7 +1419,7 @@ internal sealed class DiagnosticsManager
             .WithHelp($"implement '[OperatorFunction(\"{operatorName}\")]' with a matching signature or omit allocation arguments")
             .Report();
 
-    /// <summary> Reports <c>new</c>/<c>put</c> object creation on a type that does not derive from <c>ValueType</c> and implements no matching operator. </summary>
+    /// <summary> Reports <c>new</c> object creation on a type that does not derive from <c>ValueType</c> and implements no matching operator. </summary>
     public void ReportObjectCreationNotSupported(
         TextSpan span,
         string keyword,
@@ -1432,4 +1450,69 @@ internal sealed class DiagnosticsManager
             .WithPrimaryLabel(span, $"'{kind}' not allowed in finally clause", source)
             .WithHelp("remove the branch statement from the finally clause")
             .Report();
+
+    /// <summary> Reports an alias type (<c>&amp;T</c> or <c>*T</c>) used outside a local variable declaration. </summary>
+    public void ReportAliasNotAllowedOutsideLocal(TextSpan span, string contextDescription, SourceText? source = null) =>
+        BuildError("MH0592", $"alias type '&T' / '*T' is not allowed {contextDescription}", span, source)
+            .WithPrimaryLabel(span, $"alias type not allowed {contextDescription}", source)
+            .WithHelp("use a reference ('T&', 'T mut&') or pointer ('T*', 'T mut*') outside local variable declarations")
+            .Report();
+
+    /// <summary> Reports an alias type used as the target of an <c>extension</c> block. </summary>
+    public void ReportAliasNotAllowedAsExtensionTarget(TextSpan span, SourceText? source = null) =>
+        BuildError("MH0593", "alias type cannot be an extension target", span, source)
+            .WithPrimaryLabel(span, "extension target cannot be an alias type", source)
+            .WithHelp("extend 'T' or its reference type 'T&' / 'T mut&' instead")
+            .Report();
+
+    /// <summary>
+    /// Reports a field-adding derived type attempting to inherit a <c>Self</c>-returning method
+    /// from a <c>derived</c> base interface without overriding it.
+    /// </summary>
+    public void ReportDerivedSelfMethodNeedsOverride(
+        TextSpan span,
+        string derivedTypeName,
+        string baseOwnerName,
+        string methodName,
+        string baseReturnType,
+        string interfaceName,
+        SourceText? source = null,
+        TextSpan? baseMethodSpan = null,
+        SourceText? baseMethodSource = null)
+    {
+        var builder = BuildError(
+                "MH0594",
+                $"type '{derivedTypeName}' adds instance fields and cannot inherit base method '{baseOwnerName}.{methodName}' returning '{baseReturnType}' for 'derived' interface '{interfaceName}'; override '{methodName}' explicitly",
+                span,
+                source)
+            .WithPrimaryLabel(span, $"'{derivedTypeName}' adds fields so inherited '{baseOwnerName}.{methodName}' cannot return '{derivedTypeName}'", source)
+            .WithHelp($"declare an explicit 'override' or implementing method for '{methodName}' returning '{derivedTypeName}' on '{derivedTypeName}'");
+
+        if (baseMethodSpan is { } bSpan)
+            builder.WithSecondaryLabel(bSpan, $"inherited method declared here returning '{baseReturnType}'", baseMethodSource);
+
+        builder.Report();
+    }
+
+    /// <summary> Reports invalid placement or mismatched signature for <c>derived</c> generic arguments or <c>override</c> methods. </summary>
+    public void ReportInheritanceOrOverrideError(
+        TextSpan span,
+        string message,
+        SourceText? source = null,
+        TextSpan? relatedSpan = null,
+        SourceText? relatedSource = null,
+        string? relatedLabel = null,
+        string? help = null)
+    {
+        var builder = BuildError("MH0595", message, span, source)
+            .WithPrimaryLabel(span, message, source);
+
+        if (relatedSpan is { } rSpan)
+            builder.WithSecondaryLabel(rSpan, relatedLabel ?? "related declaration here", relatedSource);
+
+        if (help is not null)
+            builder.WithHelp(help);
+
+        builder.Report();
+    }
 }

@@ -400,65 +400,6 @@ internal sealed partial class IntrinsicDiscoveryPass
         context.DiscoveredIntrinsics.Register(KnownIntrinsics.Function, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
     }
 
-    private void ValidateDelegate(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
-    {
-        if (!typesByIntrinsic.TryGetValue(KnownIntrinsics.Delegate, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Delegate))
-            return;
-
-        var entry = list[0];
-        var symbol = entry.Symbol;
-        var syntax = GetSyntax(symbol);
-
-        bool hasPtrOrRef = context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Pointer) ||
-                           context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Reference);
-
-        if (!context.DiscoveredIntrinsics.Contains(KnownIntrinsics.NUInt) || !hasPtrOrRef)
-        {
-            var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Delegate, $"requires intrinsic '{KnownIntrinsics.NUInt}' and at least one of '{KnownIntrinsics.Pointer}' or '{KnownIntrinsics.Reference}' to be declared first", syntax?.GetSource());
-            return;
-        }
-
-        if (GetGenericParameterCount(symbol) < 1)
-        {
-            var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Delegate, "must have at least 1 generic parameter", syntax?.GetSource());
-            return;
-        }
-
-        var instanceFields = GetInstanceFields(symbol);
-        if (instanceFields.Count != 2)
-        {
-            var span = syntax?.Name.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Delegate, "must have exactly 2 instance fields", syntax?.GetSource());
-            return;
-        }
-
-        var field0 = instanceFields[0];
-        var field0Type = field0.Syntax?.Type;
-        var resolvedField0 = ResolveTypeSymbol(field0Type, field0.EnclosingScope);
-
-        context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.NUInt, out var nuintHandle);
-
-        if (resolvedField0 != nuintHandle)
-        {
-            var span = field0.Syntax?.Type.GetSpan() ?? field0.Syntax?.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Delegate, $"first instance field must be of type '{KnownIntrinsics.NUInt}'", field0.Syntax?.GetSource());
-            return;
-        }
-
-        var field1 = instanceFields[1];
-        var field1Type = field1.Syntax?.Type;
-        if (!IsAnyPointerOrReference(field1Type, field1.EnclosingScope))
-        {
-            var span = field1.Syntax?.Type.GetSpan() ?? field1.Syntax?.GetSpan() ?? default;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, symbol.Name.Text, KnownIntrinsics.Delegate, "second instance field must be a pointer or reference type (e.g. Pointer<ValType>, ValType*, Reference<ValType>, or ValType&)", field1.Syntax?.GetSource());
-            return;
-        }
-
-        context.DiscoveredIntrinsics.Register(KnownIntrinsics.Delegate, ResolutionContext.GetHandle(symbol), entry.Span, entry.Source);
-    }
-
     private void ValidateOptional(Dictionary<string, List<(Symbol Symbol, TextSpan Span, SourceText? Source)>> typesByIntrinsic)
     {
         if (!typesByIntrinsic.TryGetValue(KnownIntrinsics.Optional, out var list) || list.Count != 1 || context.DiscoveredIntrinsics.Contains(KnownIntrinsics.Optional))
@@ -718,15 +659,15 @@ internal sealed partial class IntrinsicDiscoveryPass
             .ToList();
     }
 
-    private bool IsAliasToType(TypeSyntax? syntax, Scope scope, SymbolHandle expectedTargetHandle)
+    private bool IsReferenceToType(TypeSyntax? syntax, Scope scope, SymbolHandle expectedTargetHandle)
     {
         while (syntax is GroupedType grouped)
             syntax = grouped.InnerType;
 
-        if (syntax is not PrefixModifiedType { Modifier: SafeAliasTypeModifier { IsMutable: false } } aliasMod)
+        if (syntax is not ModifiedType { Modifier: ReferenceTypeModifier { IsMutable: false } } refMod)
             return false;
 
-        var inner = aliasMod.Type;
+        var inner = refMod.Type;
         while (inner is GroupedType innerGrouped)
             inner = innerGrouped.InnerType;
 
@@ -887,33 +828,16 @@ internal sealed partial class IntrinsicDiscoveryPass
         return false;
     }
 
-    private static bool TryExtractLiteralSpan(Expression expression, out ReadOnlySpan<char> span)
+    private static string? ExtractLiteralString(Expression expression)
     {
-        if (expression is LiteralExpression lit && (lit.Literal.Kind is TokenKind.String or TokenKind.SuffixedString))
-        {
-            var rawSpan = lit.Literal.Source.AsSpan(lit.Literal.Span);
-            if (rawSpan.Length >= 2 && rawSpan[0] == '"' && rawSpan[^1] == '"')
-            {
-                span = rawSpan.Slice(1, rawSpan.Length - 2);
-                return true;
-            }
-
-            span = rawSpan;
-            return true;
-        }
+        if (expression is LiteralExpression lit && lit.Literal.Kind is TokenKind.String or TokenKind.SuffixedString)
+            return LiteralEscapeParser.Parse(lit.Literal).DecodedValue;
 
         if (expression is NameofExpression nameofExpr && nameofExpr.Argument is NamedExpression named)
-        {
-            span = named.Identifier.Source.AsSpan(named.Identifier.Span);
-            return true;
-        }
+            return named.Identifier.Value;
 
-        span = default;
-        return false;
+        return null;
     }
-
-    private static string? ExtractLiteralString(Expression expression) =>
-        TryExtractLiteralSpan(expression, out var span) ? span.ToString() : null;
 
     private SymbolHandle? ResolveTypeSymbol(TypeSyntax? syntax, Scope scope)
     {

@@ -5,7 +5,7 @@ namespace Maho.Tests;
 public sealed partial class IntrinsicDiscoveryTests
 {
     private const string IntrinsicBootstrapPrelude = """
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
         [IntrinsicType("Layout")]
         public interface Layout;
@@ -62,17 +62,17 @@ public sealed partial class IntrinsicDiscoveryTests
         """;
 
     private const string UseSitePrelude = IntrinsicBootstrapPrelude + """
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
-        intrinsic attribute IntrinsicProperty(&Str signature);
+        intrinsic attribute IntrinsicProperty(Str& signature);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -80,17 +80,9 @@ public sealed partial class IntrinsicDiscoveryTests
         {
             NUInt codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            NUInt codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
         """;
 
     [Fact]
@@ -184,7 +176,7 @@ public sealed partial class IntrinsicDiscoveryTests
 
         Assert.True(compilation.HasErrors);
         var diag = Assert.Single(compilation.Diagnostics, d => d.Code == "MH0541");
-        Assert.Contains("must be '&Str'", diag.Message);
+        Assert.Contains("must be 'Str&'", diag.Message);
     }
 
     [Fact]
@@ -276,7 +268,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
@@ -308,7 +300,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
@@ -338,7 +330,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
@@ -370,7 +362,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
@@ -403,7 +395,7 @@ public sealed partial class IntrinsicDiscoveryTests
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int8")] public struct Int8;
             [IntrinsicType("Int64")] public struct Int64;
@@ -437,7 +429,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_StrWrongFirstField_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
@@ -467,7 +459,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_StrTwoFields_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("UInt8")] public struct UInt8;
             [IntrinsicType("NUInt")] public struct NUInt;
             [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
@@ -489,7 +481,7 @@ public sealed partial class IntrinsicDiscoveryTests
     public void AbiMismatch_SliceWithFields_EmitsMH0020()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("Int64")] public struct Int64;
             [IntrinsicType("UInt8")] public struct UInt8;
 

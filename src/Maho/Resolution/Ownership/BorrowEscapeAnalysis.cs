@@ -90,7 +90,7 @@ internal sealed class BorrowEscapeAnalysis
     private bool ContainsSafeBorrowType(TypeRef type, HashSet<SymbolHandle>? visited = null)
     {
         var unwrapped = TypeRef.UnwrapDyn(type);
-        if (unwrapped.SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false } or DelegateSemanticType)
+        if (unwrapped.SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false })
             return true;
 
         if (unwrapped.SpecialType is OptionalSemanticType opt)

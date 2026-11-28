@@ -21,7 +21,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal or TypeRefKind.Never => true,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Slice or
         TypeRefKind.Array or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType is not null && SpecialType.IsResolved,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Alias => SpecialType is not null && SpecialType.IsResolved,
         _ => false
     };
 
@@ -31,7 +31,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Resolved => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Slice or
         TypeRefKind.Array or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Alias => SpecialType is not null && !SpecialType.IsResolved && !SpecialType.IsError,
         _ => false
     };
 
@@ -66,7 +66,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     /// </summary>
     public bool IsSized(ResolutionContext context, HashSet<SymbolHandle>? visited = null)
     {
-        if (Kind is TypeRefKind.Unresolved or TypeRefKind.Error or TypeRefKind.Inferred or TypeRefKind.Never or TypeRefKind.Literal or TypeRefKind.Function or TypeRefKind.Delegate)
+        if (Kind is TypeRefKind.Unresolved or TypeRefKind.Error or TypeRefKind.Inferred or TypeRefKind.Never or TypeRefKind.Literal or TypeRefKind.Function)
             return true;
 
         if (SpecialType is not null)
@@ -80,7 +80,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                 case UntaggedSemanticType:
                 case UnionSemanticType:
                 case FunctionSemanticType:
-                case DelegateSemanticType:
                 case CompileTimeLiteralType:
                     return true;
 
@@ -141,7 +140,8 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (IsInterfaceHandle(handle, context))
             return false;
 
-        if (IsIntrinsicHandle(handle, context, KnownIntrinsics.Slice))
+        if (IsIntrinsicHandle(handle, context, KnownIntrinsics.Slice) ||
+            IsIntrinsicHandle(handle, context, KnownIntrinsics.Str))
             return false;
 
         if (IsIntrinsicHandle(handle, context, KnownIntrinsics.Array))
@@ -191,7 +191,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         return tailType.IsSized(context, visited);
     }
 
-    private static bool IsInterfaceHandle(SymbolHandle handle, ResolutionContext context)
+    internal static bool IsInterfaceHandle(SymbolHandle handle, ResolutionContext context)
     {
         var sym = context.GetSymbol(handle);
         return sym switch
@@ -290,6 +290,45 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Dyn(TypeRef targetType, IReadOnlyList<TypeRef> composed) =>
         new TypeRef(TypeRefKind.Dyn, targetType.Handle, new DynSemanticType(targetType, composed));
 
+    /// <summary>
+    /// Validates and wraps an explicitly <c>dyn</c>-modified type syntax (<c>dyn T&amp;</c>, <c>dyn &amp;T</c>, <c>dyn T*</c>, or <c>dyn T</c>).
+    /// Rejects applying <c>dyn</c> to any <c>Unsized</c> type (such as interfaces, <c>Str</c>, slices, or tail-unsized structs)
+    /// because their indirections already carry fat metadata implicitly; <c>dyn</c> is strictly for fat indirections over <c>Sized</c> types.
+    /// </summary>
+    internal static TypeRef CreateValidatedDynType(
+        TypeRef inner,
+        Maho.Syntax.PrefixModifiedType dynSyntax,
+        ResolutionContext context,
+        bool reportDiagnostics)
+    {
+        if (inner.IsError || inner.IsUnresolved)
+            return inner;
+
+        TypeRef pointee = inner.SpecialType switch
+        {
+            AliasSemanticType al => al.TargetType,
+            ReferenceSemanticType rf => rf.ElementType,
+            PointerSemanticType pt => pt.ElementType,
+            _ => inner
+        };
+
+        if (!pointee.IsError && !pointee.IsUnresolved && !pointee.IsSized(context))
+        {
+            if (reportDiagnostics)
+            {
+                context.Diagnostics.ReportInvalidInterfaceOrDynUsage(
+                    dynSyntax.GetSpan() ?? default,
+                    $"'dyn' can only wrap indirections to Sized types; '{pointee.ToDisplayString(context)}' is Unsized and already uses fat references",
+                    $"'dyn' is not allowed on Unsized type '{pointee.ToDisplayString(context)}'",
+                    "remove 'dyn' (interfaces, 'Str', slices, and tail-unsized types carry fat metadata implicitly)",
+                    dynSyntax.GetSource());
+            }
+            return Error;
+        }
+
+        return Dyn(inner, isExplicitDyn: true);
+    }
+
     public static TypeRef Conformance(TypeRef targetType, InterfaceConformance conformance) =>
         new TypeRef(TypeRefKind.Resolved, targetType.Handle, new ConformanceSemanticType(targetType, conformance));
 
@@ -298,6 +337,18 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
     public static bool TryGetExplicitConformance(TypeRef type, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out InterfaceConformance? conformance)
     {
+        while (type.SpecialType is DynSemanticType or AliasSemanticType or ReferenceSemanticType or PointerSemanticType)
+        {
+            type = type.SpecialType switch
+            {
+                DynSemanticType d => d.TargetType,
+                AliasSemanticType a => a.TargetType,
+                ReferenceSemanticType r => r.ElementType,
+                PointerSemanticType p => p.ElementType,
+                _ => type
+            };
+        }
+
         if (type.SpecialType is ConformanceSemanticType conf)
         {
             conformance = conf.Conformance;
@@ -327,16 +378,14 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
     public static TypeRef Function(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
         new TypeRef(TypeRefKind.Function, null, new FunctionSemanticType(returnType, parameterTypes));
 
-    public static TypeRef Delegate(TypeRef returnType, IReadOnlyList<TypeRef> parameterTypes) =>
-        new TypeRef(TypeRefKind.Delegate, null, new DelegateSemanticType(returnType, parameterTypes));
-
     public static TypeRef Generic(SymbolHandle targetHandle, string targetName, IReadOnlyList<TypeRef> typeArguments) =>
         new TypeRef(TypeRefKind.Resolved, targetHandle, new GenericSemanticType(targetHandle, targetName, typeArguments));
 
+    internal static TypeRef DerivedSelf(SymbolHandle baseTypeHandle) =>
+        new TypeRef(TypeRefKind.Resolved, null, new DerivedSelfSemanticType(baseTypeHandle));
+
     public bool IsFunction => Kind == TypeRefKind.Function;
-    public bool IsDelegate => Kind == TypeRefKind.Delegate;
     public FunctionSemanticType? AsFunction => SpecialType as FunctionSemanticType;
-    public DelegateSemanticType? AsDelegate => SpecialType as DelegateSemanticType;
 
     public bool IsUntagged => Kind == TypeRefKind.Untagged || (SpecialType is UnionSemanticType u && u.IsUntagged);
 
@@ -527,44 +576,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (source.SpecialType is ReferenceSemanticType sourceReference)
             return IsAssignableFrom(sourceReference.ElementType, context);
 
-        if (SpecialType is DelegateSemanticType targetDel)
-        {
-            if (source.SpecialType is FunctionSemanticType srcFn)
-            {
-                if (targetDel.ParameterTypes.Count == srcFn.ParameterTypes.Count &&
-                    targetDel.ReturnType.IsAssignableFrom(srcFn.ReturnType, context))
-                {
-                    bool match = true;
-                    for (int i = 0; i < targetDel.ParameterTypes.Count; i++)
-                    {
-                        if (!srcFn.ParameterTypes[i].IsAssignableFrom(targetDel.ParameterTypes[i], context))
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return true;
-                }
-            }
-            else if (source.SpecialType is DelegateSemanticType srcDel)
-            {
-                if (targetDel.ParameterTypes.Count == srcDel.ParameterTypes.Count &&
-                    targetDel.ReturnType.IsAssignableFrom(srcDel.ReturnType, context))
-                {
-                    bool match = true;
-                    for (int i = 0; i < targetDel.ParameterTypes.Count; i++)
-                    {
-                        if (!srcDel.ParameterTypes[i].IsAssignableFrom(targetDel.ParameterTypes[i], context))
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return true;
-                }
-            }
-        }
-
         if (SpecialType is FunctionSemanticType targetFn && source.SpecialType is FunctionSemanticType srcFn2)
         {
             if (targetFn.ParameterTypes.Count == srcFn2.ParameterTypes.Count &&
@@ -593,7 +604,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             var unwrappedTargetH = context.UnwrapAlias(targetH);
             if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.ValueType, out var valTypeH) && unwrappedTargetH == valTypeH)
             {
-                if (source.IsFunction || source.IsDelegate) return true;
+                if (source.IsFunction) return true;
                 if (source.Handle is { } srcH)
                 {
                     var unwrappedSrcH = context.UnwrapAlias(srcH);
@@ -631,6 +642,17 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
                 if (context.HasAnyConformance(unwrappedSrcH2, unwrappedTargetH, SpecialType as GenericSemanticType)) return true;
             }
+            else if (source.SpecialType is FunctionSemanticType srcFunc &&
+                     context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnIntrinsicH))
+            {
+                if (IsSubtypeOf(fnIntrinsicH, unwrappedTargetH, context, superGen: SpecialType as GenericSemanticType))
+                    return true;
+
+                var fnAsGeneric = Generic(fnIntrinsicH, KnownIntrinsics.Function, [srcFunc.ReturnType, .. srcFunc.ParameterTypes]);
+                var lookup = context.ResolveInterfaceConformance(fnAsGeneric, this, null, null, default);
+                if (lookup.Status == ResolutionContext.ConformanceLookupStatus.Found)
+                    return true;
+            }
         }
 
         if (SpecialType is GenericSemanticType genTarget)
@@ -653,24 +675,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                     if (match) return true;
                 }
             }
-            else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && context.UnwrapAlias(genTarget.TargetHandle) == delH &&
-                     source.SpecialType is DelegateSemanticType srcDel)
-            {
-                if (genTarget.TypeArguments.Count == srcDel.ParameterTypes.Count + 1 &&
-                    genTarget.TypeArguments[0].IsAssignableFrom(srcDel.ReturnType, context))
-                {
-                    bool match = true;
-                    for (int i = 0; i < srcDel.ParameterTypes.Count; i++)
-                    {
-                        if (!srcDel.ParameterTypes[i].IsAssignableFrom(genTarget.TypeArguments[i + 1], context))
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return true;
-                }
-            }
         }
 
         if (source.SpecialType is GenericSemanticType genSource)
@@ -685,24 +689,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
                     for (int i = 0; i < targetFn2.ParameterTypes.Count; i++)
                     {
                         if (!targetFn2.ParameterTypes[i].IsAssignableFrom(genSource.TypeArguments[i + 1], context))
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) return true;
-                }
-            }
-            else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH2) && context.UnwrapAlias(genSource.TargetHandle) == delH2 &&
-                     SpecialType is DelegateSemanticType targetDel2)
-            {
-                if (genSource.TypeArguments.Count == targetDel2.ParameterTypes.Count + 1 &&
-                    targetDel2.ReturnType.IsAssignableFrom(genSource.TypeArguments[0], context))
-                {
-                    bool match = true;
-                    for (int i = 0; i < targetDel2.ParameterTypes.Count; i++)
-                    {
-                        if (!targetDel2.ParameterTypes[i].IsAssignableFrom(genSource.TypeArguments[i + 1], context))
                         {
                             match = false;
                             break;
@@ -999,18 +985,34 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         if (typeArgs.Count == 0)
             return this;
 
-        if (Handle is { } h && typeArgs.TryGetValue(h, out var substituted))
-            return substituted;
+        return TransformTypeRef(
+            leaf => leaf.Handle is { } h && typeArgs.TryGetValue(h, out var substituted) ? substituted : null,
+            typeArgs);
+    }
+
+    internal TypeRef SubstituteDerivedSelf(SymbolHandle originBaseHandle, TypeRef replacement) =>
+        TransformTypeRef(
+            leaf => leaf.SpecialType is DerivedSelfSemanticType derived && derived.BaseTypeHandle == originBaseHandle
+                ? replacement
+                : null,
+            tupleFlattenArgs: null);
+
+    private TypeRef TransformTypeRef(
+        Func<TypeRef, TypeRef?> mapLeaf,
+        Dictionary<SymbolHandle, TypeRef>? tupleFlattenArgs)
+    {
+        if (mapLeaf(this) is { } direct)
+            return direct;
 
         if (SpecialType is OptionalSemanticType o)
-            return Optional(o.ElementType.Substitute(typeArgs), Handle);
+            return Optional(o.ElementType.TransformTypeRef(mapLeaf, tupleFlattenArgs), Handle);
 
         if (SpecialType is UnionSemanticType u)
-            return Union([.. u.Variants.Select(v => v.Substitute(typeArgs))], u.IsUntagged);
+            return Union([.. u.Variants.Select(v => v.TransformTypeRef(mapLeaf, tupleFlattenArgs))], u.IsUntagged);
 
         if (SpecialType is PointerSemanticType p)
         {
-            var elem = p.ElementType.Substitute(typeArgs);
+            var elem = p.ElementType.TransformTypeRef(mapLeaf, tupleFlattenArgs);
             return elem.SpecialType is DynSemanticType d
                 ? Dyn(Pointer(d.TargetType, p.IsMutable), d.IsExplicitDyn)
                 : Pointer(elem, p.IsMutable);
@@ -1018,7 +1020,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         if (SpecialType is ReferenceSemanticType r)
         {
-            var elem = r.ElementType.Substitute(typeArgs);
+            var elem = r.ElementType.TransformTypeRef(mapLeaf, tupleFlattenArgs);
             return elem.SpecialType is DynSemanticType d
                 ? Dyn(Reference(d.TargetType, r.IsMutable), d.IsExplicitDyn)
                 : Reference(elem, r.IsMutable);
@@ -1026,31 +1028,34 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         if (SpecialType is AliasSemanticType al)
         {
-            var target = al.TargetType.Substitute(typeArgs);
+            var target = al.TargetType.TransformTypeRef(mapLeaf, tupleFlattenArgs);
             return target.SpecialType is DynSemanticType d
                 ? Dyn(Alias(d.TargetType, al.IsMutable, al.IsUnsafe), d.IsExplicitDyn)
                 : Alias(target, al.IsMutable, al.IsUnsafe);
         }
 
         if (SpecialType is SliceSemanticType s)
-            return Slice(s.ElementType.Substitute(typeArgs), s.Dimension, Handle);
+            return Slice(s.ElementType.TransformTypeRef(mapLeaf, tupleFlattenArgs), s.Dimension, Handle);
 
         if (SpecialType is ArraySemanticType a)
-            return Array(a.ElementType.Substitute(typeArgs), a.Sizes, Handle);
+            return Array(a.ElementType.TransformTypeRef(mapLeaf, tupleFlattenArgs), a.Sizes, Handle);
 
         if (SpecialType is DynSemanticType dyn)
-            return Dyn(dyn.TargetType.Substitute(typeArgs), dyn.IsExplicitDyn);
+            return Dyn(dyn.TargetType.TransformTypeRef(mapLeaf, tupleFlattenArgs), dyn.IsExplicitDyn);
 
         if (SpecialType is ConformanceSemanticType conf)
-            return Conformance(conf.TargetType.Substitute(typeArgs), conf.Conformance);
+            return Conformance(conf.TargetType.TransformTypeRef(mapLeaf, tupleFlattenArgs), conf.Conformance);
 
         if (SpecialType is TupleSemanticType t)
         {
             var newElements = new List<TupleElement>();
             foreach (var elem in t.Elements)
             {
-                var sub = elem.Type.Substitute(typeArgs);
-                if (sub.SpecialType is TupleSemanticType subTuple && elem.Type.Handle is { } eh && typeArgs.ContainsKey(eh))
+                var sub = elem.Type.TransformTypeRef(mapLeaf, tupleFlattenArgs);
+                if (tupleFlattenArgs is not null &&
+                    sub.SpecialType is TupleSemanticType subTuple &&
+                    elem.Type.Handle is { } eh &&
+                    tupleFlattenArgs.ContainsKey(eh))
                 {
                     newElements.AddRange(subTuple.Elements);
                 }
@@ -1063,19 +1068,16 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         }
 
         if (SpecialType is UntaggedSemanticType untagged)
-            return Untagged(untagged.InnerType.Substitute(typeArgs));
+            return Untagged(untagged.InnerType.TransformTypeRef(mapLeaf, tupleFlattenArgs));
 
         if (SpecialType is GenericSemanticType gen)
         {
-            var newArgs = gen.TypeArguments.Select(arg => arg.Substitute(typeArgs)).ToList();
+            var newArgs = gen.TypeArguments.Select(arg => arg.TransformTypeRef(mapLeaf, tupleFlattenArgs)).ToList();
             return Generic(gen.TargetHandle, gen.TargetName, newArgs);
         }
 
         if (SpecialType is FunctionSemanticType fn)
-            return Function(fn.ReturnType.Substitute(typeArgs), [.. fn.ParameterTypes.Select(pt => pt.Substitute(typeArgs))]);
-
-        if (SpecialType is DelegateSemanticType del)
-            return Delegate(del.ReturnType.Substitute(typeArgs), [.. del.ParameterTypes.Select(pt => pt.Substitute(typeArgs))]);
+            return Function(fn.ReturnType.TransformTypeRef(mapLeaf, tupleFlattenArgs), [.. fn.ParameterTypes.Select(pt => pt.TransformTypeRef(mapLeaf, tupleFlattenArgs))]);
 
         return this;
     }
@@ -1089,7 +1091,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
         TypeRefKind.Literal => SpecialType?.ToString() ?? "<literal>",
         TypeRefKind.Pointer or TypeRefKind.Reference or TypeRefKind.Slice or
         TypeRefKind.Array or TypeRefKind.Optional or TypeRefKind.Tuple or
-        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Delegate or TypeRefKind.Alias => SpecialType?.ToString() ?? Kind.ToString(),
+        TypeRefKind.Union or TypeRefKind.Untagged or TypeRefKind.Dyn or TypeRefKind.Function or TypeRefKind.Alias => SpecialType?.ToString() ?? Kind.ToString(),
         _ => "<unresolved>"
     };
 
@@ -1138,17 +1140,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             var retStr = fn.ReturnType.ToDisplayString(context);
             var paramStrs = fn.ParameterTypes.Count > 0 ? ", " + string.Join(", ", fn.ParameterTypes.Select(p => p.ToDisplayString(context))) : "";
             return $"{qualifiedFnName}<{retStr}{paramStrs}>";
-        }
-
-        if (SpecialType is DelegateSemanticType del)
-        {
-            string qualifiedDelName = (context != null && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH))
-                ? ResolutionContext.GetQualifiedSymbolName(delH, context)
-                : KnownIntrinsics.Delegate;
-
-            var retStr = del.ReturnType.ToDisplayString(context);
-            var paramStrs = del.ParameterTypes.Count > 0 ? ", " + string.Join(", ", del.ParameterTypes.Select(p => p.ToDisplayString(context))) : "";
-            return $"{qualifiedDelName}<{retStr}{paramStrs}>";
         }
 
         if (SpecialType is GenericSemanticType gen)
@@ -1236,9 +1227,6 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
 
         if (SpecialType is FunctionSemanticType fn)
             return $"func({string.Join(", ", fn.ParameterTypes.Select(p => p.ToLabelString(context, scope)))}) -> {fn.ReturnType.ToLabelString(context, scope)}";
-
-        if (SpecialType is DelegateSemanticType del)
-            return $"delegate({string.Join(", ", del.ParameterTypes.Select(p => p.ToLabelString(context, scope)))}) -> {del.ReturnType.ToLabelString(context, scope)}";
 
         if (SpecialType is GenericSemanticType gen)
         {

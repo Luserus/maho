@@ -19,6 +19,10 @@ internal sealed class InterfaceConformance
     public string ModuleName { get; }
     public int ModuleProjectId { get; }
     public BaseTypeItemSyntax? Syntax { get; }
+    /// <summary> Optional interface template storing <c>derived Self</c> markers for automatic re-binding onto subclasses. </summary>
+    public TypeRef? DerivedInterfaceTemplate { get; }
+    /// <summary> Non-null when this conformance was implicitly synthesized by inheriting a <c>derived</c> conformance from a base type. </summary>
+    public SymbolHandle? InheritedFromTypeHandle { get; }
 
     /// <summary>
     /// Maps each interface member handle (method or property) to the concrete implementing
@@ -36,7 +40,9 @@ internal sealed class InterfaceConformance
         bool isExtension,
         string moduleName,
         int moduleProjectId,
-        BaseTypeItemSyntax? syntax)
+        BaseTypeItemSyntax? syntax,
+        TypeRef? derivedInterfaceTemplate = null,
+        SymbolHandle? inheritedFromTypeHandle = null)
     {
         SerialId = serialId;
         TargetType = targetType;
@@ -48,6 +54,8 @@ internal sealed class InterfaceConformance
         ModuleName = moduleName;
         ModuleProjectId = moduleProjectId;
         Syntax = syntax;
+        DerivedInterfaceTemplate = derivedInterfaceTemplate;
+        InheritedFromTypeHandle = inheritedFromTypeHandle;
     }
 }
 

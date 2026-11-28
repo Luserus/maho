@@ -31,8 +31,6 @@ internal enum TypeRefKind : byte
     Dyn,
     /// <summary>Function pointer type (<c>func(params) -&gt; ReturnType</c>).</summary>
     Function,
-    /// <summary>Delegate type (<c>delegate(params) -&gt; ReturnType</c>).</summary>
-    Delegate,
     /// <summary>Compile-time literal type (uncollapsed integer, float, string, or char literal).</summary>
     Literal,
     /// <summary>Never / bottom type (<c>Std.Never</c>).</summary>

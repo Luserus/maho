@@ -14,9 +14,9 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public extension MyList<int32>
             {
-                public func SumElements(&this) -> int32
+                public func SumElements(this&) -> int32
                 {
-                    return this.len;
+                    return this->len;
                 }
             }
 
@@ -40,9 +40,9 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public extension<T> Container<T>
             {
-                public func GetCount(&this) -> int32
+                public func GetCount(this&) -> int32
                 {
-                    return this.count;
+                    return this->count;
                 }
             }
 
@@ -62,18 +62,18 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Printable { func Print(&this) -> (); }
+            public interface Printable { func Print(this&) -> (); }
 
             public struct Item : Printable
             {
-                public func Print(&this) -> () { }
+                public func Print(this&) -> () { }
             }
 
             public struct Wrapper<T> { }
 
             public extension<T> Wrapper<T> where T : Printable
             {
-                public func Display(&this) -> int32 { return 42; }
+                public func Display(this&) -> int32 { return 42; }
             }
 
             public func Main() -> int32
@@ -92,7 +92,7 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Printable { func Print(&this) -> (); }
+            public interface Printable { func Print(this&) -> (); }
 
             public struct Plain { }
 
@@ -100,7 +100,7 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public extension<T> Wrapper<T> where T : Printable
             {
-                public func Display(&this) -> int32 { return 42; }
+                public func Display(this&) -> int32 { return 42; }
             }
 
             public func Main() -> int32
@@ -124,7 +124,7 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public extension<T> Pair<T, int32>
             {
-                public func IntSecond(&this) -> int32 { return 100; }
+                public func IntSecond(this&) -> int32 { return 100; }
             }
 
             public func Main() -> int32
@@ -165,13 +165,13 @@ public sealed class ExtensionAndOverloadValidationTests
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
-            public interface Identifiable { func Id(&this) -> int32; }
+            public interface Identifiable { func Id(this&) -> int32; }
 
             public struct Entity { public int32 id; }
 
             public extension Entity : Identifiable
             {
-                public func Id(&this) -> int32 { return this.id; }
+                public func Id(this&) -> int32 { return this->id; }
             }
             """);
 
@@ -228,9 +228,9 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public extension Encapsulated
             {
-                public func GetSecret(&this) -> int32
+                public func GetSecret(this&) -> int32
                 {
-                    return this.secret;
+                    return this->secret;
                 }
             }
             """);
@@ -293,8 +293,8 @@ public sealed class ExtensionAndOverloadValidationTests
 
             public struct Foo
             {
-                public func Bar(&this) -> () { }
-                public func Bar(mut &this) -> () { }
+                public func Bar(this&) -> () { }
+                public func Bar(this mut&) -> () { }
             }
             """);
 
@@ -303,7 +303,7 @@ public sealed class ExtensionAndOverloadValidationTests
     }
 
     [Fact]
-    public void MethodOverload_ValueAndAlias_Ambiguity_ReportsMH0532()
+    public void MethodOverload_ValueAndAlias_InParams_ReportsMH0592()
     {
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
@@ -316,7 +316,7 @@ public sealed class ExtensionAndOverloadValidationTests
             """);
 
         Assert.True(compilation.HasErrors);
-        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0532");
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0592");
     }
 
     [Fact]

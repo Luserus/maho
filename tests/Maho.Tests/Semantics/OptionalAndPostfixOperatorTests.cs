@@ -12,9 +12,9 @@ public sealed class OptionalAndPostfixOperatorTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")]
         public struct uint8;
@@ -67,7 +67,7 @@ public sealed class OptionalAndPostfixOperatorTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -75,28 +75,20 @@ public sealed class OptionalAndPostfixOperatorTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
 
         public interface Unwrap<TReturn>
         {
             [OperatorFunction("Unwrap")]
-            func Unwrap(&this) -> TReturn;
+            func Unwrap(this&) -> TReturn;
         }
 
         public interface Try<TReturn, TFail>
         {
             [OperatorFunction("Try")]
-            func Try(&this) -> (TReturn | TFail);
+            func Try(this&) -> (TReturn | TFail);
         }
 
         public interface Implicit<TFrom, TTo>
@@ -112,10 +104,10 @@ public sealed class OptionalAndPostfixOperatorTests
             None,
 
             [IntrinsicFunction("Optional.Unwrap")]
-            func Unwrap.Unwrap(&this) -> T;
+            func Unwrap.Unwrap(this&) -> T;
 
             [IntrinsicFunction("Optional.Try")]
-            func Try.Try(&this) -> (T | Optional<T>);
+            func Try.Try(this&) -> (T | Optional<T>);
 
             [IntrinsicFunction("Optional.Implicit")]
             func Implicit.Implicit(T from) -> Optional<T>;

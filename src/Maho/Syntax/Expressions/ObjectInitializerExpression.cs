@@ -1,6 +1,6 @@
 namespace Maho.Syntax;
 
-/// <summary> Object-creation expression using direct field initialization without calling a constructor (e.g. <c>put T { x = 1, y = 2 }</c>). </summary>
+/// <summary> Object-creation expression using direct field initialization without calling a constructor (e.g. <c>new T { x = 1, y = 2 }</c>). </summary>
 internal sealed class ObjectInitializerExpression : ObjectCreationExpression
 {
     /// <summary> Opening angle bracket for allocation generic arguments, if any. </summary>

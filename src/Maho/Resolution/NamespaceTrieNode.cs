@@ -91,6 +91,26 @@ internal sealed class NamespaceTrieNode
         return [];
     }
 
+    public IReadOnlyList<Symbol> GetCallableSymbolsAnyArity(string name)
+    {
+        List<Symbol>? matches = null;
+        foreach (var (key, symbols) in SymbolsByName)
+        {
+            if (key.Text != name)
+                continue;
+
+            foreach (var sym in symbols)
+            {
+                if (sym is FunctionSymbol or MethodSymbol)
+                {
+                    matches ??= [];
+                    matches.Add(sym);
+                }
+            }
+        }
+        return matches ?? (IReadOnlyList<Symbol>)[];
+    }
+
     public Symbol? GetSymbol(SymbolHandle handle)
     {
         for (int i = 0; i < Symbols.Count; i++)

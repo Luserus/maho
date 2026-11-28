@@ -248,7 +248,7 @@ public sealed class Compilation
             else
             {
                 var bindings = context.ExtractTreeBindings(tree);
-                model = new SemanticModel(this, tree, bindings.NodeSymbols, bindings.ExpressionTypes, bindings.ControlFlowGraphs);
+                model = new SemanticModel(this, tree, bindings.NodeSymbols, bindings.ExpressionTypes, bindings.LiteralInfos, bindings.ControlFlowGraphs);
             }
 
             semanticModels[tree] = model;

@@ -196,7 +196,7 @@ internal sealed class OwnershipLowerer
             if (context.GetParameterSymbol(handle) is not { } parameter)
                 continue;
 
-            if (parameter.Syntax?.Declarator.ReceiverKind is not ReceiverKind.None)
+            if (parameter.IsReceiver)
                 receiverParameter = parameter;
 
             body.RegisterPlace(parameter, parameter.Type);
@@ -316,13 +316,18 @@ internal sealed class OwnershipLowerer
             {
                 if (TryGetDeclarationBorrow(initializer, scope, local.Type, out var borrowed, out var borrowKind))
                 {
-                    borrowed = ResolveKnownReferent(borrowed);
                     // The binding is initialized before its named loan becomes live.  This keeps
                     // holder liveness precise: the loan begins at the declaration's completed
                     // program point and ends after the holder's last use.
-                    Emit(OwnershipStatementKind.Assign, new Place(local), declaration.Declarator.Identifier.GetSpan() ?? default, declaration.GetSource(), origin: declaration);
-                    Emit(OwnershipStatementKind.Borrow, borrowed, initializer.GetSpan() ?? default, initializer.GetSource(), borrowKind: borrowKind, loanOwner: local, origin: initializer);
-                    aliasReferents[local] = borrowed;
+                    EmitBorrowedBindingWithInnerReferents(
+                        initializer,
+                        borrowed,
+                        borrowKind,
+                        local,
+                        declaration.GetSource(),
+                        declaration.Declarator.Identifier.GetSpan() ?? default,
+                        scope,
+                        emitAssignBeforeBorrow: true);
                 }
                 else
                 {
@@ -395,6 +400,50 @@ internal sealed class OwnershipLowerer
         return false;
     }
 
+    private void EmitBorrowedBindingWithInnerReferents(
+        Expression sourceExpr,
+        Place borrowed,
+        BorrowKind borrowKind,
+        Symbol loanOwner,
+        SourceText? assignSource,
+        TextSpan assignSpan,
+        Scope scope,
+        bool emitAssignBeforeBorrow)
+    {
+        borrowed = ResolveKnownReferent(borrowed);
+        List<(Place Referent, BorrowKind Kind)> innerRefs = [];
+        bool hasTemporaryAddress = sourceExpr is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } addr &&
+                                   !TryGetPlace(addr.Operand, scope, out _);
+        if (hasTemporaryAddress && sourceExpr is UnaryExpression addrUnary)
+        {
+            var tempSpan = addrUnary.Operand.GetSpan() ?? default;
+            var tempSource = addrUnary.Operand.GetSource();
+            Emit(OwnershipStatementKind.StorageLive, borrowed, tempSpan, tempSource, origin: sourceExpr);
+            LowerValue(addrUnary.Operand, scope);
+            Emit(OwnershipStatementKind.Assign, borrowed, tempSpan, tempSource, origin: sourceExpr);
+            TryCollectSafeBorrowReferents(addrUnary.Operand, scope, innerRefs);
+        }
+
+        if (emitAssignBeforeBorrow)
+            Emit(OwnershipStatementKind.Assign, new Place(loanOwner), assignSpan, assignSource, origin: sourceExpr);
+
+        var span = sourceExpr.GetSpan() ?? default;
+        var source = sourceExpr.GetSource();
+        Emit(OwnershipStatementKind.Borrow, borrowed, span, source, borrowKind: borrowKind, loanOwner: loanOwner, origin: sourceExpr);
+        aliasReferents[loanOwner] = borrowed;
+
+        foreach (var (innerRef, innerKind) in innerRefs)
+            Emit(OwnershipStatementKind.Borrow, ResolveKnownReferent(innerRef), span, source, borrowKind: innerKind, loanOwner: loanOwner, origin: sourceExpr);
+
+        if (emitAssignBeforeBorrow)
+            return;
+
+        if (innerRefs.Count > 0)
+            SetKnownReferents(loanOwner, [(borrowed, borrowKind), .. innerRefs.Select(r => (ResolveKnownReferent(r.Referent), r.Kind))]);
+        else
+            SetKnownReferents(loanOwner, [(borrowed, borrowKind)]);
+    }
+
     private static bool IsStaticStorageExpression(Expression expr)
     {
         while (expr is ParenthesizedExpression p)
@@ -408,7 +457,7 @@ internal sealed class OwnershipLowerer
         while (expr is ParenthesizedExpression p)
             expr = p.Expression;
 
-        return expr is LiteralExpression or BinaryExpression or CallExpression or TupleExpression or ObjectCreationExpression or DefaultExpression;
+        return expr is LiteralExpression or BinaryExpression or CallExpression or TupleExpression or ObjectCreationExpression or DefaultExpression or LambdaExpression or MemberAccessExpression;
     }
 
     /// <summary>
@@ -653,29 +702,15 @@ internal sealed class OwnershipLowerer
 
             case UnaryExpression unary when unary.OperatorToken.Kind == TokenKind.Ampersand:
                 bool mutable = TypeRef.UnwrapDyn(context.GetRequiredExpressionType(unary)).SpecialType is ReferenceSemanticType reference && reference.IsMutable;
-                if (TryGetPlace(unary.Operand, scope, out var borrowed))
-                {
-                    Emit(OwnershipStatementKind.Borrow, borrowed, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
-                }
-                else
-                {
-                    var operandType = context.GetRequiredExpressionType(unary.Operand);
-                    var tempPlace = CreateTemporaryPlace(unary.Operand, operandType, scope);
-                    Emit(OwnershipStatementKind.StorageLive, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
-                    LowerValue(unary.Operand, scope);
-                    Emit(OwnershipStatementKind.Assign, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
-                    Emit(OwnershipStatementKind.Borrow, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), borrowKind: mutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: unary);
-                    Emit(OwnershipStatementKind.StorageDead, tempPlace, unary.GetSpan() ?? default, unary.GetSource(), origin: unary);
-                }
+                EmitEphemeralBorrow(unary.Operand, unary, mutable, scope);
                 break;
 
             case UnaryExpression unary:
-                LowerValue(unary.Operand, scope);
+                LowerUnaryOperator(unary, scope);
                 break;
 
             case BinaryExpression binary:
-                LowerValue(binary.LeftExpression, scope);
-                LowerValue(binary.RightExpression, scope);
+                LowerBinaryOperator(binary, scope);
                 break;
 
             case CallExpression call:
@@ -683,7 +718,34 @@ internal sealed class OwnershipLowerer
                 break;
 
             case MemberAccessExpression member:
-                LowerPlaceEvaluation(member.Expression, scope);
+                if (context.ResolvedTree.TryGetBoundMethodClosure(member, out var boundInfo) &&
+                    boundInfo.ReceiverKind == ReceiverKind.Value)
+                {
+                    LowerValueForDestination(member.Expression, boundInfo.ReceiverType, scope);
+                }
+                else
+                {
+                    LowerPlaceEvaluation(member.Expression, scope);
+                }
+                break;
+
+            case LambdaExpression lambda:
+                if (context.ResolvedTree.TryGetLambdaCaptures(lambda, out var lambdaCaps))
+                {
+                    foreach (var cap in lambdaCaps)
+                    {
+                        if (cap.IsMove && IsStorageSymbol(cap.Symbol))
+                        {
+                            Emit(
+                                OwnershipStatementKind.Use,
+                                new Place(cap.Symbol),
+                                lambda.GetSpan() ?? default,
+                                lambda.GetSource(),
+                                OwnershipUseKind.Move,
+                                origin: lambda);
+                        }
+                    }
+                }
                 break;
 
             case IndexExpression index:
@@ -881,9 +943,15 @@ internal sealed class OwnershipLowerer
                 if (unwrappedDest.SpecialType is ReferenceSemanticType &&
                     TryGetDeclarationBorrow(assignment.RhsExpression, scope, destination, out var borrowed, out var borrowKind))
                 {
-                    borrowed = ResolveKnownReferent(borrowed);
-                    Emit(OwnershipStatementKind.Borrow, borrowed, assignment.RhsExpression.GetSpan() ?? default, assignment.RhsExpression.GetSource(), borrowKind: borrowKind, loanOwner: target.Root, origin: assignment.RhsExpression);
-                    SetKnownReferents(target.Root, [(borrowed, borrowKind)]);
+                    EmitBorrowedBindingWithInnerReferents(
+                        assignment.RhsExpression,
+                        borrowed,
+                        borrowKind,
+                        target.Root,
+                        assignment.GetSource(),
+                        assignment.LhsExpression.GetSpan() ?? default,
+                        scope,
+                        emitAssignBeforeBorrow: false);
                 }
                 else
                 {
@@ -904,8 +972,21 @@ internal sealed class OwnershipLowerer
     private void LowerCall(CallExpression call, Scope scope)
     {
         IReadOnlyList<ParameterSymbol> parameters = GetCallParameters(call);
-        if (call.Callee is MemberAccessExpression member)
-            LowerPlaceEvaluation(member.Expression, scope);
+        if (context.ResolvedTree.TryGetReference(call, out var callOpHandle) &&
+            context.GetSymbol(callOpHandle) is MethodSymbol callOpMethod &&
+            callOpMethod.Parameters.Count > 0 &&
+            context.GetParameterSymbol(callOpMethod.Parameters[0]) is { IsReceiver: true } opRecv)
+        {
+            if (opRecv.ReceiverKind == ReceiverKind.Value)
+                LowerValueForDestination(call.Callee, opRecv.Type, scope);
+            else
+                EmitEphemeralBorrow(call.Callee, call.Callee, opRecv.ReceiverKind == ReceiverKind.MutReference, scope);
+        }
+        else if (call.Callee is MemberAccessExpression member)
+        {
+            if (!context.ResolvedTree.IsUnboundTypeMethodCall(call))
+                LowerPlaceEvaluation(member.Expression, scope);
+        }
         else if (call.Callee is NamedExpression namedCallee)
         {
             if (TryGetStorageSymbol(namedCallee, scope, out _))
@@ -930,6 +1011,95 @@ internal sealed class OwnershipLowerer
         }
 
         LowerCallArguments(call.Arguments, parameters, scope, callTempOwners);
+    }
+
+    /// <summary>
+    /// Lowers a non-<c>&amp;</c> unary operator using its resolved operator method parameters when present,
+    /// borrowing the operand for <c>this&amp;</c>/<c>this mut&amp;</c> receivers and checking move/copy on value parameters.
+    /// </summary>
+    private void LowerUnaryOperator(UnaryExpression unary, Scope scope)
+    {
+        var parameters = GetResolvedParameters(unary);
+        if (parameters.Count == 1)
+        {
+            var p0 = parameters[0];
+            if (p0.IsReceiver && !IsOwnedValueDestination(p0.Type))
+            {
+                var unwrapped = TypeRef.UnwrapDyn(p0.Type);
+                if (unwrapped.SpecialType is ReferenceSemanticType refRecv)
+                    EmitEphemeralBorrow(unary.Operand, unary, refRecv.IsMutable, scope);
+                else
+                    LowerPlaceEvaluation(unary.Operand, scope);
+                return;
+            }
+
+            LowerValueForDestination(unary.Operand, p0.Type, scope);
+            return;
+        }
+
+        LowerValue(unary.Operand, scope);
+    }
+
+    /// <summary>
+    /// Lowers a binary operator expression, routing user-defined operator operands through
+    /// <see cref="LowerValueForDestination"/> so move-only values cannot be copied through aliases or references.
+    /// </summary>
+    private void LowerBinaryOperator(BinaryExpression binary, Scope scope)
+    {
+        var parameters = GetResolvedParameters(binary);
+        if (parameters.Count == 2)
+        {
+            LowerValueForDestination(binary.LeftExpression, parameters[0].Type, scope);
+            LowerValueForDestination(binary.RightExpression, parameters[1].Type, scope);
+            return;
+        }
+
+        LowerValue(binary.LeftExpression, scope);
+        LowerValue(binary.RightExpression, scope);
+    }
+
+    private void EmitEphemeralBorrow(Expression operand, SyntaxNode origin, bool isMutable, Scope scope)
+    {
+        if (TryGetPlace(operand, scope, out var borrowed))
+        {
+            Emit(OwnershipStatementKind.Borrow, borrowed, origin.GetSpan() ?? default, origin.GetSource(), borrowKind: isMutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: origin);
+            return;
+        }
+
+        var operandType = context.GetRequiredExpressionType(operand);
+        var tempPlace = CreateTemporaryPlace(operand, operandType, scope);
+        Emit(OwnershipStatementKind.StorageLive, tempPlace, origin.GetSpan() ?? default, origin.GetSource(), origin: origin);
+        LowerValue(operand, scope);
+        Emit(OwnershipStatementKind.Assign, tempPlace, origin.GetSpan() ?? default, origin.GetSource(), origin: origin);
+        Emit(OwnershipStatementKind.Borrow, tempPlace, origin.GetSpan() ?? default, origin.GetSource(), borrowKind: isMutable ? BorrowKind.Mutable : BorrowKind.Shared, origin: origin);
+        List<(Place Referent, BorrowKind Kind)> innerRefs = [];
+        if (TryCollectSafeBorrowReferents(operand, scope, innerRefs))
+        {
+            foreach (var (innerRef, innerKind) in innerRefs)
+                Emit(OwnershipStatementKind.Borrow, ResolveKnownReferent(innerRef), origin.GetSpan() ?? default, origin.GetSource(), borrowKind: innerKind, origin: origin);
+        }
+        Emit(OwnershipStatementKind.StorageDead, tempPlace, origin.GetSpan() ?? default, origin.GetSource(), origin: origin);
+    }
+
+    private IReadOnlyList<ParameterSymbol> GetResolvedParameters(SyntaxNode syntax)
+    {
+        if (!context.ResolvedTree.TryGetReference(syntax, out var handle))
+            return [];
+
+        IReadOnlyList<SymbolHandle> handles = context.GetSymbol(handle) switch
+        {
+            FunctionSymbol fn => fn.Parameters,
+            MethodSymbol method => method.Parameters,
+            _ => []
+        };
+
+        var result = new List<ParameterSymbol>(handles.Count);
+        foreach (var h in handles)
+        {
+            if (context.GetParameterSymbol(h) is { } p)
+                result.Add(p);
+        }
+        return result;
     }
 
     private void LowerCallArguments(
@@ -1041,7 +1211,7 @@ internal sealed class OwnershipLowerer
             {
                 foreach (var cap in captures)
                 {
-                    if (IsStorageSymbol(cap.Symbol))
+                    if (!cap.IsMove && IsStorageSymbol(cap.Symbol))
                         referents.Add((new Place(cap.Symbol), cap.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared));
                 }
             }
@@ -1084,28 +1254,24 @@ internal sealed class OwnershipLowerer
             return referents.Count > initialCount;
         }
 
-        if (context.GetExpressionType(expr) is { } exprType &&
-            TypeRef.UnwrapDyn(exprType).SpecialType is DelegateSemanticType)
+        if (expr is MemberAccessExpression member &&
+            context.ResolvedTree.TryGetBoundMethodClosure(member, out var boundInfo))
         {
-            if (expr is MemberAccessExpression member &&
-                context.ResolvedTree.TryGetReference(member, out var mHandle) &&
-                context.GetSymbol(mHandle) is MethodSymbol boundMethod &&
-                TryGetMethodReceiverMutability(boundMethod, out bool isMutRecv) &&
-                TryGetPlace(member.Expression, scope, out var recvPlace))
+            if (boundInfo.ReceiverKind is not (ReceiverKind.Value or ReceiverKind.Pointer or ReceiverKind.MutPointer))
             {
-                referents.Add((recvPlace, isMutRecv ? BorrowKind.Mutable : BorrowKind.Shared));
-                return true;
+                Expression recvExpr = member.Expression;
+                while (recvExpr is ParenthesizedExpression rp)
+                    recvExpr = rp.Expression;
+                if (recvExpr is UnaryExpression { OperatorToken.Kind: TokenKind.Ampersand } addrRecv)
+                    recvExpr = addrRecv.Operand;
+                if (TryGetPlace(recvExpr, scope, out var recvPlace))
+                {
+                    bool isMutRecv = boundInfo.ReceiverKind is ReceiverKind.MutReference or ReceiverKind.MutAlias;
+                    referents.Add((recvPlace, isMutRecv ? BorrowKind.Mutable : BorrowKind.Shared));
+                    return true;
+                }
             }
-
-            if (expr is NamedExpression named &&
-                context.ResolvedTree.TryGetReference(named, out var nHandle) &&
-                context.GetSymbol(nHandle) is MethodSymbol implicitMethod &&
-                TryGetMethodReceiverMutability(implicitMethod, out bool isMutThis) &&
-                receiverParameter is not null)
-            {
-                referents.Add((new Place(receiverParameter), isMutThis ? BorrowKind.Mutable : BorrowKind.Shared));
-                return true;
-            }
+            return false;
         }
 
         if (TryGetPlace(expr, scope, out var place) &&
@@ -1145,6 +1311,8 @@ internal sealed class OwnershipLowerer
         {
             if (TryGetPlace(addr.Operand, scope, out var targetPlace))
                 referents.Add((targetPlace, rf.IsMutable ? BorrowKind.Mutable : BorrowKind.Shared));
+            else
+                TryCollectSafeBorrowReferents(addr.Operand, scope, referents, visited);
             return;
         }
 
@@ -1157,8 +1325,7 @@ internal sealed class OwnershipLowerer
         if (method.Flags.HasFlag(FunctionFlags.Static) || method.Parameters.Count == 0)
             return false;
 
-        if (context.GetParameterSymbol(method.Parameters[0]) is not { } p0 ||
-            p0.Syntax?.Declarator.ReceiverKind is null or ReceiverKind.None)
+        if (context.GetParameterSymbol(method.Parameters[0]) is not { IsReceiver: true } p0)
         {
             return false;
         }
@@ -1200,7 +1367,7 @@ internal sealed class OwnershipLowerer
         if (context.GetSymbol(handle) is MethodSymbol opMethod)
         {
             var list = opMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
-            if (list.Count > 0 && list[0].Syntax?.Declarator.IsReceiver == true)
+            if (list.Count > 0 && list[0].IsReceiver)
                 list.RemoveAt(0);
             return list;
         }
@@ -1216,7 +1383,7 @@ internal sealed class OwnershipLowerer
         if (context.GetSymbol(handle) is MethodSymbol { Name.Text: "Construct" } ctorMethod)
         {
             var list = ctorMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
-            if (list.Count > 0 && list[0].Syntax?.Declarator.IsReceiver == true)
+            if (list.Count > 0 && list[0].IsReceiver)
                 list.RemoveAt(0);
             return list;
         }
@@ -1226,16 +1393,37 @@ internal sealed class OwnershipLowerer
 
     private List<ParameterSymbol> GetCallParameters(CallExpression call)
     {
-        if (!context.ResolvedTree.TryGetReference(call.Callee, out var handle))
-            return [];
-
-        IReadOnlyList<SymbolHandle> handles = context.GetSymbol(handle) switch
+        if (context.ResolvedTree.TryGetReference(call.Callee, out var handle))
         {
-            FunctionSymbol function => function.Parameters,
-            MethodSymbol method => method.Parameters,
-            _ => []
-        };
-        return handles.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+            switch (context.GetSymbol(handle))
+            {
+                case FunctionSymbol function:
+                    return function.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+                case MethodSymbol method:
+                {
+                    var list = method.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+                    if (!method.Flags.HasFlag(FunctionFlags.Static) &&
+                        list.Count > 0 &&
+                        list[0].IsReceiver &&
+                        !context.ResolvedTree.IsUnboundTypeMethodCall(call))
+                    {
+                        list.RemoveAt(0);
+                    }
+                    return list;
+                }
+            }
+        }
+
+        if (context.ResolvedTree.TryGetReference(call, out var opHandle) &&
+            context.GetSymbol(opHandle) is MethodSymbol callableMethod)
+        {
+            var list = callableMethod.Parameters.Select(context.GetParameterSymbol).OfType<ParameterSymbol>().ToList();
+            if (list.Count > 0 && list[0].IsReceiver)
+                list.RemoveAt(0);
+            return list;
+        }
+
+        return [];
     }
 
     private static bool IsSafeBorrow(TypeRef type) => TypeRef.UnwrapDyn(type).SpecialType is ReferenceSemanticType or AliasSemanticType { IsUnsafe: false };

@@ -18,7 +18,7 @@ public sealed partial class ExpressionResolutionTests
             {
                 A,
                 B;
-                public func NormalMethod(&this) -> () { }
+                public func NormalMethod(this&) -> () { }
             }
 
             public struct Host
@@ -321,43 +321,40 @@ public sealed partial class ExpressionResolutionTests
     }
 
     [Fact]
-    public void Allocation_NewAndPut_WithAllocationArgs_ResolvesOperators()
+    public void Allocation_New_WithAllocationArgs_ResolvesOperators()
     {
         var compilation = Compilation.FromSource($$"""
             {{Prelude}}
 
             public struct Arena;
 
-            public interface New
+            public interface New<TArg, TTarget : this = this>
             {
                 [OperatorFunction("New")]
-                func New(Arena pool) -> Point;
+                func New(TArg arg) -> TTarget;
             }
 
-            public interface Put
-            {
-                [OperatorFunction("Put")]
-                func Put(int32 offset) -> Point;
-            }
-
-            public struct Point : New, Put
+            public struct Point : New<Arena, Point>
             {
                 public int32 X;
                 public int32 Y;
 
-                public func Construct(mut &this, int32 x, int32 y) -> ()
+                public func Construct(this mut&, int32 x, int32 y) -> ()
                 {
-                    this.X = x;
-                    this.Y = y;
+                    this->X = x;
+                    this->Y = y;
                 }
 
-                func New.New(Arena pool) -> Point
+                public func New(Arena pool) -> Point
                 {
                     Point p = default;
                     return p;
                 }
+            }
 
-                func Put.Put(int32 offset) -> Point
+            public extension Point : New<int32, Point>
+            {
+                public func New(int32 offset) -> Point
                 {
                     Point p = default;
                     return p;
@@ -369,7 +366,7 @@ public sealed partial class ExpressionResolutionTests
                 public func Test(Arena pool) -> ()
                 {
                     var p1 = new(pool) Point(10, 20);
-                    put(4) Point(30, 40);
+                    Point p2 = new(4) Point(30, 40);
                 }
             }
             """);
@@ -387,7 +384,7 @@ public sealed partial class ExpressionResolutionTests
             {
                 public int32 Factor;
 
-                func Callable.Invoke(&this, int32 x, int32 y) -> int32
+                func Callable.Invoke(this&, int32 x, int32 y) -> int32
                 {
                     return x;
                 }
@@ -608,5 +605,102 @@ public sealed partial class ExpressionResolutionTests
 
         Assert.True(compilation.HasErrors);
         Assert.Contains(compilation.Diagnostics, d => d.Code == "MH2003");
+    }
+
+    [Fact]
+    public void QuotedLiterals_ValidEscapesAndSingleScalarChars_SucceedWithoutErrors()
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            [IntrinsicType("Char")] public struct char;
+
+            public struct Tag : ValType
+            {
+                public literal u8(int32 v) { Tag t; return t; }
+            }
+
+            public struct Host
+            {
+                public func Run() -> ()
+                {
+                    var a = 'a';
+                    var nl = '\n';
+                    var hex = '\x41';
+                    var bmp = '\u00E9';
+                    var astral = '\u{1F600}';
+                    var rocket = '🚀';
+                    var suff = 'a'u8;
+                    var suffEsc = '\u{1F600}'u8;
+                    var str = "hello\n\t\r\0\a\b\f\v\'\"\\\x41\u0042\u{1F680}";
+                }
+            }
+            """);
+
+        Assert.False(compilation.HasErrors, string.Join("; ", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Theory]
+    [InlineData("'ab'")]
+    [InlineData("'ab'u8")]
+    [InlineData("'a\\n'")]
+    [InlineData("'a\\n'u8")]
+    [InlineData("'\\x41\\x42'")]
+    [InlineData("'👨‍👩‍👧'")]
+    public void CharLiteral_MultiScalar_ReportsMH0107Uniformly(string literalExpr)
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            [IntrinsicType("Char")] public struct char;
+
+            public struct Tag : ValType
+            {
+                public literal u8(int32 v) { Tag t; return t; }
+            }
+
+            public struct Host
+            {
+                public func Run() -> ()
+                {
+                    var bad = {{literalExpr}};
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == "MH0107");
+    }
+
+    [Theory]
+    [InlineData("'\\q'", "MH0105")]
+    [InlineData("'\\q'u8", "MH0105")]
+    [InlineData("\"bad\\q\"", "MH0105")]
+    [InlineData("\"bad\\x1\"", "MH0105")]
+    [InlineData("\"bad\\u12\"", "MH0105")]
+    [InlineData("\"bad\\u{}\"", "MH0105")]
+    [InlineData("\"surrogate\\u{D800}\"", "MH0106")]
+    [InlineData("'\\uDFFF'", "MH0106")]
+    [InlineData("\"overflow\\u{110000}\"", "MH0106")]
+    public void QuotedLiteral_InvalidOrOutOfRangeEscape_ReportsExpectedDiagnostic(string literalExpr, string expectedCode)
+    {
+        var compilation = Compilation.FromSource($$"""
+            {{CompilerTestBed.FullPrelude}}
+            [IntrinsicType("Char")] public struct char;
+
+            public struct Tag : ValType
+            {
+                public literal u8(int32 v) { Tag t; return t; }
+            }
+
+            public struct Host
+            {
+                public func Run() -> ()
+                {
+                    var bad = {{literalExpr}};
+                }
+            }
+            """);
+
+        Assert.True(compilation.HasErrors);
+        Assert.Contains(compilation.Diagnostics, d => d.Code == expectedCode);
     }
 }

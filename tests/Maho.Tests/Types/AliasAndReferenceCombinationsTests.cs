@@ -6,9 +6,9 @@ namespace Maho.Tests;
 public sealed class AliasAndReferenceCombinationsTests
 {
     private const string Prelude = """
-        intrinsic attribute IntrinsicType(&Str name);
-        intrinsic attribute IntrinsicFunction(&Str signature);
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
+        intrinsic attribute IntrinsicFunction(Str& signature);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("Layout")]
         public interface Layout;
@@ -34,19 +34,19 @@ public sealed class AliasAndReferenceCombinationsTests
         public interface Arrow<TReturn>
         {
             [OperatorFunction("IndirectMemberAccess")]
-            func Arrow(&this) -> TReturn;
+            func Arrow(this&) -> TReturn;
         }
 
         public interface Deref<TReturn>
         {
             [OperatorFunction("Dereference")]
-            func Deref(&this) -> TReturn;
+            func Deref(this&) -> TReturn;
         }
 
         public interface Addr<T>
         {
             [OperatorFunction("AddressOf")]
-            func AddressOf(&this) -> T*;
+            func AddressOf(this&) -> T*;
         }
 
         [IntrinsicType("Slice")]
@@ -62,62 +62,62 @@ public sealed class AliasAndReferenceCombinationsTests
         }
 
         [IntrinsicType("Reference")]
-        public struct Reference<T> : Arrow<&T>, Deref<&T> where T : Layout
+        public struct Reference<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Reference.Deref()")]
-            func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("MutableReference")]
-        public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
+        public struct MutableReference<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutableReference.Deref()")]
-            func Deref.Deref(&this) -> mut &T;
+            func Deref.Deref(this&) -> T mut&;
 
-            func Arrow.Arrow(&this) -> mut &T
+            func Arrow.Arrow(this&) -> T mut&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("Pointer")]
-        public struct Pointer<T> : Arrow<&T>, Deref<&T> where T : Layout
+        public struct Pointer<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("Pointer.Deref()")]
-            func Deref.Deref(&this) -> &T;
+            func Deref.Deref(this&) -> T&;
 
-            func Arrow.Arrow(&this) -> &T
+            func Arrow.Arrow(this&) -> T&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
         [IntrinsicType("MutablePointer")]
-        public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
+        public struct MutablePointer<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
         {
             nuint addr;
             Metadata<T> metadata;
 
             [IntrinsicFunction("MutablePointer.Deref()")]
-            func Deref.Deref(&this) -> mut &T;
+            func Deref.Deref(this&) -> T mut&;
 
-            func Arrow.Arrow(&this) -> mut &T
+            func Arrow.Arrow(this&) -> T mut&
             {
-                return *this;
+                return &(*(*this));
             }
         }
 
@@ -130,7 +130,7 @@ public sealed class AliasAndReferenceCombinationsTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -138,16 +138,7 @@ public sealed class AliasAndReferenceCombinationsTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            ValType* env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
         public struct Point : Addr<Point>
@@ -155,7 +146,7 @@ public sealed class AliasAndReferenceCombinationsTests
             public Int32 x;
             public Int32 y;
 
-            func Addr.AddressOf(&this) -> Point*
+            func Addr.AddressOf(this&) -> Point*
             {
                 Point* p = default;
                 return p;
@@ -293,33 +284,48 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void AllEightReceiverKinds_DeclarationAndParse_Succeeds()
+    public void FiveReferenceReceiverKinds_AndFourAliasReceiverDiagnostics_MH0592()
     {
-        var source = Prelude + """
+        var validSource = Prelude + """
             public struct ReceiverMatrix
             {
                 public Int32 val;
 
                 public func F_Val(this) -> Int32 { return this.val; }
+                public func F_Ref(this&) -> Int32 { return this->val; }
+                public func F_MutRef(this mut&) -> Int32 { return this->val; }
+                public func F_Ptr(this*) -> Int32 { return this->val; }
+                public func F_MutPtr(this mut*) -> Int32 { return this->val; }
+            }
+            """;
+
+        var validCompilation = Compilation.FromSource(validSource);
+        Assert.False(validCompilation.HasErrors, string.Join("\n", validCompilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var invalidSource = Prelude + """
+            public struct BadReceiverMatrix
+            {
+                public Int32 val;
+
                 public func F_Alias(&this) -> Int32 { return this.val; }
                 public func F_MutAlias(mut &this) -> Int32 { return this.val; }
                 public func F_UnsafeAlias(*this) -> Int32 { return this.val; }
                 public func F_MutUnsafeAlias(mut *this) -> Int32 { return this.val; }
-                public func F_Ref(this&) -> Int32 { return this->val; }
-                public func F_MutRef(this mut&) -> Int32 { return this->val; }
-                public func F_Ptr(this*) -> Int32 { return this->val; }
             }
             """;
 
-        var compilation = Compilation.FromSource(source);
-        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        var invalidCompilation = Compilation.FromSource(invalidSource);
+        Assert.Equal(4, invalidCompilation.Diagnostics.Count(d => d.Code == "MH0592"));
     }
 
     [Fact]
-    public void SliceAndArrayModifiers_ResolveToSliceAliasReferenceAndArray()
+    public void SliceAndArrayModifiers_ResolveToSliceAliasLocal_ReferenceAndArray()
     {
         var source = Prelude + """
-            public func Accept(&Int32[] s, Int32[]& r) -> () {}
+            public func Accept(Int32[]& r) -> ()
+            {
+                &Int32[] s = *r;
+            }
 
             public struct Container
             {
@@ -331,13 +337,13 @@ public sealed class AliasAndReferenceCombinationsTests
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
 
         var fn = Assert.Single(compilation.Context.FunctionSymbols, f => f.Name.Text == "Accept");
-        var sParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
-        var rParam = compilation.Context.GetParameterSymbol(fn.Parameters[1])!;
+        var rParam = compilation.Context.GetParameterSymbol(fn.Parameters[0])!;
+        var sLocal = Assert.Single(fn.LocalVariables, v => v.Name.Text == "s");
         var container = Assert.Single(compilation.Context.TypeSymbols, s => s.Name.ToString() == "Container");
         var containerHandle = ResolutionContext.GetHandle(container);
         var faField = Assert.Single(compilation.Context.FieldSymbols, f => f.Parent == containerHandle && f.Name.ToString() == "fa");
 
-        var sAlias = Assert.IsType<AliasSemanticType>(sParam.Type.SpecialType);
+        var sAlias = Assert.IsType<AliasSemanticType>(sLocal.Type.SpecialType);
         Assert.Equal(TypeRefKind.Slice, sAlias.TargetType.Kind);
         var rRef = Assert.IsType<ReferenceSemanticType>(rParam.Type.SpecialType);
         Assert.Equal(TypeRefKind.Slice, rRef.ElementType.Kind);
@@ -363,7 +369,7 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void UniversalLValue_ExpressionReturningMutableAlias_CanBeAssignedDirectly()
+    public void UniversalLValue_ExpressionDerefMutableReference_CanBeAssignedDirectly()
     {
         var source = Prelude + """
             public struct Entity
@@ -375,9 +381,9 @@ public sealed class AliasAndReferenceCombinationsTests
             {
                 public Entity entity;
 
-                public func GetMut(&this) -> mut &Entity
+                public func GetMut(this mut&) -> Entity mut&
                 {
-                    return entity;
+                    return &this->entity;
                 }
             }
 
@@ -385,7 +391,7 @@ public sealed class AliasAndReferenceCombinationsTests
             {
                 Container c = default;
                 Entity e = default;
-                c.GetMut() = e;
+                *(c.GetMut()) = e;
             }
             """;
 
@@ -394,7 +400,7 @@ public sealed class AliasAndReferenceCombinationsTests
     }
 
     [Fact]
-    public void PrefixModifier_MutSafeAndUnsafeAlias_InGenericArguments()
+    public void PrefixModifier_AliasesInGenericArguments_ReportMH0592()
     {
         var source = Prelude + """
             public interface Getter<T>
@@ -422,7 +428,8 @@ public sealed class AliasAndReferenceCombinationsTests
             """;
 
         var compilation = Compilation.FromSource(source);
-        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.True(compilation.HasErrors);
+        Assert.Equal(4, compilation.Diagnostics.Count(d => d.Code == "MH0592"));
     }
 
     [Fact]
@@ -570,12 +577,12 @@ public sealed class AliasAndReferenceCombinationsTests
         var source = Prelude + """
             public interface IFoo
             {
-                func Bar(&this) -> Int32;
+                func Bar(this&) -> Int32;
             }
 
             public struct MyFoo : IFoo
             {
-                public func Bar(mut &this) -> Int32
+                public func Bar(this mut&) -> Int32
                 {
                     Int32 i;
                     return i;
@@ -631,5 +638,121 @@ public sealed class AliasAndReferenceCombinationsTests
 
         var compilation = Compilation.FromSource(source);
         Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+    }
+
+    [Fact]
+    public void LocalsOnlyAliases_RejectedOutsideLocals_MH0592_AndAsExtensionTarget_MH0593()
+    {
+        var nonLocalSource = Prelude + """
+            public using BadAlias = &Point;
+            public &Point badGlobal = default;
+
+            public struct BadHolder<T>
+            {
+                public T item;
+            }
+
+            public struct BadFields
+            {
+                public &Point f1;
+                public BadHolder<*Point> f2;
+                public (&Point)[] f3;
+                public (&Point)? f4;
+                public (Int32, &Point) f5;
+                public func(&Point) -> Int32 f6;
+                public Int32 Prop { get; }
+            }
+
+            public func BadParams(&Point p, Int32 val) -> &Point
+            {
+                return val;
+            }
+
+            public func BadLocalGeneric() -> ()
+            {
+                BadHolder<&Point> g = default;
+            }
+            """;
+
+        var nonLocalComp = Compilation.FromSource(nonLocalSource);
+        Assert.True(nonLocalComp.HasErrors);
+        Assert.True(nonLocalComp.Diagnostics.Count(d => d.Code == "MH0592") >= 10,
+            string.Join("\n", nonLocalComp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var extTargetSource = Prelude + """
+            public extension &Point
+            {
+                public func Sum(this&) -> Int32 { return this->x + this->y; }
+            }
+
+            public extension mut *Point
+            {
+                public func Zero(this mut&) -> () {}
+            }
+            """;
+
+        var extTargetComp = Compilation.FromSource(extTargetSource);
+        Assert.True(extTargetComp.HasErrors);
+        Assert.Equal(2, extTargetComp.Diagnostics.Count(d => d.Code == "MH0593"));
+    }
+
+    [Fact]
+    public void ExtensionOnMoveReference_SupportsRefAddition_WhileAliasMaterializationOnMoveReportsMH1005()
+    {
+        const string opsPrelude = Prelude + """
+            [IntrinsicType("Transfer")] public interface Transfer;
+            [IntrinsicType("Move")] public interface Move<T : this = this> : Transfer
+            {
+                [OperatorFunction("Move")]
+                func Move(this mut&, T mut& src) -> () {}
+            }
+
+            public interface Addition<TResult, TLeft, TRight>
+            {
+                [OperatorFunction("Addition")]
+                func Add(TLeft lhs, TRight rhs) -> TResult;
+            }
+
+            public struct MoveVec : Move
+            {
+                public Int32 x;
+            }
+            """;
+
+        var validRefOp = Compilation.FromSource(opsPrelude + """
+            public extension MoveVec& : Addition<MoveVec, MoveVec&, MoveVec&>
+            {
+                func Addition.Add(MoveVec& lhs, MoveVec& rhs) -> MoveVec
+                {
+                    return new MoveVec { x = lhs->x };
+                }
+            }
+
+            public func SumMovedByRef(MoveVec a, MoveVec b) -> MoveVec
+            {
+                return &a + &b;
+            }
+            """);
+
+        Assert.False(validRefOp.HasErrors, string.Join("\n", validRefOp.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+
+        var badMoveAliasOp = Compilation.FromSource(opsPrelude + """
+            public extension MoveVec : Addition<MoveVec, MoveVec, MoveVec>
+            {
+                func Addition.Add(MoveVec lhs, MoveVec rhs) -> MoveVec
+                {
+                    return lhs;
+                }
+            }
+
+            public func BadAliasPlus(MoveVec& p, MoveVec& q) -> MoveVec
+            {
+                &MoveVec a = *p;
+                return a + *q;
+            }
+            """);
+
+        Assert.True(badMoveAliasOp.HasErrors);
+        Assert.Equal(2, badMoveAliasOp.Diagnostics.Count(d => d.Code == "MH1005"));
     }
 }

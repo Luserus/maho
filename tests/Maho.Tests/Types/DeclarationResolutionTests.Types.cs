@@ -229,26 +229,35 @@ public sealed partial class DeclarationResolutionTests
             public struct Int32;
             public Int32* ptr;
             public Int32& refVal;
-            public &Int32[] sliceAliasVal;
             public Int32[]& sliceRefVal;
             public Int32[42] fixedArrVal;
             public Int32? optVal;
-            public (&Int32)[] nestedVal;
+            public (Int32&)[] nestedRefSliceVal;
+
+            public func LocalAliases(Int32[]& slRef, Int32 val)
+            {
+                &Int32[] sliceAliasLocal = *slRef;
+                &Int32 aliasLocal = val;
+            }
             """);
 
         Assert.Empty(diagnostics.Diagnostics);
 
         ResolutionContext context = new Resolver().Resolve(SyntaxTree.CreateSingleRoot(root));
+        Assert.DoesNotContain(context.Diagnostics.Diagnostics, d => d.DiagnosticCode == "MH0592");
         var int32 = Assert.Single(context.TypeSymbols, s => s.Name.ToString() == "Int32");
         var int32Handle = ResolutionContext.GetHandle(int32);
 
         var ptr = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "ptr");
         var refVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "refVal");
-        var sliceAliasVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "sliceAliasVal");
         var sliceRefVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "sliceRefVal");
         var fixedArrVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "fixedArrVal");
         var optVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "optVal");
-        var nestedVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedVal");
+        var nestedRefSliceVal = Assert.Single(context.GlobalVariableSymbols, s => s.Name.ToString() == "nestedRefSliceVal");
+
+        var fn = Assert.Single(context.FunctionSymbols, f => f.Name.Text == "LocalAliases");
+        var sliceAliasLocal = Assert.Single(fn.LocalVariables, v => v.Name.Text == "sliceAliasLocal");
+        var aliasLocal = Assert.Single(fn.LocalVariables, v => v.Name.Text == "aliasLocal");
 
         Assert.Equal(TypeRefKind.Pointer, ptr.Type.Kind);
         Assert.True(ptr.Type.IsResolved);
@@ -260,10 +269,14 @@ public sealed partial class DeclarationResolutionTests
         var refSem = Assert.IsType<ReferenceSemanticType>(refVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), refSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Alias, sliceAliasVal.Type.Kind);
-        var aliasSem = Assert.IsType<AliasSemanticType>(sliceAliasVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Alias, sliceAliasLocal.Type.Kind);
+        var aliasSem = Assert.IsType<AliasSemanticType>(sliceAliasLocal.Type.SpecialType);
         Assert.Equal(TypeRefKind.Slice, aliasSem.TargetType.Kind);
         Assert.Equal(TypeRef.Resolved(int32Handle), Assert.IsType<SliceSemanticType>(aliasSem.TargetType.SpecialType).ElementType);
+
+        Assert.Equal(TypeRefKind.Alias, aliasLocal.Type.Kind);
+        var localAliasSem = Assert.IsType<AliasSemanticType>(aliasLocal.Type.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), localAliasSem.TargetType);
 
         Assert.Equal(TypeRefKind.Reference, sliceRefVal.Type.Kind);
         var sliceRefSem = Assert.IsType<ReferenceSemanticType>(sliceRefVal.Type.SpecialType);
@@ -279,12 +292,12 @@ public sealed partial class DeclarationResolutionTests
         var optSem = Assert.IsType<OptionalSemanticType>(optVal.Type.SpecialType);
         Assert.Equal(TypeRef.Resolved(int32Handle), optSem.ElementType);
 
-        Assert.Equal(TypeRefKind.Slice, nestedVal.Type.Kind);
-        Assert.True(nestedVal.Type.IsResolved);
-        var nestedSem = Assert.IsType<SliceSemanticType>(nestedVal.Type.SpecialType);
-        Assert.Equal(TypeRefKind.Alias, nestedSem.ElementType.Kind);
-        var innerAliasSem = Assert.IsType<AliasSemanticType>(nestedSem.ElementType.SpecialType);
-        Assert.Equal(TypeRef.Resolved(int32Handle), innerAliasSem.TargetType);
+        Assert.Equal(TypeRefKind.Slice, nestedRefSliceVal.Type.Kind);
+        Assert.True(nestedRefSliceVal.Type.IsResolved);
+        var nestedSem = Assert.IsType<SliceSemanticType>(nestedRefSliceVal.Type.SpecialType);
+        Assert.Equal(TypeRefKind.Reference, nestedSem.ElementType.Kind);
+        var innerRefSem = Assert.IsType<ReferenceSemanticType>(nestedSem.ElementType.SpecialType);
+        Assert.Equal(TypeRef.Resolved(int32Handle), innerRefSem.ElementType);
 
         // Verify that the inner SimpleType node was recorded in ResolvedTree
         var ptrDecl = Assert.IsType<TopLevelVariableDeclaration>(root.Members[1]);
@@ -340,7 +353,7 @@ public sealed partial class DeclarationResolutionTests
             public func Process(Int32 value) -> () { }
             public func Process(Int32* value) -> () { }
             public func Process(Int32[]& value) -> () { }
-            public func Process((&Int32)[]& value) -> () { }
+            public func Process((Int32&)[]& value) -> () { }
             public func Process(Int32[10] value) -> () { }
             """);
 
@@ -361,7 +374,7 @@ public sealed partial class DeclarationResolutionTests
         var fnGroupedSliceRef = Assert.Single(context.FunctionSymbols, f =>
             context.ParameterSymbols[f.Parameters[0].ID].Type.SpecialType is ReferenceSemanticType rf &&
             rf.ElementType.SpecialType is SliceSemanticType sl &&
-            sl.ElementType.Kind == TypeRefKind.Alias);
+            sl.ElementType.Kind == TypeRefKind.Reference);
         var fnArr = Assert.Single(context.FunctionSymbols, f => context.ParameterSymbols[f.Parameters[0].ID].Type.Kind == TypeRefKind.Array);
     }
 

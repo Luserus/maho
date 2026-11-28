@@ -203,18 +203,18 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
         var candidateStr = strCandidates[0];
         var candidateStrHandle = ResolutionContext.GetHandle(candidateStr.Symbol);
 
-        // Retroactively verify candidateAttr's parameter type is &Str (Alias<Str>)
+        // Retroactively verify candidateAttr's parameter type is Str& (Reference<Str>)
         if (candidateAttr.Parameters.Count == 1)
         {
             var paramSymbol = context.GetParameterSymbol(candidateAttr.Parameters[0]);
             var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
 
-            if (!IsAliasToType(paramTypeSyntax, candidateAttr.EnclosingScope, candidateStrHandle))
+            if (!IsReferenceToType(paramTypeSyntax, candidateAttr.EnclosingScope, candidateStrHandle))
             {
                 var span = candidateAttr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? candidateAttr.Syntax?.GetSpan() ?? default;
                 context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                     span,
-                    "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                    "parameter type must be 'Str&' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
                     candidateAttr.Syntax?.GetSource());
 
                 return null;
@@ -266,12 +266,12 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
 
         var paramSymbol = context.GetParameterSymbol(attr.Parameters[0]);
         var paramTypeSyntax = paramSymbol?.Syntax?.Declarator.Type;
-        if (!IsAliasToType(paramTypeSyntax, attr.EnclosingScope, strHandle))
+        if (!IsReferenceToType(paramTypeSyntax, attr.EnclosingScope, strHandle))
         {
             var span = attr.Syntax?.Parameters?.Parameters[0].GetSpan() ?? attr.Syntax?.GetSpan() ?? default;
             context.Diagnostics.ReportInvalidIntrinsicAttributeSignature(
                 span,
-                "parameter type must be '&Str' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
+                "parameter type must be 'Str&' matching the primitive 'Str' type marked with [IntrinsicType(\"Str\")]",
                 attr.Syntax?.GetSource(),
                 attributeName);
         }
@@ -360,9 +360,8 @@ internal sealed partial class IntrinsicDiscoveryPass : ResolutionPass
         ValidateStr(typesByIntrinsic);
         ValidateBox(typesByIntrinsic);
 
-        // Group 5: Function (requires NUInt) and Delegate (requires NUInt, Pointer)
+        // Group 5: Function (requires NUInt)
         ValidateFunction(typesByIntrinsic);
-        ValidateDelegate(typesByIntrinsic);
 
         // Group 6: Optional
         ValidateOptional(typesByIntrinsic);

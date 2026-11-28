@@ -55,6 +55,8 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0103` | `EmptyCharacterLiteral` | Character literal `''` without payload. |
 | `MH0104` | `UnterminatedMultiLineComment` | Multi-line comment reaching EOF without closing `*/`. |
 | `MH0105` | `InvalidEscapeSequence` | Unrecognized escape sequence in string or character literal. |
+| `MH0106` | `InvalidUnicodeEscapeScalar` | Invalid hexadecimal syntax, surrogate code point (`U+D800`..`U+DFFF`), or out-of-range code point (`> U+10FFFF`) in `\u{...}` Unicode scalar escape. |
+| `MH0107` | `CharacterLiteralMultipleScalars` | Character literal contains more than one decoded Unicode scalar value. |
 
 ### 2.2 Parser & Grammar Recovery (`MH0120` - `MH0159`)
 | Code | Name | Description |
@@ -153,14 +155,18 @@ Strictly errors in the grammar, lexer, parser, directives, and macro syntax.
 | `MH0580` | `UnsizedTypeNotAllowed` | Unsized (DST) type used in a position requiring a statically sized (`Sized`) type. |
 | `MH0581` | `GenericConstraintNotSized` | Type argument does not satisfy the `Sized` or `Unsized` constraint on a generic parameter or `Self` bound. |
 | `MH0582` | `DerivedTypeAddsFieldsAfterUnsizedBase` | Derived type inherits multiple unsized bases or declares additional instance fields after an unsized base. |
-| `MH0583` | `InvalidInterfaceOrDynUsage` | Bare interface used outside constraint/conformance/`dyn`, or invalid `&dyn T` / `mut &dyn T` / `*dyn T` / `(dyn T)&` ordering. |
+| `MH0583` | `InvalidInterfaceOrDynUsage` | Bare interface used outside constraint/conformance/`dyn`, invalid `&dyn T` / `mut &dyn T` / `*dyn T` / `(dyn T)&` ordering, or `dyn` applied to an unsized type rather than a sized base behind indirection. |
 | `MH0584` | `InvalidThisGenericParameterPlacement` | `': this'` generic parameter can only be declared on an interface or method, not on non-interface types or standalone functions. |
 | `MH0585` | `ThisGenericArgumentMismatch` | Type argument for a `': this'` generic parameter does not exactly match the implementing or constrained type. |
 | `MH0586` | `MissingExplicitThisTypeArgument` | Interface with a `': this'` generic parameter and no `= this` default requires an explicit concrete type argument. |
 | `MH0587` | `DynThisGenericMethodCallNotAllowed` | Cannot call a method requiring a `': this'` generic parameter on type-erased `dyn Interface`. |
-| `MH0589` | `ObjectCreationNotSupported` | Type does not derive from `ValType` and does not implement `New` or `Put` for `new`/`put` object creation. |
-| `MH0590` | `GenericConstraintViolation` | Type argument fails a lifecycle constraint (`Copy` or `Move`) required by a generic parameter. |
-| `MH0591` | `NoMatchingAllocationOperator` | No matching `[OperatorFunction("New")]` or `[OperatorFunction("Put")]` overload exists for the supplied allocation arguments or type arguments. |
+| `MH0589` | `ObjectCreationNotSupported` | Type does not derive from `ValType` and does not implement `[OperatorFunction("New")]` for `new` object creation. |
+| `MH0590` | `GenericConstraintViolation` | Type argument fails a constraint required by a generic parameter. |
+| `MH0591` | `NoMatchingAllocationOperator` | No matching `[OperatorFunction("New")]` overload exists for the supplied allocation arguments or type arguments. |
+| `MH0592` | `AliasNotAllowedInContext` | Alias type (`&T` / `*T`) is not allowed in fields, parameters, return types, generic arguments, or arrays/slices/tuples/pointers/references (locals-only). |
+| `MH0593` | `AliasNotAllowedAsExtensionTarget` | Alias type (`&T` / `*T`) cannot be an `extension` target type. |
+| `MH0594` | `DerivedSelfMethodNeedsOverride` | Field-adding subclass must `override` base method returning derived `Self` type rather than inheriting the base implementation directly. |
+| `MH0595` | `InheritanceOrOverrideError` | Invalid `derived` marker placement, missing `override` / `virtual` modifier match, or invalid `derived` base re-binding. |
 
 ### 3.4 Macro Expansion & Metaprogramming (`MH0600` - `MH0604`)
 | Code | Name | Description |

@@ -93,8 +93,7 @@ internal sealed class MoveAnalysis
         if (!visited.Add(unwrap))
             return;
 
-        if (ownership.IsOwningIndirection(type, out var pointeeType) ||
-            ownership.TryGetAllocDerefInfo(type, out pointeeType, out _))
+        if (ownership.IsOwningIndirection(type, out var pointeeType))
         {
             var derefPlace = parent.Dereference();
             result.Add(derefPlace);
@@ -475,12 +474,6 @@ internal sealed class MoveAnalysis
         if (!placeTypes.TryGetValue(statement.Place, out var placeType))
             return false;
 
-        if (ownership.TryGetAllocDerefInfo(placeType, out _, out var allowedUninitFields))
-        {
-            ValidateAllocDerefNonTargetFields(state, mayBeMoved, statement.Place, placeType, allowedUninitFields, statement);
-            return true;
-        }
-
         return MatchesAllocationTargetType(placeType, allocTargetType);
     }
 
@@ -496,68 +489,6 @@ internal sealed class MoveAnalysis
             if (GetEffectiveState(state, mayBeMoved, candidate, out var moved) == InitializationState.Moved || moved)
                 return true;
         }
-        return false;
-    }
-
-    private void ValidateAllocDerefNonTargetFields(
-        Dictionary<Place, InitializationState> state,
-        HashSet<Place> mayBeMoved,
-        Place containerPlace,
-        TypeRef containerType,
-        HashSet<SymbolHandle> allowedUninitFields,
-        OwnershipStatement statement)
-    {
-        foreach (var fieldHandle in GetTypeFields(containerType))
-        {
-            if (allowedUninitFields.Contains(fieldHandle))
-                continue;
-
-            var fieldPlace = containerPlace.ProjectField(fieldHandle);
-            var fState = GetEffectiveState(state, mayBeMoved, fieldPlace, out var fMoved);
-            if (fState == InitializationState.Initialized || IsPlaceAlwaysInitialized(fieldPlace))
-                continue;
-
-            if (fMoved || fState == InitializationState.Moved)
-            {
-                context.Diagnostics.ReportUseAfterMove(statement.Span, GetPlaceName(fieldPlace), statement.Source);
-                continue;
-            }
-
-            if (placeTypes.TryGetValue(fieldPlace, out var fieldType) &&
-                ContainsAnyAllowedField(fieldType, allowedUninitFields, []))
-            {
-                ValidateAllocDerefNonTargetFields(state, mayBeMoved, fieldPlace, fieldType, allowedUninitFields, statement);
-                continue;
-            }
-
-            if (fState == InitializationState.Uninitialized)
-                context.Diagnostics.ReportUseOfUninitializedValue(statement.Span, GetPlaceName(fieldPlace), statement.Source);
-            else if (fState == InitializationState.MaybeInitialized)
-                context.Diagnostics.ReportUseOfPossiblyUninitializedValue(statement.Span, GetPlaceName(fieldPlace), statement.Source);
-        }
-    }
-
-    private bool ContainsAnyAllowedField(
-        TypeRef type,
-        HashSet<SymbolHandle> allowedUninitFields,
-        HashSet<SymbolHandle> visitedTypes)
-    {
-        if (type.Handle is not { } rawH)
-            return false;
-        if (!visitedTypes.Add(context.UnwrapAlias(rawH)))
-            return false;
-
-        foreach (var fieldHandle in GetTypeFields(type))
-        {
-            if (allowedUninitFields.Contains(fieldHandle))
-                return true;
-            if (context.GetFieldSymbol(fieldHandle) is { } fs &&
-                ContainsAnyAllowedField(fs.Type, allowedUninitFields, visitedTypes))
-            {
-                return true;
-            }
-        }
-
         return false;
     }
 

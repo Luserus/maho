@@ -30,6 +30,9 @@ internal sealed partial class Parser
         /// <summary> Right binding power used while parsing the operator's operand or right-hand side. </summary>
         public int RightBindingPower { get; }
 
+        /// <summary> Right binding power used while parsing a prefix operator's operand. </summary>
+        public int PrefixBindingPower { get; }
+
         /// <summary> Indicates whether the operator can begin a prefix expression. </summary>
         public bool IsPrefix => (Role & OperatorRole.Prefix) != 0;
         /// <summary> Indicates whether the operator can appear between two expressions. </summary>
@@ -38,12 +41,13 @@ internal sealed partial class Parser
         public bool IsPostfix => (Role & OperatorRole.Postfix) != 0;
 
         /// <summary> Creates one operator-table entry with its role and binding powers. </summary>
-        public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp)
+        public OperatorEntry(TokenKind kind, OperatorRole role, int lbp, int rbp, int prefixBp = 85)
         {
             Kind = kind;
             Role = role;
             LeftBindingPower = lbp;
             RightBindingPower = rbp;
+            PrefixBindingPower = prefixBp;
         }
     }
 
@@ -161,7 +165,7 @@ internal sealed partial class Parser
 
     /// <summary> Indicates whether the current token is one of the ordinary declaration modifiers recognized by the grammar. </summary>
     private bool IsCurrentTokenRegularModifier => CurrentToken.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or MatchingKeywordKind.Internal or MatchingKeywordKind.Extern or
-                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
+                                                   MatchingKeywordKind.Protected or MatchingKeywordKind.Unsealed or MatchingKeywordKind.Virtual or MatchingKeywordKind.Override or MatchingKeywordKind.Static or MatchingKeywordKind.Partial or
                                                    MatchingKeywordKind.Unsafe or MatchingKeywordKind.Mut or MatchingKeywordKind.Ext ||
                                                    (CurrentToken.MatchingKind is MatchingKeywordKind.Global && !LooksLikeColonColonAt(1)) ||
                                                    (CurrentToken.MatchingKind is MatchingKeywordKind.Untagged && IsUntaggedDeclarationModifierAt(current));
@@ -175,7 +179,7 @@ internal sealed partial class Parser
     private bool IsCurrentTokenTypeDeclarationStart => CurrentToken.MatchingKind is MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or MatchingKeywordKind.Union or MatchingKeywordKind.Interface;
     /// <summary> Indicates whether a matching keyword kind is permitted as a type identifier. </summary>
     private static bool CanBeTypeIdentifier(MatchingKeywordKind matchingKind) =>
-        matchingKind is not MatchingKeywordKind.New and not MatchingKeywordKind.Put
+        matchingKind is not MatchingKeywordKind.New
         and not MatchingKeywordKind.Operator
         and not MatchingKeywordKind.If and not MatchingKeywordKind.While
         and not MatchingKeywordKind.Match
@@ -184,7 +188,7 @@ internal sealed partial class Parser
         and not MatchingKeywordKind.Try and not MatchingKeywordKind.Catch and not MatchingKeywordKind.Finally
         and not MatchingKeywordKind.True and not MatchingKeywordKind.False
         and not MatchingKeywordKind.Null and not MatchingKeywordKind.Default and not MatchingKeywordKind.This
-        and not MatchingKeywordKind.Func and not MatchingKeywordKind.Delegate
+        and not MatchingKeywordKind.Func
         and not MatchingKeywordKind.Dyn and not MatchingKeywordKind.Untagged
         and not MatchingKeywordKind.Mut and not MatchingKeywordKind.Ext and not MatchingKeywordKind.Extension;
 
@@ -605,7 +609,13 @@ internal sealed partial class Parser
         return new SeparatedSyntaxList<TypeSyntax>(nodesAndSeparators);
     }
 
-    /// <summary>Parses either a type argument, a <c>Type as Interface</c> conformance argument, or a compile-time expression argument.</summary>
+    /// <summary> Checks whether the current token starts a contextual <c>derived Type</c> generic argument. </summary>
+    private bool IsDerivedGenericArgumentStart() =>
+        CurrentToken.MatchingKind is MatchingKeywordKind.Derived &&
+        Peek().Kind is not (TokenKind.Comma or TokenKind.GreaterThanSign or TokenKind.RightParen or TokenKind.Colon or TokenKind.ColonColon or TokenKind.Dot or TokenKind.LessThanSign or TokenKind.EndToken) &&
+        Peek().MatchingKind is not MatchingKeywordKind.As;
+
+    /// <summary>Parses either a type argument, a <c>derived Type</c> base-clause argument, a <c>Type as Interface</c> conformance argument, or a compile-time expression argument.</summary>
     private TypeSyntax ParseGenericArgument()
     {
         if (IsLiteralTokenKind(CurrentToken.Kind))
@@ -614,7 +624,11 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Identifier && Peek().Kind is TokenKind.Comma or TokenKind.GreaterThanSign)
             return new NamedExpressionGenericArgument(new IdentifierNameExpression(Consume()));
 
+        Token? derivedKeyword = IsDerivedGenericArgumentStart() ? Consume() : null;
         var type = ParseTypeSyntax();
+        if (derivedKeyword is { } dk)
+            type = new DerivedGenericArgumentSyntax(dk, type);
+
         if (CurrentToken.MatchingKind is MatchingKeywordKind.As)
         {
             var asKeyword = Consume();

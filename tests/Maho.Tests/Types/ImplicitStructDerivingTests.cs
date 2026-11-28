@@ -27,7 +27,7 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
@@ -69,7 +69,7 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;
@@ -103,7 +103,7 @@ public sealed class ImplicitStructDerivingTests
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
 
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Int8")] public struct int8;

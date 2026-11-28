@@ -110,8 +110,22 @@ internal sealed partial class ExpressionResolutionPass
                     return opReturnType;
                 }
 
-                while (opReturnType.SpecialType is AliasSemanticType or DynSemanticType)
-                    opReturnType = opReturnType.SpecialType is AliasSemanticType al ? al.TargetType : ((DynSemanticType)opReturnType.SpecialType!).TargetType;
+                bool unwrappedRef = false;
+                while (opReturnType.SpecialType is AliasSemanticType or DynSemanticType ||
+                       (!unwrappedRef && opReturnType.SpecialType is ReferenceSemanticType))
+                {
+                    if (opReturnType.SpecialType is ReferenceSemanticType rf)
+                    {
+                        opReturnType = rf.ElementType;
+                        unwrappedRef = true;
+                    }
+                    else
+                    {
+                        opReturnType = opReturnType.SpecialType is AliasSemanticType al
+                            ? al.TargetType
+                            : ((DynSemanticType)opReturnType.SpecialType!).TargetType;
+                    }
+                }
                 receiverType = opReturnType;
             }
             else
@@ -206,7 +220,13 @@ internal sealed partial class ExpressionResolutionPass
                     }
 
                     context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(declaredMethod));
-                    return GetTypeFromSymbol(declaredMethod);
+                    return FinalizeMethodMemberAccess(
+                        access,
+                        declaredMethod,
+                        receiverType,
+                        GetTypeFromSymbol(declaredMethod),
+                        isTypeAccess: false,
+                        scope);
                 }
 
                 // MH0609: Calling variant-level method directly on sum type instance
@@ -313,7 +333,13 @@ internal sealed partial class ExpressionResolutionPass
                             scope,
                             containingFunction);
                     }
-                    return retType;
+                    return FinalizeMethodMemberAccess(
+                        access,
+                        targetMember,
+                        receiverType,
+                        retType,
+                        isTypeAccess: isStaticAccessOnType && access.Expression is not TypeAsExpression,
+                        scope);
                 }
             }
 
@@ -341,13 +367,6 @@ internal sealed partial class ExpressionResolutionPass
                 else if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null)
                     context.Diagnostics.ReportMissingIntrinsicForSyntax(access.Identifier.Span, "function member access", KnownIntrinsics.Function, access.GetSource());
             }
-            else if (receiverType.SpecialType is DelegateSemanticType)
-            {
-                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH))
-                    recvHandle = delH;
-                else if (context.DiscoveredIntrinsics.IntrinsicTypeAttribute is not null)
-                    context.Diagnostics.ReportMissingIntrinsicForSyntax(access.Identifier.Span, "delegate member access", KnownIntrinsics.Delegate, access.GetSource());
-            }
         }
 
         if (recvHandle is not null)
@@ -371,20 +390,24 @@ internal sealed partial class ExpressionResolutionPass
             {
                 if (member is MethodSymbol method)
                 {
-                    if (originalReceiverType.SpecialType is DynSemanticType dynRecv &&
+                    bool isExistentialIfaceReceiver =
+                        receiverType.Handle is { Kind: not SymbolKind.GenericParameter } rH &&
+                        TypeRef.IsInterfaceHandle(context.UnwrapAlias(rH), context);
+
+                    if (isExistentialIfaceReceiver &&
                         method.GenericParameters.Any(gpH => context.GetGenericParameterSymbol(gpH)?.ParameterKind == GenericParameterKind.This))
                     {
-                        var ifaceSym = dynRecv.TargetType.Handle is { } ih ? context.GetSymbol(context.UnwrapAlias(ih)) : null;
+                        var ifaceSym = context.GetSymbol(context.UnwrapAlias(receiverType.Handle!.Value));
                         context.Diagnostics.ReportDynThisGenericMethodCallNotAllowed(
                             access.Identifier.Span,
                             memberName,
-                            ifaceSym?.Name.Text ?? dynRecv.ToDisplayString(context),
+                            ifaceSym?.Name.Text ?? receiverType.ToDisplayString(context),
                             access.GetSource());
                         return TypeRef.Error;
                     }
 
                     bool isMethodStatic = method.Flags.HasFlag(FunctionFlags.Static);
-                    if (!ValidateStaticAccess(isMethodStatic))
+                    if (isMethodStatic && !isStaticAccessOnType && !ValidateStaticAccess(isMethodStatic))
                         return TypeRef.Error;
                 }
                 else if (member is FieldSymbol field)
@@ -425,6 +448,13 @@ internal sealed partial class ExpressionResolutionPass
 
                 context.ResolvedTree.AddReference(access, ResolutionContext.GetHandle(member));
                 var memberResultType = GetTypeFromSymbol(member);
+                var memberParentHandle = member switch
+                {
+                    MethodSymbol ms when ms.Parent is { } mp => context.UnwrapAlias(mp),
+                    FieldSymbol fs when fs.Parent is { } fp => context.UnwrapAlias(fp),
+                    PropertySymbol ps when ps.Parent is { } pp => context.UnwrapAlias(pp),
+                    _ => default
+                };
                 if (receiverType.SpecialType is GenericSemanticType recvGst &&
                     context.GetSymbol(recvHandle.Value) is TypeSymbol recvTs &&
                     recvTs.GenericParameters.Count == recvGst.TypeArguments.Count)
@@ -440,6 +470,13 @@ internal sealed partial class ExpressionResolutionPass
                     if (subst.Count > 0)
                         memberResultType = SubstituteTypeRef(memberResultType, subst);
                 }
+                else if (memberParentHandle != default &&
+                         context.UnwrapAlias(recvHandle.Value) != memberParentHandle)
+                {
+                    var inheritedSubst = CollectBaseTypeSubstitutionsForMember(receiverType, memberParentHandle);
+                    if (inheritedSubst.Count > 0)
+                        memberResultType = SubstituteTypeRef(memberResultType, inheritedSubst);
+                }
                 if (access.GenericArguments is { Count: > 0 } memGenArgs)
                 {
                     var resolvedArgs = new List<TypeRef>(memGenArgs.Count);
@@ -454,7 +491,13 @@ internal sealed partial class ExpressionResolutionPass
                         scope,
                         containingFunction);
                 }
-                return memberResultType;
+                return FinalizeMethodMemberAccess(
+                    access,
+                    member,
+                    receiverType,
+                    memberResultType,
+                    isTypeAccess: isStaticAccessOnType && access.Expression is not TypeAsExpression,
+                    scope);
             }
 
             if (!isStaticAccessOnType)
@@ -498,7 +541,13 @@ internal sealed partial class ExpressionResolutionPass
                                 subst[pTs.GenericParameters[i]] = pGst.TypeArguments[i];
                             pType = SubstituteTypeRef(pType, subst);
                         }
-                        return pType;
+                        return FinalizeMethodMemberAccess(
+                            access,
+                            pointeeMember,
+                            pointeeType,
+                            pType,
+                            isTypeAccess: false,
+                            scope);
                     }
                 }
 
@@ -564,16 +613,19 @@ internal sealed partial class ExpressionResolutionPass
                         continue;
 
                     bool hasReceiver = m.Parameters.Count > 0 &&
-                        context.GetParameterSymbol(m.Parameters[0])?.Syntax?.Declarator.ReceiverKind is not null &&
-                        context.GetParameterSymbol(m.Parameters[0])!.Syntax!.Declarator.ReceiverKind != ReceiverKind.None &&
+                        context.GetParameterSymbol(m.Parameters[0])?.IsReceiver == true &&
                         !m.Flags.HasFlag(FunctionFlags.Static);
 
-                    if (isStaticAccessOnType && !hasReceiver)
+                    if (isStaticAccessOnType)
                     {
-                        candidate = m;
-                        break;
+                        if (!hasReceiver)
+                        {
+                            candidate = m;
+                            break;
+                        }
+                        candidate ??= m;
                     }
-                    else if (!isStaticAccessOnType && hasReceiver)
+                    else if (hasReceiver)
                     {
                         candidate = m;
                         break;
@@ -619,7 +671,13 @@ internal sealed partial class ExpressionResolutionPass
             var memberType = GetTypeFromSymbol(matchedMember);
             if (matchedArgs.Count > 0)
                 memberType = SubstituteTypeRef(memberType, matchedArgs);
-            return memberType;
+            return FinalizeMethodMemberAccess(
+                access,
+                matchedMember,
+                receiverType,
+                memberType,
+                isTypeAccess: isStaticAccessOnType && access.Expression is not TypeAsExpression,
+                scope);
         }
 
         return null;
@@ -639,6 +697,38 @@ internal sealed partial class ExpressionResolutionPass
             return true;
         }
 
+        if (targetPattern.SpecialType is SliceSemanticType targetSlice &&
+            actualType.SpecialType is SliceSemanticType actualSlice)
+        {
+            return targetSlice.Dimension == actualSlice.Dimension &&
+                   TryUnifyExtensionTarget(targetSlice.ElementType, actualSlice.ElementType, genericParams, typeArgs) &&
+                   ValidateExtensionTargetConstraints(genericParams, typeArgs);
+        }
+
+        if (targetPattern.SpecialType is ArraySemanticType targetArr &&
+            actualType.SpecialType is ArraySemanticType actualArr)
+        {
+            return targetArr.Dimension == actualArr.Dimension &&
+                   TryUnifyExtensionTarget(targetArr.ElementType, actualArr.ElementType, genericParams, typeArgs) &&
+                   ValidateExtensionTargetConstraints(genericParams, typeArgs);
+        }
+
+        if (targetPattern.SpecialType is PointerSemanticType targetPtr &&
+            actualType.SpecialType is PointerSemanticType actualPtr)
+        {
+            return targetPtr.IsMutable == actualPtr.IsMutable &&
+                   TryUnifyExtensionTarget(targetPtr.ElementType, actualPtr.ElementType, genericParams, typeArgs) &&
+                   ValidateExtensionTargetConstraints(genericParams, typeArgs);
+        }
+
+        if (targetPattern.SpecialType is ReferenceSemanticType targetRef &&
+            actualType.SpecialType is ReferenceSemanticType actualRef)
+        {
+            return targetRef.IsMutable == actualRef.IsMutable &&
+                   TryUnifyExtensionTarget(targetRef.ElementType, actualRef.ElementType, genericParams, typeArgs) &&
+                   ValidateExtensionTargetConstraints(genericParams, typeArgs);
+        }
+
         if (targetPattern.SpecialType is GenericSemanticType targetGst &&
             actualType.SpecialType is GenericSemanticType actualGst)
         {
@@ -653,54 +743,64 @@ internal sealed partial class ExpressionResolutionPass
                     return false;
             }
 
-            foreach (var gpH in genericParams)
-            {
-                if (typeArgs.TryGetValue(gpH, out var boundArg))
-                {
-                    if (context.GetGenericParameterSymbol(gpH) is { } gpSym)
-                    {
-                        foreach (var constraint in gpSym.Constraints)
-                        {
-                            if (constraint.IsResolved && constraint.Handle is { } cH)
-                            {
-                                if (boundArg.Handle is not { } bH || !DeclarationResolutionPass.SatisfiesConstraint(context, bH, cH, []))
-                                    return false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            return true;
+            return ValidateExtensionTargetConstraints(genericParams, typeArgs);
         }
 
         if (targetPattern.Handle is { } targetH && actualType.Handle is { } actualH)
         {
-            if (targetH == actualH)
-            {
-                foreach (var gpH in genericParams)
-                {
-                    if (typeArgs.TryGetValue(gpH, out var boundArg))
-                    {
-                        if (context.GetGenericParameterSymbol(gpH) is { } gpSym)
-                        {
-                            foreach (var constraint in gpSym.Constraints)
-                            {
-                                if (constraint.IsResolved && constraint.Handle is { } cH)
-                                {
-                                    if (boundArg.Handle is not { } bH || !DeclarationResolutionPass.SatisfiesConstraint(context, bH, cH, []))
-                                        return false;
-                                }
-                            }
-                        }
-                    }
-                }
-                return true;
-            }
-            return false;
+            return targetH == actualH && ValidateExtensionTargetConstraints(genericParams, typeArgs);
         }
 
-        return targetPattern.Equals(actualType);
+        return targetPattern.Equals(actualType) && ValidateExtensionTargetConstraints(genericParams, typeArgs);
+    }
+
+    private bool ValidateExtensionTargetConstraints(
+        IReadOnlyList<SymbolHandle> genericParams,
+        Dictionary<SymbolHandle, TypeRef> typeArgs)
+    {
+        foreach (var gpH in genericParams)
+        {
+            if (!typeArgs.TryGetValue(gpH, out var boundArg))
+                continue;
+            if (context.GetGenericParameterSymbol(gpH) is not { } gpSym)
+                continue;
+
+            bool hasUnsizedOrLayout = gpSym.HasExplicitUnsized;
+            foreach (var constraint in gpSym.Constraints)
+            {
+                if (!constraint.IsResolved || constraint.Handle is not { } cH)
+                    continue;
+
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Layout, out var layoutH) && cH == layoutH)
+                {
+                    hasUnsizedOrLayout = true;
+                    continue;
+                }
+
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Sized, out var sizedH) && cH == sizedH)
+                {
+                    if (!boundArg.IsSized(context))
+                        return false;
+                    continue;
+                }
+
+                if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out var unsizedH) && cH == unsizedH)
+                {
+                    hasUnsizedOrLayout = true;
+                    if (!boundArg.IsKnownUnsized(context))
+                        return false;
+                    continue;
+                }
+
+                if (boundArg.Handle is not { } bH || !DeclarationResolutionPass.SatisfiesConstraint(context, bH, cH, []))
+                    return false;
+            }
+
+            if (!hasUnsizedOrLayout && gpSym.RequiresSized(context) && !boundArg.IsSized(context))
+                return false;
+        }
+
+        return true;
     }
 
     private bool TryResolveIndirectMemberAccessOperator(TypeRef type, out TypeRef elemType)
@@ -848,6 +948,54 @@ internal sealed partial class ExpressionResolutionPass
         return false;
     }
 
+    private Dictionary<SymbolHandle, TypeRef> CollectBaseTypeSubstitutionsForMember(TypeRef receiverType, SymbolHandle targetOwnerHandle)
+    {
+        var result = new Dictionary<SymbolHandle, TypeRef>();
+        var visited = new HashSet<SymbolHandle>();
+
+        void Visit(TypeRef t, Dictionary<SymbolHandle, TypeRef> parentArgs)
+        {
+            if (t.Handle is not { } rawH)
+                return;
+
+            var h = context.UnwrapAlias(rawH);
+            if (!visited.Add(h))
+                return;
+
+            var subst = new Dictionary<SymbolHandle, TypeRef>(parentArgs);
+            var sym = context.GetSymbol(h);
+            IReadOnlyList<SymbolHandle> gps = sym switch
+            {
+                TypeSymbol ts => ts.GenericParameters,
+                NestedTypeSymbol nts => nts.GenericParameters,
+                _ => []
+            };
+            if (t.SpecialType is GenericSemanticType gst && gps.Count == gst.TypeArguments.Count)
+            {
+                for (int i = 0; i < gps.Count; i++)
+                    subst[gps[i]] = SubstituteTypeRef(gst.TypeArguments[i], parentArgs);
+            }
+
+            if (h == targetOwnerHandle)
+            {
+                result = subst;
+                return;
+            }
+
+            IReadOnlyList<TypeRef> bases = sym switch
+            {
+                TypeSymbol ts => ts.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+            foreach (var b in bases)
+                Visit(b, subst);
+        }
+
+        Visit(receiverType, []);
+        return result;
+    }
+
     private (Symbol? Member, bool IsAmbiguous, List<Symbol>? Ambiguities) FindMemberInTypeHierarchy(
         SymbolHandle typeHandle,
         string memberName,
@@ -863,6 +1011,8 @@ internal sealed partial class ExpressionResolutionPass
         var directSyms = recvScope.GetLocalSymbols(new SymbolPart(memberName, genericArity));
         if (directSyms.Count == 0 && genericArity > 0)
             directSyms = recvScope.GetLocalSymbols(new SymbolPart(memberName));
+        else if (directSyms.Count == 0 && genericArity == 0)
+            directSyms = recvScope.GetLocalCallableSymbolsAnyArity(memberName);
         var directAccessible = directSyms.Where(cand =>
         {
             if (cand is MethodSymbol m)
@@ -971,6 +1121,8 @@ internal sealed partial class ExpressionResolutionPass
             var bSyms = bScope.GetLocalSymbols(new SymbolPart(memberName, genericArity));
             if (bSyms.Count == 0 && genericArity > 0)
                 bSyms = bScope.GetLocalSymbols(new SymbolPart(memberName));
+            else if (bSyms.Count == 0 && genericArity == 0)
+                bSyms = bScope.GetLocalCallableSymbolsAnyArity(memberName);
             var bAccessible = bSyms.Where(cand =>
             {
                 if (cand is MethodSymbol m)

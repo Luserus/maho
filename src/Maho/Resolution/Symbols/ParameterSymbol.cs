@@ -9,6 +9,9 @@ internal sealed class ParameterSymbol : Symbol
     public List<SymbolHandle> Attributes { get; internal set; }
     public TypeRef Type { get; internal set; } = TypeRef.Unresolved;
     public Parameter? Syntax { get; }
+    public ReceiverKind SynthesizedReceiverKind { get; internal set; } = ReceiverKind.None;
+    public ReceiverKind ReceiverKind => Syntax?.Declarator.ReceiverKind ?? SynthesizedReceiverKind;
+    public bool IsReceiver => ReceiverKind != ReceiverKind.None;
 
     public ParameterSymbol(SymbolID id, Scope enclosingScope, SymbolPart name, SymbolHandle? containingSymbol, Parameter? syntax) : base(id, name, enclosingScope)
     {

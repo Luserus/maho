@@ -28,13 +28,13 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var valid = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Clonable<T : this>
             {
-                func Clone(&this) -> T;
+                func Clone(this&) -> T;
             }
 
             public struct Base : Clonable<Base>
             {
                 public int32 id;
-                public func Clone(&this) -> Base { return put Base { id = this.id }; }
+                public func Clone(this&) -> Base { return new Base { id = this->id }; }
             }
             """);
 
@@ -43,18 +43,18 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var wrongDerivedBaseArg = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Clonable<T : this>
             {
-                func Clone(&this) -> T;
+                func Clone(this&) -> T;
             }
 
             public struct Base : Clonable<Base>
             {
                 public int32 id;
-                public func Clone(&this) -> Base { return put Base { id = this.id }; }
+                public func Clone(this&) -> Base { return new Base { id = this->id }; }
             }
 
             public struct Derived : Base, Clonable<Base>
             {
-                public func Clone(&this) -> Base { return put Base { id = 1 }; }
+                public func Clone(this&) -> Base { return new Base { id = 1 }; }
             }
             """);
 
@@ -63,13 +63,13 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var unrelated = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Clonable<T : this>
             {
-                func Clone(&this) -> T;
+                func Clone(this&) -> T;
             }
 
             public struct Cat { public int32 age; }
             public struct Dog : Clonable<Cat>
             {
-                public func Clone(&this) -> Cat { return put Cat { age = 3 }; }
+                public func Clone(this&) -> Cat { return new Cat { age = 3 }; }
             }
             """);
 
@@ -82,24 +82,24 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var shorthand = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Eq<T : this = this>
             {
-                func Same(&this, &T other) -> bool;
+                func Same(this&, T& other) -> bool;
             }
 
             public struct Point : Eq
             {
                 public int32 x;
-                public func Same(&this, &Point other) -> bool { return true; }
+                public func Same(this&, Point& other) -> bool { return true; }
             }
 
-            public func Check<U>(U a, &U b) -> bool where U : Eq
+            public func Check<U>(U a, U& b) -> bool where U : Eq
             {
                 return a.Same(b);
             }
 
             public func Run() -> bool
             {
-                Point p = put Point { x = 5 };
-                return Check::<Point>(p, p);
+                Point p = new Point { x = 5 };
+                return Check::<Point>(p, &p);
             }
             """);
 
@@ -108,13 +108,13 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var missingExplicit = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Eq<T : this>
             {
-                func Same(&this, &T other) -> bool;
+                func Same(this&, T& other) -> bool;
             }
 
             public struct Point : Eq
             {
                 public int32 x;
-                public func Same(&this, &Point other) -> bool { return true; }
+                public func Same(this&, Point& other) -> bool { return true; }
             }
             """);
 
@@ -122,23 +122,23 @@ public sealed class ThisGenericParameterAndDefaultsTests
     }
 
     [Fact]
-    public void ThisGeneric_DynExistentialWithConcreteArg_Succeeds_WhileDynMethodThisParam_ReportsMH0587()
+    public void ThisGeneric_InterfaceExistentialWithConcreteArg_Succeeds_WhileInterfaceMethodThisParam_ReportsMH0587()
     {
         var okDyn = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Eq<T : this = this>
             {
-                func Same(&this, &T other) -> bool;
+                func Same(this&, T& other) -> bool;
             }
 
             public struct Point : Eq
             {
                 public int32 x;
-                public func Same(&this, &Point other) -> bool { return true; }
+                public func Same(this&, Point& other) -> bool { return true; }
             }
 
-            public func CompareWithDyn(dyn &Eq<Point> item, &Point other) -> bool
+            public func CompareWithDyn(Eq<Point>& item, Point& other) -> bool
             {
-                return item.Same(other);
+                return item->Same(other);
             }
             """);
 
@@ -147,18 +147,18 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var badDynMethod = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Comparable
             {
-                func Cmp<T : this>(&this, &T other) -> bool;
+                func Cmp<T : this>(this&, T& other) -> bool;
             }
 
             public struct Point : Comparable
             {
                 public int32 x;
-                public func Cmp<T : this>(&this, &T other) -> bool { return true; }
+                public func Cmp<T : this>(this&, T& other) -> bool { return true; }
             }
 
-            public func BadCall(dyn &Comparable item, &Point other) -> bool
+            public func BadCall(Comparable& item, Point& other) -> bool
             {
-                return item.Cmp::<Point>(other);
+                return item->Cmp::<Point>(&other);
             }
             """);
 
@@ -172,14 +172,14 @@ public sealed class ThisGenericParameterAndDefaultsTests
             public struct Item
             {
                 public int32 v;
-                public func Check<T : this>(&this, &T other) -> bool { return true; }
+                public func Check<T : this>(this&, T& other) -> bool { return true; }
             }
 
             public func Run() -> bool
             {
-                Item it = put Item { v = 1 };
+                Item it = new Item { v = 1 };
                 int32 num = 2;
-                return it.Check::<int32>(num);
+                return it.Check::<int32>(&num);
             }
             """);
 
@@ -192,7 +192,7 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Logger
             {
-                func Tag(&this) -> int32
+                func Tag(this&) -> int32
                 {
                     return 7;
                 }
@@ -206,23 +206,23 @@ public sealed class ThisGenericParameterAndDefaultsTests
             public struct CustomUser : Logger
             {
                 public int32 id;
-                func Logger.Tag(&this) -> int32
+                func Logger.Tag(this&) -> int32
                 {
                     return 99;
                 }
             }
 
-            public func CallConstrained<T>(&T item) -> int32 where T : Logger
+            public func CallConstrained<T>(T& item) -> int32 where T : Logger
             {
-                return item.Tag();
+                return item->Tag();
             }
 
             public func Run() -> int32
             {
-                DefaultUser d = put DefaultUser { id = 1 };
-                CustomUser c = put CustomUser { id = 2 };
+                DefaultUser d = new DefaultUser { id = 1 };
+                CustomUser c = new CustomUser { id = 2 };
                 (d as Logger).Tag();
-                CallConstrained::<CustomUser>(c);
+                CallConstrained::<CustomUser>(&c);
                 return (c as Logger).Tag();
             }
             """);
@@ -232,7 +232,7 @@ public sealed class ThisGenericParameterAndDefaultsTests
         var directCallHidden = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public interface Logger
             {
-                func Tag(&this) -> int32
+                func Tag(this&) -> int32
                 {
                     return 7;
                 }
@@ -246,7 +246,7 @@ public sealed class ThisGenericParameterAndDefaultsTests
             public struct CustomUser : Logger
             {
                 public int32 id;
-                func Logger.Tag(&this) -> int32
+                func Logger.Tag(this&) -> int32
                 {
                     return 99;
                 }
@@ -254,8 +254,8 @@ public sealed class ThisGenericParameterAndDefaultsTests
 
             public func Run() -> int32
             {
-                DefaultUser d = put DefaultUser { id = 1 };
-                CustomUser c = put CustomUser { id = 2 };
+                DefaultUser d = new DefaultUser { id = 1 };
+                CustomUser c = new CustomUser { id = 2 };
                 d.Tag();
                 return c.Tag();
             }
@@ -280,7 +280,7 @@ public sealed class ThisGenericParameterAndDefaultsTests
     public void IntrinsicType_MissingDeclaredInterfaceMethod_ReportsMH0550()
     {
         var compilation = Compilation.FromSource("""
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
             [IntrinsicType("UInt8")] public struct uint8;
@@ -290,7 +290,7 @@ public sealed class ThisGenericParameterAndDefaultsTests
 
             public interface NeedsTag
             {
-                func Tag(&this) -> int32;
+                func Tag(this&) -> int32;
             }
 
             [IntrinsicType("Str")]

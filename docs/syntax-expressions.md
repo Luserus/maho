@@ -42,9 +42,9 @@ These files are intentionally declarative: they define the tree that the parser 
 - **Explicit Return Invariant in Block Bodies (`MH2016`)**:
   Lambda block bodies strictly require an explicit `return` statement. Trailing expressions without `return` are rejected with `MH2016`.
 - **Typing & Contextual Inference (`MH2015`)**:
-  - Lambdas assigned to typed variables or passed to functions with known function/delegate signatures contextually infer their parameter types. Untyped parameters without target context emit `MH2015`.
+  - Lambdas assigned to typed variables or passed to functions with known `func(...)` or `Callable`/`CallableMut`/`CallableOnce` signatures contextually infer their parameter types. Untyped parameters without target context emit `MH2015`.
   - Non-capturing lambdas evaluate to function pointers (`Std.Function<TReturn, TParams...>`).
-  - Capturing lambdas evaluate to closures/delegates (`Std.Delegate<TReturn, TParams...>`).
+  - Capturing lambdas synthesize anonymous closure structs (`__Closure_N : Struct, Move`) implementing the appropriate callable interface (`Callable`, `CallableMut`, or `CallableOnce`).
 
 ## Things worth noticing
 

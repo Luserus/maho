@@ -13,9 +13,9 @@ internal enum SemanticTypeKind : byte
     Untagged,
     Dyn,
     Function,
-    Delegate,
     Literal,
     Generic,
     Alias,
-    Conformance
+    Conformance,
+    DerivedSelf
 }

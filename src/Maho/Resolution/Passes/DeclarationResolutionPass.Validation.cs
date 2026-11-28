@@ -1011,7 +1011,8 @@ internal sealed partial class DeclarationResolutionPass
     }
 
     private bool IsStrAliasType(TypeRef type) =>
-        type.SpecialType is AliasSemanticType al && IsStrType(al.TargetType);
+        (type.SpecialType is AliasSemanticType al && IsStrType(al.TargetType)) ||
+        (type.SpecialType is ReferenceSemanticType rf && IsStrType(rf.ElementType));
 
     private bool IsStrType(TypeRef t)
     {
@@ -1227,7 +1228,20 @@ internal sealed partial class DeclarationResolutionPass
         foreach (var ph in paramHandles)
         {
             var param = context.GetParameterSymbol(ph);
-            if (param is not null && !param.Type.IsError && !param.Type.IsUnresolved && !param.Type.IsSized(context))
+            if (param is null || param.Type.IsError || param.Type.IsUnresolved)
+                continue;
+
+            // An interface method's `this` receiver represents the abstract implementing self type
+            // (e.g. `CallableOnce.Invoke(this, ...)`), not an unsized value parameter at runtime.
+            if (param.IsReceiver &&
+                param.ContainingSymbol is { } mH &&
+                context.GetMethodSymbol(mH) is { Parent: { } pH } &&
+                context.GetSymbol(context.UnwrapAlias(pH)) is TypeSymbol { TypeKind: TypeKind.Interface } or NestedTypeSymbol { TypeKind: TypeKind.Interface })
+            {
+                continue;
+            }
+
+            if (!param.Type.IsSized(context))
             {
                 var span = param.Syntax?.Declarator.Type.GetSpan() ?? param.Syntax?.GetSpan() ?? default;
                 context.Diagnostics.ReportUnsizedTypeNotAllowed(span, param.Type.ToDisplayString(context), contextDescription, param.Syntax?.GetSource() ?? fallbackSource);

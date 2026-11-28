@@ -256,7 +256,7 @@ internal sealed partial class ExpressionResolutionPass
                         }
                         if (litOverloads.Count == 1)
                         {
-                            if (TryResolveCallableOperator(call, targetType, argTypes, out var ret1) && targetType.IsAssignableFrom(ret1, context))
+                            if (TryResolveCallableOperator(call, targetType, argTypes, scope, containingFunction, out var ret1) && targetType.IsAssignableFrom(ret1, context))
                             {
                                 if (context.ResolvedTree.TryGetReference(call, out var mHandle) && context.GetMethodSymbol(mHandle) is { } m1)
                                     cand1 = m1;
@@ -266,7 +266,7 @@ internal sealed partial class ExpressionResolutionPass
 
                     MethodSymbol? cand2 = null;
                     var defaultType = CollapseLiteralToDefault(TypeRef.Literal(CompileTimeLiteralKind.Int, litCallee.Literal.Value));
-                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var ret2) && targetType.IsAssignableFrom(ret2, context))
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, scope, containingFunction, out var ret2) && targetType.IsAssignableFrom(ret2, context))
                     {
                         if (context.ResolvedTree.TryGetReference(call, out var mHandle2) && context.GetMethodSymbol(mHandle2) is { } m2)
                             cand2 = m2;
@@ -288,7 +288,7 @@ internal sealed partial class ExpressionResolutionPass
                         return chosenMethod.ReturnType;
                     }
 
-                    if (TryResolveCallableOperator(call, defaultType, argTypes, out var defRet))
+                    if (TryResolveCallableOperator(call, defaultType, argTypes, scope, containingFunction, out var defRet))
                     {
                         context.SetExpressionType(call, defRet);
                         return defRet;

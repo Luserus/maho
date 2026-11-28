@@ -71,7 +71,8 @@ internal sealed partial class ExpressionResolutionPass
         }
 
         // 4. Operator overload lookup through DiscoveredOperators for concrete operands
-        if (TryResolveOperatorOverload(opKind, lhs, rhs, binary, out var overloadResult))
+        if (TryResolveOperatorOverload(opKind, lhs, rhs, binary, out var overloadResult) ||
+            TryResolveBinaryOperatorViaConformances(opKind, lhs, rhs, binary, out overloadResult))
             return overloadResult;
 
         // 5. No compatible operator overload found: report MH2001
@@ -128,42 +129,44 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (concreteType.Handle is not { } cHandle || context.GetTypeSymbol(cHandle) is not { } cTypeSym)
-            return false;
-
-        var typeScope = GetOwnedScope(cTypeSym);
-        foreach (var candidate in candidates)
+        foreach (var candidateScope in GetOperatorCandidateScopes(concreteType))
         {
-            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
-            if (ifaceSym is null) continue;
-
-            foreach (var sym in typeScope.Symbols.Values)
+            foreach (var candidate in candidates)
             {
-                if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+                if (ifaceSym is null)
+                    continue;
+
+                foreach (var sym in candidateScope.Scope.Symbols.Values)
                 {
-                    if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
+                    if (sym is not MethodSymbol method ||
+                        method.Parameters.Count != 2 ||
+                        !IsOperatorCandidateMethod(method, ifaceSym, candidate, candidateScope.BaseTypes))
                     {
-                        if (method.Parameters.Count == 2)
-                        {
-                            var p0 = context.GetParameterSymbol(method.Parameters[0]);
-                            var p1 = context.GetParameterSymbol(method.Parameters[1]);
-                            if (p0 is null || p1 is null) continue;
+                        continue;
+                    }
 
-                            var litParam = isLhsLiteral ? p0.Type : p1.Type;
-                            var concParam = isLhsLiteral ? p1.Type : p0.Type;
+                    var p0 = context.GetParameterSymbol(method.Parameters[0]);
+                    var p1 = context.GetParameterSymbol(method.Parameters[1]);
+                    if (p0 is null || p1 is null)
+                        continue;
 
-                            if (concParam.IsAssignableFrom(concreteType, context) && IsLiteralCompatibleWith(literalType, litParam))
-                            {
-                                CollapseExpression(literalExpr, litParam, scope, containingFunction);
-                                context.ResolvedTree.AddReference(binary, ResolutionContext.GetHandle(method));
-                                result = method.ReturnType;
-                                return true;
-                            }
-                        }
+                    var p0Type = SubstituteIfNeeded(p0.Type, candidateScope.TypeArgs);
+                    var p1Type = SubstituteIfNeeded(p1.Type, candidateScope.TypeArgs);
+                    var litParam = isLhsLiteral ? p0Type : p1Type;
+                    var concParam = isLhsLiteral ? p1Type : p0Type;
+
+                    if (concParam.IsAssignableFrom(concreteType, context) && IsLiteralCompatibleWith(literalType, litParam))
+                    {
+                        CollapseExpression(literalExpr, litParam, scope, containingFunction);
+                        context.ResolvedTree.AddReference(binary, ResolutionContext.GetHandle(method));
+                        result = SubstituteIfNeeded(method.ReturnType, candidateScope.TypeArgs);
+                        return true;
                     }
                 }
             }
         }
+
         return false;
     }
 
@@ -222,10 +225,19 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        // Operators must resolve to explicit Interface.Operator methods on operand type (LHS or RHS)
-        var operandHandles = new List<SymbolHandle>();
-        if (lhs.Handle is { } lh) operandHandles.Add(lh);
-        if (rhs.Handle is { } rh && !operandHandles.Contains(rh)) operandHandles.Add(rh);
+        var candidateScopes = new List<OperatorCandidateScope>();
+        var seenOwners = new HashSet<SymbolHandle>();
+        void CollectScopes(TypeRef operand)
+        {
+            foreach (var s in GetOperatorCandidateScopes(operand))
+            {
+                var ownerH = ResolutionContext.GetHandle(s.Owner);
+                if (seenOwners.Add(ownerH))
+                    candidateScopes.Add(s);
+            }
+        }
+        CollectScopes(lhs);
+        CollectScopes(rhs);
 
         foreach (var candidate in candidates)
         {
@@ -233,35 +245,29 @@ internal sealed partial class ExpressionResolutionPass
             if (ifaceSym is null)
                 continue;
 
-            foreach (var opHandle in operandHandles)
+            foreach (var candidateScope in candidateScopes)
             {
-                var operandTypeSym = context.GetTypeSymbol(opHandle);
-                if (operandTypeSym is null)
-                    continue;
-
-                var scope = GetOwnedScope(operandTypeSym);
-                foreach (var sym in scope.Symbols.Values)
+                foreach (var sym in candidateScope.Scope.Symbols.Values)
                 {
-                    if (sym is MethodSymbol method && method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    if (sym is not MethodSymbol method ||
+                        method.Parameters.Count != 2 ||
+                        !IsOperatorCandidateMethod(method, ifaceSym, candidate, candidateScope.BaseTypes))
                     {
-                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
-                        {
-                            // Verify parameter types match operands
-                            if (method.Parameters.Count == 2)
-                            {
-                                var p0 = context.GetParameterSymbol(method.Parameters[0]);
-                                var p1 = context.GetParameterSymbol(method.Parameters[1]);
+                        continue;
+                    }
 
-                                if (p0 is not null && p1 is not null &&
-                                    p0.Type.IsAssignableFrom(lhs, context) &&
-                                    p1.Type.IsAssignableFrom(rhs, context))
-                                {
-                                    context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
-                                    result = method.ReturnType;
-                                    return true;
-                                }
-                            }
-                        }
+                    var p0 = context.GetParameterSymbol(method.Parameters[0]);
+                    var p1 = context.GetParameterSymbol(method.Parameters[1]);
+                    if (p0 is null || p1 is null)
+                        continue;
+
+                    var p0Type = SubstituteIfNeeded(p0.Type, candidateScope.TypeArgs);
+                    var p1Type = SubstituteIfNeeded(p1.Type, candidateScope.TypeArgs);
+                    if (p0Type.IsAssignableFrom(lhs, context) && p1Type.IsAssignableFrom(rhs, context))
+                    {
+                        context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
+                        result = SubstituteIfNeeded(method.ReturnType, candidateScope.TypeArgs);
+                        return true;
                     }
                 }
             }
@@ -285,6 +291,16 @@ internal sealed partial class ExpressionResolutionPass
     /// <returns>The resolved semantic type of the unary operation, or <see cref="TypeRef.Error"/> on failure.</returns>
     private TypeRef ResolveUnary(UnaryExpression unary, Scope scope, SymbolHandle containingFunction)
     {
+        if (unary.OperatorToken.Kind == TokenKind.Ampersand &&
+            expectedExpressionTypes.TryGetValue(unary, out var expectedUnaryType))
+        {
+            var unwrappedExpected = TypeRef.UnwrapDyn(expectedUnaryType);
+            if (unwrappedExpected.SpecialType is ReferenceSemanticType expectedRef)
+            {
+                expectedExpressionTypes[unary.Operand] = expectedRef.ElementType;
+            }
+        }
+
         var operand = ResolveExpression(unary.Operand, scope, containingFunction);
         var opKind = GetUnaryOperatorKind(unary.OperatorToken.Kind, unary.Position);
 
@@ -293,6 +309,7 @@ internal sealed partial class ExpressionResolutionPass
 
         bool wasDyn = operand.SpecialType is DynSemanticType;
         operand = TypeRef.UnwrapDyn(operand);
+        bool isOperandReadOnlyAlias = operand.SpecialType is AliasSemanticType { IsMutable: false };
         if (operand.SpecialType is AliasSemanticType operandAlias)
             operand = operandAlias.TargetType;
 
@@ -302,14 +319,25 @@ internal sealed partial class ExpressionResolutionPass
             if (TryResolveUnaryOverload(OperatorKind.AddressOf, operand, unary, out var addrResult))
                 return wasDyn ? TypeRef.Dyn(addrResult, isExplicitDyn: true) : addrResult;
 
-            var refType = TypeRef.Reference(operand);
+            bool isMutableBorrow = !isOperandReadOnlyAlias &&
+                !IsImmutableBorrowOperand(unary.Operand, scope) &&
+                expectedExpressionTypes.TryGetValue(unary, out var expectedAddrType) &&
+                TypeRef.UnwrapDyn(expectedAddrType).SpecialType is ReferenceSemanticType { IsMutable: true };
+            var refType = TypeRef.Reference(operand, isMutable: isMutableBorrow);
             return wasDyn ? TypeRef.Dyn(refType, isExplicitDyn: true) : refType;
         }
 
         if (opKind == OperatorKind.Dereference)
         {
             if (TryResolveUnaryOverload(OperatorKind.Dereference, operand, unary, out var derefResult))
+            {
+                if (TypeRef.UnwrapDyn(derefResult).SpecialType is ReferenceSemanticType derefRef)
+                {
+                    var localAlias = TypeRef.Alias(derefRef.ElementType, isMutable: derefRef.IsMutable);
+                    return derefResult.SpecialType is DynSemanticType || wasDyn ? TypeRef.Dyn(localAlias, isExplicitDyn: true) : localAlias;
+                }
                 return wasDyn ? TypeRef.Dyn(derefResult, isExplicitDyn: true) : derefResult;
+            }
 
             if (operand.SpecialType is ReferenceSemanticType refType)
             {
@@ -433,135 +461,51 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        var opHandle = operand.Handle;
         operand = TypeRef.UnwrapDyn(operand);
-        if (opHandle is null)
-        {
-            if (operand.SpecialType is ReferenceSemanticType refSem)
-            {
-                string req = refSem.IsMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference;
-                if (context.DiscoveredIntrinsics.TryGet(req, out var refH))
-                    opHandle = refH;
-            }
-            else if (operand.SpecialType is PointerSemanticType ptrSem)
-            {
-                string req = ptrSem.IsMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer;
-                if (context.DiscoveredIntrinsics.TryGet(req, out var ptrH))
-                    opHandle = ptrH;
-            }
-            else if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
-                opHandle = hOpt;
-            else if (operand.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
-                opHandle = hArr;
-            else if (operand.Kind == TypeRefKind.Slice && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
-                opHandle = hSlice;
-            else if (operand.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
-                opHandle = hTup;
-        }
-
-        if (opHandle is null)
+        var candidateScopes = GetOperatorCandidateScopes(operand).ToList();
+        if (candidateScopes.Count == 0)
             return false;
 
-        var operandTypeSym = (Symbol?)context.GetTypeSymbol(opHandle.Value) ?? context.GetSymbol(opHandle.Value);
-        if (operandTypeSym is null)
-            return false;
-
-        // Build generic parameter mapping if operand is generic (e.g. Box<T>, Optional<T>, Reference<T>, Pointer<T>)
-        Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
-        if (operand.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
-        {
-            typeArgs = new Dictionary<SymbolHandle, TypeRef>();
-            for (int i = 0; i < tsGen.GenericParameters.Count; i++)
-                typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
-        }
-        else if (operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
-        {
-            if (operand.SpecialType is OptionalSemanticType optSem)
-                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
-            else if (operand.SpecialType is ReferenceSemanticType refSem)
-                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = refSem.ElementType };
-            else if (operand.SpecialType is PointerSemanticType ptrSem)
-                typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = ptrSem.ElementType };
-        }
-
-        IReadOnlyList<TypeRef> baseTypes = operandTypeSym switch
-        {
-            TypeSymbol tSym => tSym.BaseTypes,
-            NestedTypeSymbol nts => nts.BaseTypes,
-            _ => []
-        };
-
-        var scope = GetOwnedScope(operandTypeSym);
         foreach (var candidate in candidates)
         {
             var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
             if (ifaceSym is null)
                 continue;
 
-            foreach (var sym in scope.Symbols.Values)
+            foreach (var candidateScope in candidateScopes)
             {
-                if (sym is MethodSymbol method)
+                foreach (var sym in candidateScope.Scope.Symbols.Values)
                 {
-                    bool isCandidate = false;
-                    if (method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+                    if (sym is not MethodSymbol method ||
+                        !IsOperatorCandidateMethod(method, ifaceSym, candidate, candidateScope.BaseTypes))
                     {
-                        if (method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text))
-                            isCandidate = true;
-                    }
-                    else if (baseTypes.Any(b => b.Handle == candidate.InterfaceHandle))
-                    {
-                        if (context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod &&
-                            method.Name.Text == opMethod.Name.Text)
-                        {
-                            isCandidate = true;
-                        }
+                        continue;
                     }
 
-                    if (isCandidate)
+                    // Check if instance method on receiver or static unary accepting operand
+                    if (method.Parameters.Count == 0)
                     {
-                        // Check if instance method on receiver or static unary accepting operand
-                        if (method.Parameters.Count == 0)
+                        context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
+                        result = SubstituteIfNeeded(method.ReturnType, candidateScope.TypeArgs);
+                        return true;
+                    }
+                    else if (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p)
+                    {
+                        if (p.Syntax?.Declarator.IsReceiver == true)
                         {
+                            bool requiresMut = p.Syntax.Declarator.ReceiverKind is ReceiverKind.MutAlias or ReceiverKind.MutReference or ReceiverKind.MutPointer or ReceiverKind.MutUnsafeAlias;
+                            if (requiresMut && !IsOperandMutableForReceiver(operand))
+                                continue;
+
                             context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
-                            var rawReturn = method.ReturnType;
-                            result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
+                            result = SubstituteIfNeeded(method.ReturnType, candidateScope.TypeArgs);
                             return true;
                         }
-                        else if (method.Parameters.Count == 1 && context.GetParameterSymbol(method.Parameters[0]) is { } p)
+                        else if (SubstituteIfNeeded(p.Type, candidateScope.TypeArgs).IsAssignableFrom(operand, context))
                         {
-                            if (p.Syntax?.Declarator.IsReceiver == true)
-                            {
-                                bool requiresMut = p.Syntax.Declarator.ReceiverKind is ReceiverKind.MutAlias or ReceiverKind.MutReference or ReceiverKind.MutPointer or ReceiverKind.MutUnsafeAlias;
-                                if (requiresMut)
-                                {
-                                    bool isOperandMut = false;
-                                    if (operand.SpecialType is ReferenceSemanticType rSem)
-                                        isOperandMut = rSem.IsMutable;
-                                    else if (operand.SpecialType is PointerSemanticType pSem)
-                                        isOperandMut = pSem.IsMutable;
-                                    else if (operand.SpecialType is AliasSemanticType aSem)
-                                        isOperandMut = aSem.IsMutable;
-                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mpH) && operand.Handle == mpH)
-                                        isOperandMut = true;
-                                    else if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mrH) && operand.Handle == mrH)
-                                        isOperandMut = true;
-
-                                    if (!isOperandMut)
-                                        continue;
-                                }
-
-                                context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
-                                var rawReturn = method.ReturnType;
-                                result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
-                                return true;
-                            }
-                            else if (p.Type.IsAssignableFrom(operand, context))
-                            {
-                                context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
-                                var rawReturn = method.ReturnType;
-                                result = typeArgs is not null ? SubstituteTypeRef(rawReturn, typeArgs) : rawReturn;
-                                return true;
-                            }
+                            context.ResolvedTree.AddReference(syntax, ResolutionContext.GetHandle(method));
+                            result = SubstituteIfNeeded(method.ReturnType, candidateScope.TypeArgs);
+                            return true;
                         }
                     }
                 }
@@ -832,6 +776,164 @@ internal sealed partial class ExpressionResolutionPass
                 return false;
             }
 
+            return true;
+        }
+
+        return false;
+    }
+
+    private sealed record OperatorCandidateScope(
+        Symbol Owner,
+        Scope Scope,
+        IReadOnlyList<TypeRef> BaseTypes,
+        Dictionary<SymbolHandle, TypeRef>? TypeArgs);
+
+    /// <summary>
+    /// Collects the direct type scope and matching visible extension scopes for operator overload lookup.
+    /// </summary>
+    private IEnumerable<OperatorCandidateScope> GetOperatorCandidateScopes(TypeRef operand)
+    {
+        operand = TypeRef.UnwrapDyn(operand);
+        while (operand.SpecialType is AliasSemanticType operandAlias)
+        {
+            operand = operandAlias.TargetType;
+            operand = TypeRef.UnwrapDyn(operand);
+        }
+        var opHandle = operand.Handle;
+        if (opHandle is null)
+        {
+            if (operand.SpecialType is ReferenceSemanticType refSem)
+            {
+                string req = refSem.IsMutable ? KnownIntrinsics.MutableReference : KnownIntrinsics.Reference;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var refH))
+                    opHandle = refH;
+            }
+            else if (operand.SpecialType is PointerSemanticType ptrSem)
+            {
+                string req = ptrSem.IsMutable ? KnownIntrinsics.MutablePointer : KnownIntrinsics.Pointer;
+                if (context.DiscoveredIntrinsics.TryGet(req, out var ptrH))
+                    opHandle = ptrH;
+            }
+            else if (operand.Kind == TypeRefKind.Optional && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Optional, out var hOpt))
+                opHandle = hOpt;
+            else if (operand.Kind == TypeRefKind.Array && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Array, out var hArr))
+                opHandle = hArr;
+            else if (operand.Kind == TypeRefKind.Slice && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Slice, out var hSlice))
+                opHandle = hSlice;
+            else if (operand.Kind == TypeRefKind.Tuple && context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var hTup))
+                opHandle = hTup;
+        }
+
+        if (opHandle is { } oh && ((Symbol?)context.GetTypeSymbol(oh) ?? context.GetSymbol(oh)) is { } operandTypeSym)
+        {
+            Dictionary<SymbolHandle, TypeRef>? typeArgs = null;
+            if (operand.SpecialType is GenericSemanticType gst && operandTypeSym is TypeSymbol tsGen && tsGen.GenericParameters.Count == gst.TypeArguments.Count)
+            {
+                typeArgs = new Dictionary<SymbolHandle, TypeRef>();
+                for (int i = 0; i < tsGen.GenericParameters.Count; i++)
+                    typeArgs[tsGen.GenericParameters[i]] = gst.TypeArguments[i];
+            }
+            else if (operandTypeSym is TypeSymbol ts && ts.GenericParameters.Count == 1)
+            {
+                if (operand.SpecialType is OptionalSemanticType optSem)
+                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = optSem.ElementType };
+                else if (operand.SpecialType is ReferenceSemanticType refSem2)
+                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = refSem2.ElementType };
+                else if (operand.SpecialType is PointerSemanticType ptrSem2)
+                    typeArgs = new Dictionary<SymbolHandle, TypeRef> { [ts.GenericParameters[0]] = ptrSem2.ElementType };
+            }
+
+            IReadOnlyList<TypeRef> baseTypes = operandTypeSym switch
+            {
+                TypeSymbol tSym => tSym.BaseTypes,
+                NestedTypeSymbol nts => nts.BaseTypes,
+                _ => []
+            };
+            yield return new OperatorCandidateScope(operandTypeSym, GetOwnedScope(operandTypeSym), baseTypes, typeArgs);
+        }
+
+        foreach (var ext in context.ExtensionSymbols)
+        {
+            if (ext.TargetTypeRef.IsError || ext.TargetTypeRef.IsUnresolved)
+                continue;
+
+            var extSubs = new Dictionary<SymbolHandle, TypeRef>();
+            if (TryUnifyExtensionTarget(ext.TargetTypeRef, operand, ext.GenericParameters, extSubs))
+                yield return new OperatorCandidateScope(ext, GetOwnedScope(ext), ext.BaseInterfaces, extSubs.Count > 0 ? extSubs : null);
+        }
+    }
+
+    private bool IsOperatorCandidateMethod(
+        MethodSymbol method,
+        TypeSymbol ifaceSym,
+        DiscoveredOperatorMethod candidate,
+        IReadOnlyList<TypeRef> ownerBaseTypes)
+    {
+        if (method.Flags.HasFlag(FunctionFlags.InterfaceScoped))
+            return method.ExplicitInterfaceName is { } ein && (ein.Last.Equals(ifaceSym.Name) || ein.Last.Text == ifaceSym.Name.Text);
+
+        return ownerBaseTypes.Any(b => b.Handle == candidate.InterfaceHandle) &&
+               context.GetMethodSymbol(candidate.MethodHandle) is { } opMethod &&
+               method.Name.Text == opMethod.Name.Text;
+    }
+
+    private TypeRef SubstituteIfNeeded(TypeRef type, Dictionary<SymbolHandle, TypeRef>? typeArgs) =>
+        typeArgs is not null ? SubstituteTypeRef(type, typeArgs) : type;
+
+    private bool IsOperandMutableForReceiver(TypeRef operand)
+    {
+        if (operand.SpecialType is ReferenceSemanticType rSem)
+            return rSem.IsMutable;
+        if (operand.SpecialType is PointerSemanticType pSem)
+            return pSem.IsMutable;
+        if (operand.SpecialType is AliasSemanticType aSem)
+            return aSem.IsMutable;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mpH) && operand.Handle == mpH)
+            return true;
+        if (context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mrH) && operand.Handle == mrH)
+            return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns whether taking the address of <paramref name="expr"/> traverses an immutable alias,
+    /// immutable reference, or immutable pointer projection and therefore cannot yield <c>T mut&amp;</c>.
+    /// </summary>
+    private bool IsImmutableBorrowOperand(Expression expr, Scope scope)
+    {
+        while (expr is ParenthesizedExpression paren)
+            expr = paren.Expression;
+
+        if (context.GetExpressionType(expr) is { } exprType &&
+            TypeRef.UnwrapDyn(exprType).SpecialType is AliasSemanticType { IsMutable: false })
+        {
+            return true;
+        }
+
+        if (expr is MemberAccessExpression mae)
+        {
+            if (mae.Dot.Kind == TokenKind.MinusGreaterThan)
+            {
+                if (context.GetExpressionType(mae.Expression) is { } recvType &&
+                    TryResolveIndirectMemberAccessOperator(recvType, out var arrowRet) &&
+                    TypeRef.UnwrapDyn(arrowRet).SpecialType is ReferenceSemanticType { IsMutable: false }
+                        or PointerSemanticType { IsMutable: false }
+                        or AliasSemanticType { IsMutable: false })
+                {
+                    return true;
+                }
+            }
+            else if (IsImmutableBorrowOperand(mae.Expression, scope))
+            {
+                return true;
+            }
+        }
+        else if (expr is NamedExpression { Identifier.MatchingKind: MatchingKeywordKind.This } named &&
+                 context.ResolvedTree.TryGetReference(named, out var thisH) &&
+                 context.GetParameterSymbol(thisH) is { } thisParam &&
+                 TypeRef.UnwrapDyn(thisParam.Type).SpecialType is ReferenceSemanticType { IsMutable: false }
+                     or PointerSemanticType { IsMutable: false })
+        {
             return true;
         }
 

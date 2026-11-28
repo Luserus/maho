@@ -188,7 +188,7 @@ public sealed class LifetimeAnalysisTests
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public struct Resource : Destructor
             {
-                public func Drop(mut &this) -> () {}
+                public func Drop(this mut&) -> () {}
             }
 
             public func Consume(Resource resource) -> () {}
@@ -205,11 +205,11 @@ public sealed class LifetimeAnalysisTests
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public struct Box { int32 value; }
 
-            public func Escape() -> &Box
+            public func Escape() -> Box&
             {
                 Box local;
                 &Box alias = local;
-                return alias;
+                return &alias;
             }
             """);
 
@@ -379,7 +379,7 @@ public sealed class LifetimeAnalysisTests
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
             public struct Resource : Destructor
             {
-                public func Drop(mut &this) -> () {}
+                public func Drop(this mut&) -> () {}
             }
 
             public struct Pair
@@ -430,9 +430,9 @@ public sealed class LifetimeAnalysisTests
             public struct Counter
             {
                 public int32 count;
-                public func Increment(mut &this) -> ()
+                public func Increment(this mut&) -> ()
                 {
-                    this.count = 42;
+                    this->count = 42;
                 }
             }
 
@@ -471,7 +471,7 @@ public sealed class LifetimeAnalysisTests
     public void TemporaryBorrow_EscapingReturn_ReportsMH1008()
     {
         var compilation = Compilation.FromSource(CompilerTestBed.FullPrelude + """
-            public func Test() -> &int32
+            public func Test() -> int32&
             {
                 return &42;
             }

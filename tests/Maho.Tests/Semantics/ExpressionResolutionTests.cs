@@ -13,9 +13,9 @@ public sealed partial class ExpressionResolutionTests
         [IntrinsicType("Unsized")]
         public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
 
         [IntrinsicType("Bool")]
@@ -98,11 +98,34 @@ public sealed partial class ExpressionResolutionTests
         [IntrinsicType("Metadata")]
         public struct Metadata<T> where T : Layout;
 
+        public interface Deref<TReturn>
+        {
+            [OperatorFunction("Dereference")]
+            func Deref(this&) -> TReturn;
+        }
+
+        public interface Arrow<TReturn>
+        {
+            [OperatorFunction("IndirectMemberAccess")]
+            func Arrow(this&) -> TReturn;
+        }
+
         [IntrinsicType("Reference")]
-        public struct Reference<T> where T : Layout
+        public struct Reference<T> : Arrow<T&>, Deref<T&> where T : Layout
         {
             nuint raw;
             Metadata<T> metadata;
+            [IntrinsicFunction("Reference.Deref()")] func Deref.Deref(this&) -> T&;
+            func Arrow.Arrow(this&) -> T& { return &(*(*this)); }
+        }
+
+        [IntrinsicType("MutableReference")]
+        public struct MutableReference<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
+        {
+            nuint raw;
+            Metadata<T> metadata;
+            [IntrinsicFunction("MutableReference.Deref()")] func Deref.Deref(this&) -> T mut&;
+            func Arrow.Arrow(this&) -> T mut& { return &(*(*this)); }
         }
 
         [IntrinsicType("Str")]
@@ -110,7 +133,7 @@ public sealed partial class ExpressionResolutionTests
         {
             uint8[] data;
         }
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
         [IntrinsicType("Pointer")]
         public struct Pointer<T> where T : Layout
@@ -128,29 +151,29 @@ public sealed partial class ExpressionResolutionTests
         public interface Deconstruct<T...>
         {
             [OperatorFunction("Deconstruct")]
-            func Deconstruct(&this) -> Tuple<T...>;
+            func Deconstruct(this&) -> Tuple<T...>;
         }
 
         public interface DeconstructMut<T...>
         {
             [OperatorFunction("DeconstructMut")]
-            func Deconstruct(mut &this) -> Tuple<T...>;
+            func Deconstruct(this mut&) -> Tuple<T...>;
         }
 
         [IntrinsicType("Tuple")]
         public struct Tuple<T...> : ValType, Deconstruct<T...>, DeconstructMut<T...>
         {
             [IntrinsicFunction("Tuple.Deconstruct()")]
-            func Deconstruct.Deconstruct(&this) -> Tuple<T...>;
+            func Deconstruct.Deconstruct(this&) -> Tuple<T...>;
 
             [IntrinsicFunction("Tuple.DeconstructMut()")]
-            func DeconstructMut.Deconstruct(mut &this) -> Tuple<T...>;
+            func DeconstructMut.Deconstruct(this mut&) -> Tuple<T...>;
         }
 
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
@@ -158,17 +181,9 @@ public sealed partial class ExpressionResolutionTests
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
         }
 
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
         """;
 
     [Fact]

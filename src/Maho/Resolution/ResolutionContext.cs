@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Maho.Diagnostics;
 using Maho.Resolution.Ownership;
 using Maho.Syntax;
+using Maho.Text;
 
 namespace Maho.Resolution;
 
@@ -130,7 +131,26 @@ internal sealed class ResolutionContext
     private readonly Dictionary<SymbolHandle, OwnershipFacts> ownershipFacts = [];
     private readonly Dictionary<string, Dictionary<SyntaxNode, SymbolHandle>> treeNodeSymbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<Expression, TypeRef>> treeExpressionTypes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<LiteralExpression, Text.ResolvedLiteralInfo>> treeLiteralInfos = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<LiteralExpression, Text.ResolvedLiteralInfo> literalInfos = [];
     private readonly Dictionary<Expression, ConstantValue> constantValues = [];
+
+    public void SetLiteralInfo(LiteralExpression literal, Text.ResolvedLiteralInfo info)
+    {
+        literalInfos[literal] = info;
+        if (CurrentTreeFilePath != null)
+        {
+            if (!treeLiteralInfos.TryGetValue(CurrentTreeFilePath, out var dict))
+            {
+                dict = [];
+                treeLiteralInfos[CurrentTreeFilePath] = dict;
+            }
+            dict[literal] = info;
+        }
+    }
+
+    public bool TryGetLiteralInfo(LiteralExpression literal, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Maho.Text.ResolvedLiteralInfo? info) =>
+        literalInfos.TryGetValue(literal, out info);
 
     public void SetConstantValue(Expression expr, ConstantValue value) => constantValues[expr] = value;
     public bool TryGetConstantValue(Expression expr, out ConstantValue value) => constantValues.TryGetValue(expr, out value);
@@ -495,7 +515,9 @@ internal sealed class ResolutionContext
         Accessibility accessibility,
         SymbolHandle ownerHandle,
         bool isExtension,
-        BaseTypeItemSyntax? syntax)
+        BaseTypeItemSyntax? syntax,
+        TypeRef? derivedInterfaceTemplate = null,
+        SymbolHandle? inheritedFromTypeHandle = null)
     {
         var unwrappedTargetH = targetType.Handle is { } th ? UnwrapAlias(th) : default;
         var unwrappedIfaceH = UnwrapAlias(interfaceHandle);
@@ -509,7 +531,9 @@ internal sealed class ResolutionContext
             isExtension,
             ModuleName,
             ProjectId,
-            syntax);
+            syntax,
+            derivedInterfaceTemplate,
+            inheritedFromTypeHandle);
 
         Conformances.Add(conformance);
         if (unwrappedTargetH != default)
@@ -676,7 +700,26 @@ internal sealed class ResolutionContext
             }
         }
 
+        if (TypeRef.TryGetExplicitConformance(expectedInterfaceType, out var destExplicitConf))
+        {
+            if (destExplicitConf.InterfaceHandle == ifaceH || TypeRef.IsSubtypeOf(destExplicitConf.InterfaceHandle, ifaceH, this))
+            {
+                if (!IsConformanceAccessible(destExplicitConf, enclosingOwner))
+                    return new(ConformanceLookupStatus.Inaccessible, destExplicitConf);
+                return new(ConformanceLookupStatus.Found, destExplicitConf);
+            }
+        }
+
         var concreteTarget = UnwrapConcreteTarget(sourceType);
+        if (concreteTarget.SpecialType is FunctionSemanticType srcFuncType &&
+            DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var funcIntrinsicHandle))
+        {
+            concreteTarget = TypeRef.Generic(
+                funcIntrinsicHandle,
+                KnownIntrinsics.Function,
+                [srcFuncType.ReturnType, .. srcFuncType.ParameterTypes]);
+        }
+
         if (concreteTarget.Handle is not { } rawTargetH)
             return new(ConformanceLookupStatus.NotApplicable, null);
 
@@ -715,17 +758,12 @@ internal sealed class ResolutionContext
                         NestedTypeSymbol nts => nts.GenericParameters,
                         _ => []
                     };
-                    if (tGps.Count == actualTargetGen.TypeArguments.Count)
-                    {
-                        var subst = new Dictionary<SymbolHandle, TypeRef>(tGps.Count);
-                        for (int gi = 0; gi < tGps.Count; gi++)
-                            subst[tGps[gi]] = actualTargetGen.TypeArguments[gi];
-                        if (c.InterfaceType.Substitute(subst).SpecialType is GenericSemanticType subGen)
-                            effectiveConfGen = subGen;
-                    }
+                    var subst = BuildGenericSubstitutionForVariadic(tGps, actualTargetGen.TypeArguments);
+                    if (subst is not null && c.InterfaceType.Substitute(subst).SpecialType is GenericSemanticType subGen)
+                        effectiveConfGen = subGen;
                 }
 
-                if (!effectiveConfGen.Equals(expectedGen))
+                if (!AreGenericArgListsEqualForConformance(effectiveConfGen.TypeArguments, expectedGen.TypeArguments))
                     continue;
             }
 
@@ -834,6 +872,69 @@ internal sealed class ResolutionContext
         {
             if (GetTypeSymbol(bh) is { TypeKind: not TypeKind.Interface })
                 CollectConformancesForTarget(bh, results);
+        }
+    }
+
+    private Dictionary<SymbolHandle, TypeRef>? BuildGenericSubstitutionForVariadic(
+        IReadOnlyList<SymbolHandle> genericParams,
+        IReadOnlyList<TypeRef> typeArguments)
+    {
+        if (genericParams.Count == 0)
+            return null;
+
+        bool hasVariadic = (GetSymbol(genericParams[^1]) as GenericParameterSymbol)?.IsVariadic == true;
+        if (genericParams.Count == typeArguments.Count && !hasVariadic)
+        {
+            var subst = new Dictionary<SymbolHandle, TypeRef>(genericParams.Count);
+            for (int i = 0; i < genericParams.Count; i++)
+                subst[genericParams[i]] = typeArguments[i];
+            return subst;
+        }
+
+        if (hasVariadic && typeArguments.Count >= genericParams.Count - 1)
+        {
+            var subst = new Dictionary<SymbolHandle, TypeRef>(genericParams.Count);
+            int fixedCount = genericParams.Count - 1;
+            for (int i = 0; i < fixedCount; i++)
+                subst[genericParams[i]] = typeArguments[i];
+            var variadicArgs = new List<TupleElement>(typeArguments.Count - fixedCount);
+            for (int i = fixedCount; i < typeArguments.Count; i++)
+                variadicArgs.Add(new TupleElement(typeArguments[i], null));
+            DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupH);
+            subst[genericParams[^1]] = TypeRef.Tuple(variadicArgs, tupH != default ? tupH : null);
+            return subst;
+        }
+
+        return null;
+    }
+
+    private static bool AreGenericArgListsEqualForConformance(
+        IReadOnlyList<TypeRef> actualArgs,
+        IReadOnlyList<TypeRef> expectedArgs)
+    {
+        var flatActual = FlattenVariadicTrailingTuple(actualArgs);
+        var flatExpected = FlattenVariadicTrailingTuple(expectedArgs);
+        if (flatActual.Count != flatExpected.Count)
+            return false;
+        for (int i = 0; i < flatActual.Count; i++)
+        {
+            if (!flatActual[i].Equals(flatExpected[i]))
+                return false;
+        }
+        return true;
+
+        static List<TypeRef> FlattenVariadicTrailingTuple(IReadOnlyList<TypeRef> args)
+        {
+            if (args.Count > 0 && args[^1].SpecialType is TupleSemanticType tup)
+            {
+                var list = new List<TypeRef>(args.Count - 1 + tup.Elements.Count);
+                for (int i = 0; i < args.Count - 1; i++)
+                    list.Add(args[i]);
+                foreach (var elem in tup.Elements)
+                    list.Add(elem.Type);
+                return list;
+            }
+            return [.. args];
         }
     }
 
@@ -1077,7 +1178,9 @@ internal sealed class ResolutionContext
         Scope scope,
         SymbolHandle containingFunction,
         bool reportDiagnostics,
-        bool isConformanceOrConstraintContext = false)
+        bool isConformanceOrConstraintContext = false,
+        SyntaxNode? fallbackSyntax = null,
+        IReadOnlyDictionary<SymbolHandle, TypeRef>? initialSubst = null)
     {
         var targetSym = GetSymbol(targetHandle);
         IReadOnlyList<SymbolHandle> genericParams = targetSym switch
@@ -1091,13 +1194,21 @@ internal sealed class ResolutionContext
         };
 
         string targetName = GetTargetDisplayName(this, targetHandle);
-        int count = Math.Min(genericParams.Count, Math.Min(argSyntaxes.Count, resolvedArgs.Count));
-        var genericArgSubst = new Dictionary<SymbolHandle, TypeRef>(count);
+        int count = fallbackSyntax is not null
+            ? Math.Min(genericParams.Count, resolvedArgs.Count)
+            : Math.Min(genericParams.Count, Math.Min(argSyntaxes.Count, resolvedArgs.Count));
+        var genericArgSubst = initialSubst is not null
+            ? new Dictionary<SymbolHandle, TypeRef>(initialSubst)
+            : new Dictionary<SymbolHandle, TypeRef>(count);
         for (int s = 0; s < count; s++)
         {
             if (!resolvedArgs[s].IsError && !resolvedArgs[s].IsUnresolved)
                 genericArgSubst[genericParams[s]] = resolvedArgs[s];
         }
+
+        SyntaxNode? GetArgSite(int index) => index < argSyntaxes.Count ? argSyntaxes[index] : fallbackSyntax;
+        TextSpan GetArgSpan(int index) => GetArgSite(index)?.GetSpan() ?? default;
+        Text.SourceText? GetArgSource(int index) => GetArgSite(index)?.GetSource();
 
         for (int i = 0; i < count; i++)
         {
@@ -1114,12 +1225,12 @@ internal sealed class ResolutionContext
                 if (reportDiagnostics)
                 {
                     Diagnostics.ReportGenericConstraintNotSized(
-                        argSyntaxes[i].GetSpan() ?? default,
+                        GetArgSpan(i),
                         argType.ToDisplayString(this),
                         gp.Name.ToString(),
                         targetName,
                         "Sized",
-                        argSyntaxes[i].GetSource());
+                        GetArgSource(i));
                 }
                 continue;
             }
@@ -1129,12 +1240,12 @@ internal sealed class ResolutionContext
                 if (reportDiagnostics)
                 {
                     Diagnostics.ReportGenericConstraintNotSized(
-                        argSyntaxes[i].GetSpan() ?? default,
+                        GetArgSpan(i),
                         argType.ToDisplayString(this),
                         gp.Name.ToString(),
                         targetName,
                         "Unsized",
-                        argSyntaxes[i].GetSource());
+                        GetArgSource(i));
                 }
                 continue;
             }
@@ -1164,11 +1275,11 @@ internal sealed class ResolutionContext
                         if (!satisfied && reportDiagnostics)
                         {
                             Diagnostics.ReportDefaultGenericConstraintViolation(
-                                argSyntaxes[i].GetSpan() ?? default,
+                                GetArgSpan(i),
                                 gp.Name.Text,
                                 argType.ToDisplayString(this),
                                 expectedIface.ToDisplayString(this),
-                                argSyntaxes[i].GetSource());
+                                GetArgSource(i));
                         }
                     }
                     else
@@ -1176,38 +1287,39 @@ internal sealed class ResolutionContext
                         var thisLookup = ResolveInterfaceConformance(argType, expectedIface, explicitModuleQualifier: null, scope, containingFunction);
                         if (thisLookup.Status == ConformanceLookupStatus.Found)
                         {
-                            ResolvedTree.AddConformance(argSyntaxes[i], thisLookup.Conformance!);
+                            if (GetArgSite(i) is { } siteNode)
+                                ResolvedTree.AddConformance(siteNode, thisLookup.Conformance!);
                         }
                         else if (reportDiagnostics)
                         {
                             if (thisLookup.Status == ConformanceLookupStatus.Inaccessible)
                             {
                                 Diagnostics.ReportInaccessibleInterfaceConformance(
-                                    argSyntaxes[i].GetSpan() ?? default,
+                                    GetArgSpan(i),
                                     argType.ToDisplayString(this),
                                     thisLookup.Conformance!.InterfaceType.ToDisplayString(this),
                                     thisLookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
-                                    argSyntaxes[i].GetSource());
+                                    GetArgSource(i));
                             }
                             else if (thisLookup.Status == ConformanceLookupStatus.Ambiguous)
                             {
                                 var mods = thisLookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList();
                                 Diagnostics.ReportAmbiguousInterfaceConformance(
-                                    argSyntaxes[i].GetSpan() ?? default,
+                                    GetArgSpan(i),
                                     argType.ToDisplayString(this),
                                     expectedIface.ToDisplayString(this),
                                     mods,
-                                    argSyntaxes[i].GetSource());
+                                    GetArgSource(i));
                             }
                             else
                             {
                                 Diagnostics.ReportThisGenericArgumentMismatch(
-                                    argSyntaxes[i].GetSpan() ?? default,
+                                    GetArgSpan(i),
                                     gp.Name.Text,
                                     targetName,
                                     argType.ToDisplayString(this),
                                     expectedIface.ToDisplayString(this),
-                                    argSyntaxes[i].GetSource());
+                                    GetArgSource(i));
                             }
                         }
                     }
@@ -1231,12 +1343,12 @@ internal sealed class ResolutionContext
                     if (!trSatisfied && reportDiagnostics)
                     {
                         Diagnostics.ReportGenericConstraintViolation(
-                            argSyntaxes[i].GetSpan() ?? default,
+                            GetArgSpan(i),
                             argType.ToDisplayString(this),
                             gp.Name.Text,
                             targetName,
                             constraint.ToDisplayString(this),
-                            argSyntaxes[i].GetSource());
+                            GetArgSource(i));
                     }
                     continue;
                 }
@@ -1245,36 +1357,37 @@ internal sealed class ResolutionContext
                 var lookup = ResolveInterfaceConformance(argType, effectiveConstraint, explicitModuleQualifier: null, scope, containingFunction);
                 if (lookup.Status == ConformanceLookupStatus.Found)
                 {
-                    ResolvedTree.AddConformance(argSyntaxes[i], lookup.Conformance!);
+                    if (GetArgSite(i) is { } siteNode)
+                        ResolvedTree.AddConformance(siteNode, lookup.Conformance!);
                 }
                 else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.Inaccessible)
                 {
                     Diagnostics.ReportInaccessibleInterfaceConformance(
-                        argSyntaxes[i].GetSpan() ?? default,
+                        GetArgSpan(i),
                         TypeRef.UnwrapConformance(argType).ToDisplayString(this),
                         lookup.Conformance!.InterfaceType.ToDisplayString(this),
                         lookup.Conformance.Accessibility.ToString().ToLowerInvariant(),
-                        argSyntaxes[i].GetSource());
+                        GetArgSource(i));
                 }
                 else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.Ambiguous)
                 {
                     var mods = lookup.AmbiguousCandidates!.Select(c => c.ModuleName).Distinct().ToList();
                     Diagnostics.ReportAmbiguousInterfaceConformance(
-                        argSyntaxes[i].GetSpan() ?? default,
+                        GetArgSpan(i),
                         TypeRef.UnwrapConformance(argType).ToDisplayString(this),
                         effectiveConstraint.ToDisplayString(this),
                         mods,
-                        argSyntaxes[i].GetSource());
+                        GetArgSource(i));
                 }
                 else if (reportDiagnostics && lookup.Status == ConformanceLookupStatus.NotFound)
                 {
                     Diagnostics.ReportGenericConstraintViolation(
-                        argSyntaxes[i].GetSpan() ?? default,
+                        GetArgSpan(i),
                         TypeRef.UnwrapConformance(argType).ToDisplayString(this),
                         gp.Name.Text,
                         targetName,
                         effectiveConstraint.ToDisplayString(this),
-                        argSyntaxes[i].GetSource());
+                        GetArgSource(i));
                 }
                 else if (reportDiagnostics &&
                          !isConformanceOrConstraintContext &&
@@ -1290,12 +1403,12 @@ internal sealed class ResolutionContext
                     if (!satisfiedByGp)
                     {
                         Diagnostics.ReportGenericConstraintViolation(
-                            argSyntaxes[i].GetSpan() ?? default,
+                            GetArgSpan(i),
                             argType.ToDisplayString(this),
                             gp.Name.Text,
                             targetName,
                             effectiveConstraint.ToDisplayString(this),
-                            argSyntaxes[i].GetSource());
+                            GetArgSource(i));
                     }
                 }
             }
@@ -1432,7 +1545,7 @@ internal sealed class ResolutionContext
         SymbolID id = isSink ? new SymbolID(sinkID--) : typeID++;
         TypeSymbol symbol;
 
-        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Interface)
             symbol = new ProductTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
         else
             symbol = new SumTypeSymbol(id, enclosingScope, name, typeKind, containingNamespace, syntax);
@@ -1456,7 +1569,7 @@ internal sealed class ResolutionContext
         SymbolID id = isSink ? new SymbolID(sinkID--) : nestedTypeID++;
         MemberTypeSymbol symbol;
 
-        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Interface)
             symbol = new MemberProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
         else
             symbol = new MemberSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
@@ -1480,7 +1593,7 @@ internal sealed class ResolutionContext
         SymbolID id = isSink ? new SymbolID(sinkID--) : nestedTypeID++;
         LocalTypeSymbol symbol;
 
-        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Delegate or TypeKind.Interface)
+        if (typeKind is TypeKind.Struct or TypeKind.Class or TypeKind.Interface)
             symbol = new LocalProductTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
         else
             symbol = new LocalSumTypeSymbol(id, enclosingScope, name, typeKind, parent, syntax);
@@ -2385,9 +2498,6 @@ internal sealed class ResolutionContext
         if (typeRef.Kind == TypeRefKind.Function)
             return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) ? fnH : null;
 
-        if (typeRef.Kind == TypeRefKind.Delegate)
-            return DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) ? delH : null;
-
         if (!typeRef.IsResolved || typeRef.Handle is not { } handle)
             return null;
 
@@ -2509,12 +2619,13 @@ internal sealed class ResolutionContext
     };
 
     /// <summary>
-    /// Extracts AST-to-symbol, expression-to-type, and CFG bindings belonging to a specific syntax tree from the global resolution context.
+    /// Extracts AST-to-symbol, expression-to-type, literal escape metadata, and CFG bindings belonging to a specific syntax tree from the global resolution context.
     /// </summary>
     /// <param name="tree">The syntax tree whose local bindings should be extracted.</param>
-    /// <returns>A tuple containing node symbols, expression types, and control flow graphs for the syntax tree.</returns>
+    /// <returns>A tuple containing node symbols, expression types, literal escape info, and control flow graphs for the syntax tree.</returns>
     public (Dictionary<SyntaxNode, SymbolHandle> NodeSymbols,
             Dictionary<Expression, TypeRef> ExpressionTypes,
+            Dictionary<LiteralExpression, Maho.Text.ResolvedLiteralInfo> LiteralInfos,
             Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph> ControlFlowGraphs) ExtractTreeBindings(SyntaxTree tree)
     {
         var nodeSymbols = treeNodeSymbols.TryGetValue(tree.FilePath, out var nodes)
@@ -2522,6 +2633,9 @@ internal sealed class ResolutionContext
             : [];
         var exprTypes = treeExpressionTypes.TryGetValue(tree.FilePath, out var exprs)
             ? new Dictionary<Expression, TypeRef>(exprs)
+            : [];
+        var literals = treeLiteralInfos.TryGetValue(tree.FilePath, out var lits)
+            ? new Dictionary<LiteralExpression, Maho.Text.ResolvedLiteralInfo>(lits)
             : [];
         var cfgs = new Dictionary<SymbolHandle, ControlFlow.ControlFlowGraph>();
 
@@ -2534,7 +2648,7 @@ internal sealed class ResolutionContext
             }
         }
 
-        return (nodeSymbols, exprTypes, cfgs);
+        return (nodeSymbols, exprTypes, literals, cfgs);
     }
 
     /// <summary>
@@ -2564,6 +2678,17 @@ internal sealed class ResolutionContext
         {
             expressionTypes[expr] = type;
             exprs[expr] = type;
+        }
+
+        if (!treeLiteralInfos.TryGetValue(path, out var lits))
+        {
+            lits = [];
+            treeLiteralInfos[path] = lits;
+        }
+        foreach (var (lit, info) in model.LiteralInfos)
+        {
+            literalInfos[lit] = info;
+            lits[lit] = info;
         }
 
         foreach (var (handle, cfg) in model.ControlFlowGraphs)
@@ -2832,7 +2957,6 @@ internal sealed class ResolutionContext
             case TupleType:
             case UniformTupleType:
             case FunctionTypeSyntax:
-            case DelegateTypeSyntax:
             case UnionType:
             case LiteralGenericArgument:
                 parts.Add(new SymbolPart(string.Empty));
@@ -2840,6 +2964,10 @@ internal sealed class ResolutionContext
 
             case NamedExpressionGenericArgument named:
                 parts.Add(new SymbolPart(named.Expression.Identifier));
+                break;
+
+            case DerivedGenericArgumentSyntax derivedArg:
+                AddTypeNameParts(derivedArg.TargetType, parts);
                 break;
 
             default:

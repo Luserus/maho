@@ -9,11 +9,11 @@ public sealed class LambdaExpressionTests
         [IntrinsicType("Sized")] public interface Sized : Layout;
         [IntrinsicType("Unsized")] public interface Unsized : Layout;
 
-        intrinsic attribute IntrinsicType(&Str name);
+        intrinsic attribute IntrinsicType(Str& name);
 
-        intrinsic attribute IntrinsicFunction(&Str signature);
+        intrinsic attribute IntrinsicFunction(Str& signature);
 
-        intrinsic attribute OperatorFunction(&Str name);
+        intrinsic attribute OperatorFunction(Str& name);
 
         [IntrinsicType("UInt8")] public struct uint8;
         [IntrinsicType("Int8")] public struct int8;
@@ -56,24 +56,31 @@ public sealed class LambdaExpressionTests
         public interface Callable<TReturn, TParams...>
         {
             [OperatorFunction("Callable")]
-            func Invoke(&this, TParams args) -> TReturn;
+            func Invoke(this&, TParams args) -> TReturn;
+        }
+
+        public interface CallableMut<TReturn, TParams...>
+        {
+            [OperatorFunction("CallableMut")]
+            func Invoke(this mut&, TParams args) -> TReturn;
+        }
+
+        public interface CallableOnce<TReturn, TParams...>
+        {
+            [OperatorFunction("CallableOnce")]
+            func Invoke(this, TParams args) -> TReturn;
         }
 
         [IntrinsicType("Function")]
-        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
+        public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>, CallableMut<TReturn, TParams...>, CallableOnce<TReturn, TParams...>
         {
             nuint codeAddress;
             [IntrinsicFunction("Function.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
-        }
-
-        [IntrinsicType("Delegate")]
-        public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-        {
-            nuint codeAddress;
-            Pointer<ValType> env;
-            [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-            func Callable.Invoke(&this, TParams args) -> TReturn;
+            func Callable.Invoke(this&, TParams args) -> TReturn;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            func CallableMut.Invoke(this mut&, TParams args) -> TReturn;
+            [IntrinsicFunction("Function.Invoke(TParams...)")]
+            func CallableOnce.Invoke(this, TParams args) -> TReturn;
         }
         """;
 
@@ -131,21 +138,23 @@ public sealed class LambdaExpressionTests
     }
 
     [Fact]
-    public void Lambda_Capturing_InfersDelegateType()
+    public void Lambda_Capturing_SynthesizesClosureStruct()
     {
         var compilation = Compilation.FromSource($$"""
             {{StdPrelude}}
 
             public struct Host
             {
-                public func Test(int32 captured) -> ()
+                public func Test(int32 captured) -> int32
                 {
-                    delegate(int32) -> int32 d = x => captured;
+                    var d = (int32 x) => captured;
+                    return d(5);
                 }
             }
             """);
 
-        Assert.False(compilation.HasErrors);
+        Assert.False(compilation.HasErrors, string.Join("\n", compilation.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
+        Assert.Contains(compilation.Context!.TypeSymbols, t => t.Name.Text.StartsWith("__Closure_"));
     }
 
     [Fact]

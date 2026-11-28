@@ -15,7 +15,7 @@ public sealed class ScriptingTests
                 [IntrinsicType("Layout")] interface Layout;
                 [IntrinsicType("Sized")] interface Sized : Layout;
                 [IntrinsicType("Unsized")] interface Unsized : Layout;
-                attribute IntrinsicType(&Str name);
+                attribute IntrinsicType(Str& name);
                 [IntrinsicType("UInt8")] struct UInt8;
                 [IntrinsicType("Int8")] struct Int8;
                 [IntrinsicType("Int64")] struct Int64;

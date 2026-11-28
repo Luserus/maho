@@ -49,10 +49,11 @@ internal sealed partial class IntrinsicDiscoveryPass
             return;
         }
 
-        if (!TryExtractLiteralSpan(app.Arguments[0], out var nameSpan) || !KnownIntrinsics.TryGetOperatorKind(nameSpan, out var opKind))
+        string? opName = ExtractLiteralString(app.Arguments[0]);
+        if (opName is null || !KnownIntrinsics.TryGetOperatorKind(opName.AsSpan(), out var opKind))
         {
             var span = app.Arguments[0].GetSpan() ?? default;
-            string displayVal = nameSpan.Length > 0 ? nameSpan.ToString() : (app.Arguments[0].ToString() ?? "");
+            string displayVal = opName ?? app.Arguments[0].ToString() ?? "";
             context.Diagnostics.ReportInvalidOperatorFunctionSignature(span, displayVal, $"unknown operator function '{displayVal}'", method.Syntax?.GetSource());
             return;
         }
@@ -171,7 +172,7 @@ internal sealed partial class IntrinsicDiscoveryPass
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors cannot accept parameters", source);
                     return;
                 }
-                if (method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.MutAlias or ReceiverKind.MutReference }])
+                if (method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.MutReference }])
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "destructors must take a 'mut &this' receiver", source);
                     return;
@@ -346,44 +347,6 @@ internal sealed partial class IntrinsicDiscoveryPass
                 }
                 break;
 
-            // Put
-            case OperatorKind.Put:
-                if (hasReceiver && method.Syntax?.Signature.Parameters[0].Declarator.ReceiverKind is not (ReceiverKind.MutAlias or ReceiverKind.MutReference))
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "instance 'Put' operator must take a 'mut &this' receiver", source);
-                    return;
-                }
-                if (isVoidReturn)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
-                    return;
-                }
-                break;
-
-            // AllocDeref
-            case OperatorKind.AllocDeref:
-                if (isStatic)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
-                    return;
-                }
-                if (paramCount != 0)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "cannot accept parameters", source);
-                    return;
-                }
-                if (hasReceiver && method.Syntax?.Signature.Parameters[0].Declarator.ReceiverKind is not (ReceiverKind.MutAlias or ReceiverKind.MutReference))
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "instance 'AllocDeref' operator must take a 'mut &this' receiver", source);
-                    return;
-                }
-                if (isVoidReturn)
-                {
-                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "return type cannot be void", source);
-                    return;
-                }
-                break;
-
             // Copy
             case OperatorKind.Copy:
             // Move
@@ -393,7 +356,7 @@ internal sealed partial class IntrinsicDiscoveryPass
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must accept exactly 2 parameters (dest, source)", source);
                     return;
                 }
-                if (hasReceiver && method.Syntax?.Signature.Parameters[0].Declarator.ReceiverKind is not (ReceiverKind.MutAlias or ReceiverKind.MutReference))
+                if (hasReceiver && method.Syntax?.Signature.Parameters[0].Declarator.ReceiverKind is not ReceiverKind.MutReference)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, $"instance '{fullName}' operator must take a 'mut &this' receiver", source);
                     return;
@@ -407,9 +370,23 @@ internal sealed partial class IntrinsicDiscoveryPass
 
             // Callable
             case OperatorKind.Callable:
+            case OperatorKind.CallableMut:
+            case OperatorKind.CallableOnce:
                 if (isStatic)
                 {
                     context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "must be declared as an instance method", source);
+                    return;
+                }
+                if (opKind == OperatorKind.CallableMut &&
+                    method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.MutReference }, ..])
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "receiver parameter must be 'this mut&'", source);
+                    return;
+                }
+                if (opKind == OperatorKind.CallableOnce &&
+                    method.Syntax?.Signature.Parameters is not [{ Declarator.ReceiverKind: ReceiverKind.Value }, ..])
+                {
+                    context.Diagnostics.ReportInvalidOperatorFunctionSignature(sigSpan, fullName, "receiver parameter must be 'this'", source);
                     return;
                 }
                 break;

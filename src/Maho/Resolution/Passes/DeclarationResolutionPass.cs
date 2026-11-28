@@ -26,7 +26,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private ResolutionContext context = null!;
     private Symbol? currentTypeSymbol;
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
-    private readonly Dictionary<(TypeSyntax, Scope, bool, bool), TypeRef> resolvedTypes = [];
+    private readonly Dictionary<(TypeSyntax, Scope, bool, bool, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
@@ -74,6 +74,12 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             ResolveAlias(alias);
         }
 
+        foreach (var field in context.FieldSymbols)
+        {
+            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
+            ResolveVariable(field, field.Syntax);
+        }
+
         foreach (var function in context.FunctionSymbols)
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(function));
@@ -108,12 +114,6 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         {
             context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(constant));
             ResolveConstant(constant);
-        }
-
-        foreach (var field in context.FieldSymbols)
-        {
-            context.CurrentTreeFilePath = context.GetSymbolTreeFilePath(ResolutionContext.GetHandle(field));
-            ResolveVariable(field, field.Syntax);
         }
 
         foreach (var local in context.LocalVariableSymbols)
@@ -224,8 +224,10 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         CheckDuplicateVariables();
         CheckDuplicateProperties();
         ValidateModuleConformanceUniqueness();
+        SynthesizeDerivedConformances();
         ValidateInterfaceImplementations();
         ValidateModifiers();
+        ValidateMethodOverrides();
         ValidateThisGenericParameters();
         ValidateGenericParameterDefaults();
         ValidateMainEntryPoints();
@@ -409,7 +411,19 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         for (int i = 0; i < baseClause.BaseTypes.Count; i++)
         {
             var item = baseClause.BaseTypes[i];
-            var baseRef = ResolveType(item.Type, scope, isTraitBoundContext: true, implicitThisTarget: ownerTargetType, isConformanceOrConstraintContext: true);
+            bool hasDerivedSyntax = ContainsDerivedGenericArgument(item.Type);
+            TypeRef baseRef;
+            activeDerivedBaseContext = (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                ? (context.UnwrapAlias(ownerHandle), ownerTargetType)
+                : null;
+            try
+            {
+                baseRef = ResolveType(item.Type, scope, isTraitBoundContext: true, implicitThisTarget: ownerTargetType, isConformanceOrConstraintContext: true);
+            }
+            finally
+            {
+                activeDerivedBaseContext = null;
+            }
             result.Add(baseRef);
 
             if (baseRef.IsError || baseRef.Handle is not { } rawBaseH)
@@ -424,7 +438,16 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             };
 
             if (!isInterface)
+            {
+                if (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                {
+                    context.Diagnostics.ReportInheritanceOrOverrideError(
+                        item.Type.GetSpan() ?? default,
+                        "'derived' generic type argument can only be used inside a base interface's generic arguments",
+                        item.GetSource());
+                }
                 continue;
+            }
 
             ValidateThisArgumentsOnTarget(
                 baseRef,
@@ -468,6 +491,10 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 _ => Accessibility.Public
             };
 
+            TypeRef? derivedTemplate = (!isExtension && !isOwnerInterface && hasDerivedSyntax)
+                ? BuildDerivedInterfaceTemplate(item.Type, baseRef, context.UnwrapAlias(ownerHandle))
+                : null;
+
             context.RegisterConformance(
                 ownerTargetType,
                 baseRef,
@@ -475,7 +502,8 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
                 acc,
                 ownerHandle,
                 isExtension,
-                item);
+                item,
+                derivedTemplate);
         }
 
         return result;
@@ -579,14 +607,13 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
         bool isMetadata = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Metadata, out var metaH) && handle == metaH;
         bool isEnum = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Enum, out var enumH) && handle == enumH;
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && handle == fnH;
-        bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && handle == delH;
         bool isTuple = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Tuple, out var tupleH) && handle == tupleH;
         bool isPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Pointer, out var ptrH) && handle == ptrH;
         bool isMutPointer = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutablePointer, out var mutPtrH) && handle == mutPtrH;
         bool isReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Reference, out var refH) && handle == refH;
         bool isMutReference = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.MutableReference, out var mutRefH) && handle == mutRefH;
 
-        if (isValueType || isNever || isStruct || isSlice || isArray || isMetadata || isEnum || isFunction || isDelegate || isTuple || isPointer || isMutPointer || isReference || isMutReference)
+        if (isValueType || isNever || isStruct || isSlice || isArray || isMetadata || isEnum || isFunction || isTuple || isPointer || isMutPointer || isReference || isMutReference)
             return;
 
         // All other structs (user structs and intrinsics like integers, floats, etc.) derive from Struct
@@ -681,9 +708,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private void ValidateCallableImplementation(IReadOnlyList<TypeRef> baseTypes, SymbolHandle typeHandle, string typeName, TextSpan span, SourceText? source)
     {
         bool isFunction = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Function, out var fnH) && typeHandle == fnH;
-        bool isDelegate = context.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Delegate, out var delH) && typeHandle == delH;
-
-        if (!isFunction && !isDelegate)
+        if (!isFunction)
             return;
 
         bool implementsCallable = false;
@@ -698,8 +723,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
 
         if (!implementsCallable)
         {
-            string intrinsicName = isFunction ? KnownIntrinsics.Function : KnownIntrinsics.Delegate;
-            context.Diagnostics.ReportIntrinsicAbiMismatch(span, typeName, intrinsicName, "must implement an operator interface marked with [OperatorFunction(\"Callable\")]", source);
+            context.Diagnostics.ReportIntrinsicAbiMismatch(span, typeName, KnownIntrinsics.Function, "must implement an operator interface marked with [OperatorFunction(\"Callable\")]", source);
         }
     }
 
@@ -1047,7 +1071,15 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
             ResolveTypeConstraints(ext.Syntax.Constraints, ext.GenericParameters, ext.Scope);
         }
 
-        ext.TargetTypeRef = ResolveType(ext.Syntax.TargetType, ext.Scope, allowInference: false);
+        var resolvedTarget = ResolveType(ext.Syntax.TargetType, ext.Scope, allowInference: false, allowAlias: true);
+        if (!resolvedTarget.IsError && TypeRef.UnwrapDyn(resolvedTarget).SpecialType is AliasSemanticType)
+        {
+            context.Diagnostics.ReportAliasNotAllowedAsExtensionTarget(
+                ext.Syntax.TargetType.GetSpan() ?? ext.Syntax.GetSpan() ?? default,
+                ext.Syntax.GetSource());
+            resolvedTarget = TypeRef.Error;
+        }
+        ext.TargetTypeRef = resolvedTarget;
         ext.TargetTypeHandle = ext.TargetTypeRef.Handle;
 
         if (ext.Syntax.Base is not null)

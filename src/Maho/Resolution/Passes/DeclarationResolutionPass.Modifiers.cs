@@ -24,7 +24,7 @@ internal sealed partial class DeclarationResolutionPass
         MatchingKeywordKind.Public or MatchingKeywordKind.Internal or MatchingKeywordKind.Protected or MatchingKeywordKind.Private => ModifierCategory.Visibility,
         MatchingKeywordKind.Extern or MatchingKeywordKind.Intrinsic => ModifierCategory.Linkage,
         MatchingKeywordKind.Static => ModifierCategory.Storage,
-        MatchingKeywordKind.Virtual or MatchingKeywordKind.Unsealed => ModifierCategory.Polymorphism,
+        MatchingKeywordKind.Virtual or MatchingKeywordKind.Override or MatchingKeywordKind.Unsealed => ModifierCategory.Polymorphism,
         MatchingKeywordKind.Unsafe => ModifierCategory.Safety,
         MatchingKeywordKind.Partial => ModifierCategory.Partial,
         MatchingKeywordKind.Const or MatchingKeywordKind.Mut => ModifierCategory.Mutability,
@@ -32,7 +32,7 @@ internal sealed partial class DeclarationResolutionPass
         _ => ModifierCategory.None
     };
 
-    private const string CanonicalOrderString = "[visibility] [extern|intrinsic] [static] [virtual|unsealed] [unsafe] [partial] [const|mut] [untagged]";
+    private const string CanonicalOrderString = "[visibility] [extern|intrinsic] [static] [virtual|override|unsealed] [unsafe] [partial] [const|mut] [untagged]";
 
     private void ValidateModifiers()
     {
@@ -126,8 +126,8 @@ internal sealed partial class DeclarationResolutionPass
                     ValidateModifierList(
                         method.Syntax.Signature.Modifiers,
                         allowed: isExplicitInterfaceImpl
-                            ? [MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial]
-                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
+                            ? [MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Override, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial]
+                            : [MatchingKeywordKind.Public, MatchingKeywordKind.Internal, MatchingKeywordKind.Protected, MatchingKeywordKind.Private, MatchingKeywordKind.Extern, MatchingKeywordKind.Virtual, MatchingKeywordKind.Override, MatchingKeywordKind.Unsealed, MatchingKeywordKind.Unsafe, MatchingKeywordKind.Partial],
                         itemKind: isExplicitInterfaceImpl ? "explicit interface method implementation" : "method",
                         name: method.Name.Text,
                         span: method.Syntax.Signature.Identifier.GetSpan() ?? default,
@@ -335,6 +335,7 @@ internal sealed partial class DeclarationResolutionPass
         Token? seenConst = null;
         Token? seenMut = null;
         Token? seenVirtual = null;
+        Token? seenOverride = null;
         Token? seenUnsealed = null;
 
         var lastCategory = ModifierCategory.None;
@@ -411,13 +412,26 @@ internal sealed partial class DeclarationResolutionPass
             {
                 if (seenUnsealed is not null)
                     context.Diagnostics.ReportConflictingModifiers(mod.Span, seenUnsealed.Value, mod.Value, name, source);
+                else if (seenOverride is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenOverride.Value, mod.Value, name, source);
                 else
                     seenVirtual = mod;
+            }
+            else if (kind == MatchingKeywordKind.Override)
+            {
+                if (seenUnsealed is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenUnsealed.Value, mod.Value, name, source);
+                else if (seenVirtual is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVirtual.Value, mod.Value, name, source);
+                else
+                    seenOverride = mod;
             }
             else if (kind == MatchingKeywordKind.Unsealed)
             {
                 if (seenVirtual is not null)
                     context.Diagnostics.ReportConflictingModifiers(mod.Span, seenVirtual.Value, mod.Value, name, source);
+                else if (seenOverride is not null)
+                    context.Diagnostics.ReportConflictingModifiers(mod.Span, seenOverride.Value, mod.Value, name, source);
                 else
                     seenUnsealed = mod;
             }

@@ -1,12 +1,12 @@
 namespace Std;
 
-intrinsic attribute IntrinsicType(&Str name);
+intrinsic attribute IntrinsicType(Str& name);
 
-intrinsic attribute IntrinsicFunction(&Str name);
+intrinsic attribute IntrinsicFunction(Str& name);
 
-intrinsic attribute IntrinsicProperty(&Str name);
+intrinsic attribute IntrinsicProperty(Str& name);
 
-intrinsic attribute OperatorFunction(&Str name);
+intrinsic attribute OperatorFunction(Str& name);
 
 [IntrinsicType("Layout")]
 interface Layout;
@@ -24,7 +24,7 @@ interface Transfer;
 interface Move<T : this = this> : Transfer
 {
     [OperatorFunction("Move")]
-    func Move(mut &this, mut &T src) -> ()
+    func Move(this mut&, T mut& src) -> ()
     {
     }
 }
@@ -33,7 +33,7 @@ interface Move<T : this = this> : Transfer
 interface Copy<T : this = this> : Transfer
 {
     [OperatorFunction("Copy")]
-    func Copy(mut &this, &T src) -> ()
+    func Copy(this mut&, T& src) -> ()
     {
     }
 }
@@ -41,53 +41,37 @@ interface Copy<T : this = this> : Transfer
 interface Destructor : Move
 {
     [OperatorFunction("Destructor")]
-    func Drop(mut &this) -> ();
-}
-
-interface Put<T : this = this>
-{
-    [OperatorFunction("Put")]
-    func Put() -> T
-    {
-        T value;
-        return value;
-    }
+    func Drop(this mut&) -> ();
 }
 
 interface OwningDeref<TReturn>
 {
     [OperatorFunction("OwningDeref")]
-    func OwningDeref(mut &this) -> TReturn;
-}
-
-interface AllocDeref<TReturn>
-{
-    [OperatorFunction("AllocDeref")]
-    func AllocDeref(mut &this) -> TReturn;
+    func OwningDeref(this mut&) -> TReturn;
 }
 
 interface ExplicitCast<TTarget>
 {
     [OperatorFunction("ExplicitCast")]
-    func Cast(&this) -> TTarget;
+    func Cast(this&) -> TTarget;
 }
 
 interface IndexerGetter<TIndex, TReturn>
 {
     [OperatorFunction("IndexerGetter")]
-    func Get(&this, TIndex index) -> TReturn;
+    func Get(this&, TIndex index) -> TReturn;
 }
 
 interface Iterator<TItem>
 {
     [OperatorFunction("Iterator")]
-    func Next(mut &this) -> TItem;
+    func Next(this mut&) -> TItem;
 }
 
 interface Iterable<TItem, TIterator>
 {
     [OperatorFunction("Iterable")]
-    func Iterate(&this) -> TIterator;
+    func Iterate(this&) -> TIterator;
 }
 
 [IntrinsicType("ValueType")]
@@ -158,87 +142,87 @@ struct Float128;
 struct Metadata<T> where T : Layout
 {
     [IntrinsicFunction("Metadata.Size()")]
-    internal func Size(&this) -> NUInt;
+    internal func Size(this&) -> NUInt;
 
     [IntrinsicFunction("Metadata.Align()")]
-    internal func Align(&this) -> NUInt;
+    internal func Align(this&) -> NUInt;
 }
 
 interface Deref<TReturn>
 {
     [OperatorFunction("Dereference")]
-    func Deref(&this) -> TReturn;
+    func Deref(this&) -> TReturn;
 }
 
 interface Arrow<TReturn>
 {
     [OperatorFunction("IndirectMemberAccess")]
-    func Arrow(&this) -> TReturn;
+    func Arrow(this&) -> TReturn;
 }
 
 [IntrinsicType("Reference")]
-struct Reference<T> : Arrow<&T>, Deref<&T>, ExplicitCast<ValType*> where T : Layout
+struct Reference<T> : Arrow<T&>, Deref<T&>, ExplicitCast<ValType*> where T : Layout
 {
     internal NUInt address;
     internal Metadata<T> metadata;
 
     [IntrinsicFunction("Reference.Deref()")]
-    func Deref.Deref(&this) -> &T;
+    func Deref.Deref(this&) -> T&;
 
     [IntrinsicFunction("Reference.Cast<ValType*>()")]
-    func ExplicitCast.Cast(&this) -> ValType*;
+    func ExplicitCast.Cast(this&) -> ValType*;
 
-    func Arrow.Arrow(&this) -> &T
+    func Arrow.Arrow(this&) -> T&
     {
-        return *this;
+        return &(*(*this));
     }
 }
 
 [IntrinsicType("MutableReference")]
-struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T>, ExplicitCast<ValType*> where T : Layout
+struct MutableReference<T> : Arrow<T mut&>, Deref<T mut&>, ExplicitCast<ValType*> where T : Layout
 {
     internal NUInt address;
     internal Metadata<T> metadata;
 
     [IntrinsicFunction("MutableReference.Deref()")]
-    func Deref.Deref(&this) -> mut &T;
+    func Deref.Deref(this&) -> T mut&;
 
     [IntrinsicFunction("MutableReference.Cast<ValType*>()")]
-    func ExplicitCast.Cast(&this) -> ValType*;
+    func ExplicitCast.Cast(this&) -> ValType*;
 
-    func Arrow.Arrow(&this) -> mut &T
+    func Arrow.Arrow(this&) -> T mut&
     {
-        return *this;
+        return &(*(*this));
     }
 }
 
 [IntrinsicType("Pointer")]
-struct Pointer<T> : Arrow<&T>, Deref<&T> where T : Layout
+struct Pointer<T> : Arrow<T&>, Deref<T&> where T : Layout
 {
     internal NUInt address;
     internal Metadata<T> metadata;
 
     [IntrinsicFunction("Pointer.Deref()")]
-    func Deref.Deref(&this) -> &T;
+    func Deref.Deref(this&) -> T&;
 
-    func Arrow.Arrow(&this) -> &T
+    func Arrow.Arrow(this&) -> T&
     {
-        return *this;
+        return &(*(*this));
     }
 }
 
 [IntrinsicType("MutablePointer")]
-struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
+struct MutablePointer<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
 {
     internal NUInt address;
     internal Metadata<T> metadata;
 
     [IntrinsicFunction("MutablePointer.Deref()")]
-    func Deref.Deref(&this) -> mut &T;
+    func Deref.Deref(this&) -> T mut&;
 
-    func Arrow.Arrow(&this) -> mut &T
+    func Arrow.Arrow(this&) -> T mut&
     {
-        return *this;
+        return &(*(*this));
     }
 }
 
@@ -247,9 +231,9 @@ struct SliceIterator<T, D : int = 1> : Iterator<T>
     internal T[]& data;
     internal NUInt index;
 
-    func Iterator.Next(mut &this) -> T
+    func Iterator.Next(this mut&) -> T
     {
-        return (*this.data)[this.index];
+        return (*this->data)[this->index];
     }
 }
 
@@ -259,9 +243,9 @@ struct Slice<T, D : int = 1> : Iterable<T, SliceIterator<T, D>>
     [IntrinsicProperty("Slice.Length")]
     internal NUInt Length { get; }
 
-    func Iterable.Iterate(&this) -> SliceIterator<T, D>
+    func Iterable.Iterate(this&) -> SliceIterator<T, D>
     {
-        return put SliceIterator<T, D> { data = &this, index = 0 };
+        return new SliceIterator<T, D> { data = this, index = 0 };
     }
 }
 
@@ -269,11 +253,11 @@ struct Slice<T, D : int = 1> : Iterable<T, SliceIterator<T, D>>
 struct Array<T, N : int, D : int = 1> : Iterable<T, SliceIterator<T, D>>
 {
     [IntrinsicFunction("Array.AsSlice()")]
-    internal func AsSlice(&this) -> T[]&;
+    internal func AsSlice(this&) -> T[]&;
 
-    func Iterable.Iterate(&this) -> SliceIterator<T, D>
+    func Iterable.Iterate(this&) -> SliceIterator<T, D>
     {
-        return put SliceIterator<T, D> { data = this.AsSlice(), index = 0 };
+        return new SliceIterator<T, D> { data = this->AsSlice(), index = 0 };
     }
 }
 
@@ -282,9 +266,9 @@ struct Str : IndexerGetter<NUInt, UInt8>
 {
     internal UInt8[] data;
 
-    func IndexerGetter.Get(&this, NUInt index) -> UInt8
+    func IndexerGetter.Get(this&, NUInt index) -> UInt8
     {
-        return this.data[index];
+        return this->data[index];
     }
 }
 
@@ -294,31 +278,39 @@ struct Tuple;
 interface Callable<TReturn, TArgs...>
 {
     [OperatorFunction("Callable")]
-    func Invoke(&this, TArgs... args) -> TReturn;
+    func Invoke(this&, TArgs... args) -> TReturn;
+}
+
+interface CallableMut<TReturn, TArgs...>
+{
+    [OperatorFunction("CallableMut")]
+    func Invoke(this mut&, TArgs... args) -> TReturn;
+}
+
+interface CallableOnce<TReturn, TArgs...>
+{
+    [OperatorFunction("CallableOnce")]
+    func Invoke(this, TArgs... args) -> TReturn;
 }
 
 [IntrinsicType("Function")]
-struct Function<TReturn, TArgs...> : Callable<TReturn, TArgs...>
+struct Function<TReturn, TArgs...> : Callable<TReturn, TArgs...>, CallableMut<TReturn, TArgs...>, CallableOnce<TReturn, TArgs...>
 {
     NUInt address;
 
     [IntrinsicFunction("Function.Invoke(TParams...)")]
-    func Callable.Invoke(&this, TArgs... args) -> TReturn;
+    func Callable.Invoke(this&, TArgs... args) -> TReturn;
+
+    [IntrinsicFunction("Function.Invoke(TParams...)")]
+    func CallableMut.Invoke(this mut&, TArgs... args) -> TReturn;
+
+    [IntrinsicFunction("Function.Invoke(TParams...)")]
+    func CallableOnce.Invoke(this, TArgs... args) -> TReturn;
 
     func GetAddress() -> NUInt
     {
         return address;
     }
-}
-
-[IntrinsicType("Delegate")]
-struct Delegate<TReturn, TArgs...> : Callable<TReturn, TArgs...>
-{
-    NUInt address;
-    ValType& context;
-
-    [IntrinsicFunction("Delegate.Invoke(TParams...)")]
-    func Callable.Invoke(&this, TArgs... args) -> TReturn;
 }
 
 [IntrinsicType("Optional")]
@@ -521,7 +513,7 @@ struct Int32 : Addition<Int32, Int32, Int32>,
     func BitwiseNot.BitwiseNot(Int32 op) -> Int32;
 
 
-    func Abs(&this) -> Int32
+    func Abs(this&) -> Int32
     {
         return 0;
     }
@@ -532,13 +524,13 @@ interface Throwable;
 
 interface Allocator
 {
-    func Allocate(mut &this, NUInt size, NUInt alignment) -> ValType*;
-    func Deallocate(mut &this, ValType* ptr, NUInt size, NUInt alignment) -> ();
+    func Allocate(this mut&, NUInt size, NUInt alignment) -> ValType*;
+    func Deallocate(this mut&, ValType* ptr, NUInt size, NUInt alignment) -> ();
 }
 
 struct GlobalAllocator
 {
-    internal static mut dyn Allocator mut* instance;
+    internal static mut Allocator mut* instance;
 
     internal func Allocate(NUInt size, NUInt alignment) -> ValType*
     {
@@ -552,33 +544,63 @@ struct GlobalAllocator
 }
 
 [IntrinsicType("Box")]
-struct Box<T> : Destructor, Arrow<&T>, Deref<&T>, OwningDeref<mut &T>, AllocDeref<mut &T> where T : Layout
+struct Box<T> : Destructor, Arrow<T&>, Deref<T&>, OwningDeref<T mut&> where T : Layout
 {
     T mut& pointer;
 
-    func Destructor.Drop(mut &this) -> ()
+    [IntrinsicFunction("Box.AllocUninit")]
+    public func AllocUninit<TVal>() -> TVal mut*;
+
+    [IntrinsicFunction("Ptr.WriteUninit")]
+    public func WriteUninit<TVal>(TVal mut* dst, TVal value) -> ();
+
+    [IntrinsicFunction("Box.FromMutPtr")]
+    public func FromMutPtr<TVal>(TVal mut* ptr) -> TVal mut&;
+
+    [IntrinsicFunction("Box.AllocSlice")]
+    public func AllocSlice<TVal>(NUInt len) -> Box<TVal[]>;
+
+    func Destructor.Drop(this mut&) -> ()
     {
-        GlobalAllocator.Free(this.pointer as ValType*, this.pointer.metadata.Size(), this.pointer.metadata.Align());
+        GlobalAllocator.Free(this->pointer as ValType*, this->pointer.metadata.Size(), this->pointer.metadata.Align());
     }
 
-    func Arrow.Arrow(&this) -> &T
+    func Arrow.Arrow(this&) -> T&
     {
-        return *this.pointer;
+        return this->pointer;
     }
 
-    func Deref.Deref(&this) -> &T
+    func Deref.Deref(this&) -> T&
     {
-        return *this.pointer;
+        return this->pointer;
     }
 
-    func OwningDeref.OwningDeref(mut &this) -> mut &T
+    func OwningDeref.OwningDeref(this mut&) -> T mut&
     {
-        return *this.pointer;
+        return this->pointer;
+    }
+}
+
+public extension<T> Box<T> where T : Sized
+{
+    public func Construct(this mut&, T value) -> ()
+    {
+        T mut* raw = Box::<T>.AllocUninit::<T>();
+        Box::<T>.WriteUninit::<T>(raw, value);
+        this->pointer = Box::<T>.FromMutPtr::<T>(raw);
     }
 
-    func AllocDeref.AllocDeref(mut &this) -> mut &T
+    public func Emplace<F>(F init) -> Box<T> where F : CallableOnce<T>
     {
-        return *this.pointer;
+        return new Box<T>(init());
+    }
+}
+
+public extension<T> Box<T[]> where T : Sized
+{
+    public func Alloc(NUInt len) -> Box<T[]>
+    {
+        return Box::<T>.AllocSlice::<T>(len);
     }
 }
 

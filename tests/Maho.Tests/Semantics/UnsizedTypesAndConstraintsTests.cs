@@ -13,7 +13,7 @@ public sealed class UnsizedTypesAndConstraintsTests
     public void Intrinsics_LayoutSizedUnsized_SliceArrayStr_And_LiteralsCollapseToRefStr()
     {
         var source = Prelude + """
-            public attribute CustomTag(&Str tag);
+            public attribute CustomTag(Str& tag);
 
             public struct Packet
             {
@@ -22,7 +22,7 @@ public sealed class UnsizedTypesAndConstraintsTests
             }
 
             [CustomTag("v1")]
-            public func Run() -> &Str
+            public func Run() -> Str&
             {
                 var literal = "hello";
                 var named = nameof(Packet);
@@ -39,16 +39,16 @@ public sealed class UnsizedTypesAndConstraintsTests
         Assert.True(ctx.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Unsized, out _));
         Assert.True(ctx.DiscoveredIntrinsics.TryGet(KnownIntrinsics.Str, out var strH));
         Assert.False(TypeRef.Resolved(strH).IsSized(ctx));
-        Assert.True(TypeRef.Alias(TypeRef.Resolved(strH)).IsSized(ctx));
+        Assert.True(TypeRef.Reference(TypeRef.Resolved(strH)).IsSized(ctx));
 
         var runFn = Assert.Single(ctx.FunctionSymbols, f => f.Name.Text == "Run");
         var litVar = Assert.Single(runFn.LocalVariables, v => v.Name.Text == "literal");
         var namedVar = Assert.Single(runFn.LocalVariables, v => v.Name.Text == "named");
 
-        var litAlias = Assert.IsType<AliasSemanticType>(litVar.Type.SpecialType);
-        Assert.Equal(strH, litAlias.TargetType.Handle);
-        var namedAlias = Assert.IsType<AliasSemanticType>(namedVar.Type.SpecialType);
-        Assert.Equal(strH, namedAlias.TargetType.Handle);
+        var litRef = Assert.IsType<ReferenceSemanticType>(litVar.Type.SpecialType);
+        Assert.Equal(strH, litRef.ElementType.Handle);
+        var namedRef = Assert.IsType<ReferenceSemanticType>(namedVar.Type.SpecialType);
+        Assert.Equal(strH, namedRef.ElementType.Handle);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class UnsizedTypesAndConstraintsTests
             [IntrinsicType("UInt8")] public struct uint8;
             [IntrinsicType("Slice")] public struct Slice<T, D : int = 1>;
             [IntrinsicType("Str")] public struct Str { public uint8[] data; }
-            intrinsic attribute IntrinsicType(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
             intrinsic attribute OperatorFunction(Str name);
             """;
 
@@ -95,7 +95,7 @@ public sealed class UnsizedTypesAndConstraintsTests
 
             public interface IGreetable
             {
-                func Greet(&this) -> int32;
+                func Greet(this&) -> int32;
             }
 
             public union Choice(int32 | bool);
@@ -108,13 +108,13 @@ public sealed class UnsizedTypesAndConstraintsTests
             }
 
             public struct SliceOfInt { public (int32)[] data; }
-            public struct SliceOfAlias { public (&int32)[] data; }
-            public struct SliceOfDynAlias { public (dyn &IGreetable)[] data; }
-            public struct SliceOfDynRef { public (dyn IGreetable&)[] data; }
-            public struct SliceOfStrAlias { public (&Str)[] data; }
+            public struct SliceOfIntRef { public (int32&)[] data; }
+            public struct SliceOfIfaceRef { public (IGreetable&)[] data; }
+            public struct SliceOfStrRef { public (Str&)[] data; }
 
-            public func AcceptAlias(&int32[] a, int32[]& r, &((&Str)[]) args, dyn &((dyn &IGreetable)[]) d, &((&int32)[]) grouped) -> ()
+            public func AcceptRef(int32[]& r, ((Str&)[])& args, ((IGreetable&)[])& d, ((int32&)[])& grouped) -> ()
             {
+                &int32[] localAlias = *r;
             }
 
             public func StatementsDisambiguation() -> Num
@@ -124,7 +124,7 @@ public sealed class UnsizedTypesAndConstraintsTests
                 (a) * b;
                 (a) & b;
                 (int32)* ptr = default;
-                ((&int32)[])* slicePtr = default;
+                ((int32&)[])* slicePtr = default;
                 return (a) * b;
             }
             """;
@@ -146,38 +146,43 @@ public sealed class UnsizedTypesAndConstraintsTests
         var unionSem = Assert.IsType<UnionSemanticType>(anonPtr.ElementType.SpecialType);
         Assert.True(unionSem.IsUntagged);
 
-        var sliceAliasSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfAlias"));
-        var sliceAliasType = ctx.GetFieldSymbol(sliceAliasSym.Fields[0])!.Type;
-        var sliceOfAlias = Assert.IsType<SliceSemanticType>(sliceAliasType.SpecialType);
-        Assert.IsType<AliasSemanticType>(sliceOfAlias.ElementType.SpecialType);
-        Assert.False(sliceAliasType.IsSized(ctx));
+        var sliceIntRefSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfIntRef"));
+        var sliceIntRefType = ctx.GetFieldSymbol(sliceIntRefSym.Fields[0])!.Type;
+        var sliceOfIntRef = Assert.IsType<SliceSemanticType>(sliceIntRefType.SpecialType);
+        Assert.IsType<ReferenceSemanticType>(sliceOfIntRef.ElementType.SpecialType);
+        Assert.False(sliceIntRefType.IsSized(ctx));
 
-        var sliceDynAliasSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfDynAlias"));
-        var sliceOfDynAlias = Assert.IsType<SliceSemanticType>(ctx.GetFieldSymbol(sliceDynAliasSym.Fields[0])!.Type.SpecialType);
-        var elemDynAlias = Assert.IsType<DynSemanticType>(sliceOfDynAlias.ElementType.SpecialType);
-        Assert.IsType<AliasSemanticType>(elemDynAlias.TargetType.SpecialType);
+        var sliceStrRefSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfStrRef"));
+        var sliceOfStrRef = Assert.IsType<SliceSemanticType>(ctx.GetFieldSymbol(sliceStrRefSym.Fields[0])!.Type.SpecialType);
+        Assert.IsType<ReferenceSemanticType>(sliceOfStrRef.ElementType.SpecialType);
 
-        var sliceDynRefSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfDynRef"));
-        var sliceOfDynRef = Assert.IsType<SliceSemanticType>(ctx.GetFieldSymbol(sliceDynRefSym.Fields[0])!.Type.SpecialType);
-        var elemDynRef = Assert.IsType<DynSemanticType>(sliceOfDynRef.ElementType.SpecialType);
-        Assert.IsType<ReferenceSemanticType>(elemDynRef.TargetType.SpecialType);
+        var sliceIfaceRefSym = Assert.IsAssignableFrom<ProductTypeSymbol>(Assert.Single(ctx.TypeSymbols, t => t.Name.Text == "SliceOfIfaceRef"));
+        var sliceOfIfaceRef = Assert.IsType<SliceSemanticType>(ctx.GetFieldSymbol(sliceIfaceRefSym.Fields[0])!.Type.SpecialType);
+        Assert.IsType<ReferenceSemanticType>(sliceOfIfaceRef.ElementType.SpecialType);
 
-        var acceptFn = Assert.Single(ctx.FunctionSymbols, f => f.Name.Text == "AcceptAlias");
-        var pAlias = ctx.GetParameterSymbol(acceptFn.Parameters[0])!.Type;
-        var aliasOfSlice = Assert.IsType<AliasSemanticType>(pAlias.SpecialType);
-        Assert.IsType<SliceSemanticType>(aliasOfSlice.TargetType.SpecialType);
-        Assert.True(pAlias.IsSized(ctx));
-
-        var pRef = ctx.GetParameterSymbol(acceptFn.Parameters[1])!.Type;
+        var acceptFn = Assert.Single(ctx.FunctionSymbols, f => f.Name.Text == "AcceptRef");
+        var pRef = ctx.GetParameterSymbol(acceptFn.Parameters[0])!.Type;
         var refOfSlice = Assert.IsType<ReferenceSemanticType>(pRef.SpecialType);
         Assert.IsType<SliceSemanticType>(refOfSlice.ElementType.SpecialType);
         Assert.True(pRef.IsSized(ctx));
 
-        var pGrouped = ctx.GetParameterSymbol(acceptFn.Parameters[4])!.Type;
-        var groupedAlias = Assert.IsType<AliasSemanticType>(pGrouped.SpecialType);
-        var groupedSlice = Assert.IsType<SliceSemanticType>(groupedAlias.TargetType.SpecialType);
-        Assert.IsType<AliasSemanticType>(groupedSlice.ElementType.SpecialType);
+        var localAlias = Assert.Single(acceptFn.LocalVariables, v => v.Name.Text == "localAlias");
+        var aliasOfSlice = Assert.IsType<AliasSemanticType>(localAlias.Type.SpecialType);
+        Assert.IsType<SliceSemanticType>(aliasOfSlice.TargetType.SpecialType);
+        Assert.True(localAlias.Type.IsSized(ctx));
+
+        var pGrouped = ctx.GetParameterSymbol(acceptFn.Parameters[3])!.Type;
+        var groupedRef = Assert.IsType<ReferenceSemanticType>(pGrouped.SpecialType);
+        var groupedSlice = Assert.IsType<SliceSemanticType>(groupedRef.ElementType.SpecialType);
+        Assert.IsType<ReferenceSemanticType>(groupedSlice.ElementType.SpecialType);
         Assert.True(pGrouped.IsSized(ctx));
+
+        // Verify alias elements in slices/fields/params are rejected with MH0592.
+        var badAliasLocations = Compilation.FromSource(Prelude + """
+            public struct BadAliasSliceField { public (&int32)[] data; }
+            public func BadAliasParam(&int32[] a) -> () {}
+            """);
+        Assert.Equal(2, badAliasLocations.Diagnostics.Count(d => d.Code == "MH0592"));
 
         // Verify '(a) * b;' and '(a) & b;' parsed as expression statements rather than declarations.
         var disambigFn = Assert.Single(ctx.FunctionSymbols, f => f.Name.Text == "StatementsDisambiguation");
@@ -191,9 +196,9 @@ public sealed class UnsizedTypesAndConstraintsTests
     public void CanonicalDyn_AliasAndRefEquivalence_BoxInterop_And_InvalidOrderings()
     {
         const string dynContractPrelude = """
-            intrinsic attribute IntrinsicType(&Str name);
-            intrinsic attribute IntrinsicFunction(&Str signature);
-            intrinsic attribute OperatorFunction(&Str name);
+            intrinsic attribute IntrinsicType(Str& name);
+            intrinsic attribute IntrinsicFunction(Str& signature);
+            intrinsic attribute OperatorFunction(Str& name);
 
             [IntrinsicType("Layout")] public interface Layout;
             [IntrinsicType("Sized")] public interface Sized : Layout;
@@ -213,112 +218,104 @@ public sealed class UnsizedTypesAndConstraintsTests
             public interface Deref<TReturn>
             {
                 [OperatorFunction("Dereference")]
-                func Deref(&this) -> TReturn;
+                func Deref(this&) -> TReturn;
             }
 
             public interface Arrow<TReturn>
             {
                 [OperatorFunction("IndirectMemberAccess")]
-                func Arrow(&this) -> TReturn;
+                func Arrow(this&) -> TReturn;
             }
 
             [IntrinsicType("Reference")]
-            public struct Reference<T> : Arrow<&T>, Deref<&T> where T : Layout
+            public struct Reference<T> : Arrow<T&>, Deref<T&> where T : Layout
             {
                 public nuint raw;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("Reference.Deref()")] func Deref.Deref(&this) -> &T;
-                func Arrow.Arrow(&this) -> &T { return *this; }
+                [IntrinsicFunction("Reference.Deref()")] func Deref.Deref(this&) -> T&;
+                func Arrow.Arrow(this&) -> T& { return &(*(*this)); }
             }
 
             [IntrinsicType("MutableReference")]
-            public struct MutableReference<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
+            public struct MutableReference<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
             {
                 public nuint raw;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("MutableReference.Deref()")] func Deref.Deref(&this) -> mut &T;
-                func Arrow.Arrow(&this) -> mut &T { return *this; }
+                [IntrinsicFunction("MutableReference.Deref()")] func Deref.Deref(this&) -> T mut&;
+                func Arrow.Arrow(this&) -> T mut& { return &(*(*this)); }
             }
 
             [IntrinsicType("Pointer")]
-            public struct Pointer<T> : Arrow<&T>, Deref<&T> where T : Layout
+            public struct Pointer<T> : Arrow<T&>, Deref<T&> where T : Layout
             {
                 public nuint addr;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("Pointer.Deref()")] func Deref.Deref(&this) -> &T;
-                func Arrow.Arrow(&this) -> &T { return *this; }
+                [IntrinsicFunction("Pointer.Deref()")] func Deref.Deref(this&) -> T&;
+                func Arrow.Arrow(this&) -> T& { return &(*(*this)); }
             }
 
             [IntrinsicType("MutablePointer")]
-            public struct MutablePointer<T> : Arrow<mut &T>, Deref<mut &T> where T : Layout
+            public struct MutablePointer<T> : Arrow<T mut&>, Deref<T mut&> where T : Layout
             {
                 public nuint addr;
                 public Metadata<T> metadata;
-                [IntrinsicFunction("MutablePointer.Deref()")] func Deref.Deref(&this) -> mut &T;
-                func Arrow.Arrow(&this) -> mut &T { return *this; }
+                [IntrinsicFunction("MutablePointer.Deref()")] func Deref.Deref(this&) -> T mut&;
+                func Arrow.Arrow(this&) -> T mut& { return &(*(*this)); }
             }
 
-            public interface Allocator { func Allocate(mut &this, nuint size, nuint alignment) -> ValType*; }
+            public interface Allocator { func Allocate(this mut&, nuint size, nuint alignment) -> ValType*; }
             public struct GlobalAllocator
             {
-                public static mut dyn Allocator mut* instance;
+                public static mut Allocator mut* instance;
                 public func Allocate(nuint size, nuint alignment) -> ValType* { return default; }
             }
 
             [IntrinsicType("Box")]
-            public struct Box<T> : Arrow<&T>, Deref<&T> where T : Layout
+            public struct Box<T> : Arrow<T&>, Deref<T&> where T : Layout
             {
                 public T mut& pointer;
-                func Arrow.Arrow(&this) -> &T { return *pointer; }
-                func Deref.Deref(&this) -> &T { return *pointer; }
+                func Arrow.Arrow(this&) -> T& { return this->pointer; }
+                func Deref.Deref(this&) -> T& { return this->pointer; }
             }
 
             public interface Callable<TReturn, TParams...>
             {
                 [OperatorFunction("Callable")]
-                func Invoke(&this, TParams args) -> TReturn;
+                func Invoke(this&, TParams args) -> TReturn;
             }
 
             [IntrinsicType("Function")]
             public struct Function<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
             {
                 public nuint codeAddress;
-                [IntrinsicFunction("Function.Invoke(TParams...)")] func Callable.Invoke(&this, TParams args) -> TReturn;
+                [IntrinsicFunction("Function.Invoke(TParams...)")] func Callable.Invoke(this&, TParams args) -> TReturn;
             }
 
-            [IntrinsicType("Delegate")]
-            public struct Delegate<TReturn, TParams...> : ValType, Callable<TReturn, TParams...>
-            {
-                public nuint codeAddress;
-                public Pointer<ValType> env;
-                [IntrinsicFunction("Delegate.Invoke(TParams...)")] func Callable.Invoke(&this, TParams args) -> TReturn;
-            }
             """;
 
         var validSource = dynContractPrelude + """
             public interface IGreetable
             {
-                func Greet(&this) -> int32;
+                func Greet(this&) -> int32;
             }
 
             public struct Greeter : IGreetable
             {
-                public func Greet(&this) -> int32 { return 7; }
+                public func Greet(this&) -> int32 { return 7; }
             }
 
-            public func TakeAlias(dyn &IGreetable a) -> int32 { return a.Greet(); }
-            public func TakeRef(dyn IGreetable& r) -> int32 { return r->Greet(); }
-            public func TakeRefDeref(dyn IGreetable& r) -> int32 { return (*r).Greet(); }
+            public func TakeRef(IGreetable& r) -> int32 { return r->Greet(); }
+            public func TakeRefDeref(IGreetable& r) -> int32 { return (*r).Greet(); }
 
-            public func CrossConvert(dyn &IGreetable a, dyn IGreetable& r, dyn IGreetable* p, dyn IGreetable mut* mp) -> int32
+            public func CrossConvert(IGreetable& r, IGreetable* p, IGreetable mut* mp) -> int32
             {
-                dyn IGreetable& rFromA = a;
-                dyn &IGreetable aFromR = *r;
-                dyn &IGreetable aFromRImplicit = r;
-                int32 x = TakeRef(a);
-                int32 y = TakeAlias(r);
-                Box<dyn IGreetable> boxed = default;
-                dyn &IGreetable fromBox = *boxed;
+                &IGreetable a = *r;
+                IGreetable& rFromA = &a;
+                &IGreetable aFromRImplicit = r;
+                int32 x = TakeRef(&a);
+                int32 y = TakeRef(r);
+                Box<IGreetable> boxed = default;
+                &IGreetable fromBox = *boxed;
                 int32 z = boxed->Greet();
                 return fromBox.Greet();
             }
@@ -329,11 +326,10 @@ public sealed class UnsizedTypesAndConstraintsTests
 
         string[] invalidTypes =
         [
-            "&dyn IGreetable x",
-            "mut &dyn IGreetable x",
-            "*dyn IGreetable x",
-            "(dyn IGreetable)& x",
-            "(dyn IGreetable)* x"
+            "dyn IGreetable& x",
+            "dyn uint8[]& x",
+            "(dyn StructPoint)& x",
+            "(dyn StructPoint)* x"
         ];
 
         foreach (var decl in invalidTypes)
@@ -341,7 +337,12 @@ public sealed class UnsizedTypesAndConstraintsTests
             var invalidSource = dynContractPrelude + $$"""
                 public interface IGreetable
                 {
-                    func Greet(&this) -> int32;
+                    func Greet(this&) -> int32;
+                }
+
+                public struct StructPoint
+                {
+                    public int32 v;
                 }
 
                 public func Test({{decl}}) -> ()
@@ -351,6 +352,30 @@ public sealed class UnsizedTypesAndConstraintsTests
 
             var comp = Compilation.FromSource(invalidSource);
             Assert.True(comp.HasErrors, $"Expected MH0583 for: {decl}");
+            Assert.Contains(comp.Diagnostics, d => d.Code == "MH0583");
+        }
+
+        string[] invalidLocalDynAliases =
+        [
+            "dyn &IGreetable x = *g;",
+            "dyn &Str s = \"hi\";",
+            "&dyn StructPoint sp = pt;",
+            "mut &dyn StructPoint msp = pt;",
+            "*dyn StructPoint usp = pt;"
+        ];
+
+        foreach (var localStmt in invalidLocalDynAliases)
+        {
+            var invalidSource = dynContractPrelude + $$"""
+                public interface IGreetable { func Greet(this&) -> int32; }
+                public struct StructPoint { public int32 v; }
+                public func Test(IGreetable& g, StructPoint pt) -> ()
+                {
+                    {{localStmt}}
+                }
+                """;
+            var comp = Compilation.FromSource(invalidSource);
+            Assert.True(comp.HasErrors, $"Expected MH0583 for local: {localStmt}");
             Assert.Contains(comp.Diagnostics, d => d.Code == "MH0583");
         }
     }
@@ -373,9 +398,9 @@ public sealed class UnsizedTypesAndConstraintsTests
 
             public struct ZeroFieldDerived : Packet;
 
-            public func Inspect(&Packet p, Packet& r, &OuterPacket op, &ZeroFieldDerived zd) -> uint8
+            public func Inspect(Packet& p, Packet& r, OuterPacket& op, ZeroFieldDerived& zd) -> uint8
             {
-                return p.data[0];
+                return p->data[0];
             }
             """;
 
@@ -438,7 +463,7 @@ public sealed class UnsizedTypesAndConstraintsTests
                 Packet local;
                 (Packet | int32) badUnion;
                 var d = default(Str);
-                var p = put Packet { length = 1, data = default };
+                var p = new Packet { length = 1, data = default };
                 try
                 {
                 }
@@ -460,12 +485,12 @@ public sealed class UnsizedTypesAndConstraintsTests
         var source = Prelude + """
             public interface IRun
             {
-                func Run(&this) -> int32;
+                func Run(this&) -> int32;
             }
 
             public struct Runner : IRun
             {
-                public func Run(&this) -> int32 { return 1; }
+                public func Run(this&) -> int32 { return 1; }
             }
 
             public struct Holder<T> where T : Layout
@@ -473,21 +498,24 @@ public sealed class UnsizedTypesAndConstraintsTests
                 public int32 tag;
             }
 
-            public func ValidConstraint<T : IRun>(&T item) -> int32 { return 1; }
-            public func ValidHolder(Holder<dyn &IRun> h) -> () {}
-            public func ValidBox(Box<dyn IRun> b) -> int32 { return b->Run(); }
+            public func ValidConstraint<T : IRun>(T& item) -> int32 { return 1; }
+            public func ValidHolder(Holder<IRun&> h) -> () {}
+            public func ValidBox(Box<IRun> b) -> int32 { return b->Run(); }
             public func ValidConformance(Runner r) -> int32 { return (r as IRun).Run(); }
 
-            public func BadBare(IRun v, &IRun a, mut &IRun ma, IRun& r, IRun[] s, Holder<IRun> h, Box<IRun> b) -> IRun
+            public func BadBare(IRun v, dyn IRun& r, IRun[] s, Box<dyn IRun> b) -> IRun
             {
                 IRun local;
+                dyn &IRun a = local;
+                dyn mut &IRun ma = local;
                 return local;
             }
             """;
 
         var compilation = Compilation.FromSource(source);
         Assert.True(compilation.HasErrors);
-        Assert.True(compilation.Diagnostics.Count(d => d.Code == "MH0583") >= 9);
+        Assert.True(compilation.Diagnostics.Count(d => d.Code == "MH0583") >= 4);
+        Assert.True(compilation.Diagnostics.Count(d => d.Code == "MH0580") >= 3);
     }
 
     [Fact]
@@ -500,31 +528,31 @@ public sealed class UnsizedTypesAndConstraintsTests
                 public T payload;
             }
 
-            public func RequireSized<T>(&T v) -> int32 { return 1; }
-            public func AllowAnyLayout<T>(&T v) -> int32 where T : Layout { return 2; }
-            public func RequireUnsized<T>(&T v) -> int32 where T : Unsized { return 3; }
+            public func RequireSized<T>(T& v) -> int32 { return 1; }
+            public func AllowAnyLayout<T>(T& v) -> int32 where T : Layout { return 2; }
+            public func RequireUnsized<T>(T& v) -> int32 where T : Unsized { return 3; }
 
             public extension<T> Wrapper<T> where T : Sized
             {
-                public func ExtractSized(&this) -> T { return this.payload; }
+                public func ExtractSized(this&) -> T { return this->payload; }
             }
 
-            public func TakeByteSlice(&uint8[] s) -> int32 { return 1; }
+            public func TakeByteSlice(uint8[]& s) -> int32 { return 1; }
             public func TakeByteSliceRef(uint8[]& s) -> int32 { return 2; }
-            public func TakeUnsizedWrapper(&Wrapper<uint8[]> w) -> int32 { return 3; }
+            public func TakeUnsizedWrapper(Wrapper<uint8[]>& w) -> int32 { return 3; }
 
-            public func Test(uint8[4]& fixedArr, Wrapper<uint8[4]>& wrappedArr, &Wrapper<int32> boxedNum, &Str text, &int32 num) -> int32
+            public func Test(uint8[4]& fixedArr, Wrapper<uint8[4]>& wrappedArr, Wrapper<int32>& boxedNum, Str& text, int32& num) -> int32
             {
                 int32 a = RequireSized::<int32>(num);
                 int32 b = AllowAnyLayout::<int32>(num);
                 int32 c = AllowAnyLayout::<Str>(text);
                 int32 d = AllowAnyLayout::<uint8[4]>(fixedArr);
                 int32 e = RequireUnsized::<Str>(text);
-                int32 f = boxedNum.ExtractSized();
+                int32 f = boxedNum->ExtractSized();
 
-                &uint8[] sliceAlias = fixedArr;
+                &uint8[] sliceAlias = *fixedArr;
                 uint8[]& sliceRef = fixedArr;
-                &Wrapper<uint8[]> wAlias = wrappedArr;
+                &Wrapper<uint8[]> wAlias = *wrappedArr;
 
                 int32 s1 = TakeByteSlice(fixedArr);
                 int32 s2 = TakeByteSliceRef(fixedArr);
@@ -538,26 +566,26 @@ public sealed class UnsizedTypesAndConstraintsTests
         var invalidSource = Prelude + """
             public interface SizedOnly : Sized
             {
-                func SizeTag(&this) -> int32;
+                func SizeTag(this&) -> int32;
             }
 
             public struct BadUnsizedImpl : SizedOnly
             {
                 public uint8[] bytes;
-                public func SizeTag(&this) -> int32 { return 0; }
+                public func SizeTag(this&) -> int32 { return 0; }
             }
 
-            public func NeedSized<T>(&T x) -> int32 { return 1; }
-            public func NeedUnsized<T>(&T x) -> int32 where T : Unsized { return 2; }
+            public func NeedSized<T>(T& x) -> int32 { return 1; }
+            public func NeedUnsized<T>(T& x) -> int32 where T : Unsized { return 2; }
 
-            public func ForwardLayout<T>(&T x) -> int32 where T : Layout
+            public func ForwardLayout<T>(T& x) -> int32 where T : Layout
             {
                 int32 a = NeedSized::<T>(x);
                 int32 b = NeedUnsized::<T>(x);
                 return a;
             }
 
-            public func TestConcrete(&Str text, &int32 num) -> ()
+            public func TestConcrete(Str& text, int32& num) -> ()
             {
                 NeedSized::<Str>(text);
                 NeedUnsized::<int32>(num);
@@ -574,10 +602,8 @@ public sealed class UnsizedTypesAndConstraintsTests
     {
         string[] validMainSignatures =
         [
-            "public func Main(&(&Str)[] args) -> int32 { return 0; }",
-            "public func Main((&Str)[]& args) -> int32 { return 0; }",
-            "public func Main(dyn &((&Str)[]) args) -> int32 { return 0; }",
-            "public func Main(dyn (&Str)[]& args) -> int32 { return 0; }"
+            "public func Main(Str&[]& args) -> int32 { return 0; }",
+            "public func Main((Str&)[]& args) -> int32 { return 0; }"
         ];
 
         foreach (var sig in validMainSignatures)

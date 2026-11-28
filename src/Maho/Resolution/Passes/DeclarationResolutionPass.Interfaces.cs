@@ -88,8 +88,41 @@ internal sealed partial class DeclarationResolutionPass
             NestedTypeSymbol nts => BuildSelfTypeRef(typeHandle, nts.Name.Text, nts.GenericParameters),
             _ => TypeRef.Resolved(typeHandle)
         };
-        var implementedInterfaces = GetImplementedInterfaces(typeSymbol, rootSelf);
-        if (implementedInterfaces.Count == 0)
+
+        var directConformances = context.Conformances
+            .Where(c => !c.IsExtension && context.UnwrapAlias(c.OwnerHandle) == typeHandle)
+            .ToList();
+
+        var obligations = new List<(SymbolHandle IfaceHandle, Dictionary<SymbolHandle, TypeRef> TypeArgs, InterfaceConformance? DirectConformance)>();
+        var seenObligations = new List<(SymbolHandle IfaceHandle, Dictionary<SymbolHandle, TypeRef> TypeArgs)>();
+
+        void AddObligation(SymbolHandle ih, Dictionary<SymbolHandle, TypeRef> args, InterfaceConformance? directConf)
+        {
+            for (int i = 0; i < seenObligations.Count; i++)
+            {
+                if (seenObligations[i].IfaceHandle == ih && TypeArgMapsEqual(seenObligations[i].TypeArgs, args))
+                    return;
+            }
+            seenObligations.Add((ih, args));
+            obligations.Add((ih, args, directConf));
+        }
+
+        foreach (var conf in directConformances)
+        {
+            var chain = new List<(SymbolHandle IfaceHandle, Dictionary<SymbolHandle, TypeRef> TypeArgs)>();
+            CollectInterfaceChain(conf.InterfaceType, [], [], chain, rootSelf);
+            for (int i = 0; i < chain.Count; i++)
+                AddObligation(chain[i].IfaceHandle, chain[i].TypeArgs, i == 0 ? conf : null);
+        }
+
+        // Also cover any transitive interfaces from base interfaces when no conformance was registered.
+        if (directConformances.Count == 0)
+        {
+            foreach (var (ih, args) in GetImplementedInterfaces(typeSymbol, rootSelf))
+                AddObligation(ih, args, null);
+        }
+
+        if (obligations.Count == 0)
             return;
 
         var typeSpan = (typeSymbol as TypeSymbol)?.Syntax?.Name.GetSpan() ??
@@ -97,12 +130,9 @@ internal sealed partial class DeclarationResolutionPass
         var typeSource = (typeSymbol as TypeSymbol)?.Syntax?.GetSource() ??
                          (typeSymbol as NestedTypeSymbol)?.Syntax?.GetSource();
 
-        foreach (var (ifaceHandle, typeArgs) in implementedInterfaces)
+        foreach (var (ifaceHandle, typeArgs, directConf) in obligations)
         {
-            var matchingConf = context.Conformances.FirstOrDefault(c =>
-                !c.IsExtension &&
-                c.OwnerHandle == typeHandle &&
-                c.InterfaceHandle == ifaceHandle);
+            var matchingConf = directConf ?? directConformances.FirstOrDefault(c => c.InterfaceHandle == ifaceHandle);
 
             ValidateConformanceMembers(
                 typeSymbol,
@@ -115,6 +145,20 @@ internal sealed partial class DeclarationResolutionPass
                 typeSpan,
                 typeSource);
         }
+    }
+
+    private static bool TypeArgMapsEqual(Dictionary<SymbolHandle, TypeRef> a, Dictionary<SymbolHandle, TypeRef> b)
+    {
+        if (a.Count != b.Count)
+            return false;
+
+        foreach (var (k, v) in a)
+        {
+            if (!b.TryGetValue(k, out var bv) || !v.Equals(bv))
+                return false;
+        }
+
+        return true;
     }
 
     private void ValidateConformanceMembers(
@@ -143,7 +187,7 @@ internal sealed partial class DeclarationResolutionPass
                 bool hasDefault = ifaceMethod.Flags.HasFlag(FunctionFlags.Intrinsic) ||
                                   (ifaceMethod.Syntax?.Body is not null && ifaceMethod.Syntax.Body is not FunctionEmptyBody);
 
-                if (IsInterfaceMethodImplemented(typeSymbol, ownerHandle, extensionScope, ifaceSym, ifaceMethod, typeArgs, out var implementingMethod))
+                if (IsInterfaceMethodImplemented(typeSymbol, ownerHandle, extensionScope, ifaceSym, ifaceMethod, typeArgs, conformance?.InheritedFromTypeHandle, out var implementingMethod, out var selfReturnNeedsOverride))
                 {
                     if (implementingMethod is not null)
                     {
@@ -167,6 +211,26 @@ internal sealed partial class DeclarationResolutionPass
                             }
                         }
                     }
+                    continue;
+                }
+
+                if (selfReturnNeedsOverride is not null)
+                {
+                    var baseOwnerName = selfReturnNeedsOverride.Parent is { } bh ? context.GetSymbol(bh)?.Name.Text ?? "base" : "base";
+                    var baseRetDisplay = selfReturnNeedsOverride.ReturnType.ToDisplayString(context);
+                    var baseMethodSpan = selfReturnNeedsOverride.Syntax?.Signature.Identifier.GetSpan() ?? selfReturnNeedsOverride.Syntax?.GetSpan();
+                    var baseMethodSource = selfReturnNeedsOverride.Syntax?.GetSource();
+
+                    context.Diagnostics.ReportDerivedSelfMethodNeedsOverride(
+                        typeSpan,
+                        ownerName,
+                        baseOwnerName,
+                        ifaceMethod.Name.ToString(),
+                        baseRetDisplay,
+                        conformance?.InterfaceType.ToDisplayString(context) ?? ifaceSym.Name.ToString(),
+                        typeSource,
+                        baseMethodSpan,
+                        baseMethodSource);
                     continue;
                 }
 
@@ -293,9 +357,12 @@ internal sealed partial class DeclarationResolutionPass
         TypeSymbol ifaceSym,
         MethodSymbol ifaceMethod,
         Dictionary<SymbolHandle, TypeRef> typeArgs,
-        out MethodSymbol? implementingMethod)
+        SymbolHandle? derivedOriginHandle,
+        out MethodSymbol? implementingMethod,
+        out MethodSymbol? selfReturnNeedsOverride)
     {
         implementingMethod = null;
+        selfReturnNeedsOverride = null;
         var ifaceHandle = ResolutionContext.GetHandle(ifaceSym);
         var candidateScopes = BuildCandidateImplementationScopes(typeSymbol, ownerHandle, extensionScope, ifaceHandle);
 
@@ -411,6 +478,12 @@ internal sealed partial class DeclarationResolutionPass
                         continue;
                 }
 
+                // Must have a body or be intrinsic
+                if (method.Syntax?.Body is FunctionEmptyBody && !method.Flags.HasFlag(FunctionFlags.Intrinsic))
+                    continue;
+
+                bool isDeclaredDirectlyOnOwner = method.Parent is { } mp && context.UnwrapAlias(mp) == context.UnwrapAlias(ownerHandle);
+
                 // Check parameter types (skipping receiver parameter if present)
                 int startIdx = ifaceHasReceiver ? 1 : 0;
                 bool paramsMatch = true;
@@ -419,27 +492,48 @@ internal sealed partial class DeclarationResolutionPass
                     var actualParamType = context.GetParameterSymbol(method.Parameters[i])?.Type ?? TypeRef.Unresolved;
                     if (methodGenericSubst is not null)
                         actualParamType = actualParamType.Substitute(methodGenericSubst);
-                    if (!IsTypeEquivalent(actualParamType, expectedParamTypes[i]))
+                    if (!IsTypeEquivalent(actualParamType, expectedParamTypes[i]) &&
+                        !(isDeclaredDirectlyOnOwner &&
+                          method.Flags.HasFlag(FunctionFlags.Override) &&
+                          (actualParamType.SpecialType is ReferenceSemanticType or PointerSemanticType) &&
+                          actualParamType.IsAssignableFrom(expectedParamTypes[i], context)))
                     {
                         paramsMatch = false;
                         break;
                     }
                 }
 
-                if (!paramsMatch)
-                    continue;
-
                 // Check return type
                 var actualReturnType = methodGenericSubst is not null ? method.ReturnType.Substitute(methodGenericSubst) : method.ReturnType;
-                if (!IsTypeEquivalent(actualReturnType, expectedReturn))
-                    continue;
+                bool returnMatch = IsTypeEquivalent(actualReturnType, expectedReturn);
 
-                // Must have a body or be intrinsic
-                if (method.Syntax?.Body is FunctionEmptyBody && !method.Flags.HasFlag(FunctionFlags.Intrinsic))
-                    continue;
+                if (paramsMatch && returnMatch)
+                {
+                    implementingMethod = method;
+                    return true;
+                }
 
-                implementingMethod = method;
-                return true;
+                if (!isDeclaredDirectlyOnOwner && derivedOriginHandle is { } originH)
+                {
+                    var derivedMatch = CheckDerivedInheritedMethodCompatibility(
+                        typeSymbol,
+                        ownerHandle,
+                        method,
+                        expectedParamTypes,
+                        expectedReturn,
+                        methodGenericSubst,
+                        startIdx,
+                        originH);
+
+                    if (derivedMatch == DerivedMethodMatchResult.Compatible)
+                    {
+                        implementingMethod = method;
+                        return true;
+                    }
+
+                    if (derivedMatch == DerivedMethodMatchResult.NeedsOverrideForSelfReturn)
+                        selfReturnNeedsOverride ??= method;
+                }
             }
         }
 
