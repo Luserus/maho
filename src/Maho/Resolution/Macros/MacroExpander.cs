@@ -63,6 +63,18 @@ internal sealed class MacroExpander
     public MacroDeclaration? LookupMacro(SymbolPart name) =>
         macroTable.TryGetValue(name, out var macro) ? macro : null;
 
+    private T ParseSnippetWithOrigin<T>(SourceText sourceText, ExpansionOrigin origin, Func<Parser, T> parse)
+    {
+        var snippetDiagnostics = new DiagnosticsManager(sourceText);
+        var parser = new Parser(sourceText, snippetDiagnostics);
+        T result = parse(parser);
+
+        foreach (var diag in snippetDiagnostics.Diagnostics)
+            diagnostics.Report(diag.ExpansionOrigin is null ? diag.WithExpansionOrigin(origin) : diag);
+
+        return result;
+    }
+
     /// <summary>
     /// Expands a macro invocation in an expression context.
     /// </summary>
@@ -96,11 +108,11 @@ internal sealed class MacroExpander
             return invocation;
         }
 
-        var parser = new Parser(sourceText, diagnostics);
+        var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
 
         if (!arm.Template.IsExpression)
         {
-            var blockExpr = parser.ParseBlockExpressionSnippet(substitutedTokens);
+            var blockExpr = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseBlockExpressionSnippet(substitutedTokens));
 
             if (blockExpr.FinalExpression is null)
             {
@@ -111,21 +123,21 @@ internal sealed class MacroExpander
                 return invocation;
             }
 
-            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
             AttachOrigin(blockExpr, origin);
 
-            if (hygieneId.IsMacroGenerated)
-                TagHygiene(blockExpr, localNames!, hygieneId, templateTokensSet!);
+            var effectiveHygiene = ResolveMacroHygiene([blockExpr], localNames!, hygieneId, templateTokensSet!);
+            if (effectiveHygiene.IsMacroGenerated)
+                TagHygiene(blockExpr, localNames!, effectiveHygiene, templateTokensSet!);
 
             return blockExpr;
         }
 
-        var expandedExpr = parser.ParseExpressionSnippet(substitutedTokens);
-        var exprOrigin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
-        AttachOrigin(expandedExpr, exprOrigin);
+        var expandedExpr = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseExpressionSnippet(substitutedTokens));
+        AttachOrigin(expandedExpr, origin);
 
-        if (hygieneId.IsMacroGenerated)
-            TagHygiene(expandedExpr, localNames!, hygieneId, templateTokensSet!);
+        var exprHygiene = ResolveMacroHygiene([expandedExpr], localNames!, hygieneId, templateTokensSet!);
+        if (exprHygiene.IsMacroGenerated)
+            TagHygiene(expandedExpr, localNames!, exprHygiene, templateTokensSet!);
 
         return expandedExpr;
     }
@@ -164,35 +176,36 @@ internal sealed class MacroExpander
             return [new LocalMacroInvocationDeclaration(invocation, null)];
         }
 
-        var parser = new Parser(sourceText, diagnostics);
+        var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
         List<Local> statements;
 
         if (arm.Template.IsExpression)
         {
-            var expr = parser.ParseExpressionSnippet(substitutedTokens);
-            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+            var expr = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseExpressionSnippet(substitutedTokens));
             AttachOrigin(expr, origin);
             var stmt = new LocalExpressionStatement(expr, new Token(sourceText, default, TokenKind.Semicolon, [], []))
             {
                 ExpansionOrigin = origin
             };
 
-            if (hygieneId.IsMacroGenerated)
-                TagHygiene(stmt, localNames!, hygieneId, templateTokensSet!);
+            var stmtHygiene = ResolveMacroHygiene([stmt], localNames!, hygieneId, templateTokensSet!);
+            if (stmtHygiene.IsMacroGenerated)
+                TagHygiene(stmt, localNames!, stmtHygiene, templateTokensSet!);
 
             statements = [stmt];
         }
         else
         {
-            statements = parser.ParseStatementsSnippet(substitutedTokens);
-            var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+            statements = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseStatementsSnippet(substitutedTokens));
 
             foreach (var stmt in statements)
-            {
                 AttachOrigin(stmt, origin);
 
-                if (hygieneId.IsMacroGenerated)
-                    TagHygiene(stmt, localNames!, hygieneId, templateTokensSet!);
+            var blockHygiene = ResolveMacroHygiene(statements, localNames!, hygieneId, templateTokensSet!);
+            if (blockHygiene.IsMacroGenerated)
+            {
+                foreach (var stmt in statements)
+                    TagHygiene(stmt, localNames!, blockHygiene, templateTokensSet!);
             }
         }
 
@@ -232,9 +245,8 @@ internal sealed class MacroExpander
             return [new MemberMacroInvocationDeclaration(invocation, null)];
         }
 
-        var parser = new Parser(sourceText, diagnostics);
-        var members = parser.ParseMembersSnippet(substitutedTokens);
         var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+        var members = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseMembersSnippet(substitutedTokens));
 
         foreach (var member in members)
             AttachOrigin(member, origin);
@@ -276,9 +288,8 @@ internal sealed class MacroExpander
             return [new TopLevelMacroInvocationDeclaration(invocation, null)];
         }
 
-        var parser = new Parser(sourceText, diagnostics);
-        var topLevels = parser.ParseTopLevelsSnippet(substitutedTokens);
         var origin = CreateOrigin(macro, invocation, sourceText, parentOrigin);
+        var topLevels = ParseSnippetWithOrigin(sourceText, origin, p => p.ParseTopLevelsSnippet(substitutedTokens));
 
         foreach (var topLevel in topLevels)
             AttachOrigin(topLevel, origin);
@@ -546,7 +557,7 @@ internal sealed class MacroExpander
 
                 if (result.Count == 0)
                 {
-                    diagnostics.ReportInvalidTokenConcatenation(hash1.Span, "'##' cannot appear at the start of a macro template", sourceText);
+                    diagnostics.ReportInvalidTokenConcatenation(hash1.Span, "'##' cannot appear at the start of a macro template", hash1.Source ?? sourceText);
                     i += 2;
 
                     continue;
@@ -554,7 +565,7 @@ internal sealed class MacroExpander
 
                 if (i + 2 >= tokens.Count)
                 {
-                    diagnostics.ReportInvalidTokenConcatenation(hash2.Span, "'##' cannot appear at the end of a macro template", sourceText);
+                    diagnostics.ReportInvalidTokenConcatenation(hash2.Span, "'##' cannot appear at the end of a macro template", hash2.Source ?? sourceText);
                     i += 2;
 
                     continue;
@@ -570,10 +581,15 @@ internal sealed class MacroExpander
                 }
                 else
                 {
+                    bool sameSource = ReferenceEquals(left.Source, right.Source);
+                    var errorSource = (sameSource ? left.Source : hash1.Source) ?? sourceText;
+                    var errorSpan = sameSource
+                        ? new TextSpan(left.Span.Start, Math.Max(0, right.Span.End - left.Span.Start))
+                        : hash1.Span;
                     diagnostics.ReportInvalidTokenConcatenation(
-                        new TextSpan(left.Span.Start, Math.Max(0, right.Span.End - left.Span.Start)),
+                        errorSpan,
                         $"pasting '{left.Value}' and '{right.Value}' does not result in a valid token",
-                        sourceText);
+                        errorSource);
 
                     i += 3;
                 }
@@ -649,6 +665,40 @@ internal sealed class MacroExpander
         }
 
         return localNames;
+    }
+
+    private HygieneId ResolveMacroHygiene(
+        IEnumerable<SyntaxNode> nodes,
+        HashSet<SymbolPart> localNames,
+        HygieneId initialHygieneId,
+        HashSet<Token> templateTokensSet)
+    {
+        foreach (var node in nodes)
+            CollectTemplateVariableLocals(node, localNames, templateTokensSet);
+
+        if (initialHygieneId.IsMacroGenerated)
+            return initialHygieneId;
+
+        return localNames.Count > 0 ? new HygieneId(++hygieneCounter) : HygieneId.Root;
+    }
+
+    private static void CollectTemplateVariableLocals(
+        SyntaxNode? node,
+        HashSet<SymbolPart> localNames,
+        HashSet<Token> templateTokensSet)
+    {
+        if (node is null)
+            return;
+
+        if (node is VariableDeclarator declarator &&
+            declarator.Identifier is SimpleName simple &&
+            templateTokensSet.Contains(simple.Name))
+        {
+            localNames.Add(new SymbolPart(simple.Name));
+        }
+
+        foreach ((_, SyntaxNode child) in SyntaxSpan.GetChildren(node))
+            CollectTemplateVariableLocals(child, localNames, templateTokensSet);
     }
 
     private void TagHygiene(

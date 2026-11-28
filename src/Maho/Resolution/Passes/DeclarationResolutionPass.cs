@@ -28,6 +28,7 @@ internal sealed partial class DeclarationResolutionPass : ResolutionPass
     private readonly HashSet<SyntaxNode> resolvedBodies = [];
     private readonly Dictionary<(TypeSyntax, Scope, bool, bool, bool), TypeRef> resolvedTypes = [];
     private readonly HashSet<VariableDeclarator> resolvedDeclarators = [];
+    private readonly HashSet<AliasSymbol> resolvingAliases = [];
     private readonly HashSet<ParameterSymbol> resolvedParameters = [];
     private readonly Dictionary<(VariableDeclaration, Scope), List<SymbolHandle>> resolvedVariableAttributes = [];
 

@@ -45,5 +45,17 @@ internal sealed class CompileTimeLiteralType : SemanticType
 
     /// <inheritdoc/>
     public override string ToString() => $"<literal {LiteralKind}: {RawText}>";
+
+    public override string ToDisplayString(ResolutionContext? context = null)
+    {
+        return LiteralKind switch
+        {
+            CompileTimeLiteralKind.Int => "integer literal",
+            CompileTimeLiteralKind.Float => "float literal",
+            CompileTimeLiteralKind.Str => "string literal",
+            CompileTimeLiteralKind.Char => "char literal",
+            _ => "literal"
+        };
+    }
 }
 

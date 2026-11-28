@@ -56,7 +56,12 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 }
                 span ??= unit.EndToken.Span;
 
-                tree.DiagnosticsManager.ReportMultipleTopLevelSources(span.Value, tree.SourceText);
+                if (!context.Diagnostics.Diagnostics.Any(d =>
+                        d.DiagnosticCode == "MH0161" &&
+                        ReferenceEquals(d.Source, tree.SourceText)))
+                {
+                    context.Diagnostics.ReportMultipleTopLevelSources(span.Value, tree.SourceText);
+                }
             }
         }
 
@@ -187,8 +192,11 @@ internal sealed partial class SymbolDiscoveryPass : ResolutionPass
                 else if (currentTree is not null)
                 {
                     var span = statement.GetSpan() ?? default;
-                    if (!currentTree.DiagnosticsManager.Diagnostics.Any(d => d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length))
-                        currentTree.DiagnosticsManager.ReportTopLevelPragmaRequired(span, currentTree.SourceText);
+                    bool alreadyReported =
+                        currentTree.SyntaxDiagnostics.Diagnostics.Any(d => d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length) ||
+                        context.Diagnostics.Diagnostics.Any(d => ReferenceEquals(d.Source, currentTree.SourceText) && d.DiagnosticCode == "MH0160" && d.Span.Start == span.Start && d.Span.Length == span.Length);
+                    if (!alreadyReported)
+                        context.Diagnostics.ReportTopLevelPragmaRequired(span, currentTree.SourceText);
                 }
                 return containingNamespace;
             default:

@@ -716,15 +716,41 @@ internal sealed partial class DeclarationResolutionPass
 
         if (symbol is AliasSymbol aliasSymbol && aliasSymbol.IsGlobalAlias && !aliasSymbol.Target.IsResolved)
         {
-            if (reportDiagnostics)
+            // The alias target may not be resolved yet because DeclarationResolutionPass resolves
+            // TypeSymbols before AliasSymbols.  Try to resolve it lazily now (with a cycle guard).
+            if (!resolvingAliases.Add(aliasSymbol))
             {
-                var span = syntax.GetSpan() ?? default;
-                var source = syntax.GetSource();
-                string? arityNote = GetArityMismatchNote(scope, name);
-                context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+                // Cycle detected – report error
+                if (reportDiagnostics)
+                {
+                    var span = syntax.GetSpan() ?? default;
+                    var source = syntax.GetSource();
+                    context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin);
+                }
+                return TypeRef.Error;
             }
 
-            return TypeRef.Error;
+            try
+            {
+                ResolveAlias(aliasSymbol);
+            }
+            finally
+            {
+                resolvingAliases.Remove(aliasSymbol);
+            }
+
+            if (!aliasSymbol.Target.IsResolved)
+            {
+                if (reportDiagnostics)
+                {
+                    var span = syntax.GetSpan() ?? default;
+                    var source = syntax.GetSource();
+                    string? arityNote = GetArityMismatchNote(scope, name);
+                    context.Diagnostics.ReportUnresolvedTypeReference(span, name.ToDisplayString(), source, syntax.ExpansionOrigin, arityNote);
+                }
+
+                return TypeRef.Error;
+            }
         }
 
         var handle = ResolutionContext.GetHandle(symbol);

@@ -1223,7 +1223,7 @@ internal readonly struct TypeRef : IEquatable<TypeRef>
             return "var";
 
         if (Kind == TypeRefKind.Literal)
-            return SpecialType?.ToString() ?? "<literal>";
+            return SpecialType?.ToDisplayString(context) ?? "literal";
 
         if (SpecialType is FunctionSemanticType fn)
             return $"func({string.Join(", ", fn.ParameterTypes.Select(p => p.ToLabelString(context, scope)))}) -> {fn.ReturnType.ToLabelString(context, scope)}";

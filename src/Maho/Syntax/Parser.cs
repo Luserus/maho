@@ -281,6 +281,7 @@ internal sealed partial class Parser
     static Parser() => operatorTrie = BuildOperatorTrie();
 
     private readonly bool allowImplicitTopLevel;
+    private bool containsMacroSyntax;
 
     /// <summary> Creates a parser over one token stream and shared diagnostics sink. </summary>
     public Parser(SourceText text, DiagnosticsManager diagnostics, bool allowImplicitTopLevel = false)
@@ -296,6 +297,7 @@ internal sealed partial class Parser
     {
         this.tokens = FilterTokens(tokens);
         current = default;
+        containsMacroSyntax = false;
 
         var compilationUnit = ParseCompilationUnit();
         Root = compilationUnit;
@@ -326,8 +328,9 @@ internal sealed partial class Parser
         var filtered = FilterTokens(sourceTokens);
         if (filtered.Count == 0 || filtered[^1].Kind is not TokenKind.EndToken)
         {
-            var endSpan = filtered.Count > 0 ? new TextSpan(filtered[^1].Span.End, 0) : new TextSpan(text.Length, 0);
-            filtered.Add(new Token(text, endSpan, TokenKind.EndToken, [], []));
+            var endSource = filtered.Count > 0 ? (filtered[^1].Source ?? text) : text;
+            var endSpan = filtered.Count > 0 ? new TextSpan(filtered[^1].Span.End, 0) : new TextSpan(endSource.Length, 0);
+            filtered.Add(new Token(endSource, endSpan, TokenKind.EndToken, [], []));
         }
         return filtered;
     }
@@ -439,7 +442,7 @@ internal sealed partial class Parser
 
         var eofToken = Consume();
 
-        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled);
+        return new CompilationUnit(directives, topLevels, eofToken, topLevelStatementsEnabled, containsMacroSyntax);
     }
 
     /// <summary> Builds the operator trie used by combined-operator lookups. </summary>
@@ -667,12 +670,15 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
-            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+            var tokenSource = token.Source ?? text;
+
+            if (prevToken is not null && ((prevToken.Source ?? text) != tokenSource ||
+                                          prevToken.Span.End != token.Span.Start ||
                                           prevToken.TrailingTrivia.Length > 0 ||
                                           token.LeadingTrivia.Length > 0))
-                break; // trivia between operator characters
+                break; // trivia or source boundary between operator characters
 
-            if (!node.Next.TryGetValue(text[token.Span.Start], out node))
+            if ((uint)token.Span.Start >= (uint)tokenSource.Length || !node.Next.TryGetValue(tokenSource[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
@@ -692,7 +698,7 @@ internal sealed partial class Parser
         Token token = default!;
 
         if (length == 0)
-            return new Token(text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
+            return new Token(CurrentToken.Source ?? text, new TextSpan(CurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {
@@ -704,13 +710,13 @@ internal sealed partial class Parser
 
         Token last = token;
 
-        return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+        return new Token(first.Source ?? text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
     private TopLevelStatement ParseTopLevelStatementWithValidation(bool topLevelStatementsEnabled)
     {
         if (!topLevelStatementsEnabled)
-            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span);
+            diagnostics.ReportTopLevelPragmaRequired(CurrentToken.Span, CurrentToken.Source);
 
         return ParseTopLevelStatement();
     }

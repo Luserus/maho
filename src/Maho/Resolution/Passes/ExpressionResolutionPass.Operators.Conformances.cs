@@ -188,6 +188,154 @@ internal sealed partial class ExpressionResolutionPass
         return TryResolveImplicitCast(actual, expected, out _);
     }
 
+    /// <summary>
+    /// Resolves a unary operator against type conformances (including <c>derived</c>-synthesized conformances)
+    /// and generic parameter constraints when direct lexical scopes do not declare a concrete method.
+    /// </summary>
+    private bool TryResolveUnaryOperatorViaConformances(
+        OperatorKind opKind,
+        TypeRef operand,
+        UnaryExpression unary,
+        out TypeRef resultType)
+    {
+        resultType = TypeRef.Unresolved;
+
+        if (!context.DiscoveredOperators.TryGetOperators(opKind, out var candidates) || candidates.Count == 0)
+            return false;
+
+        var concreteOperand = operand;
+        while (concreteOperand.SpecialType is AliasSemanticType al)
+            concreteOperand = al.TargetType;
+
+        if (concreteOperand.Handle is not { } rawH)
+            return false;
+
+        var unwrappedH = context.UnwrapAlias(rawH);
+
+        if (context.GetGenericParameterSymbol(unwrappedH) is { } gpSym)
+        {
+            if (TryMatchUnaryConstraints(candidates, gpSym.Constraints, operand, unary, out resultType))
+                return true;
+            return false;
+        }
+
+        var confs = new List<InterfaceConformance>();
+        context.CollectConformancesForTarget(unwrappedH, confs);
+        if (TryMatchUnaryConformances(candidates, confs, concreteOperand, operand, unary, out resultType))
+            return true;
+
+        return false;
+    }
+
+    private bool TryMatchUnaryConstraints(
+        IReadOnlyList<DiscoveredOperatorMethod> candidates,
+        IReadOnlyList<TypeRef> constraints,
+        TypeRef operand,
+        UnaryExpression unary,
+        out TypeRef resultType)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (context.GetMethodSymbol(candidate.MethodHandle) is not { } ifaceMethod ||
+                ifaceMethod.Parameters.Count != 1)
+                continue;
+
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            foreach (var constraint in constraints)
+            {
+                if (constraint.Handle is not { } cH || context.UnwrapAlias(cH) != candidate.InterfaceHandle)
+                    continue;
+
+                var typeArgs = BuildInterfaceSubstitutionMap(ifaceSym, constraint);
+                if (MatchesUnaryInterfaceSignature(ifaceMethod, typeArgs, operand, out var resolvedRet))
+                {
+                    context.ResolvedTree.AddReference(unary, candidate.MethodHandle);
+                    resultType = resolvedRet;
+                    return true;
+                }
+            }
+        }
+
+        resultType = TypeRef.Unresolved;
+        return false;
+    }
+
+    private bool TryMatchUnaryConformances(
+        IReadOnlyList<DiscoveredOperatorMethod> candidates,
+        IReadOnlyList<InterfaceConformance> conformances,
+        TypeRef operandType,
+        TypeRef operand,
+        UnaryExpression unary,
+        out TypeRef resultType)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (context.GetMethodSymbol(candidate.MethodHandle) is not { } ifaceMethod ||
+                ifaceMethod.Parameters.Count != 1)
+                continue;
+
+            var ifaceSym = context.GetTypeSymbol(candidate.InterfaceHandle);
+            if (ifaceSym is null)
+                continue;
+
+            foreach (var conf in conformances)
+            {
+                if (conf.InterfaceHandle != candidate.InterfaceHandle)
+                    continue;
+
+                var instantiatedIfaceType = conf.InterfaceType;
+                if (operandType.SpecialType is GenericSemanticType opGen &&
+                    conf.TargetType.Handle is { } ctH)
+                {
+                    var ctGps = GetTypeGenericParameters(context.UnwrapAlias(ctH));
+                    if (ctGps.Count == opGen.TypeArguments.Count && ctGps.Count > 0)
+                    {
+                        var ownerSubst = new Dictionary<SymbolHandle, TypeRef>(ctGps.Count);
+                        for (int i = 0; i < ctGps.Count; i++)
+                            ownerSubst[ctGps[i]] = opGen.TypeArguments[i];
+                        instantiatedIfaceType = instantiatedIfaceType.Substitute(ownerSubst);
+                    }
+                }
+
+                var typeArgs = BuildInterfaceSubstitutionMap(ifaceSym, instantiatedIfaceType);
+                if (MatchesUnaryInterfaceSignature(ifaceMethod, typeArgs, operand, out var resolvedRet))
+                {
+                    var targetMethodHandle = conf.MethodMap.TryGetValue(candidate.MethodHandle, out var mappedH)
+                        ? mappedH
+                        : candidate.MethodHandle;
+                    context.ResolvedTree.AddReference(unary, targetMethodHandle);
+                    resultType = resolvedRet;
+                    return true;
+                }
+            }
+        }
+
+        resultType = TypeRef.Unresolved;
+        return false;
+    }
+
+    private bool MatchesUnaryInterfaceSignature(
+        MethodSymbol ifaceMethod,
+        Dictionary<SymbolHandle, TypeRef> typeArgs,
+        TypeRef operand,
+        out TypeRef returnType)
+    {
+        returnType = TypeRef.Unresolved;
+
+        var p0 = context.GetParameterSymbol(ifaceMethod.Parameters[0])?.Type ?? TypeRef.Unresolved;
+        if (typeArgs.Count > 0)
+            p0 = p0.Substitute(typeArgs);
+
+        if (!IsBinaryOperandCompatible(operand, p0))
+            return false;
+
+        returnType = typeArgs.Count > 0 ? ifaceMethod.ReturnType.Substitute(typeArgs) : ifaceMethod.ReturnType;
+        return true;
+    }
+
     private IReadOnlyList<SymbolHandle> GetTypeGenericParameters(SymbolHandle typeHandle) => context.GetSymbol(typeHandle) switch
     {
         TypeSymbol ts => ts.GenericParameters,

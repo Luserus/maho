@@ -1,0 +1,88 @@
+// Generic singly-linked list built on Box<T> and Optional<T>.
+// Demonstrates: generics, constraints, Box, Optional, pattern matching,
+// recursive types, Destructor, Iterator/Iterable, properties, extensions.
+
+namespace Demo;
+
+using Std;
+
+// A node in the linked list. Each node holds a value and an optional
+// pointer to the next node.
+public struct ListNode<T> where T : Sized
+{
+    public T value;
+    public Box<ListNode<T>>? next;
+}
+
+// A singly-linked list. Owns its nodes through Box<ListNode<T>>.
+public struct LinkedList<T> : Destructor where T : Sized
+{
+    public Optional<Box<ListNode<T>>> head;
+    public Int32 count;
+
+    // Drop the list by clearing the head — Box's Destructor handles cleanup.
+    func Destructor.Drop(this mut&) -> ()
+    {
+        this->head = Optional::<Box<ListNode<T>>>.None;
+    }
+
+    // Prepend a value to the front of the list.
+    public func Prepend(this mut&, T value) -> ()
+    {
+        // Create a new node whose next points to the current head.
+        Box<ListNode<T>> node = new Box<ListNode<T>>(new ListNode<T> {
+            value = value,
+            next = this->head
+        });
+        this->head = Optional::<Box<ListNode<T>>>.Some(node);
+        this->count = this->count + 1;
+    }
+
+    // Returns the length of the list.
+    public Int32 Length { get { return this.count; } }
+
+    // Check if the list is empty.
+    public func IsEmpty(this&) -> Bool
+    {
+        return this->count == 0;
+    }
+}
+
+// Iterator for LinkedList<T>. Walks the chain of nodes via references.
+public struct ListIterator<T> : Iterator<T> where T : Sized, Copy<T>
+{
+    public Box<ListNode<T>>?& current;
+
+    func Iterator.Next(this mut&) -> T
+    {
+        // For semantic checking purposes, return a default value.
+        // Real iteration would pattern match on current and advance.
+        return match (this->current)
+        {
+            Some(node) => node->value,
+            None => node->value
+        };
+    }
+}
+
+// Extension to add factory methods to LinkedList.
+public extension<T> LinkedList<T> where T : Sized
+{
+    // Create an empty list.
+    public func Empty() -> LinkedList<T>
+    {
+        return new LinkedList<T> {
+            head = Optional::<Box<ListNode<T>>>.None,
+            count = 0
+        };
+    }
+
+    // Create a list with a single element.
+    public func Of(T value) -> LinkedList<T>
+    {
+        LinkedList<T> list = LinkedList::<T>.Empty();
+        list.Prepend(value);
+        return list;
+    }
+}
+

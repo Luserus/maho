@@ -98,6 +98,12 @@ internal sealed partial class ExpressionResolutionPass
             return receiverType;
         }
 
+        // Suppress cascading errors when receiver type is error or unresolved
+        if (receiverType.IsError || receiverType.IsUnresolved)
+        {
+            return TypeRef.Error;
+        }
+
         bool isArrowAccess = access.Dot.Kind == TokenKind.MinusGreaterThan;
         TypeRef originalReceiverType = receiverType;
 

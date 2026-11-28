@@ -38,13 +38,17 @@ internal sealed class MoveAnalysis
     /// </summary>
     public OwnershipFacts Analyze()
     {
+        var reachable = ComputeReachableBlocks();
         bool changed;
         do
         {
             changed = false;
             foreach (var block in body.Blocks)
             {
-                var (input, inMoved) = JoinPredecessors(block);
+                if (!reachable.Contains(block))
+                    continue;
+
+                var (input, inMoved) = JoinPredecessors(block, reachable);
                 if (!incoming.TryGetValue(block, out var currentInput) || !StatesEqual(currentInput, input) ||
                     !incomingMoved.TryGetValue(block, out var currentInMoved) || !currentInMoved.SetEquals(inMoved))
                 {
@@ -65,7 +69,7 @@ internal sealed class MoveAnalysis
         }
         while (changed);
 
-        ReportInvalidUses();
+        ReportInvalidUses(reachable);
         return new OwnershipFacts(body, CloneMap(incoming), CloneMap(outgoing));
     }
 
@@ -175,7 +179,25 @@ internal sealed class MoveAnalysis
         return InitializationState.Uninitialized;
     }
 
-    private (Dictionary<Place, InitializationState> Init, HashSet<Place> MayBeMoved) JoinPredecessors(OwnershipBlock block)
+    private HashSet<OwnershipBlock> ComputeReachableBlocks()
+    {
+        var reachable = new HashSet<OwnershipBlock>();
+        var queue = new Queue<OwnershipBlock>();
+        queue.Enqueue(body.Entry);
+        reachable.Add(body.Entry);
+        while (queue.Count > 0)
+        {
+            var block = queue.Dequeue();
+            foreach (var successor in block.Successors)
+            {
+                if (reachable.Add(successor))
+                    queue.Enqueue(successor);
+            }
+        }
+        return reachable;
+    }
+
+    private (Dictionary<Place, InitializationState> Init, HashSet<Place> MayBeMoved) JoinPredecessors(OwnershipBlock block, HashSet<OwnershipBlock> reachable)
     {
         if (ReferenceEquals(block, body.Entry) || block.Predecessors.Count == 0)
             return (NewDefaultState(), []);
@@ -185,6 +207,9 @@ internal sealed class MoveAnalysis
         bool first = true;
         foreach (var predecessor in block.Predecessors)
         {
+            if (!reachable.Contains(predecessor))
+                continue;
+
             if (!outgoing.TryGetValue(predecessor, out var state))
                 continue;
 
@@ -329,10 +354,13 @@ internal sealed class MoveAnalysis
         }
     }
 
-    private void ReportInvalidUses()
+    private void ReportInvalidUses(HashSet<OwnershipBlock> reachable)
     {
         foreach (var block in body.Blocks)
         {
+            if (!reachable.Contains(block))
+                continue;
+
             var state = CopyState(GetOrEmpty(incoming, block));
             var mayBeMoved = new HashSet<Place>(incomingMoved.GetValueOrDefault(block) ?? []);
             foreach (var statement in block.Statements)

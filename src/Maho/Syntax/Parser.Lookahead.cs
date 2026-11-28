@@ -386,12 +386,15 @@ internal sealed partial class Parser
             if (token.Kind is TokenKind.EndToken)
                 break; // end of tokens
 
-            if (prevToken is not null && (prevToken.Span.End != token.Span.Start ||
+            var tokenSource = token.Source ?? text;
+
+            if (prevToken is not null && ((prevToken.Source ?? text) != tokenSource ||
+                                          prevToken.Span.End != token.Span.Start ||
                                           prevToken.TrailingTrivia.Length > 0 ||
                                           token.LeadingTrivia.Length > 0))
-                break; // trivia between operator characters
+                break; // trivia or source boundary between operator characters
 
-            if (!node.Next.TryGetValue(text[token.Span.Start], out node))
+            if ((uint)token.Span.Start >= (uint)tokenSource.Length || !node.Next.TryGetValue(tokenSource[token.Span.Start], out node))
                 break; // no further match
 
             length = i + 1;
@@ -411,7 +414,7 @@ internal sealed partial class Parser
         Token token = default!;
 
         if (length == 0)
-            return new Token(text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
+            return new Token(LookaheadCurrentToken.Source ?? text, new TextSpan(LookaheadCurrentToken.Span.Start, 0), TokenKind.NullToken, [], []);
 
         for (int i = 0; i < length; i++)
         {
@@ -423,7 +426,7 @@ internal sealed partial class Parser
 
         Token last = token;
 
-        return new Token(text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
+        return new Token(first.Source ?? text, new TextSpan(first.Span.Start, last.Span.End - first.Span.Start), kind, first.LeadingTrivia, last.TrailingTrivia);
     }
 
     /// <summary> Parses a speculative generic type-argument list without mutating real parser state. </summary>

@@ -333,9 +333,10 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (targetType.Handle is not { } targetHandle)
+        if (targetType.Handle is not { } rawTargetHandle)
             return false;
 
+        var targetHandle = context.UnwrapAlias(rawTargetHandle);
         var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
         if (targetSym is null)
             return false;
@@ -390,10 +391,11 @@ internal sealed partial class ExpressionResolutionPass
         if (!context.DiscoveredOperators.TryGetOperators(kind, out var candidates))
             return false;
 
-        if (targetType.Handle is not { } targetHandle)
+        if (targetType.Handle is not { } rawTargetHandle2)
             return false;
 
-        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle) ?? context.GetSymbol(targetHandle);
+        var targetHandle2 = context.UnwrapAlias(rawTargetHandle2);
+        var targetSym = (Symbol?)context.GetTypeSymbol(targetHandle2) ?? context.GetSymbol(targetHandle2);
         if (targetSym is null)
             return false;
 
@@ -583,9 +585,10 @@ internal sealed partial class ExpressionResolutionPass
     /// <returns>The matching symbol if found; otherwise <see langword="null"/>.</returns>
     private Symbol? LookupMemberOnType(TypeRef targetType, string memberName)
     {
-        if (targetType.Handle is not { } handle)
+        if (targetType.Handle is not { } rawHandle)
             return null;
 
+        var handle = context.UnwrapAlias(rawHandle);
         var sym = (Symbol?)context.GetTypeSymbol(handle) ?? context.GetSymbol(handle);
         if (sym is not null)
         {
@@ -624,7 +627,7 @@ internal sealed partial class ExpressionResolutionPass
         }
         else if (lit.Literal.Kind is TokenKind.Char)
         {
-            if (hChar is { } hc && targetType.Handle == hc) return true;
+            if (hChar is { } hc && targetType.Handle is { } hcRaw && context.UnwrapAlias(hcRaw) == hc) return true;
         }
 
         if (targetType.Handle is { } th)
@@ -681,7 +684,7 @@ internal sealed partial class ExpressionResolutionPass
             if (lit.LiteralKind is CompileTimeLiteralKind.Int && IsNumeric(targetType)) return true;
             if (lit.LiteralKind is CompileTimeLiteralKind.Float && IsNumeric(targetType)) return true;
             if (lit.LiteralKind is CompileTimeLiteralKind.Str && IsStringAliasOrRefTarget(targetType)) return true;
-            if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle == hc) return true;
+            if (lit.LiteralKind is CompileTimeLiteralKind.Char && hChar is { } hc && targetType.Handle is { } hcRaw2 && context.UnwrapAlias(hcRaw2) == hc) return true;
         }
 
         if (targetType.Handle is { } th)

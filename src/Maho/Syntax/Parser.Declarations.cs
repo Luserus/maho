@@ -139,13 +139,15 @@ internal sealed partial class Parser
 
         TypeBody body;
 
-        if (CurrentToken.Kind is TokenKind.LeftBrace)
-            body = kind == TypeKind.Enum ? ParseEnumTypeBlockBody() : ParseTypeBlockBody();
-        else if (CurrentToken.Kind is TokenKind.Semicolon)
-            body = ParseTypeEmptyBody();
+        if (CurrentToken.Kind is TokenKind.LeftBrace or TokenKind.Semicolon ||
+            TrySkipMalformedHeaderBeforeBody("a type body", "after the type declaration"))
+        {
+            body = CurrentToken.Kind is TokenKind.LeftBrace
+                ? (kind == TypeKind.Enum ? ParseEnumTypeBlockBody() : ParseTypeBlockBody())
+                : ParseTypeEmptyBody();
+        }
         else
         {
-            diagnostics.ReportExpectedBody(CurrentToken.Span, "a type body", GetTokenDisplay(CurrentToken), "after the type declaration");
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
@@ -188,7 +190,10 @@ internal sealed partial class Parser
     {
         Token? dollarToken = null;
         if (CurrentToken.Kind is TokenKind.Dollar)
+        {
+            containsMacroSyntax = true;
             dollarToken = Consume();
+        }
 
         NamedSyntax name = ParseNamedSyntax(allowQualified: true);
 
@@ -478,13 +483,15 @@ internal sealed partial class Parser
             constraints.Add(ParseTypeConstraintClause());
 
         TypeBody body;
-        if (CurrentToken.Kind is TokenKind.LeftBrace)
-            body = ParseTypeBlockBody();
-        else if (CurrentToken.Kind is TokenKind.Semicolon)
-            body = ParseTypeEmptyBody();
+        if (CurrentToken.Kind is TokenKind.LeftBrace or TokenKind.Semicolon ||
+            TrySkipMalformedHeaderBeforeBody("an extension body", "after the extension declaration"))
+        {
+            body = CurrentToken.Kind is TokenKind.LeftBrace
+                ? ParseTypeBlockBody()
+                : ParseTypeEmptyBody();
+        }
         else
         {
-            diagnostics.ReportExpectedBody(CurrentToken.Span, "an extension body", GetTokenDisplay(CurrentToken), "after the extension declaration");
             body = new TypeEmptyBody(CreateMissingToken());
         }
 
@@ -971,7 +978,8 @@ internal sealed partial class Parser
         {
             if (CurrentToken.MatchingKind is MatchingKeywordKind.Where)
                 constraints.Add(ParseTypeConstraintClause());
-            else if (CurrentToken.Kind is TokenKind.Colon && baseClause is null)
+            else if (CurrentToken.Kind is TokenKind.Colon && baseClause is null &&
+                     (constraints.Count == 0 || IsLikelyBaseInitializerAfterConstraint()))
                 baseClause = ParseBaseInitializerClause();
             else
                 break;
@@ -1026,8 +1034,74 @@ internal sealed partial class Parser
         return new PropertyAccessorDeclaration(attributes, modifiers, keyword, kind, body);
     }
 
+    private bool IsLikelyBaseInitializerAfterConstraint()
+    {
+        for (int i = 1; i < 64; i++)
+        {
+            var token = Peek(i);
+            if (token.Kind is TokenKind.LeftParen)
+                return true;
+
+            if (token.Kind is TokenKind.EndToken or TokenKind.LeftBrace or TokenKind.RightBrace or TokenKind.Semicolon ||
+                token.MatchingKind is MatchingKeywordKind.Where ||
+                (token.Kind is TokenKind.Equals && Peek(i + 1).Kind is TokenKind.GreaterThanSign))
+                return false;
+        }
+
+        return false;
+    }
+
+    private bool TrySkipMalformedHeaderBeforeBody(string expectedWhat, string contextDescription, bool allowArrow = false)
+    {
+        if (CurrentToken.Kind is TokenKind.LeftBrace or TokenKind.Semicolon || (allowArrow && IsArrow()))
+            return true;
+
+        diagnostics.ReportExpectedBody(CurrentToken.Span, expectedWhat, GetTokenDisplay(CurrentToken), contextDescription, CurrentToken.Source);
+
+        for (int i = 0; i < 64; i++)
+        {
+            var token = Peek(i);
+            if (token.Kind is TokenKind.LeftBrace or TokenKind.Semicolon)
+            {
+                for (int j = 0; j < i; j++)
+                    Consume();
+                return true;
+            }
+
+            if (allowArrow &&
+                token.Kind is TokenKind.Equals &&
+                Peek(i + 1) is { Kind: TokenKind.GreaterThanSign } gt &&
+                (token.Source ?? text) == (gt.Source ?? text) &&
+                token.Span.End == gt.Span.Start &&
+                token.TrailingTrivia.Length == 0 &&
+                gt.LeadingTrivia.Length == 0)
+            {
+                for (int j = 0; j < i; j++)
+                    Consume();
+                return true;
+            }
+
+            if (token.Kind is TokenKind.EndToken or TokenKind.RightBrace ||
+                token.MatchingKind is MatchingKeywordKind.Public or MatchingKeywordKind.Private or
+                    MatchingKeywordKind.Internal or MatchingKeywordKind.Protected or
+                    MatchingKeywordKind.Struct or MatchingKeywordKind.Class or MatchingKeywordKind.Enum or
+                    MatchingKeywordKind.Union or MatchingKeywordKind.Interface or
+                    MatchingKeywordKind.Extension or MatchingKeywordKind.Ext or
+                    MatchingKeywordKind.Namespace or MatchingKeywordKind.Using or
+                    MatchingKeywordKind.Func or MatchingKeywordKind.Macro or MatchingKeywordKind.Operator)
+                return false;
+        }
+
+        return false;
+    }
+
     private FunctionBody ParseFunctionBody()
     {
+        if (CurrentToken.Kind is not TokenKind.LeftBrace and not TokenKind.Semicolon &&
+            !IsArrow() &&
+            !TrySkipMalformedHeaderBeforeBody("a function body", "after the function signature", allowArrow: true))
+            return new FunctionEmptyBody(CreateMissingToken());
+
         if (CurrentToken.Kind is TokenKind.LeftBrace)
             return ParseFunctionBlockBody();
         else if (IsArrow())
@@ -1037,13 +1111,8 @@ internal sealed partial class Parser
             var semicolon = ExpectToken(TokenKind.Semicolon, "';'", "after expression body");
             return new FunctionLambdaBody(arrow, new LocalReturnStatement(new ReturnStatement(arrow, expr, semicolon)));
         }
-        else if (CurrentToken.Kind is TokenKind.Semicolon)
-            return ParseFunctionEmptyBody();
         else
-        {
-            diagnostics.ReportExpectedBody(CurrentToken.Span, "a function body", GetTokenDisplay(CurrentToken), "after the function signature");
-            return new FunctionEmptyBody(CreateMissingToken());
-        }
+            return ParseFunctionEmptyBody();
     }
 
     private FunctionBlockBody ParseFunctionBlockBody()

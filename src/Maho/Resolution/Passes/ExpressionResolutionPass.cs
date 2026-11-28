@@ -197,24 +197,24 @@ internal sealed partial class ExpressionResolutionPass : ResolutionPass
 
     /// <summary>Checks whether a type reference corresponds to a signed integer primitive.</summary>
     private bool IsSignedInteger(TypeRef t) =>
-        t.Handle is { } h && (h == hInt8 || h == hInt16 || h == hInt32 || h == hInt64 || h == hInt128 || h == hNInt);
+        t.Handle is { } rawH && (context.UnwrapAlias(rawH)) is var h && (h == hInt8 || h == hInt16 || h == hInt32 || h == hInt64 || h == hInt128 || h == hNInt);
 
     /// <summary>Checks whether a type reference corresponds to an unsigned integer primitive.</summary>
     private bool IsUnsignedInteger(TypeRef t) =>
-        t.Handle is { } h && (h == hUInt8 || h == hUInt16 || h == hUInt32 || h == hUInt64 || h == hUInt128 || h == hNUInt);
+        t.Handle is { } rawH && (context.UnwrapAlias(rawH)) is var h && (h == hUInt8 || h == hUInt16 || h == hUInt32 || h == hUInt64 || h == hUInt128 || h == hNUInt);
 
     /// <summary>Checks whether a type reference corresponds to any integer primitive.</summary>
     private bool IsInteger(TypeRef t) => IsSignedInteger(t) || IsUnsignedInteger(t);
 
     /// <summary>Checks whether a type reference corresponds to a floating-point primitive.</summary>
     private bool IsFloatingPoint(TypeRef t) =>
-        t.Handle is { } h && (h == hFloat16 || h == hFloat32 || h == hFloat64 || h == hFloat128);
+        t.Handle is { } rawH && (context.UnwrapAlias(rawH)) is var h && (h == hFloat16 || h == hFloat32 || h == hFloat64 || h == hFloat128);
 
     /// <summary>Checks whether a type reference is numeric (integer or floating-point).</summary>
     private bool IsNumeric(TypeRef t) => IsInteger(t) || IsFloatingPoint(t);
 
     /// <summary>Checks whether a type reference corresponds to canonical boolean.</summary>
-    private bool IsBool(TypeRef t) => t.Handle is { } h && h == hBool;
+    private bool IsBool(TypeRef t) => t.Handle is { } rawH && context.UnwrapAlias(rawH) == hBool;
 
     /// <summary>Checks whether a type reference corresponds to empty tuple ().</summary>
     private bool IsVoidType(TypeRef t) => t.IsEmptyTuple;

@@ -1,0 +1,44 @@
+// Simple association list (key-value pairs) using the linked list.
+// Demonstrates: multiple generic parameters, Equality constraint,
+// IndexerGetter, extensions.
+
+namespace Demo;
+
+using Std;
+
+// A key-value pair.
+public struct Entry<K, V> where K : Sized where V : Sized
+{
+    public K key;
+    public V value;
+}
+
+// An association list mapping K -> V.
+// Uses a linked list of Entry<K, V> internally.
+public struct AssocList<K, V> where K : Sized where V : Sized
+{
+    public LinkedList<Entry<K, V>> entries;
+
+    // Insert a key-value pair at the front (shadowing previous entries with same key).
+    public func Insert(this mut&, K key, V value) -> ()
+    {
+        Entry<K, V> entry = new Entry<K, V> { key = key, value = value };
+        this->entries.Prepend(entry);
+    }
+
+    // Returns the number of entries.
+    public func Count(this&) -> Int32 { return this->entries.count; }
+}
+
+// Extension to provide factory methods for AssocList.
+public extension<K, V> AssocList<K, V> where K : Sized where V : Sized
+{
+    // Create an empty association list.
+    public func Empty() -> AssocList<K, V>
+    {
+        return new AssocList<K, V> {
+            entries = LinkedList::<Entry<K, V>>.Empty()
+        };
+    }
+}
+

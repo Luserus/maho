@@ -288,7 +288,11 @@ internal sealed partial class ExpressionResolutionPass
     private List<MethodSymbol> GetMatchingLiteralMethods(TypeRef targetType, CompileTimeLiteralKind kind)
     {
         var result = new List<MethodSymbol>();
-        if (targetType.Handle is not { } handle || context.GetTypeSymbol(handle) is not { } typeSym)
+        var rawHandle = targetType.Handle;
+        if (rawHandle is null)
+            return result;
+        var handle = context.UnwrapAlias(rawHandle.Value);
+        if (context.GetTypeSymbol(handle) is not { } typeSym)
             return result;
 
         var scope = GetOwnedScope(typeSym);

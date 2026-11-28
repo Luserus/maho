@@ -367,6 +367,7 @@ public sealed class Compilation
         // 1. Full Reuse Short-Circuit:
         if (cachedCompilation != null &&
             !cachedCompilation.Options.RequiresReanalysis(options) &&
+            ReferencedCompilationsMatch(cachedCompilation.ReferencedCompilations, referencedCompilations) &&
             pathsList.Count == cachedCompilation.SyntaxTrees.Count &&
             pathsList.All(p => cachedCompilation.GetSyntaxTree(p) is { } tree && tree.IsEquivalent(p)))
         {
@@ -399,7 +400,10 @@ public sealed class Compilation
         var fileReadErrors = new (string Path, string ErrorMessage, bool IsInternal)?[pathsList.Count];
         var sourceTexts = new SourceText?[pathsList.Count];
         var roots = new CompilationUnit?[pathsList.Count];
-        var fileDms = new DiagnosticsManager?[pathsList.Count];
+        var syntaxDms = new DiagnosticsManager?[pathsList.Count];
+        var tokenLists = new List<Token>?[pathsList.Count];
+        var allowImplicits = new bool[pathsList.Count];
+        var cachedTrees = new SyntaxTree?[pathsList.Count];
 
         var changedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var cachedTreeMap = new Dictionary<string, SyntaxTree>(StringComparer.OrdinalIgnoreCase);
@@ -415,9 +419,24 @@ public sealed class Compilation
             string path = pathsList[i];
             if (cachedTreeMap.TryGetValue(path, out var cachedTree) && cachedTree.IsEquivalent(path))
             {
+                cachedTrees[i] = cachedTree;
                 sourceTexts[i] = cachedTree.SourceText;
-                roots[i] = cachedTree.Root;
-                fileDms[i] = cachedTree.DiagnosticsManager;
+                syntaxDms[i] = cachedTree.SyntaxDiagnostics;
+                allowImplicits[i] = cachedTree.AllowImplicitTopLevel;
+
+                // Re-parse unchanged files that underwent macro expansion or contain macro syntax so
+                // MacroExpansionPass always operates on an unexpanded AST without mutating cachedCompilation.
+                if (cachedTree.WasMacroExpanded || cachedTree.ContainsMacroSyntax)
+                {
+                    var tokens = cachedTree.Tokens;
+                    roots[i] = ReparseUnexpandedRoot(cachedTree.SourceText, ref tokens, cachedTree.AllowImplicitTopLevel);
+                    tokenLists[i] = tokens;
+                }
+                else
+                {
+                    tokenLists[i] = cachedTree.Tokens;
+                    roots[i] = cachedTree.Root;
+                }
             }
             else
             {
@@ -427,23 +446,18 @@ public sealed class Compilation
                     var text = new SourceText(new SourceFile(path));
                     sourceTexts[i] = text;
 
-                    bool isEntryFile = options.EntryFile != null &&
-                        (string.Equals(path, options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(Path.GetFileName(path), options.EntryFile, StringComparison.OrdinalIgnoreCase));
-
-                    bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
-                    bool allowImplicit = (isSingleFileScript && (options.EntryFile == null || isEntryFile)) ||
-                                         (options.ImplicitTopLevel && isEntryFile);
+                    bool allowImplicit = ComputeAllowImplicitParse(path, pathsList.Count, options);
+                    allowImplicits[i] = allowImplicit;
 
                     var dm = new DiagnosticsManager(text);
-                    fileDms[i] = dm;
+                    syntaxDms[i] = dm;
 
                     var lexer = new Lexer(text, dm);
                     lexer.Lex();
+                    tokenLists[i] = lexer.Tokens;
 
                     var parser = new Parser(text, dm, allowImplicit);
-                    var root = parser.Parse(lexer.Tokens);
-                    roots[i] = root;
+                    roots[i] = parser.Parse(lexer.Tokens);
                 }
                 catch (Exception ex)
                 {
@@ -457,7 +471,10 @@ public sealed class Compilation
         var validPaths = new List<string>(pathsList.Count);
         var validSourceTexts = new List<SourceText>(pathsList.Count);
         var validRoots = new List<CompilationUnit>(pathsList.Count);
-        var validFileDms = new List<DiagnosticsManager>(pathsList.Count);
+        var validSyntaxDms = new List<DiagnosticsManager>(pathsList.Count);
+        var validTokenLists = new List<List<Token>?>(pathsList.Count);
+        var validAllowImplicits = new List<bool>(pathsList.Count);
+        var validCachedTrees = new List<SyntaxTree?>(pathsList.Count);
 
         for (int i = 0; i < pathsList.Count; i++)
         {
@@ -466,7 +483,10 @@ public sealed class Compilation
                 validPaths.Add(pathsList[i]);
                 validSourceTexts.Add(sourceTexts[i]!);
                 validRoots.Add(roots[i]!);
-                validFileDms.Add(fileDms[i]!);
+                validSyntaxDms.Add(syntaxDms[i]!);
+                validTokenLists.Add(tokenLists[i]);
+                validAllowImplicits.Add(allowImplicits[i]);
+                validCachedTrees.Add(cachedTrees[i]);
             }
         }
 
@@ -480,32 +500,31 @@ public sealed class Compilation
         {
             var unit = validRoots[i];
             bool? pragmaState = PragmaDirective.GetTopLevelPragmaState(unit.Pragmas);
-            bool isExplicitEntry = options.EntryFile != null &&
-                (string.Equals(validPaths[i], options.EntryFile, StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(Path.GetFileName(validPaths[i]), options.EntryFile, StringComparison.OrdinalIgnoreCase));
+            bool isExplicitEntry = IsMatchingEntryFile(validPaths[i], options.EntryFile);
             bool isSingleFileScript = pathsList.Count == 1 && options.RootDirectory == null;
 
-            if (pragmaState == false)
+            bool enablesTopLevel = pragmaState switch
             {
-                unit.EnablesTopLevelStatements = false;
-            }
-            else if (pragmaState == true)
-            {
-                unit.EnablesTopLevelStatements = true;
+                false => false,
+                true => true,
+                null => (options.ImplicitTopLevel && isExplicitEntry) ||
+                        (isSingleFileScript && (options.EntryFile == null || isExplicitEntry))
+            };
+
+            if (pragmaState == true || (pragmaState is null && enablesTopLevel))
                 explicitTopLevelIndices.Add(i);
-            }
-            else
+
+            if (validCachedTrees[i] is { } ct &&
+                ReferenceEquals(unit, ct.Root) &&
+                unit.EnablesTopLevelStatements != enablesTopLevel)
             {
-                if ((options.ImplicitTopLevel && isExplicitEntry) || (isSingleFileScript && (options.EntryFile == null || isExplicitEntry)))
-                {
-                    unit.EnablesTopLevelStatements = true;
-                    explicitTopLevelIndices.Add(i);
-                }
-                else
-                {
-                    unit.EnablesTopLevelStatements = false;
-                }
+                var tokens = validTokenLists[i];
+                unit = ReparseUnexpandedRoot(validSourceTexts[i], ref tokens, validAllowImplicits[i]);
+                validTokenLists[i] = tokens;
+                validRoots[i] = unit;
             }
+
+            unit.EnablesTopLevelStatements = enablesTopLevel;
         }
 
         if (effectiveEntryFile == null)
@@ -516,30 +535,31 @@ public sealed class Compilation
                 effectiveEntryFile = validPaths[explicitTopLevelIndices[0]];
         }
 
-        if (explicitTopLevelIndices.Count > 1)
-        {
-            foreach (int idx in explicitTopLevelIndices)
-                validFileDms[idx].ReportMultipleTopLevelSources(GetTopLevelPragmaSpan(validRoots[idx]));
-        }
-
         var effectiveOptions = options with
         {
             EntryFile = effectiveEntryFile,
             ImplicitTopLevel = options.ImplicitTopLevel || (pathsList.Count == 1 && options.RootDirectory == null)
         };
 
-        var syntaxTrees = new SyntaxTree[validRoots.Count];
-
+        var workingTrees = new SyntaxTree[validRoots.Count];
         for (int i = 0; i < validRoots.Count; i++)
         {
-            if (cachedTreeMap.TryGetValue(validPaths[i], out var cachedTree) &&
-                ReferenceEquals(cachedTree.Root, validRoots[i]))
+            if (validCachedTrees[i] is { } cachedTree &&
+                ReferenceEquals(cachedTree.Root, validRoots[i]) &&
+                !cachedTree.WasMacroExpanded &&
+                !cachedTree.ContainsMacroSyntax)
             {
-                syntaxTrees[i] = cachedTree;
+                workingTrees[i] = cachedTree;
             }
             else
             {
-                syntaxTrees[i] = new SyntaxTree(validRoots[i], validSourceTexts[i], validFileDms[i], validPaths[i]);
+                workingTrees[i] = new SyntaxTree(
+                    validRoots[i],
+                    validSourceTexts[i],
+                    validSyntaxDms[i],
+                    validPaths[i],
+                    tokens: validTokenLists[i],
+                    allowImplicitTopLevel: validAllowImplicits[i]);
             }
         }
 
@@ -550,12 +570,15 @@ public sealed class Compilation
             .ToList();
 
         var resolutionDm = new DiagnosticsManager();
-        var context = resolver.ResolveIncremental(syntaxTrees, changedPaths, referencedContexts, cachedCompilation, diagnostics: resolutionDm, options: effectiveOptions);
+        var context = resolver.ResolveIncremental(workingTrees, changedPaths, referencedContexts, cachedCompilation, diagnostics: resolutionDm, options: effectiveOptions);
+
+        var perFileResDiags = new List<Diagnostic>[validPaths.Count];
+        for (int i = 0; i < validPaths.Count; i++)
+            perFileResDiags[i] = [];
 
         foreach (var diag in resolutionDm.Diagnostics)
         {
             int targetIdx = -1;
-
             for (int k = 0; k < validSourceTexts.Count; k++)
             {
                 if (ReferenceEquals(diag.Source, validSourceTexts[k]))
@@ -566,50 +589,49 @@ public sealed class Compilation
             }
 
             if (targetIdx >= 0)
-                validFileDms[targetIdx].Report(diag);
-            else if (validFileDms.Count > 0)
-                validFileDms[0].Report(diag);
+                perFileResDiags[targetIdx].Add(diag);
+            else if (perFileResDiags.Length > 0)
+                perFileResDiags[0].Add(diag);
+        }
+
+        var syntaxTrees = new SyntaxTree[validRoots.Count];
+        for (int i = 0; i < validRoots.Count; i++)
+        {
+            if (validCachedTrees[i] is { } cachedTree &&
+                ReferenceEquals(cachedTree.Root, validRoots[i]) &&
+                !workingTrees[i].WasMacroExpanded &&
+                cachedTree.ResolutionDiagnostics.Count == 0 &&
+                perFileResDiags[i].Count == 0)
+            {
+                syntaxTrees[i] = cachedTree;
+            }
+            else
+            {
+                syntaxTrees[i] = new SyntaxTree(
+                    validRoots[i],
+                    validSourceTexts[i],
+                    validSyntaxDms[i],
+                    validPaths[i],
+                    perFileResDiags[i],
+                    validTokenLists[i],
+                    validAllowImplicits[i],
+                    workingTrees[i].WasMacroExpanded);
+            }
         }
         semSw.Stop();
 
-        // Check if any changed file changed public signatures
-        bool signaturesChanged = false;
-        if (cachedCompilation == null || changedPaths.Count == pathsList.Count)
-        {
-            signaturesChanged = true;
-        }
-        else
-        {
-            foreach (var changedPath in changedPaths)
-            {
-                var oldSymbols = cachedCompilation.Context.GetTreeSymbols(changedPath);
-                var newSymbols = context.GetTreeSymbols(changedPath);
-                if (oldSymbols.Count != newSymbols.Count)
-                {
-                    signaturesChanged = true;
-                    break;
-                }
-                for (int s = 0; s < oldSymbols.Count; s++)
-                {
-                    var oldSym = cachedCompilation.Context.GetSymbol(oldSymbols[s]);
-                    var newSym = context.GetSymbol(newSymbols[s]);
-                    if (oldSym?.Name.Text != newSym?.Name.Text || oldSym?.Kind != newSym?.Kind)
-                    {
-                        signaturesChanged = true;
-                        break;
-                    }
-                }
-                if (signaturesChanged)
-                    break;
-            }
-        }
+        // Check if any changed file changed public signatures or macro definitions
+        bool signaturesChanged = HasPublicSignatureChanges(cachedCompilation, context, changedPaths, pathsList.Count);
 
         var reusableModels = new Dictionary<SyntaxTree, SemanticModel>();
         if (!signaturesChanged && cachedCompilation != null)
         {
             foreach (var tree in syntaxTrees)
             {
-                if (!changedPaths.Contains(tree.FilePath) && cachedCompilation.GetSemanticModel(tree.FilePath) is { } cachedModel)
+                if (!changedPaths.Contains(tree.FilePath) &&
+                    !tree.WasMacroExpanded &&
+                    cachedCompilation.GetSemanticModel(tree.FilePath) is { } cachedModel &&
+                    ReferenceEquals(tree, cachedModel.SyntaxTree))
                 {
                     reusableModels[tree] = cachedModel;
                 }
@@ -619,10 +641,10 @@ public sealed class Compilation
         var allProjectedDiagnostics = new List<DiagnosticInfo>();
         for (int i = 0; i < validPaths.Count; i++)
         {
-            var dm = validFileDms[i];
             var text = validSourceTexts[i];
             var path = validPaths[i];
-            allProjectedDiagnostics.AddRange(ProjectDiagnostics(dm.Diagnostics, text, path));
+            allProjectedDiagnostics.AddRange(ProjectDiagnostics(validSyntaxDms[i].Diagnostics, text, path));
+            allProjectedDiagnostics.AddRange(ProjectDiagnostics(perFileResDiags[i], text, path));
         }
 
         var fileErrorsMap = new Dictionary<string, (string ErrorMessage, bool IsInternal)>(StringComparer.OrdinalIgnoreCase);
@@ -658,17 +680,76 @@ public sealed class Compilation
             entryFile: effectiveEntryFile);
     }
 
-    private static bool ContainsTopLevelStatement(IReadOnlyList<TopLevel> members)
+    private static bool ReferencedCompilationsMatch(IReadOnlyList<Compilation> previous, IReadOnlyList<Compilation> current)
     {
-        foreach (TopLevel member in members)
+        if (previous.Count != current.Count)
+            return false;
+
+        for (int i = 0; i < previous.Count; i++)
         {
-            switch (member)
+            if (!ReferenceEquals(previous[i], current[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsMatchingEntryFile(string path, string? entryFile) =>
+        entryFile != null &&
+        (string.Equals(path, entryFile, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(Path.GetFileName(path), entryFile, StringComparison.OrdinalIgnoreCase));
+
+    private static bool ComputeAllowImplicitParse(string path, int fileCount, CompilationOptions options)
+    {
+        bool isEntryFile = IsMatchingEntryFile(path, options.EntryFile);
+        bool isSingleFileScript = fileCount == 1 && options.RootDirectory == null;
+        return (isSingleFileScript && (options.EntryFile == null || isEntryFile)) ||
+               (options.ImplicitTopLevel && isEntryFile);
+    }
+
+    private static CompilationUnit ReparseUnexpandedRoot(SourceText sourceText, ref List<Token>? tokens, bool allowImplicit)
+    {
+        var dm = new DiagnosticsManager(sourceText);
+        if (tokens is null)
+        {
+            var lexer = new Lexer(sourceText, dm);
+            lexer.Lex();
+            tokens = lexer.Tokens;
+        }
+
+        var parser = new Parser(sourceText, dm, allowImplicit);
+        return parser.Parse(tokens);
+    }
+
+    private static bool HasPublicSignatureChanges(
+        Compilation? cachedCompilation,
+        ResolutionContext newContext,
+        HashSet<string> changedPaths,
+        int totalFiles)
+    {
+        if (cachedCompilation == null || changedPaths.Count == totalFiles)
+            return true;
+
+        var oldContext = cachedCompilation.Context;
+        foreach (var changedPath in changedPaths)
+        {
+            var oldSymbols = oldContext.GetTreeSymbols(changedPath);
+            var newSymbols = newContext.GetTreeSymbols(changedPath);
+            if (oldSymbols.Count != newSymbols.Count)
+                return true;
+
+            for (int s = 0; s < oldSymbols.Count; s++)
             {
-                case TopLevelStatement:
+                var oldSym = oldContext.GetSymbol(oldSymbols[s]);
+                var newSym = newContext.GetSymbol(newSymbols[s]);
+                if (oldSym is null || newSym is null ||
+                    oldSym.Kind != newSym.Kind ||
+                    oldSym.Name.Text != newSym.Name.Text)
+                {
                     return true;
-                case TopLevelBlockDeclaration block when ContainsTopLevelStatement(block.Members):
-                    return true;
-                case NamespaceDeclaration { Body: NamespaceBlockBody body } when ContainsTopLevelStatement(body.Members):
+                }
+
+                if (!SymbolSignatureMatches(oldSym, oldContext, newSym, newContext))
                     return true;
             }
         }
@@ -676,15 +757,58 @@ public sealed class Compilation
         return false;
     }
 
-    private static TextSpan GetTopLevelPragmaSpan(CompilationUnit unit)
+    private static bool SymbolSignatureMatches(Symbol oldSym, ResolutionContext oldCtx, Symbol newSym, ResolutionContext newCtx)
     {
-        foreach (PragmaDirective pragma in unit.Pragmas)
+        switch (oldSym)
         {
-            if (pragma.Name.Value == "toplevel" && pragma.Value.Value == "enable")
-                return pragma.HashToken.Span;
+            case MacroSymbol:
+                return false;
+            case FunctionSymbol of when newSym is FunctionSymbol nf:
+                return ParametersAndReturnMatch(of.Parameters, of.ReturnType, oldCtx, nf.Parameters, nf.ReturnType, newCtx);
+            case MethodSymbol om when newSym is MethodSymbol nm:
+                return ParametersAndReturnMatch(om.Parameters, om.ReturnType, oldCtx, nm.Parameters, nm.ReturnType, newCtx);
+            case FieldSymbol ofld when newSym is FieldSymbol nfld:
+                return ofld.Type.ToDisplayString(oldCtx) == nfld.Type.ToDisplayString(newCtx);
+            case GlobalVariableSymbol og when newSym is GlobalVariableSymbol ng:
+                return og.Type.ToDisplayString(oldCtx) == ng.Type.ToDisplayString(newCtx);
+            case PropertySymbol op when newSym is PropertySymbol np:
+                return op.Type.ToDisplayString(oldCtx) == np.Type.ToDisplayString(newCtx);
+            case ConstantSymbol oc when newSym is ConstantSymbol nc:
+                return oc.Type.ToDisplayString(oldCtx) == nc.Type.ToDisplayString(newCtx);
+            case AliasSymbol oa when newSym is AliasSymbol na:
+                return oa.Target.ToDisplayString(oldCtx) == na.Target.ToDisplayString(newCtx);
+            default:
+                return true;
+        }
+    }
+
+    private static bool ParametersAndReturnMatch(
+        IReadOnlyList<SymbolHandle> oldParams,
+        TypeRef oldRet,
+        ResolutionContext oldCtx,
+        IReadOnlyList<SymbolHandle> newParams,
+        TypeRef newRet,
+        ResolutionContext newCtx)
+    {
+        if (oldParams.Count != newParams.Count ||
+            oldRet.ToDisplayString(oldCtx) != newRet.ToDisplayString(newCtx))
+        {
+            return false;
         }
 
-        return unit.EndToken.Span;
+        for (int i = 0; i < oldParams.Count; i++)
+        {
+            var op = oldCtx.GetParameterSymbol(oldParams[i]);
+            var np = newCtx.GetParameterSymbol(newParams[i]);
+            if (op is null || np is null ||
+                op.Name.Text != np.Name.Text ||
+                op.Type.ToDisplayString(oldCtx) != np.Type.ToDisplayString(newCtx))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsUserFacingError(Exception ex) => ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or

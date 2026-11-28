@@ -408,6 +408,10 @@ internal sealed partial class ExpressionResolutionPass
         {
             return overloadResult;
         }
+        else if (TryResolveUnaryOperatorViaConformances(opKind, operand, unary, out var confResult))
+        {
+            return confResult;
+        }
 
         // 5. No unary overload found: report MH2002
         if (!operand.IsUnresolved && !operand.IsError && !operand.IsInferred)
@@ -799,7 +803,7 @@ internal sealed partial class ExpressionResolutionPass
             operand = operandAlias.TargetType;
             operand = TypeRef.UnwrapDyn(operand);
         }
-        var opHandle = operand.Handle;
+        var opHandle = operand.Handle is { } rawOpH ? context.UnwrapAlias(rawOpH) : (SymbolHandle?)null;
         if (opHandle is null)
         {
             if (operand.SpecialType is ReferenceSemanticType refSem)

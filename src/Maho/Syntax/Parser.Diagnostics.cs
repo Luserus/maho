@@ -19,24 +19,27 @@ internal sealed partial class Parser
         if (token.Kind is TokenKind.MissingToken)
             return DiagnosticText.MissingToken;
 
+        var tokenSource = token.Source ?? text;
+
         if (current < tokens.Count && token == CurrentToken)
         {
             var (_, combinedLength) = GetCombinedOperatorData();
             if (combinedLength > 1)
             {
                 var lastToken = Peek(combinedLength - 1);
-                return DiagnosticText.SourceSpan(text, new TextSpan(token.Span.Start, lastToken.Span.End - token.Span.Start));
+                if ((lastToken.Source ?? text) == tokenSource)
+                    return DiagnosticText.SourceSpan(tokenSource, new TextSpan(token.Span.Start, lastToken.Span.End - token.Span.Start));
             }
         }
 
-        return DiagnosticText.SourceSpan(text, token.Span);
+        return DiagnosticText.SourceSpan(tokenSource, token.Span);
     }
 
     /// <summary> Synthesizes a zero-width missing token at the current cursor position. </summary>
     private Token CreateMissingToken() => CreateMissingTokenAt(CurrentToken.Span.Start);
 
     /// <summary> Creates a synthetic missing token at a chosen source position. </summary>
-    private Token CreateMissingTokenAt(int position) => new(text, new TextSpan(position, 0), TokenKind.MissingToken, [], []);
+    private Token CreateMissingTokenAt(int position, SourceText? source = null) => new(source ?? text, new TextSpan(position, 0), TokenKind.MissingToken, [], []);
 
     /// <summary> Picks the span to attach to a missing-token diagnostic. </summary>
     private TextSpan GetMissingTokenDiagnosticSpan(MissingTokenAnchor anchor) =>
@@ -65,8 +68,13 @@ internal sealed partial class Parser
         if (!isClosingToken && anchor is MissingTokenAnchor.BeforeCurrent)
             return MissingTokenAnchor.BeforeCurrent;
 
-        int currentLine = text.GetLineIndex(CurrentToken.Span.Start);
-        int previousLine = text.GetLineIndex(PreviousToken.Span.End);
+        var currentSource = CurrentToken.Source ?? text;
+        var previousSource = PreviousToken.Source ?? text;
+        if (currentSource != previousSource)
+            return anchor;
+
+        int currentLine = currentSource.GetLineIndex(CurrentToken.Span.Start);
+        int previousLine = previousSource.GetLineIndex(PreviousToken.Span.End);
 
         return currentLine > previousLine
             ? MissingTokenAnchor.AfterPrevious
@@ -82,6 +90,28 @@ internal sealed partial class Parser
         return CreateMissingToken();
     }
 
+    private (SourceText DiagSource, TextSpan? UnexpectedSpan) ResolveDiagnosticSourceAndUnexpectedSpan(TextSpan diagnosticSpan)
+    {
+        var currentSource = CurrentToken.Source ?? text;
+        var previousSource = PreviousToken.Source ?? text;
+        var diagSource = currentSource == previousSource || diagnosticSpan.Equals(CurrentToken.Span)
+            ? currentSource
+            : previousSource;
+
+        TextSpan? unexpectedSpan = null;
+        if (CurrentToken.Kind is not TokenKind.EndToken &&
+            CurrentToken.Span.Length > 0 &&
+            currentSource == diagSource &&
+            (uint)CurrentToken.Span.Start <= (uint)diagSource.Length &&
+            (uint)diagnosticSpan.Start <= (uint)diagSource.Length &&
+            diagSource.GetLineIndex(CurrentToken.Span.Start) != diagSource.GetLineIndex(diagnosticSpan.Start))
+        {
+            unexpectedSpan = CurrentToken.Span;
+        }
+
+        return (diagSource, unexpectedSpan);
+    }
+
     /// <summary> Expects one token kind and reports a targeted diagnostic when recovery is needed. </summary>
     private Token ExpectToken(TokenKind expectedKind, string expectedText, string? context = null, MissingTokenAnchor anchor = MissingTokenAnchor.BeforeCurrent)
     {
@@ -91,17 +121,11 @@ internal sealed partial class Parser
         MissingTokenAnchor effectiveAnchor = GetEffectiveAnchor(anchor, IsClosingToken(expectedKind));
         TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
         int missingTokenPosition = GetMissingTokenPosition(effectiveAnchor);
+        var (diagSource, unexpectedSpan) = ResolveDiagnosticSourceAndUnexpectedSpan(diagnosticSpan);
 
-        TextSpan? unexpectedSpan = null;
-        if (CurrentToken.Kind is not TokenKind.EndToken && CurrentToken.Span.Length > 0)
-        {
-            if (text.GetLineIndex(CurrentToken.Span.Start) != text.GetLineIndex(diagnosticSpan.Start))
-                unexpectedSpan = CurrentToken.Span;
-        }
+        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context, source: diagSource, unexpectedSpan: unexpectedSpan);
 
-        diagnostics.ReportExpectedToken(diagnosticSpan, expectedText, GetTokenDisplay(CurrentToken), context, unexpectedSpan: unexpectedSpan);
-
-        return CreateMissingTokenAt(missingTokenPosition);
+        return CreateMissingTokenAt(missingTokenPosition, diagSource);
     }
 
     /// <summary> Expects an identifier token and recovers with a synthetic placeholder if needed. </summary>
@@ -110,7 +134,7 @@ internal sealed partial class Parser
         if (CurrentToken.Kind is TokenKind.Identifier)
             return Consume();
 
-        diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), context);
+        diagnostics.ReportExpectedIdentifier(CurrentToken.Span, GetTokenDisplay(CurrentToken), context, CurrentToken.Source);
         return RecoverWithMissingToken();
     }
 
@@ -119,20 +143,14 @@ internal sealed partial class Parser
     {
         MissingTokenAnchor effectiveAnchor = GetEffectiveAnchor(anchor);
         TextSpan diagnosticSpan = GetMissingTokenDiagnosticSpan(effectiveAnchor);
+        var (diagSource, unexpectedSpan) = ResolveDiagnosticSourceAndUnexpectedSpan(diagnosticSpan);
 
-        TextSpan? unexpectedSpan = null;
-        if (CurrentToken.Kind is not TokenKind.EndToken && CurrentToken.Span.Length > 0)
-        {
-            if (text.GetLineIndex(CurrentToken.Span.Start) != text.GetLineIndex(diagnosticSpan.Start))
-                unexpectedSpan = CurrentToken.Span;
-        }
-
-        diagnostics.ReportExpectedExpression(diagnosticSpan, GetTokenDisplay(CurrentToken), context, unexpectedSpan: unexpectedSpan);
+        diagnostics.ReportExpectedExpression(diagnosticSpan, GetTokenDisplay(CurrentToken), context, source: diagSource, unexpectedSpan: unexpectedSpan);
 
         if (effectiveAnchor is MissingTokenAnchor.BeforeCurrent)
             return new LiteralExpression(RecoverWithMissingToken());
 
-        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(effectiveAnchor)));
+        return new LiteralExpression(CreateMissingTokenAt(GetMissingTokenPosition(effectiveAnchor), diagSource));
     }
 
     /// <summary> Parses an expression or synthesizes a missing one when parsing cannot continue. </summary>

@@ -67,6 +67,17 @@ internal sealed class DiagnosticsManager
     public DiagnosticBuilder BuildInfo(string code, string message, TextSpan primarySpan, SourceText? source = null) =>
         new(this, code, message, DiagnosticKind.Info, primarySpan, source ?? defaultSource);
 
+    /// <summary> Helper to suppress cascading diagnostics when types contain error or unresolved markers. </summary>
+    private static bool IsErrorOrUnresolved(params string?[] typeNames)
+    {
+        foreach (var name in typeNames)
+        {
+            if (name is not null && (name.Contains("<error>") || name.Contains("<unresolved>")))
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// Reports an unsupported binary operator or type mismatch between left and right operands,
     /// annotating the operator with a primary caret and the operands with secondary underlines.
@@ -85,7 +96,7 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
-        if (lhsTypeName.Contains("<error>") || rhsTypeName.Contains("<error>"))
+        if (IsErrorOrUnresolved(lhsTypeName, rhsTypeName))
             return;
 
         var lhsDisplay = lhsLabel ?? lhsTypeName;
@@ -119,7 +130,7 @@ internal sealed class DiagnosticsManager
         string? help = null,
         SourceText? source = null)
     {
-        if (operandTypeName.Contains("<error>"))
+        if (IsErrorOrUnresolved(operandTypeName))
             return;
 
         var operandDisplay = operandLabel ?? operandTypeName;
@@ -146,7 +157,7 @@ internal sealed class DiagnosticsManager
         string? lhsLabel = null,
         SourceText? source = null)
     {
-        if (rhsTypeName.Contains("<error>") || lhsTypeName.Contains("<error>"))
+        if (IsErrorOrUnresolved(rhsTypeName, lhsTypeName))
             return;
 
         var rhsDisplay = rhsLabel ?? rhsTypeName;
@@ -165,7 +176,7 @@ internal sealed class DiagnosticsManager
         string? paramLabel = null,
         SourceText? source = null)
     {
-        if (argTypeName.Contains("<error>") || paramTypeName.Contains("<error>"))
+        if (IsErrorOrUnresolved(argTypeName, paramTypeName))
             return;
 
         var argDisplay = argLabel ?? argTypeName;
@@ -189,7 +200,7 @@ internal sealed class DiagnosticsManager
         string? returnLabel = null,
         SourceText? source = null)
     {
-        if (exprTypeName.Contains("<error>") || returnTypeName.Contains("<error>"))
+        if (IsErrorOrUnresolved(exprTypeName, returnTypeName))
             return;
 
         var exprDisplay = exprLabel ?? exprTypeName;
@@ -205,6 +216,9 @@ internal sealed class DiagnosticsManager
         string? actualLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(actualTypeName))
+            return;
+
         var actualDisplay = actualLabel ?? actualTypeName;
         BuildError("MH2007", $"condition expression must have type 'Bool', but found '{actualTypeName}'", span, source)
             .WithPrimaryLabel(span, actualDisplay, source)
@@ -936,6 +950,9 @@ internal sealed class DiagnosticsManager
         string? elseLabel = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(thenType, elseType))
+            return;
+
         var thenDisplay = thenLabel ?? thenType;
         var elseDisplay = elseLabel ?? elseType;
         BuildError("MH2011", $"conditional branches evaluate to different types '{thenType}' and '{elseType}'; explicit cast to a common base type is required", span, source)
@@ -945,10 +962,15 @@ internal sealed class DiagnosticsManager
     }
 
     /// <summary> Reports conflicting return types in inferred function. </summary>
-    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null) =>
+    public void ReportConflictingReturnType(TextSpan span, string actualType, string previousType, SourceText? source = null)
+    {
+        if (IsErrorOrUnresolved(actualType, previousType))
+            return;
+
         BuildError("MH2012", $"return statement returns type '{actualType}', which conflicts with previous return type '{previousType}'; all return branches must return the exact same type or require explicit return type declaration", span, source)
             .WithPrimaryLabel(span, $"returns '{actualType}' but previous return yielded '{previousType}'", source)
             .Report();
+    }
 
     /// <summary> Reports ambiguous literal conversion when multiple literal overloads exist. </summary>
     public void ReportAmbiguousLiteralConversion(
@@ -973,6 +995,9 @@ internal sealed class DiagnosticsManager
         string? labelTypeName = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         var labelType = labelTypeName ?? typeName;
         BuildError("MH2014", $"type '{typeName}' does not contain a definition for '{memberName}'", span, source)
             .WithPrimaryLabel(span, $"'{memberName}' not found on '{labelType}'", source)
@@ -986,6 +1011,9 @@ internal sealed class DiagnosticsManager
         string? labelTypeName = null,
         SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         var labelType = labelTypeName ?? typeName;
         BuildError("MH0611", $"type '{typeName}' is not callable or has no matching overload for 'Call'", span, source)
             .WithPrimaryLabel(span, $"'{labelType}' is not callable", source)
@@ -1178,11 +1206,16 @@ internal sealed class DiagnosticsManager
             .Report();
 
     /// <summary> Reports that an expression in a for-in loop is not iterable. </summary>
-    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null) =>
+    public void ReportTypeNotIterable(TextSpan span, string typeName, SourceText? source = null)
+    {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         BuildError("MH0571", $"type '{typeName}' is not iterable; missing 'Iterable' contract", span, source)
             .WithPrimaryLabel(span, $"type '{typeName}' is not iterable", source)
             .WithHelp($"implement the 'Iterable<TItem, TIterator>' operator contract on '{typeName}'")
             .Report();
+    }
 
     /// <summary> Reports that yield was used outside a generator function returning an Iterator or Iterable. </summary>
     public void ReportInvalidYieldUsage(TextSpan span, SourceText? source = null) =>
@@ -1200,6 +1233,9 @@ internal sealed class DiagnosticsManager
     /// <summary> Reports that a thrown type does not implement the Throwable interface. </summary>
     public void ReportTypeNotThrowable(TextSpan span, string typeName, string? label = null, SourceText? source = null)
     {
+        if (IsErrorOrUnresolved(typeName))
+            return;
+
         var display = label ?? typeName;
         BuildError("MH2030", $"type '{typeName}' is not throwable; must implement 'Throwable'", span, source)
             .WithPrimaryLabel(span, $"type '{display}' cannot be thrown", source)

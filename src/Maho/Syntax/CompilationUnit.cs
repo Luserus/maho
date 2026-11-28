@@ -19,9 +19,11 @@ internal sealed class CompilationUnit : SyntaxNode
     public Token EndToken { get; }
     /// <summary> Whether executable top-level statements are enabled for this unit. </summary>
     public bool EnablesTopLevelStatements { get; set; }
+    /// <summary> Whether this parsed unit contains macro invocations, macro attributes, or suffixed literals. </summary>
+    public bool ContainsMacroSyntax { get; internal set; }
 
     /// <summary> Creates one compilation unit from its directives, members, and end token. </summary>
-    public CompilationUnit(IReadOnlyList<Directive> directives, IReadOnlyList<TopLevel> members, Token endToken, bool enablesTopLevelStatements = false)
+    public CompilationUnit(IReadOnlyList<Directive> directives, IReadOnlyList<TopLevel> members, Token endToken, bool enablesTopLevelStatements = false, bool containsMacroSyntax = false)
     {
         Directives = directives;
         var pragmas = new List<PragmaDirective>();
@@ -42,5 +44,6 @@ internal sealed class CompilationUnit : SyntaxNode
         Members = members;
         EndToken = endToken;
         EnablesTopLevelStatements = enablesTopLevelStatements;
+        ContainsMacroSyntax = containsMacroSyntax;
     }
 }

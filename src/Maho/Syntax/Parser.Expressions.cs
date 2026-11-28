@@ -345,7 +345,13 @@ internal sealed partial class Parser
     /// <summary> Parses a literal expression. </summary>
     /// <returns> The literal expression node. </returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private LiteralExpression ParseLiteralExpression() => new LiteralExpression(Consume());
+    private LiteralExpression ParseLiteralExpression()
+    {
+        var token = Consume();
+        if (token.HasSuffix)
+            containsMacroSyntax = true;
+        return new LiteralExpression(token);
+    }
 
     private bool LooksLikeColonColonAt(int offset = 0)
     {
@@ -889,7 +895,7 @@ internal sealed partial class Parser
             if (CurrentToken.Kind is TokenKind.LeftParen)
             {
                 openParen = Consume();
-                if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && text[CurrentToken.Span.Start] == '_')
+                if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && (CurrentToken.Source ?? text) is { } discardSrc && (uint)CurrentToken.Span.Start < (uint)discardSrc.Length && discardSrc[CurrentToken.Span.Start] == '_')
                 {
                     varId = Consume();
                 }
@@ -947,7 +953,7 @@ internal sealed partial class Parser
     private PatternSyntax ParsePattern()
     {
         // 1. Wildcard '_'
-        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && text[CurrentToken.Span.Start] == '_')
+        if (CurrentToken.Kind is TokenKind.Identifier && CurrentToken.Span.Length == 1 && (CurrentToken.Source ?? text) is { } discardSrc2 && (uint)CurrentToken.Span.Start < (uint)discardSrc2.Length && discardSrc2[CurrentToken.Span.Start] == '_')
             return new WildcardPattern(Consume());
 
         // 2. Literal pattern

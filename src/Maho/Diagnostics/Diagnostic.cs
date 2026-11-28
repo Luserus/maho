@@ -90,6 +90,38 @@ internal sealed class Diagnostic
         Source = source ?? foundText.Source;
     }
 
+    internal Diagnostic WithExpansionOrigin(ExpansionOrigin origin) => MessageKind switch
+    {
+        DiagnosticMessageKind.Fixed => new Diagnostic(DiagnosticCode, message ?? string.Empty, Span, Kind, ExpectedText, Source)
+        {
+            Labels = Labels,
+            Notes = Notes,
+            HelpMessages = HelpMessages,
+            Suggestions = Suggestions,
+            CustomData = CustomData,
+            ExpansionOrigin = origin
+        },
+        DiagnosticMessageKind.BadToken => new Diagnostic(DiagnosticCode, foundText, Span, Kind, Source)
+        {
+            Labels = Labels,
+            Notes = Notes,
+            HelpMessages = HelpMessages,
+            Suggestions = Suggestions,
+            CustomData = CustomData,
+            ExpansionOrigin = origin
+        },
+        DiagnosticMessageKind.Expected => new Diagnostic(DiagnosticCode, ExpectedText ?? string.Empty, foundText, Span, Kind, context, Source)
+        {
+            Labels = Labels,
+            Notes = Notes,
+            HelpMessages = HelpMessages,
+            Suggestions = Suggestions,
+            CustomData = CustomData,
+            ExpansionOrigin = origin
+        },
+        _ => this
+    };
+
     private static string CreateExpectedMessage(string expected, DiagnosticText found, string? context)
     {
         if (string.IsNullOrWhiteSpace(context))

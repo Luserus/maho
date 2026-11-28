@@ -1,0 +1,81 @@
+// Mock bump allocator for demonstration purposes.
+// Since only Int32 has arithmetic operators, all sizing uses Int32.
+// No raw pointers — just tracks allocation metadata.
+using Std;
+
+namespace Demo;
+
+
+// A bump allocator that tracks allocation counts and total size.
+public struct BumpAllocator
+{
+    public Int32 capacity;
+    public Int32 offset;
+    public Int32 allocationCount;
+
+    // Simulate an allocation by bumping the offset.
+    public func Allocate(this mut&, Int32 size, Int32 alignment) -> Bool
+    {
+        Int32 newOffset = this->offset + size;
+        if (newOffset > this->capacity)
+        {
+            return false;
+        }
+        this->offset = newOffset;
+        this->allocationCount = this->allocationCount + 1;
+        return true;
+    }
+
+    // Reset the allocator to its initial state.
+    public func Reset(this mut&) -> ()
+    {
+        this->offset = 0;
+        this->allocationCount = 0;
+    }
+
+    // Returns remaining capacity.
+    public func Remaining(this&) -> Int32
+    {
+        return this->capacity - this->offset;
+    }
+
+    // Returns whether the allocator is empty (no allocations).
+    public func IsEmpty(this&) -> Bool
+    {
+        return this->offset == 0;
+    }
+
+    // Returns the number of allocations made.
+    public func Count(this&) -> Int32
+    {
+        return this->allocationCount;
+    }
+}
+
+// AllocStats: collects statistics about allocator usage.
+// Demonstrates interface implementation, properties.
+public struct AllocStats
+{
+    public Int32 totalAllocated;
+    public Int32 peakUsage;
+
+    // Record an allocation.
+    public func Record(this mut&, Int32 size) -> ()
+    {
+        this->totalAllocated = this->totalAllocated + size;
+        if (this->totalAllocated > this->peakUsage)
+        {
+            this->peakUsage = this->totalAllocated;
+        }
+    }
+
+    // Reset statistics.
+    public func Reset(this mut&) -> ()
+    {
+        this->totalAllocated = 0;
+        this->peakUsage = 0;
+    }
+
+    // Property: peak usage.
+    public Int32 Peak { get { return this.peakUsage; } }
+}

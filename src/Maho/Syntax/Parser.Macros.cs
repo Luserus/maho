@@ -240,6 +240,7 @@ internal sealed partial class Parser
 
     private MacroInvocationExpression ParseMacroInvocationExpression()
     {
+        containsMacroSyntax = true;
         Token dollarToken = Consume();
         Token name = ExpectToken(TokenKind.Identifier, "an identifier", "as macro name");
 
